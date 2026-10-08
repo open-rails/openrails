@@ -252,7 +252,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	})
 	require.Error(t, err)
 	own := r.client
-	product, err := own.CreateProduct(ctx, billing.CreateProductParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", EntitlementsSpec: map[string]*int{"content:rival": nil}})
+	product, err := own.CreateProduct(ctx, billing.CreateProductParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", Entitlements: []string{"content:rival"}})
 	require.NoError(t, err)
 	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)

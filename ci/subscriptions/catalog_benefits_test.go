@@ -24,19 +24,19 @@ import (
 const acceptedCatalogBenefit = "content:accepted"
 const editedCatalogBenefit = "content:edited"
 
-func requireSubscriptionBenefits(t *testing.T, w *world, id billing.SubscriptionID, expected map[string]*int) {
+func requireSubscriptionBenefits(t *testing.T, w *world, id billing.SubscriptionID, expected []string) {
 	t.Helper()
 	var raw []byte
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT coalesce(entitlements_spec_snapshot, '{}'::jsonb) FROM billing.subscriptions WHERE id=$1`), id.UUID()).Scan(&raw))
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT coalesce(entitlements_snapshot, '[]'::jsonb) FROM billing.subscriptions WHERE id=$1`), id.UUID()).Scan(&raw))
 	want, err := json.Marshal(expected)
 	require.NoError(t, err)
 	require.JSONEq(t, string(want), string(raw))
 }
 
-func importCatalogBenefitsCCBill(t *testing.T, w *world, benefits map[string]*int) *ccbillMember {
+func importCatalogBenefitsCCBill(t *testing.T, w *world, benefits []string) *ccbillMember {
 	t.Helper()
 	c := w.client[embedded]
-	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "accepted-benefits", DisplayName: "Accepted benefits", EntitlementsSpec: benefits})
+	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "accepted-benefits", DisplayName: "Accepted benefits", Entitlements: benefits})
 	require.NoError(t, err)
 	hours := monthHours
 	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
@@ -71,13 +71,13 @@ func TestCatalogBenefitsRemainAcceptedOnRenewal(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
-			benefits := map[string]*int{}
+			benefits := []string{}
 			if !empty {
-				benefits[acceptedCatalogBenefit] = nil
+				benefits = append(benefits, acceptedCatalogBenefit)
 			}
 			m := importCatalogBenefitsCCBill(t, w, benefits)
 			requireSubscriptionBenefits(t, w, m.sub, benefits)
-			_, err := w.client[embedded].UpdateProduct(t.Context(), m.price.ProductID, billing.UpdateProductParams{EntitlementsSpec: catalog.Value(map[string]*int{editedCatalogBenefit: nil})})
+			_, err := w.client[embedded].UpdateProduct(t.Context(), m.price.ProductID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{editedCatalogBenefit})})
 			require.NoError(t, err)
 			w.advance(20*day + time.Hour)
 			txn := ccbillNumericID()
@@ -88,7 +88,7 @@ func TestCatalogBenefitsRemainAcceptedOnRenewal(t *testing.T) {
 			require.Equal(t, !empty, m.c.entitled(acceptedCatalogBenefit))
 			require.False(t, m.c.entitled(editedCatalogBenefit), "a product edit is not an accepted subscription change")
 			var paymentSnapshot []byte
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT coalesce(entitlements_spec_snapshot, '{}'::jsonb) FROM billing.payments WHERE transaction_id=$1`), txn).Scan(&paymentSnapshot))
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT coalesce(entitlements_snapshot, '[]'::jsonb) FROM billing.payments WHERE transaction_id=$1`), txn).Scan(&paymentSnapshot))
 			want, err := json.Marshal(benefits)
 			require.NoError(t, err)
 			require.JSONEq(t, string(want), string(paymentSnapshot), "the paid record preserves the same accepted benefits")
@@ -109,14 +109,14 @@ func TestCatalogBenefitsRemainAcceptedOnReactivation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			w.armDestructive()
-			benefits := map[string]*int{}
+			benefits := []string{}
 			if !empty {
-				benefits[acceptedCatalogBenefit] = nil
+				benefits = append(benefits, acceptedCatalogBenefit)
 			}
 			l := importLegacy(t, w, "nmi", embedded, func(book *billing.DeclaredBilling) {
 				price, err := w.client[embedded].GetPrice(t.Context(), book.Subscriptions[0].Price, billing.GetPriceParams{})
 				require.NoError(t, err)
-				_, err = w.client[embedded].UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{EntitlementsSpec: catalog.Value(benefits)})
+				_, err = w.client[embedded].UpdateProduct(t.Context(), price.ProductID, billing.UpdateProductParams{Entitlements: catalog.Value(benefits)})
 				require.NoError(t, err)
 			})
 			w.converge()
@@ -125,7 +125,7 @@ func TestCatalogBenefitsRemainAcceptedOnReactivation(t *testing.T) {
 			require.Equal(t, http.StatusOK, status, "%v", body)
 			w.settle()
 			require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
-			_, err := w.client[embedded].UpdateProduct(t.Context(), l.price.ProductID, billing.UpdateProductParams{EntitlementsSpec: catalog.Value(map[string]*int{editedCatalogBenefit: nil})})
+			_, err := w.client[embedded].UpdateProduct(t.Context(), l.price.ProductID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{editedCatalogBenefit})})
 			require.NoError(t, err)
 			before := l.engineCharges()
 			status, body = l.c.call(http.MethodPost, "/subscriptions/"+l.sub.String()+"/resume", "", map[string]any{})
@@ -152,11 +152,11 @@ func TestCatalogPendingBenefitsRemainAcceptedOnFirstPayment(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
 			c := w.client[embedded]
-			benefits := map[string]*int{}
+			benefits := []string{}
 			if !empty {
-				benefits[acceptedCatalogBenefit] = nil
+				benefits = append(benefits, acceptedCatalogBenefit)
 			}
-			product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pending-benefits", DisplayName: "Pending benefits", EntitlementsSpec: benefits})
+			product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "pending-benefits", DisplayName: "Pending benefits", Entitlements: benefits})
 			require.NoError(t, err)
 			hours := monthHours
 			price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
@@ -177,7 +177,7 @@ func TestCatalogPendingBenefitsRemainAcceptedOnFirstPayment(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, models.StatusPending, pending.Status)
 			requireSubscriptionBenefits(t, w, billing.SubscriptionID(pending.ID), benefits)
-			_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{EntitlementsSpec: catalog.Value(map[string]*int{editedCatalogBenefit: nil})})
+			_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{editedCatalogBenefit})})
 			require.NoError(t, err)
 			w.advance(day)
 			sale := w.nmi.RenewSchedule(railSub, true)

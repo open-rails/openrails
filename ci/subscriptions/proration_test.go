@@ -27,7 +27,7 @@ func (w *world) tierPrice(group string, rank int, cents int64, cycle int, nmiPla
 	client := w.client[embedded]
 	key := fmt.Sprintf("tier-%d-%s", rank, uuid.NewString()[:8])
 	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, TierGroup: &group, TierRank: rank,
-		EntitlementsSpec: map[string]*int{"content:" + key: nil}})
+		Entitlements: []string{"content:" + key}})
 	require.NoError(w.t, err)
 	params := billing.CreatePriceParams{ProductID: product.ID, Key: key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", BillingIntervalHours: &cycle, AccessDurationHours: &cycle}
 	out := tier{ent: "content:" + key}

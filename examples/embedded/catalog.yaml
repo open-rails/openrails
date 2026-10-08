@@ -1,20 +1,18 @@
 # catalog.yaml
 schema_version: 1 # the file format
 products:
-  - key: post-101
-    display_name: Post 101 — Behind the scenes
-    entitlements: ["post:101"]
+  - key: course-101
+    display_name: Course 101 — Intro to CSS
+    entitlements: ["course:101"]
     prices:
-      - key: purchase
+      - key: buy
         currency: USD
         unit_amount: 4990000 # $4.99; every USD amount is in micros
-        access_duration: null # permanent access to this post
-        billing_interval: null
-      - key: rental-3-days
+        access_duration: null # permanent access to this course
+      - key: rent
         currency: USD
         unit_amount: 1990000 # $1.99, paid once
         access_duration: 3 days
-        billing_interval: null
 
   - key: post-102
     display_name: Post 102 — The full shoot
@@ -26,9 +24,9 @@ products:
         access_duration: null
         billing_interval: null
 
-  - key: featured-posts-bundle
-    display_name: Featured posts — 101 and 102
-    entitlements: ["post:101", "post:102"] # the same keys as individual sales
+  - key: featured-content-bundle
+    display_name: Featured content — CSS course and Post 102
+    entitlements: ["course:101", "post:102"] # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD

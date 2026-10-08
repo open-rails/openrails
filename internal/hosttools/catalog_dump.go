@@ -136,11 +136,11 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 				return nil, nil, fmt.Errorf("decode product %q credit grant: %w", row.Key, err)
 			}
 		}
-		p.EntitlementsSpec.Set = true
+		p.Entitlements = catalog.Value([]string{})
 		p.RateCards = catalog.Value([]catalog.RateCard{})
-		if len(row.EntitlementsSpec) == 0 || string(row.EntitlementsSpec) == "null" {
-			p.EntitlementsSpec = catalog.Null[map[string]*int]()
-		} else if err := json.Unmarshal(row.EntitlementsSpec, &p.EntitlementsSpec.Value); err != nil {
+		if len(row.Entitlements) == 0 || string(row.Entitlements) == "null" {
+			p.Entitlements = catalog.Value([]string{})
+		} else if err := json.Unmarshal(row.Entitlements, &p.Entitlements.Value); err != nil {
 			return nil, nil, err
 		}
 		ids = append(ids, row.ID)

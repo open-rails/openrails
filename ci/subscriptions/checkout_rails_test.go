@@ -35,8 +35,7 @@ products:
   display_name: Rails
   prices:
 %s
-  entitlements_spec:
-    %s: null
+  entitlements: ["%s"]
 `, key, strings.ReplaceAll(prices, "{key}", key), key)
 	params, err := catalog.ParseApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)

@@ -46,7 +46,7 @@ products:
     display_name: Novice
     tier_group: membership
     tier_rank: 1
-    entitlements_spec: {tier:novice: null}
+    entitlements: ["tier:novice"]
     prices:
       - key: novice-monthly
         currency: USD
@@ -81,7 +81,7 @@ access; null `access_duration_hours` gives indefinite access:
 ```yaml
       - key: course-101
         display_name: Course 101
-        entitlements_spec: {course:101: null}
+        entitlements: ["course:101"]
         prices:
           - key: course-101-usd
             currency: USD

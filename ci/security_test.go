@@ -42,7 +42,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
-		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", EntitlementsSpec: map[string]*int{"content:refunded": nil},
+		Key: "refund-" + uuid.NewString()[:8], DisplayName: "Refunded post", Entitlements: []string{"content:refunded"},
 	})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})

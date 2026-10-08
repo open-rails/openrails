@@ -25,8 +25,7 @@ func TestCatalogApplicationContentReplay(t *testing.T) {
 products:
 - key: %[1]s
   display_name: %[2]s
-  entitlements_spec:
-    %[1]s: null
+  entitlements: ["%[1]s"]
   prices:
   - key: monthly
     currency: usd

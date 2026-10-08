@@ -47,7 +47,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			_, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
 			negative := -24
-			_, err = client.CreateProduct(ctx, billing.CreateProductParams{Key: "neg-" + uuid.NewString()[:8], DisplayName: "Negative", EntitlementsSpec: map[string]*int{"content:neg": &negative}})
+			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "neg-duration-" + uuid.NewString()[:8], UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &negative})
 			require.Error(t, err, "a negative access duration is refused")
 
 			archived := w.membership("content:archived", 1_000_000)
@@ -88,7 +88,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			w := newWorld(t)
 			replica := w.sibling()
 			client := w.client[embedded]
-			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", Entitlements: []string{"content:post"}})
 			require.NoError(t, err)
 			price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 			require.NoError(t, err)

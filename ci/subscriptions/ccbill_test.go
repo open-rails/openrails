@@ -43,7 +43,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 	t.Helper()
 	l := &legacy{w: w, rail: "ccbill", tp: embedded, ent: "content:ccbill", c: w.newCustomer()}
 	client := w.client[embedded]
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", Entitlements: []string{l.ent}})
 	require.NoError(t, err)
 	hours := monthHours
 	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,

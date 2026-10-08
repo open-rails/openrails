@@ -29,7 +29,7 @@ func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount
 	client := w.client[tp]
 	product, err := client.GetProductByKey(w.t.Context(), productKey)
 	if err != nil {
-		product, err = client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: productKey, DisplayName: "Cadence " + productKey, EntitlementsSpec: map[string]*int{entitlement: nil}})
+		product, err = client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: productKey, DisplayName: "Cadence " + productKey, Entitlements: []string{entitlement}})
 	}
 	require.NoError(w.t, err)
 	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})

@@ -68,8 +68,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
       solana:
         plan_pda: %[4]s
         plan_id: "%[5]d"
-  entitlements_spec:
-    %[1]s-%[2]s: null
+  entitlements: ["%[1]s-%[2]s"]
 `, p.key, sfx, p.amount, pda, id)
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))

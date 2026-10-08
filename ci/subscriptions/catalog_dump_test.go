@@ -28,7 +28,7 @@ products:
 - key: premium
   display_name: Premium
   description: Feature access
-  entitlements_spec: {premium: null, welcome: 72}
+  entitlements: ["premium", "welcome"]
   tier_group: membership
   tier_rank: 2
   prices:

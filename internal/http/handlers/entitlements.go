@@ -99,8 +99,8 @@ func ServiceListEntitlements(r *httprequest.Request) {
 // customers holding an active window of the path's entitlement at ?at=,
 // ordered by customer id. It backs a host directory's filter by entitlement.
 func ServiceListEntitlementCustomers(r *httprequest.Request) {
-	entitlement := strings.TrimSpace(r.Param("entitlement"))
-	if entitlement == "" {
+	entitlement := r.Param("entitlement")
+	if strings.TrimSpace(entitlement) == "" {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "entitlement is required").WithParam("entitlement"))
 		return
 	}

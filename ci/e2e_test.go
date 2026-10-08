@@ -107,9 +107,9 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	client := f.runtime(t, "bootstrap-"+uuid.NewString()[:8])
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
-		Key:              "welcome-" + uuid.NewString()[:8],
-		DisplayName:      "Welcome",
-		EntitlementsSpec: map[string]*int{"content:welcome": nil},
+		Key:          "welcome-" + uuid.NewString()[:8],
+		DisplayName:  "Welcome",
+		Entitlements: []string{"content:welcome"},
 	})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{
@@ -228,9 +228,9 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
-		Key:              "premium-post-" + uuid.NewString()[:8],
-		DisplayName:      "Premium post",
-		EntitlementsSpec: map[string]*int{"content:premium": nil},
+		Key:          "premium-post-" + uuid.NewString()[:8],
+		DisplayName:  "Premium post",
+		Entitlements: []string{"content:premium"},
 	})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{

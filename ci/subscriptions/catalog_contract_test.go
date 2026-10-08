@@ -75,7 +75,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	var products []*billing.Product
 	for i := range 3 {
 		product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "plan-" + uuid.NewString()[:8], DisplayName: "Plan", TierGroup: &tier, TierRank: i + 1,
-			EntitlementsSpec: map[string]*int{"content:plan": nil}})
+			Entitlements: []string{"content:plan"}})
 		require.NoError(t, err)
 		require.Empty(t, product.Prices)
 		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, UnitAmount: int64(i+1) * 1_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,

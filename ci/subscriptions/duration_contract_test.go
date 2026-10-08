@@ -158,7 +158,7 @@ func TestCheckoutOrderRenewalAPIContract(t *testing.T) {
 	w.selfService = true
 	w.start()
 	product, err := w.client[remote].CreateProduct(t.Context(), billing.CreateProductParams{
-		Key: "renewal-choice", DisplayName: "Order renewal", EntitlementsSpec: map[string]*int{"content:renewal-choice": nil},
+		Key: "renewal-choice", DisplayName: "Order renewal", Entitlements: []string{"content:renewal-choice"},
 	})
 	require.NoError(t, err)
 	price, err := w.client[remote].CreatePrice(t.Context(), billing.CreatePriceParams{

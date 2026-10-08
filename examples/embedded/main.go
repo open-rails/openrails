@@ -167,11 +167,11 @@ func run(ctx context.Context) error {
 	// The host decides which key grants access to each post. Paid posts stay
 	// separate from membership-included posts; a bundle grants both paid keys.
 	postAccess := map[string]string{
-		"101": "post:101",
+		"101": "course:101",
 		"102": "post:102",
 		"103": "channel:main:membership",
 	}
-	r.GET("/posts/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
+	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
 		id := c.Param("id")
 		entitlement, exists := postAccess[id]
 		if !exists {

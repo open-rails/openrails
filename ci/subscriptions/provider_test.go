@@ -37,7 +37,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	t.Helper()
 	l := &legacy{w: w, rail: rail, tp: tp, ent: "content:legacy", c: w.newCustomer()}
 	client := w.client[tp]
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy membership", Entitlements: []string{l.ent}})
 	require.NoError(t, err)
 	hours := monthHours
 	links := map[string]map[string]string{"stripe": {"price_id": "price_legacy_" + uuid.NewString()[:8]}}
