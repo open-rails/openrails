@@ -121,7 +121,7 @@ func TestEngineTierUpgrade(t *testing.T) {
 			require.Len(t, w.railLedger(rail), charges+1, "a retried change is never charged twice")
 
 			end := *next.CurrentPeriodEndsAt
-			w.advance(end.Sub(w.clock.Now()) + time.Second)
+			w.advanceHealthyTo(end.Add(time.Second))
 			w.runRenewals()
 			ledger = w.railLedger(rail)
 			require.Len(t, ledger, charges+2, "%s: one renewal", row.name)
@@ -192,7 +192,7 @@ func TestEngineTierDowngrade(t *testing.T) {
 			require.True(t, c.entitled(high.ent))
 			require.Len(t, w.railLedger(rail), charges, "nothing is charged or refunded now")
 
-			w.advance(end.Sub(w.clock.Now()) + time.Second)
+			w.advanceHealthyTo(end.Add(time.Second))
 			_, err = w.client[tp].PreviewTierChange(t.Context(), sub, billing.ChangeTierParams{PriceID: top.ID})
 			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRenewalDue)
 			w.runRenewals()
