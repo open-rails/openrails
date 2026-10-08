@@ -172,6 +172,7 @@ type ProviderReport struct {
 	AutoResolved         int64             `json:"auto_resolved"`
 	AutoFixed            int               `json:"auto_fixed"`
 	ApplySkipped         int               `json:"apply_skipped,omitempty"`
+	WithheldChanges      int               `json:"withheld_changes,omitempty"`
 	ApplyErrors          []string          `json:"apply_errors,omitempty"`
 	Dunning              *DunningForensics `json:"dunning_forensics,omitempty"`
 }
@@ -445,7 +446,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// to be an absence proof (#842) — a non-exhaustive roster proves nothing and
 	// produces no absence findings to guard.
 	traits := traitsFor(provider)
-	if traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
+	if (params.Mutations == nil || params.Mutations.Overwrite) && traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
 		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
 		// or#837: the ratio is emitted on EVERY absence-capable pass, not only
 		// when it trips. A breaker whose only trace is the moment it fires
@@ -490,6 +491,9 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// needs) and halts the merchant.
 	plannedCancels := countPlannedCancellations(findings)
 	capExceeded, capReason := e.CancelBudget.Exceeded(plannedCancels, localLive)
+	if params.Mutations != nil && !params.Mutations.Overwrite {
+		capExceeded = false
+	}
 	opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
 		"provider": string(provider), "planned_cancellations": plannedCancels,
 		"local_live": localLive, "allowed": e.CancelBudget.Limit(localLive),
@@ -537,6 +541,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 		if f.Apply != nil && rec.Status == FindingStatusReconcileRequired && params.Mutations.allows(f) {
 			applyByID[rec.ID] = f
+		} else if f.Apply != nil && rec.Status == FindingStatusReconcileRequired {
+			rep.WithheldChanges++
 		}
 	}
 

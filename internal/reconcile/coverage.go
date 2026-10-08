@@ -40,16 +40,53 @@ func (p PullProofs) Merge(o PullProofs) {
 // PullProofs extracts the completed provider sections of a run.
 func (r *RunResult) PullProofs() PullProofs {
 	out := PullProofs{}
-	if r == nil || r.Summary == nil {
+	if r == nil || r.Summary == nil || r.Mode != ModeEnforce {
 		return out
 	}
 	for name, rep := range r.Summary.Providers {
-		if rep == nil || rep.Aborted || rep.Error != "" {
+		if rep == nil || rep.Aborted || rep.Error != "" || len(rep.ApplyErrors) != 0 ||
+			rep.WithheldChanges != 0 || rep.RequiresReview != 0 || r.hasUnapplied(name, false) {
 			continue
 		}
 		out[Provider(name)] = PullProof{Coverage: rep.Coverage, PspID: rep.PspID}
 	}
 	return out
+}
+
+// AppliedEventCoverage confirms the financial part of an observed provider
+// window. Policy-held lifecycle transitions do not prevent receipt recovery;
+// this does not authorize those transitions or prove provider finality.
+func (r *RunResult) AppliedEventCoverage(provider Provider, since, until time.Time) bool {
+	if r == nil || r.Mode != ModeEnforce || r.Summary == nil {
+		return false
+	}
+	rep := r.Summary.Providers[string(provider)]
+	if rep == nil || rep.Aborted || rep.Error != "" || len(rep.ApplyErrors) != 0 || r.hasUnapplied(string(provider), true) {
+		return false
+	}
+	cov := rep.Coverage
+	return cov.TransactionsExhaustive && cov.TransactionsPaginatedComplete &&
+		cov.TransactionWindowSince != nil && !cov.TransactionWindowSince.After(since) &&
+		cov.TransactionWindowUntil != nil && !cov.TransactionWindowUntil.Before(until)
+}
+
+func (r *RunResult) hasUnapplied(provider string, financialOnly bool) bool {
+	for _, finding := range r.Findings {
+		if string(finding.Provider) != provider || (finding.Status != FindingStatusReconcileRequired && finding.Status != FindingStatusRequiresReview) {
+			continue
+		}
+		if financialOnly {
+			switch finding.Type {
+			case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingPaymentMethodMismatch, FindingEvidenceStale:
+				// These remain visible for the separate lifecycle/destructive
+				// policy. An intentionally held cancellation is not a missing
+				// financial receipt and must not deadlock catching up.
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // MarkReconciledSourceDomains flips the §3.2 confirmed-absence gate

@@ -526,7 +526,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},

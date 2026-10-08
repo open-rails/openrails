@@ -1205,7 +1205,7 @@ type BillingPspCustomer struct {
 type BillingPspRefreshWatermark struct {
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	// Refresh domain. events covers provider transaction/subscription event windows.
+	// events is observed provider-window progress; applied_events is complete provider-window coverage with required financial receipts recovered. Neither is provider finality or a cross-database clone fence.
 	EventDomain string
 	WatermarkAt time.Time
 	CreatedAt   time.Time
