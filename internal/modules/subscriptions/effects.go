@@ -53,6 +53,10 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
 				}
 			}
+			if err := pushRenewalGrace(ctx, d, ents, sub, entitlementNames(sub.EntitlementsSpecSnapshot), e.Start, e.End); err != nil {
+				return nil, err
+			}
+
 		case lifecycle.EndAccess:
 			// Canceling recurrence cannot shorten access already purchased.
 			sources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
@@ -75,7 +79,13 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			if err := s.dunningAccess(ctx, d, ents, sub, now); err != nil {
 				return nil, err
 			}
-		case lifecycle.CloseDunning, lifecycle.ReopenAccess:
+		case lifecycle.ProbeProvider, lifecycle.ReopenAccess:
+			if sub.CurrentPeriodStartsAt != nil && sub.CurrentPeriodEndsAt != nil {
+				if err := pushRenewalGrace(ctx, d, ents, sub, entitlementNames(sub.EntitlementsSpecSnapshot), *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt); err != nil {
+					return nil, err
+				}
+			}
+		case lifecycle.CloseDunning:
 			// Paid grants retain their own expiry when billing resumes.
 
 		case lifecycle.Notify:
@@ -185,5 +195,6 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
+	sub.Price = price
 	return nil // The caller grants the newly paid period from this snapshot.
 }

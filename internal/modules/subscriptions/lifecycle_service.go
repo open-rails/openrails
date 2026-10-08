@@ -595,6 +595,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}).Info("Created new subscription record for membership")
 	}
 
+	subscription.Price = price
 	if err := FillCustomerEmail(ctx, dbb.Gen(ctx), subscription.CustomerID, params.CustomerEmail); err != nil {
 		return nil, nil, fmt.Errorf("record customer email: %w", err)
 	}
@@ -678,7 +679,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			}).Info("Granted subscription entitlement")
 		}
 		if len(entNames) > 0 {
-			if err := pushEngineRenewalGrace(ctx, dbb, entitlementService, subscription, entNames, periodStartsAt, periodEndsAt); err != nil {
+			if err := pushRenewalGrace(ctx, dbb, entitlementService, subscription, entNames, periodStartsAt, periodEndsAt); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1039,6 +1040,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if params.Prepared == nil {
 			subscription.AccessDurationHoursSnapshot = price.AccessDurationHours
 		}
+		subscription.Price = price
 
 		amount := params.Amount
 		if !params.AmountProvided && amount <= 0 {
@@ -1243,7 +1245,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		}
 		entSvc := s.newLifecycleEntitlementService(txdb)
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
-			if err := pushEngineRenewalGrace(ctx, txdb, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
+			if err := pushRenewalGrace(ctx, txdb, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
 			}
 		}
@@ -2388,48 +2390,26 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 	return sub.CurrentPeriodEndsAt.UTC().Add(window), nil
 }
 
-// dunningAccess applies the merchant's access policy to a membership entering
-// dunning. Engine members keep access through an open-ended grace, or lose it
-// with the paid period. A provider-scheduled member keeps its standing window,
-// or, under suspend, has it bounded at the paid period; a recovery reopens it.
+// dunningAccess applies the merchant's policy through an explicit grace grant.
+// It never changes the expiry of purchased access.
 func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
 	if sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !accessMatchesBillingPeriod(sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt) {
 		return nil
 	}
-	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		return s.engineDunningAccess(ctx, d, ent, sub, now)
-	}
-	if sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod {
-		return nil
-	}
-	policy, err := CasePolicy(ctx, d, sub)
-	if err != nil {
-		return err
-	}
-	if !policy.SuspendAccess || sub.CurrentPeriodEndsAt == nil {
-		return nil
-	}
-	if err := ent.BoundSubscriptionAccess(ctx, sub.ID, *sub.CurrentPeriodEndsAt); err != nil {
-		return fmt.Errorf("suspend access through dunning for %s: %w", sub.ID, err)
-	}
-	return nil
-}
-
-// engineDunningAccess applies the merchant's access policy to an engine
-// membership in dunning: an open-ended grace from the paid period's end
-// (closed by the renewal that pays, or by the terminal outcome), or no grace.
-func (s *SubscriptionLifecycleService) engineDunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
 	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return err
 	}
 	if policy.SuspendAccess || sub.CurrentPeriodEndsAt == nil {
 		if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.EntitlementRevokeDunning, models.EntitlementSourceGrace); err != nil {
-			return fmt.Errorf("end engine renewal grace for %s: %w", sub.ID, err)
+			return fmt.Errorf("end renewal grace for %s: %w", sub.ID, err)
 		}
 		return nil
 	}
 	start := sub.CurrentPeriodEndsAt.UTC()
+	if paidEnd := accessEnd(*sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot); paidEnd.After(start) {
+		start = *paidEnd
+	}
 	for name := range sub.EntitlementsSpecSnapshot {
 		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, Indefinite: true, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}); err != nil {
 			return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)

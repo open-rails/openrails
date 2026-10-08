@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 )
@@ -56,23 +57,25 @@ type graceWriter interface {
 	PushNewEntitlement(context.Context, entitlements.PushNewEntitlementParams) (*models.Entitlement, error)
 }
 
-// pushEngineRenewalGrace appends the renewal grace after periodEnd for a live
-// engine-owned subscription: open-ended by default, the allowance when the
-// merchant suspends held renewals. Other collection policies project their own
-// access (provider cohorts hold standing windows).
-func pushEngineRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
-	if ent == nil || sub == nil || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.CanceledAt != nil || sub.Status == models.StatusCanceled || !accessMatchesBillingPeriod(sub, periodStart, periodEnd) {
+// pushRenewalGrace appends explicit grace after matched paid access and billing
+// boundaries: open-ended by default, bounded when the merchant suspends held
+// renewals. Paid grants remain finite for both engine and provider schedules.
+func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
+	if ent == nil || sub == nil || sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || !accessMatchesBillingPeriod(sub, periodStart, periodEnd) {
 		return nil
 	}
-	grace, err := EngineRenewalGrace(periodEnd.Sub(periodStart))
+	grace, err := EngineRenewalGrace(time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour)
 	if err != nil {
-		return fmt.Errorf("engine renewal grace for %s: %w", sub.ID, err)
+		return fmt.Errorf("renewal grace for %s: %w", sub.ID, err)
 	}
-	policy, err := DunningPolicy(ctx, d)
+	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return err
 	}
 	start := periodEnd.UTC()
+	if paidEnd := accessEnd(periodStart, sub.AccessDurationHoursSnapshot); paidEnd.After(start) {
+		start = *paidEnd
+	}
 	end := start.Add(grace)
 	for _, name := range names {
 		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}
@@ -80,7 +83,7 @@ func pushEngineRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub 
 			p.EndsAt, p.Indefinite = nil, true
 		}
 		if _, err := ent.PushNewEntitlement(ctx, p); err != nil {
-			return fmt.Errorf("grant engine renewal grace %s: %w", name, err)
+			return fmt.Errorf("grant renewal grace %s: %w", name, err)
 		}
 	}
 	return nil
@@ -92,4 +95,14 @@ func entitlementNames(spec map[string]*int) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// EnsureRenewalGrace materializes the merchant's renewal-hold policy for an
+// existing paid subscription. The caller owns its transaction and row lock;
+// imports use the same path as observed provider renewals.
+func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d *db.DB, sub *models.Subscription) error {
+	if sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil {
+		return nil
+	}
+	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, entitlementNames(sub.EntitlementsSpecSnapshot), *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
 }

@@ -58,7 +58,7 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 			require.False(t, grant.Indefinite)
 			require.Equal(t, start.Add(time.Duration(*hours)*time.Hour), *grant.EndsAt)
 		}
-		require.NoError(t, pushEngineRenewalGrace(context.Background(), nil, r, sub, []string{"premium"}, start, billingEnd))
+		require.NoError(t, pushRenewalGrace(context.Background(), nil, r, sub, []string{"premium"}, start, billingEnd))
 		require.Len(t, r.grants, 1, "grace must not override deliberate independent access duration")
 		require.True(t, EngineCollectionDue(sub, billingEnd, false), "access expiration never stops recurring billing")
 		_, err = Transition(sub, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: start.Add(time.Hour)}, start.Add(time.Hour))
@@ -138,4 +138,26 @@ func TestLatePaidPeriodRetainsExpiredAccessHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, recorded.grants, 1, "late settlement still records what was bought")
 	require.Equal(t, start.Add(24*time.Hour), *recorded.grants[0].EndsAt, "it never invents fresh access from settlement time")
+}
+
+func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
+	start := time.Date(2026, 10, 8, 18, 0, 0, 0, time.UTC)
+	providerEnd := start.Add(6 * time.Hour) // date-only provider boundary
+	paidEnd := start.Add(24 * time.Hour)
+	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), Status: models.StatusPastDue, CollectionPolicy: models.CollectionPolicyNMISchedule,
+		Price: &models.Price{BillingIntervalHours: new(24)}, AccessDurationHoursSnapshot: new(24), CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &providerEnd,
+		EntitlementsSpecSnapshot: map[string]*int{"premium": nil}, DunningPolicy: []byte(`{"access_during_dunning":"keep","access_while_renewal_held":"keep"}`)}
+	r := &recordedAccess{}
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.Len(t, r.grants, 1)
+	require.Equal(t, models.EntitlementSourceGrace, r.grants[0].SourceType)
+	require.Equal(t, paidEnd, *r.grants[0].NotBefore, "provider date rounding never shortens purchased access")
+	require.True(t, r.grants[0].Indefinite, "existing keep policy is represented by explicit grace")
+	sub.AccessDurationHoursSnapshot = new(1)
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.Len(t, r.grants, 1, "deliberately short access never receives recurring grace")
+	sub.AccessDurationHoursSnapshot = new(24)
+	sub.Status = models.StatusCanceled
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.Len(t, r.grants, 1, "canceled recurrence never regains grace")
 }

@@ -39,5 +39,11 @@ func subscriptionAccess(sub *models.Subscription, name string, start time.Time) 
 // access window is not extended through an unpaid gap, and a longer or indefinite
 // purchase does not need a billing-boundary grace grant.
 func accessMatchesBillingPeriod(sub *models.Subscription, start, end time.Time) bool {
-	return sub.AccessDurationHoursSnapshot != nil && end.Sub(start) == time.Duration(*sub.AccessDurationHoursSnapshot)*time.Hour
+	if sub.AccessDurationHoursSnapshot == nil {
+		return false
+	}
+	if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Price != nil && sub.Price.BillingIntervalHours != nil {
+		return *sub.AccessDurationHoursSnapshot == *sub.Price.BillingIntervalHours
+	}
+	return end.Sub(start) == time.Duration(*sub.AccessDurationHoursSnapshot)*time.Hour
 }
