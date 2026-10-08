@@ -89,4 +89,4 @@ SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.aut
 FROM billing.prices p
 JOIN billing.products product ON product.merchant_id = p.merchant_id AND product.id = p.product_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT p.archived
-ORDER BY p.product_id, p.amount, p.currency;
+ORDER BY p.product_id, p.amount, p.currency, p.key;

@@ -49,6 +49,12 @@ products:
       model: per_unit
       currency: USD
       per_unit: {unit_amount: "1000", divide_by: 2, round: up, maximum_amount: "1000000"}
+  - ordinal: 4
+    payment_term: in_advance
+    price:
+      model: flat
+      currency: USD
+      flat: {amount: "1000"}
 - key: api-pack
   display_name: $100 prepaid balance
   credit_grant: {currency: USD, amount: 100000000, expires_after_days: 90}
@@ -67,6 +73,9 @@ products:
 - key: video
   display_name: Video
   prices:
+  - key: buy-gift
+    currency: USD
+    unit_amount: 4990000
   - key: buy
     currency: USD
     unit_amount: 4990000
@@ -129,7 +138,11 @@ products:
 	require.EqualValues(t, 1000000000, products["api-deposit"].Prices[0].CustomerAmount.Value.MaxAmount)
 	require.True(t, products["video"].CreditGrant.Null)
 	require.Len(t, exported.Meters, 1)
-	require.Len(t, products["premium"].RateCards.Value, 1)
+	require.Len(t, products["premium"].RateCards.Value, 2)
+	require.Empty(t, products["premium"].RateCards.Value[1].Filter, "an absent optional filter remains valid")
+	require.Nil(t, products["premium"].RateCards.Value[1].Allowance)
+	require.Equal(t, "buy", products["video"].Prices[1].Key)
+	require.Equal(t, "buy-gift", products["video"].Prices[2].Key, "equal amounts/currencies use key order")
 
 	target := newWorld(t)
 	receipt, err := target.client[remote].ApplyCatalog(t.Context(), exported)

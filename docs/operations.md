@@ -24,10 +24,10 @@ exactly four ways the system diverges, each with its own mechanism:
 ## Mutation Flags
 
 Provider pull and merchant-configuration commands use mutation flags. Catalog
-application instead carries optional `prune` (and, for a guarded change,
-`application_id` + `expected_revision`) in its document; it has no
-insert/overwrite flags. For commands that use
-mutation flags:
+application instead carries optional `prune` in its document; it has no
+insert/overwrite flags. Each canonical catalog content hash is remembered
+permanently, so replaying an old document never rolls back later edits. For
+commands that use mutation flags:
 
 - no mutation flags: plan/report only
 - `--insert`: create records or provider objects missing from the target
@@ -50,7 +50,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
-| `apply-catalog --merchant NAME --file PATH` | atomic local catalog application; declarative by default, guarded with `application_id` + `expected_revision` |
+| `apply-catalog --merchant NAME --file PATH` | atomic local catalog batch; permanent content-hash replay, with omission preserved unless `prune: true` |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
