@@ -17,7 +17,7 @@ func parseAmount(input string) (int64, string, error) {
 	}
 	units, ok := currency.Lookup(parts[1])
 	if !ok {
-		return 0, "", fmt.Errorf("unknown currency %q", parts[1])
+		return 0, "", fmt.Errorf("unknown currency %q; recognized currencies: %s", parts[1], recognizedCurrencies())
 	}
 	whole, fraction, point := strings.Cut(parts[0], ".")
 	if whole == "" || point && fraction == "" {
@@ -42,4 +42,12 @@ func parseAmount(input string) (int64, string, error) {
 		return 0, "", fmt.Errorf("amount exceeds int64 native units for %s", units.Code)
 	}
 	return amount, units.Code, nil
+}
+
+func recognizedCurrencies() string {
+	var codes []string
+	for _, units := range currency.List() {
+		codes = append(codes, units.Code)
+	}
+	return strings.Join(codes, ", ")
 }

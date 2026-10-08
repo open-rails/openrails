@@ -22,6 +22,11 @@ func TestHumanAmountsUseExactRegisteredNativeUnits(t *testing.T) {
 		{"1 SOL", 1_000_000_000, "SOL"},
 		{"0.000000001 SOL", 1, "SOL"},
 		{"10 USDC", 10_000_000, "USDC"},
+		{"199.99 MXN", 199_990_000, "MXN"},
+		{"1500 KRW", 15_000_000, "KRW"},
+		{"5 USDT", 5_000_000, "USDT"},
+		{"2.5 PYUSD", 2_500_000, "PYUSD"},
+		{"1 usd1", 1_000_000, "USD1"},
 		{"0.000001 USDC", 1, "USDC"},
 		{"0 USD", 0, "USD"},
 		{"0.000000 USD", 0, "USD"},
@@ -43,6 +48,7 @@ func TestHumanAmountsUseExactRegisteredNativeUnits(t *testing.T) {
 func TestHumanAmountsRefuseRoundingAndAmbiguousNumbers(t *testing.T) {
 	for _, input := range []string{
 		"", "9.99", "USD", "9.99 USD extra", "USD 9.99", "9.99 UNKNOWN",
+		"9.99 $", "1 EURC", "1000 HUF", "1 BHD", "1 SOLANA",
 		"-1 USD", "-0 USD", "+1 USD", ".99 USD", "1. USD", "1.2.3 USD",
 		"1e3 USD", "1/2 USD", "1,000 USD", "1_000 USD", "NaN USD", "Inf USD",
 		"0.0000001 USD", "9.9900000 USD", "0.0000000 USD", "0.0000000001 SOL", "0.0000001 USDC",

@@ -23,6 +23,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 	}{
 		{"SOL", "SOL", "1 SOL", solanafake.DevnetSOLMint, 1_000_000_000},
 		{"USDC", "USDC", "10 USDC", solanafake.DevnetUSDCMint, 10_000_000},
+		{"PYUSD", "PYUSD", "2.5 PYUSD", solanafake.DevnetPYUSDMint, 2_500_000},
 		{"SOL-above-2pow53", "SOL", "9007199.254740993 SOL", solanafake.DevnetSOLMint, 9_007_199_254_740_993},
 	} {
 		for _, tp := range []topology{embedded, remote} {
@@ -32,7 +33,9 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 				declare := w.declare
 				w.declare = func(psps map[string]openrails.PSPConfig) {
 					declare(psps)
-					psps["solana"].Settings["tokens"].(map[string]any)["USDC"] = map[string]any{}
+					tokens := psps["solana"].Settings["tokens"].(map[string]any)
+					tokens["USDC"] = map[string]any{}
+					tokens["PYUSD"] = map[string]any{}
 				}
 				w.mount = func(c *openrails.HTTPConfig) { c.Checkout = &openrails.CheckoutConfig{} }
 				w.start()

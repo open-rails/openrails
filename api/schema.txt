@@ -11,6 +11,7 @@ migration 0007_checkout_session_directory.up.sql sha256:28f5ee3c7d980e9d607fb82e
 migration 0008_billing_access_intervals.up.sql sha256:711cdfd7a4611d00d15617823e7964214fe2f0bba9688327f20150cc628f9b94
 migration 0009_invoice_collection_cadence.up.sql sha256:b90e15a74c20dd154c34bbb4deb115eac0541299eae862d728153e291ca4e95d
 migration 0010_entitlement_names.up.sql sha256:b232cc073d440a64f515c5b868624efe731d3681a1373e851a21710259255acb
+migration 0011_currency_codes.up.sql sha256:513950fd96eae6df288a7afd6956ded16b0c84f6fec0ff2b9f0fd3a12103ff37
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -72,7 +73,7 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   column released_at timestamp with time zone
   constraint admission_operations_available_amount_check CHECK ((available_amount >= 0))
   constraint admission_operations_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
-  constraint admission_operations_currency_check CHECK ((currency ~ '^[A-Z]{3,12}$'::text))
+  constraint admission_operations_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint admission_operations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint admission_operations_estimated_amount_check CHECK ((estimated_amount >= 0))
   constraint admission_operations_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))

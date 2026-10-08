@@ -2,6 +2,7 @@ package moneyutil
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -131,7 +132,7 @@ func TestRegisteredFiatCurrenciesShareNativeShift(t *testing.T) {
 }
 
 func TestFormatting(t *testing.T) {
-	if got := DescribeNativeScales(); got != "EUR 1000000, JPY 10000, SOL 1000000000, USD 1000000, USDC 1000000" {
+	if got := DescribeNativeScales(); !strings.HasPrefix(got, "AED 1000000, ") || !strings.Contains(got, ", JPY 10000, ") || !strings.Contains(got, ", SOL 1000000000, ") || !strings.HasSuffix(got, ", ZAR 1000000") {
 		t.Errorf("DescribeNativeScales() = %q", got)
 	}
 	withCurrency(t, "TST", 6, 3)

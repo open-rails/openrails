@@ -101,7 +101,7 @@ describe("displaying an exact amount", () => {
         const input = nativeAmountToInput(units, currency)
         expect(amountFromInput(input, scale)).toBe(units)
         // Display keeps every input digit; Intl may only pad minor-unit zeros.
-        const shown = digits(formatNativeAmount(units, currency))
+        const shown = digits(formatNativeAmount(units, currency).replace(currency, ""))
         expect(shown.slice(0, digits(input).length)).toBe(digits(input))
         expect(shown.slice(digits(input).length)).toMatch(/^0*$/)
       }

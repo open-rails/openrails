@@ -18,13 +18,23 @@ type Units struct {
 // NativeShift is the decimal shift from settlement units to native units.
 func (u Units) NativeShift() int { return u.Decimals - u.MinorDecimals }
 
-var registry = map[string]Units{
-	"USD":  {Code: "USD", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
-	"EUR":  {Code: "EUR", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
-	"JPY":  {Code: "JPY", Decimals: 4, MinorDecimals: 0, Kind: "fiat"},
-	"SOL":  {Code: "SOL", Decimals: 9, MinorDecimals: 9, Kind: "crypto"},
-	"USDC": {Code: "USDC", Decimals: 6, MinorDecimals: 6, Kind: "crypto"},
-}
+// registry is OpenRails' fixed set of recognized currencies. Fiat native units
+// are 10^4 per ISO 4217 minor unit; codes whose card-rail unit differs from ISO
+// (HUF, ISK, TWD, UGX, three-decimal) are left out. Crypto entries are the
+// Solana rail's settlable tokens at on-chain precision.
+var registry = func() map[string]Units {
+	out := map[string]Units{}
+	for _, code := range []string{"AED", "AUD", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "EUR", "GBP", "HKD", "ILS", "INR", "MXN", "MYR", "NOK", "NZD", "PHP", "PLN", "SAR", "SEK", "SGD", "THB", "TRY", "USD", "ZAR"} {
+		out[code] = Units{Code: code, Decimals: 6, MinorDecimals: 2, Kind: "fiat"}
+	}
+	for _, code := range []string{"JPY", "KRW"} {
+		out[code] = Units{Code: code, Decimals: 4, MinorDecimals: 0, Kind: "fiat"}
+	}
+	for code, decimals := range map[string]int{"SOL": 9, "USDC": 6, "USDT": 6, "PYUSD": 6, "USD1": 6, "USDG": 6} {
+		out[code] = Units{Code: code, Decimals: decimals, MinorDecimals: decimals, Kind: "crypto"}
+	}
+	return out
+}()
 
 // Lookup returns the registered scale for a currency code, case-insensitively.
 func Lookup(code string) (Units, bool) {

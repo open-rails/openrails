@@ -112,15 +112,18 @@ your application decides what each permits. Keys are nonblank strings of at most
 A product name or key does not implicitly grant an entitlement. Use `[]` to grant
 none; omitted fields preserve an existing product's list.
 
-Price amounts include an explicit currency: `amount: 9.99 USD`, `amount: 1 SOL`,
-or `amount: 10 USDC`. A bare `amount: 9.99` is invalid. Conversion uses the
-currency's registered precision exactly, without rounding. A price can use
-`amount` or the numeric `unit_amount` and `currency` fields, never both forms.
+Price amounts always name their currency: `amount: 9.99 USD`, `amount: 199 MXN`,
+`amount: 1 SOL` or `amount: 10 USDC`. A bare `amount: 9.99` is invalid, and the
+code must be one OpenRails recognizes: major fiat currencies (USD, EUR, GBP, MXN,
+JPY, …) and the Solana tokens SOL, USDC, USDT, PYUSD, USD1 and USDG.
+`GET /v1/currencies` lists them all. Conversion uses the currency's registered
+precision exactly, without rounding. A price can use `amount` or the numeric
+`unit_amount` and `currency` fields, never both forms.
 Payment rails still determine which currencies they can charge. One-time Solana
-checkout supports SOL or USDC prices paid in the matching token when the merchant
+checkout supports token prices paid in the matching token when the merchant
 accepts it; those amounts need no FX conversion. Paying a token-denominated price
 with a different token is unsupported. New Solana recurring plans remain
-USD-denominated, and card rails accept only supported fiat currencies.
+USD-denominated, and card rails accept only fiat currencies their provider supports.
 
 Durations accept positive
 whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
