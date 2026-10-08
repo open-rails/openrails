@@ -95,7 +95,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 			return out, err
 		}
 	}
-	if price.AutoRenew {
+	if price.IsRecurring() {
 		return out, errors.New("sale requires a one-time price")
 	}
 	if eligibility.Status != EligibilityAllowed {

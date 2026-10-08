@@ -248,7 +248,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		CreatePrice: billing.CreatePriceParams{
 			ProductID: billing.ProductID(current.ProductID), Key: key,
 			UnitAmount: args.NewAmount, Currency: current.Currency,
-			AccessDurationHours: current.AccessDurationHours, AutoRenew: current.AutoRenew,
+			AccessDurationHours: current.AccessDurationHours, BillingIntervalHours: current.BillingIntervalHours,
 			TrialUnitAmount: current.TrialUnitAmount, TrialDurationHours: current.TrialDurationHours,
 			PSPs: psps,
 		},
@@ -277,7 +277,7 @@ func toolDefDraftCatalogDiff() dashboard.ToolDef {
 				"unit_amount": {"type": "integer", "description": "Amount in the currency's native units (see the doctrine scale table)."},
 				"currency": {"type": "string", "description": "Optional; defaults to the product's existing price currency if it has one."},
 				"access_duration_hours": {"type": "integer", "description": "Billing period in hours (720=~monthly, 8760=~yearly). Omit for a durable one-time purchase."},
-				"auto_renew": {"type": "boolean", "description": "Whether it recurs. Requires access_duration_hours."}
+				"billing_interval_hours": {"type": "integer", "description": "Positive whole hours between recurring charges; omit for a one-time price. Independent of access duration."}
 			},
 			"required": ["product_key", "unit_amount"],
 			"additionalProperties": false
@@ -286,12 +286,12 @@ func toolDefDraftCatalogDiff() dashboard.ToolDef {
 }
 
 type draftCatalogDiffArgs struct {
-	ProductKey          string `json:"product_key"`
-	NewPriceKey         string `json:"new_price_key,omitempty"`
-	UnitAmount          int64  `json:"unit_amount"`
-	Currency            string `json:"currency,omitempty"`
-	AccessDurationHours *int   `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool   `json:"auto_renew,omitempty"`
+	ProductKey           string `json:"product_key"`
+	NewPriceKey          string `json:"new_price_key,omitempty"`
+	UnitAmount           int64  `json:"unit_amount"`
+	Currency             string `json:"currency,omitempty"`
+	AccessDurationHours  *int   `json:"access_duration_hours,omitempty"`
+	BillingIntervalHours *int   `json:"billing_interval_hours,omitempty"`
 }
 
 func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) (string, *billing.CatalogDraft, error) {
@@ -321,7 +321,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 		}
 	}
 
-	interval := cadence.PriceIntervalLabel(args.AccessDurationHours, args.AutoRenew)
+	interval := cadence.PriceIntervalLabel(args.BillingIntervalHours)
 	key := strings.TrimSpace(args.NewPriceKey)
 	if key == "" {
 		key = productKey + "-" + interval
@@ -342,7 +342,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 		CreatePrice: billing.CreatePriceParams{
 			ProductID: billing.ProductID(product.ID), Key: key,
 			UnitAmount: args.UnitAmount, Currency: currency,
-			AccessDurationHours: args.AccessDurationHours, AutoRenew: args.AutoRenew,
+			AccessDurationHours: args.AccessDurationHours, BillingIntervalHours: args.BillingIntervalHours,
 		},
 	}
 	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the console's new-price form — nothing has been changed yet.", reviewText)

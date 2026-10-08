@@ -25,7 +25,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), billing.MerchantID(mid))
 	quota := int(9007199254740993) // 2^53+1: a float64 round trip would change it
 	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", EntitlementsSpec: map[string]*int{"quota": &quota}}
-	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: intPtr(720)}
+	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720)}
 	expiry := now.Add(time.Hour)
 	session := models.CheckoutAttempt{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutAttemptModeSubscription, Rail: models.RailNMI,
 		Status: models.CheckoutAttemptStatusRequiresAction, Amount: new(price.Amount), Currency: new(price.Currency), ExpiresAt: &expiry}
@@ -83,7 +83,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 	for name, mutate := range map[string]func(*models.Price, *gen.BillingPaymentMethod){
 		"free":           func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Amount = 0 },
 		"trial":          func(p *models.Price, _ *gen.BillingPaymentMethod) { p.TrialUnitAmount = new(int64(0)) },
-		"not recurring":  func(p *models.Price, _ *gen.BillingPaymentMethod) { p.AutoRenew = false },
+		"not recurring":  func(p *models.Price, _ *gen.BillingPaymentMethod) { p.BillingIntervalHours = nil },
 		"archived":       func(p *models.Price, _ *gen.BillingPaymentMethod) { p.Archived = true },
 		"foreign method": func(_ *models.Price, m *gen.BillingPaymentMethod) { m.CustomerID = uuid.New() },
 		"other PSP method": func(_ *models.Price, m *gen.BillingPaymentMethod) {

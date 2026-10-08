@@ -14,7 +14,7 @@ func acceptedCreditGrant(product *models.Product, price *models.Price) (*models.
 	if product.CreditGrant == nil {
 		return nil, nil
 	}
-	if price.AutoRenew {
+	if price.IsRecurring() {
 		return nil, fmt.Errorf("recurring credit benefits are not supported")
 	}
 	policy := product.CreditGrant

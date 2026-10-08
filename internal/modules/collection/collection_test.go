@@ -156,7 +156,7 @@ func TestCycleHours(t *testing.T) {
 	require.Zero(t, BillingCycleHoursOf(nil))
 	require.Zero(t, BillingCycleHoursOf(&models.Price{}))
 	require.Zero(t, BillingCycleHoursOf(&models.Price{AccessDurationHours: &week}), "one-time price has no cycle")
-	require.Equal(t, week, BillingCycleHoursOf(&models.Price{AccessDurationHours: &week, AutoRenew: true}))
+	require.Equal(t, week, BillingCycleHoursOf(&models.Price{AccessDurationHours: &week, BillingIntervalHours: &week}))
 }
 
 func must[T any](v T, err error) T {

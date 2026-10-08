@@ -44,7 +44,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 		switch e := effect.(type) {
 		case lifecycle.GrantPeriod:
 			granted = &e
-			if !e.End.After(now) {
+			if end := accessEnd(e.Start, sub.AccessDurationHoursSnapshot); end != nil && !end.After(now) {
 				continue
 			}
 			for name := range sub.EntitlementsSpecSnapshot {
@@ -52,23 +52,18 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 				if err := ents.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &grace, SourceID: &source, Reason: models.EntitlementRevokeSuperseded}); err != nil {
 					return nil, fmt.Errorf("grant period %s: %w", sub.ID, err)
 				}
-				start, end := e.Start, e.End
-				if _, err := ents.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+				if _, err := ents.PushNewEntitlement(ctx, subscriptionAccess(sub, name, e.Start)); err != nil {
 					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
 				}
 			}
 		case lifecycle.EndAccess:
-			// Grace ends now; paid access runs to At and is revoked only once
-			// At has passed. The bound closes the standing window at At.
-			sources, asOf := []models.EntitlementSourceType{models.EntitlementSourceGrace}, now
-			if !e.At.After(now) {
-				sources, asOf = append(sources, models.EntitlementSourceSubscription), e.At
+			// Canceling recurrence cannot shorten access already purchased.
+			sources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
+			if e.Revoke {
+				sources = append(sources, models.EntitlementSourceSubscription)
 			}
-			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, asOf, revokeReason(sub, opts), sources...); err != nil {
+			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, revokeReason(sub, opts), sources...); err != nil {
 				return nil, fmt.Errorf("end access %s: %w", sub.ID, err)
-			}
-			if err := ents.BoundSubscriptionAccess(ctx, sub.ID, e.At); err != nil {
-				return nil, fmt.Errorf("bound access %s: %w", sub.ID, err)
 			}
 			if sub.Rail == models.RailSolana {
 				if err := s.cancelSolanaSubscriptionForLifecycle(ctx, d, sub.ID); err != nil {
@@ -200,5 +195,6 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
 	return s.switchTierAccess(ctx, d, sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
 }

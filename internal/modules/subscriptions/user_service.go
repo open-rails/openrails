@@ -322,14 +322,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("unable to cancel subscription for rail %s", subscription.Rail)
 	}
 
-	// #691 closure: a user cancel is PROOF — write the access end on disk NOW, at
-	// the known period end (resumable runway; a dead system cannot extend a
-	// canceled sub). Immediate when no future paid period remains.
-	accessEnd := now
-	if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
-		accessEnd = *subscription.CurrentPeriodEndsAt
-	}
-
 	// Persist the cancellation; any durable remote intent (deferred NMI delete,
 	// CCBill remote cancel) is enqueued IN THE SAME TRANSACTION.
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -354,7 +346,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		}
 		subscription = locked
 		txEntSvc := entitlements.NewEntitlementService(txdb, s.clock)
-		if err := txEntSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
+		if err := txEntSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
 			return fmt.Errorf("failed to bound subscription access windows: %w", err)
 		}
 		if enqueueRemoteIntent != nil {
@@ -398,9 +390,7 @@ func accessFromSubscription(sub *models.Subscription) *billing.SubscriptionAcces
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		grant.StartsAt = *sub.CurrentPeriodStartsAt
 	}
-	if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() {
-		grant.EndsAt = sub.CurrentPeriodEndsAt
-	}
+	grant.EndsAt = accessEnd(grant.StartsAt, sub.AccessDurationHoursSnapshot)
 	return grant
 }
 

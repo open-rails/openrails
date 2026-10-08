@@ -477,7 +477,7 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 	if !ok {
 		return nil
 	}
-	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: productSpecKeys(sub.EntitlementsSpec), Start: start, End: &end})
+	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: productSpecKeys(sub.EntitlementsSpec), Start: start, End: end})
 	return err
 }
 
@@ -545,27 +545,22 @@ type customerWindow struct {
 // the sweep converge); whether a WINDOW materializes is MaterializeGrant's
 // decision alone. Every distinct source retains its whole interval; a standing
 // subscription window already represents subsequent paid periods of that source.
-// Replay guard (mirrors #691's appendCoveredPeriodGrant): a bounded window whose
-// end is not past the latest grant end recorded for (source, feature) appends
-// nothing — the grant_effect.mismatch repair re-enters here with grants already
-// on the ledger. Returns the number of feature-windows actually MATERIALIZED
-// (grants-recorded is the always case); GrantAdmin's Imported/Blocked split
-// reads it.
+// Replay is keyed by the source's exact interval, including an indefinite end.
+// Overlapping paid periods remain distinct immutable purchase facts.
 func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow) (int, error) {
 	created := 0
 	for _, f := range w.Feats {
-		if w.End != nil {
-			latest, err := l.q.LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
-				MerchantID: l.merchant, CustomerID: w.Customer,
-				SourceType: string(w.Source), SourceID: w.SourceID, Entitlement: f,
-			})
-			if err != nil {
-				return created, fmt.Errorf("grants: derive-1 replay check %q: %w", f, err)
-			}
-			if !latest.IsZero() && !w.End.After(latest) {
-				continue // replay: this window is already on the grant ledger
-			}
+		exists, err := l.q.EntitlementGrantWindowExists(ctx, gen.EntitlementGrantWindowExistsParams{
+			MerchantID: l.merchant, CustomerID: w.Customer, SourceType: string(w.Source), SourceID: w.SourceID,
+			Entitlement: f, StartsAt: w.Start, EndsAt: w.End,
+		})
+		if err != nil {
+			return created, fmt.Errorf("grants: derive-1 replay check %q: %w", f, err)
 		}
+		if exists {
+			continue
+		}
+
 		g, err := l.Grant(ctx, GrantInput{
 			Customer: w.Customer, Kind: Entitlement, Source: w.Source, SourceID: w.SourceID, Payment: w.Payment,
 			Spec: &Spec{Entitlements: []string{f}}, StartsAt: w.Start, EndsAt: w.End,
@@ -589,25 +584,24 @@ func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow)
 	return created, nil
 }
 
-// subscriptionWindow mirrors the retired migrate logic: start =
-// current_period_starts_at ?? started_at, end = current_period_ends_at ??
-// ended_at; valid only if end is strictly after start.
-func subscriptionWindow(s gen.ListUngrantedSubscriptionsRow) (time.Time, time.Time, bool) {
+// subscriptionWindow uses the accepted access duration independently of billing.
+func subscriptionWindow(s gen.ListUngrantedSubscriptionsRow) (time.Time, *time.Time, bool) {
 	start := s.StartedAt
 	if s.CurrentPeriodStartsAt != nil && !s.CurrentPeriodStartsAt.IsZero() {
 		start = *s.CurrentPeriodStartsAt
 	}
-	var end time.Time
-	switch {
-	case s.CurrentPeriodEndsAt != nil && !s.CurrentPeriodEndsAt.IsZero():
-		end = *s.CurrentPeriodEndsAt
-	case s.EndedAt != nil && !s.EndedAt.IsZero():
-		end = *s.EndedAt
+	if start.IsZero() {
+		return time.Time{}, nil, false
 	}
-	if start.IsZero() || end.IsZero() || !end.After(start) {
-		return time.Time{}, time.Time{}, false
+	start = start.UTC()
+	if s.AccessDurationHoursSnapshot == nil {
+		return start, nil, true
 	}
-	return start.UTC(), end.UTC(), true
+	if *s.AccessDurationHoursSnapshot <= 0 {
+		return time.Time{}, nil, false
+	}
+	end := start.Add(time.Duration(*s.AccessDurationHoursSnapshot) * time.Hour)
+	return start, &end, true
 }
 
 // productSpecKeys returns the entitlement feature names — the keys of a product's

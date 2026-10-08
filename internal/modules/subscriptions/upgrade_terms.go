@@ -20,6 +20,7 @@ const TypeNMIUpgrade = "nmi_upgrade"
 // RecurringAmount; a downgrade charges nothing, moves the amount (NMI bills it
 // from the next renewal) and schedules the local price for that renewal.
 type NMIUpgradePayload struct {
+	AccessDurationHours       *int                    `json:"access_duration_hours"`
 	Action                    string                  `json:"action"` // upgrade | downgrade
 	Instrument                charge.FrozenInstrument `json:"instrument"`
 	RequestedPrice            string                  `json:"requested_price"`
@@ -56,6 +57,9 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
 	}
+	if err := validateAccessDuration(p.AccessDurationHours); err != nil {
+		return p, err
+	}
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil ||
 		in.IntentType != TypeNMIUpgrade || in.Rail != "nmi" || in.PspID == nil ||
@@ -82,4 +86,22 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 		return p, err
 	}
 	return p, nil
+}
+
+func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {
+	type plain NMIUpgradePayload
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["access_duration_hours"]; !present {
+		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
+		decoded.AccessDurationHours = &hours
+	}
+	*p = NMIUpgradePayload(decoded)
+	return nil
 }

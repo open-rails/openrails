@@ -131,7 +131,7 @@ func boundSettlementToken(price *models.Price, candidate RoutingCandidate) strin
 
 func checkoutModeForRail(price *models.Price, rail string) models.CheckoutAttemptMode {
 	_ = rail
-	if price != nil && price.AutoRenew {
+	if price != nil && price.IsRecurring() {
 		return models.CheckoutAttemptModeSubscription
 	}
 	return models.CheckoutAttemptModeOneOff

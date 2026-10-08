@@ -64,13 +64,13 @@ func TestTransitions(t *testing.T) {
 		{name: "fix-method decline opens the dunning window", from: snap(Active, Engine), event: RenewalDeclined{t1, FixMethod, t1}, want: AwaitingMethod, through: t1,
 			effects: []Effect{OpenDunning{t1}, Notify{NoticeUpdateMethod}}},
 		{name: "non-recoverable decline cancels when seen", from: snap(Active, NMISchedule), event: RenewalDeclined{t1, NonRecoverable, t1.Add(time.Hour)}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t1.Add(time.Hour)}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t1.Add(time.Hour)}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "held terminal keeps a mirror verifiable", from: snap(PastDue, NMISchedule), event: TerminalHeld{}, want: Unverified, through: t1,
 			effects: []Effect{CloseDunning{}, ProbeProvider{}}},
 		{name: "held terminal keeps an engine row past_due", from: snap(PastDue, Engine), event: TerminalHeld{}, want: PastDue, through: t1,
 			effects: []Effect{CloseDunning{}}},
 		{name: "first decline exhausts a no-retry cycle", from: snap(Active, Engine), event: DunningExhausted{t2}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "provider-owned decline is mirrored only", from: snap(Active, Provider), event: RenewalDeclined{t1, NonRecoverable, t1}, want: PastDue, through: t1,
 			effects: []Effect{OpenDunning{t1}}},
 		{name: "stale decline of a paid period", from: snap(Active, NMISchedule), event: RenewalDeclined{t0, Retry, t1}, want: Active, through: t1},
@@ -89,7 +89,7 @@ func TestTransitions(t *testing.T) {
 		{name: "new card on an active row", from: snap(Active, Engine), event: MethodReplaced{}, want: Active, through: t1},
 
 		{name: "exhausted dunning cancels", from: snap(PastDue, NMISchedule), event: DunningExhausted{t2}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "exhaustion needs a live subscription", from: snap(Canceled, NMISchedule), event: DunningExhausted{t2}, want: Canceled, through: t1, err: ErrIllegal},
 
 		{name: "overdue asks the provider", from: snap(Active, NMISchedule), event: RenewalOverdue{}, want: Unverified, through: t1,
@@ -100,18 +100,18 @@ func TestTransitions(t *testing.T) {
 		{name: "overdue never touches dunning", from: snap(PastDue, NMISchedule), event: RenewalOverdue{}, want: PastDue, through: t1},
 
 		{name: "provider cancel keeps paid access", from: snap(Unverified, Provider), event: ProviderCanceled{half}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t1}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t1}, Notify{NoticeEnded}}},
 		{name: "provider cancel after paid-through", from: snap(PastDue, Provider), event: ProviderCanceled{t2}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t2}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t2}, Notify{NoticeEnded}}},
 
 		{name: "user cancel runs to period end", from: snap(Active, Engine), event: Cancel{Kind: CancelUser, At: half}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t1}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t1}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "immediate cancel ends access", from: snap(Active, NMISchedule), event: Cancel{Kind: CancelMerchant, Immediate: true, At: half}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{half}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: half, Revoke: true}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "chargeback is immediate", from: snap(Active, Provider), event: Cancel{Kind: CancelChargeback, At: half}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{half}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: half, Revoke: true}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "cancel after paid-through is immediate", from: snap(PastDue, Engine), event: Cancel{Kind: CancelUser, At: t2}, want: Canceled, through: t1,
-			effects: []Effect{CloseDunning{}, EndAccess{t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
+			effects: []Effect{CloseDunning{}, EndAccess{At: t2}, QueueProviderCancel{}, Notify{NoticeEnded}}},
 		{name: "cancel without a kind", from: snap(Active, Engine), event: Cancel{At: half}, want: Active, through: t1, err: ErrInvalid},
 		{name: "repeated cancel", from: Snapshot{Status: Canceled, Owner: Engine, PaidThrough: t1, EndedAt: t1, CancelKind: CancelUser}, event: Cancel{Kind: CancelUser, At: half}, want: Canceled, through: t1},
 
@@ -121,7 +121,7 @@ func TestTransitions(t *testing.T) {
 		{name: "an immediate cancel is not resumable", from: Snapshot{Status: Canceled, Owner: Engine, PaidThrough: t1, EndedAt: half, CancelKind: CancelMerchant}, event: Resume{half.Add(-time.Hour)}, want: Canceled, through: t1, err: ErrIllegal},
 		{name: "a chargeback is not resumable", from: Snapshot{Status: Canceled, Owner: Engine, PaidThrough: t1, EndedAt: t1, CancelKind: CancelChargeback}, event: Resume{half}, want: Canceled, through: t1, err: ErrIllegal},
 		{name: "merchant revoke after a user cancel ends access now", from: Snapshot{Status: Canceled, Owner: NMISchedule, PaidThrough: t1, EndedAt: t1, CancelKind: CancelUser}, event: Cancel{Kind: CancelMerchant, Immediate: true, At: half}, want: Canceled, through: t1,
-			effects: []Effect{EndAccess{half}}},
+			effects: []Effect{EndAccess{At: half, Revoke: true}}},
 		{name: "provider confirms a running period", from: Snapshot{Status: Unverified, Owner: NMISchedule, PaidThrough: t2}, event: ProviderConfirmedCurrent{half}, want: Active, through: t2},
 		{name: "provider liveness never pays a lapsed period", from: snap(Unverified, NMISchedule), event: ProviderConfirmedCurrent{t2}, want: Unverified, through: t1},
 		{name: "a provider cancel with paid time left is resumable", from: Snapshot{Status: Canceled, Owner: Provider, PaidThrough: t1, EndedAt: t1, CancelKind: CancelExpired}, event: Resume{half}, want: Active, through: t1,
@@ -163,7 +163,7 @@ func TestChargebackAfterCancel(t *testing.T) {
 	next, effects, err := Apply(from, Cancel{Kind: CancelChargeback, At: half})
 	require.NoError(t, err)
 	require.Equal(t, CancelChargeback, next.CancelKind)
-	require.Equal(t, []Effect{EndAccess{half}}, effects)
+	require.Equal(t, []Effect{EndAccess{At: half, Revoke: true}}, effects)
 }
 
 // Paid-through never moves without a payment fact, and access is never ended

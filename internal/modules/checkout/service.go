@@ -332,7 +332,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 
 	// Check for existing coverage and determine if purchase is allowed
 	var coverage *CoverageInfo
-	if product.CreditGrant != nil && !price.AutoRenew {
+	if product.CreditGrant != nil && !price.IsRecurring() {
 		coverage = &CoverageInfo{}
 	} else if permanentPurchase(price) && s.PurchaseService != nil {
 		coverage, err = s.PurchaseService.purchaseCoverage(ctx, user.ID, price, product)
@@ -366,7 +366,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	}
 
 	// Determine if this is a subscription or one-time purchase
-	isSubscription := price.AutoRenew
+	isSubscription := price.IsRecurring()
 
 	if isSubscription {
 		// #691 checkout guard: an `unknown` sub for this product/tier-group means
@@ -1673,7 +1673,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		StripeSubscriptionID: existingSub.RailSubscriptionID, StripeItemID: state.ItemID, Action: action,
 		OldPriceID: existingSub.PriceID, OldStripePriceID: currentStripePriceID,
 		PriceID: newPrice.ID, ProductID: newPrice.ProductID, ProductName: newProduct.DisplayName, StripePriceID: stripePriceID,
-		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount,
+		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount, AccessDurationHours: newPrice.AccessDurationHours,
 	}
 	if action == "downgrade" {
 		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {

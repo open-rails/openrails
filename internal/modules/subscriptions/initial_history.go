@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -47,7 +48,7 @@ func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTer
 	}
 	seen := map[string]bool{}
 	for _, g := range rows {
-		if g.MerchantID != merchant || g.CustomerID != t.CustomerID || g.Kind != string(grants.Entitlement) || g.SourceType != string(grants.Subscription) || models.DerefStr(g.SourceID) != t.SubscriptionID.String() || g.Event != "grant" || g.SupersedesID != nil || g.ProductID != nil && *g.ProductID != t.ProductID || g.PaymentID != nil && *g.PaymentID != t.PaymentID || !g.StartsAt.Equal(t.PeriodStart) || g.EndsAt == nil || !g.EndsAt.Equal(t.PeriodEnd) {
+		if g.MerchantID != merchant || g.CustomerID != t.CustomerID || g.Kind != string(grants.Entitlement) || g.SourceType != string(grants.Subscription) || models.DerefStr(g.SourceID) != t.SubscriptionID.String() || g.Event != "grant" || g.SupersedesID != nil || g.ProductID != nil && *g.ProductID != t.ProductID || g.PaymentID != nil && *g.PaymentID != t.PaymentID || !g.StartsAt.Equal(t.PeriodStart) || !sameAccessEnd(g.EndsAt, accessEnd(t.PeriodStart, t.AccessDurationHours)) {
 			return errors.New("initial membership grant has another owner or interval")
 		}
 		var spec grants.Spec
@@ -65,4 +66,11 @@ func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTer
 		return errors.New("initial membership has incomplete immutable grant history")
 	}
 	return nil
+}
+
+func sameAccessEnd(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }

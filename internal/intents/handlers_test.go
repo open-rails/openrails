@@ -318,7 +318,7 @@ func TestStripeArchiveVerifyThenExecute(t *testing.T) {
 func TestStripeArchiveSupersededOnceObjectJoinsCatalog(t *testing.T) {
 	psp, productID, priceID, cycle := uuid.New(), uuid.New(), uuid.New(), 720
 	price := func(links map[string]map[string]string) *models.Price {
-		return &models.Price{ID: priceID, ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true, PSPLinks: links}
+		return &models.Price{ID: priceID, ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, BillingIntervalHours: &cycle, PSPLinks: links}
 	}
 	product := &models.Product{ID: productID, Key: "retired"}
 	linked := map[string]map[string]string{"stripe": {models.RailKeyPSPID: psp.String(), models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"}}
@@ -444,7 +444,7 @@ func TestSolanaSunsetSupersededWhenPlanRejoinsCatalog(t *testing.T) {
 	psp, cycle := uuid.New(), 720
 	pda := solanago.NewWallet().PublicKey().String()
 	price := func(archived bool) *models.Price {
-		return &models.Price{ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true, Archived: archived,
+		return &models.Price{ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "USD", AccessDurationHours: &cycle, BillingIntervalHours: &cycle, Archived: archived,
 			PSPLinks: map[string]map[string]string{string(models.RailSolana): {models.RailKeyPSPID: psp.String(), models.RailKeyRail: "solana", "plan_pda": pda}}}
 	}
 	for archived, applicable := range map[bool]bool{true: true, false: false} {

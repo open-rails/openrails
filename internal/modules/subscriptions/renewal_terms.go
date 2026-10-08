@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -21,6 +22,7 @@ import (
 // Preparation reads catalog and scheduled changes before admission; settlement
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
+	AccessDurationHours  *int            `json:"access_duration_hours"`
 	PSPID                uuid.UUID       `json:"psp_id"`
 	SubscriptionID       uuid.UUID       `json:"subscription_id"`
 	CustomerID           uuid.UUID       `json:"customer_id"`
@@ -40,6 +42,9 @@ type RenewalTerms struct {
 }
 
 func (t RenewalTerms) Validate() error {
+	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
+		return err
+	}
 	if t.PSPID == uuid.Nil || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.FromPriceID == uuid.Nil || t.FromProductID == uuid.Nil || t.PriceID == uuid.Nil || t.ProductID == uuid.Nil || t.Amount <= 0 || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) {
 		return errors.New("renewal terms are incomplete")
 	}
@@ -69,7 +74,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	}
 	terms = RenewalTerms{
 		PSPID: sub.PspID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, FromPriceID: sub.PriceID, FromProductID: sub.ProductID,
-		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(),
+		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot,
 		Entitlements:         models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
 		PreviousEntitlements: models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
 	}
@@ -85,6 +90,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 			return terms, ErrEngineAgreementMismatch
 		}
 		terms.Amount, terms.Currency, terms.ProductName = agreement.Amount, agreement.Currency, agreement.ProductName
+		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
 		terms.Entitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
 		terms.PreviousEntitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
@@ -119,6 +125,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, errors.New("renewal price has no valid recurring cadence")
 	}
 	terms.ProductID, terms.Amount, terms.Currency = price.ProductID, price.Amount, price.Currency
+	terms.AccessDurationHours = price.AccessDurationHours
 	terms.PeriodEnd = terms.PeriodStart.Add(time.Duration(*cycle) * time.Hour)
 	product, err := catalog.NewProductService(d).GetByID(ctx, terms.ProductID)
 	if err != nil {
@@ -177,6 +184,7 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	}
 	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(terms.Entitlements)
+	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
 	return alreadyAdvanced, nil
 }
 
@@ -212,4 +220,24 @@ func renewalPaymentCustodian(params *RenewMembershipParams) string {
 		return params.PaymentCustodian
 	}
 	return models.CustodianPSP
+}
+
+// UnmarshalJSON preserves already accepted operations from before access and billing were separated.
+// Only an absent access field uses that operation's original billing period; explicit null is indefinite.
+func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
+	type plain RenewalTerms
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["access_duration_hours"]; !present {
+		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
+		decoded.AccessDurationHours = &hours
+	}
+	*t = RenewalTerms(decoded)
+	return nil
 }

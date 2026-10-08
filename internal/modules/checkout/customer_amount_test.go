@@ -36,7 +36,7 @@ func TestCustomerAmountSelection(t *testing.T) {
 	_, err = CheckoutPriceForAmount(fixed, new(fixed.Amount))
 	require.ErrorIs(t, err, ErrCheckoutAttemptValidation, "even a matching override is invalid on a fixed pack")
 	recurring := *price
-	recurring.AutoRenew = true
+	recurring.BillingIntervalHours = intPtr(720)
 	_, err = CheckoutPriceForAmount(&recurring, new(int64(1_000_000)))
 	require.ErrorIs(t, err, ErrCheckoutAttemptValidation)
 }

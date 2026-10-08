@@ -614,7 +614,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			// Idempotently (re)record the product access grant for one-time purchases
 			// (issue #250) so a replayed webhook/poll repairs a missing grant the same
 			// way it repairs entitlements.
-			if err := s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil || existingPayment.CreditGrantSnapshot != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
+			if err := s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil || existingPayment.CreditGrantSnapshot != nil, price.IsRecurring(), price.AccessDurationHours, acceptedAt); err != nil {
 				return nil, fmt.Errorf("failed to repair product access for existing payment: %w", err)
 			}
 
@@ -660,7 +660,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		// Durable product ownership/access grant (issue #250) for one-time product
 		// purchases — additive to the feature entitlements granted above. Keyed on the
 		// payment id so it is idempotent; skipped for subscription purchases.
-		if err := s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil || credit != nil, price.AutoRenew, price.AccessDurationHours, acceptedAt); err != nil {
+		if err := s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil || credit != nil, price.IsRecurring(), price.AccessDurationHours, acceptedAt); err != nil {
 			return nil, fmt.Errorf("failed to grant product access after payment: %w", err)
 		}
 
@@ -690,11 +690,11 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 // The access window comes from the price's access_duration_hours (#622): a finite
 // value sets ends_at (rental, possibly sub-day); nil = durable ownership. A nil
 // ProductAccessService makes this a no-op so existing call sites/tests are unaffected.
-func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, autoRenew bool, accessDurationHours *int, acceptedAt time.Time) error {
+func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, recurring bool, accessDurationHours *int, acceptedAt time.Time) error {
 	if s.ProductAccessService == nil {
 		return nil
 	}
-	if isSubscription || autoRenew {
+	if isSubscription || recurring {
 		return nil
 	}
 	var endsAt *time.Time

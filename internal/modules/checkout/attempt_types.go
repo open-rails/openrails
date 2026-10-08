@@ -113,9 +113,10 @@ type CheckoutAttemptPaymentResponse struct {
 // CheckoutAttemptMembershipQuote is the immutable commercial agreement shown
 // before the customer confirms. It carries no provider or execution authority.
 type CheckoutAttemptMembershipQuote struct {
-	ProductName  string          `json:"product_name"`
-	CycleHours   int64           `json:"cycle_hours"`
-	Entitlements map[string]*int `json:"entitlements"`
+	AccessDurationHours *int            `json:"access_duration_hours"`
+	ProductName         string          `json:"product_name"`
+	CycleHours          int64           `json:"cycle_hours"`
+	Entitlements        map[string]*int `json:"entitlements"`
 }
 
 type CheckoutAttemptResponse struct {

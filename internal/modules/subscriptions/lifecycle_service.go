@@ -331,7 +331,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	var price *models.Price
 	var err error
 	if terms := params.Prepared; terms != nil {
-		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, AutoRenew: true}
+		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, BillingIntervalHours: new(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)), AccessDurationHours: terms.AccessDurationHours}
 	} else {
 		price, err = priceService.GetByID(ctx, params.PriceID)
 	}
@@ -468,12 +468,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	switch {
 	case params.CurrentPeriodEndsAt != nil && !params.CurrentPeriodEndsAt.IsZero() && params.CurrentPeriodEndsAt.After(periodStartsAt):
 		periodEndsAt = params.CurrentPeriodEndsAt.UTC()
-	case price.AccessDurationHours != nil:
-		// Truthful window from the price's declared access duration — covers both
-		// recurring and one-off/durable prices (RecurringCycleHours is AutoRenew-gated).
-		periodEndsAt = periodStartsAt.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
+	case price.RecurringCycleHours() != nil:
+		periodEndsAt = periodStartsAt.Add(time.Duration(*price.BillingIntervalHours) * time.Hour)
 	default:
-		// #651: no provider period and no declared access duration. A cadence
+		// No provider period and no declared billing interval. A cadence
 		// is never invented.
 		return nil, nil, fmt.Errorf("create membership on price %s: %w", price.ID, &collection.UnknownCycleError{})
 	}
@@ -502,6 +500,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			existingPendingSub.RailSubscriptionID = *params.RailSubscriptionID
 		}
 
+		existingPendingSub.AccessDurationHoursSnapshot = price.AccessDurationHours
 		existingPendingSub.CurrentPeriodStartsAt = &periodStartsAt
 		existingPendingSub.CurrentPeriodEndsAt = &periodEndsAt
 		// The pending membership already accepted its benefits. An empty
@@ -528,13 +527,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		subscription = existingPendingSub
 	} else {
 		subscription = &models.Subscription{
-			ID:                       uuidutil.NewV7(),
-			CustomerID:               identity.CustomerIDFromString(params.UserID).UUID(),
-			ProductID:                price.ProductID,
-			PriceID:                  price.ID,
-			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
-			Status:                   models.StatusActive,
-			Rail:                     params.Rail,
+			ID:                          uuidutil.NewV7(),
+			CustomerID:                  identity.CustomerIDFromString(params.UserID).UUID(),
+			ProductID:                   price.ProductID,
+			PriceID:                     price.ID,
+			EntitlementsSpecSnapshot:    models.CloneEntitlementsSpec(product.EntitlementsSpec),
+			AccessDurationHoursSnapshot: price.AccessDurationHours,
+			Status:                      models.StatusActive,
+			Rail:                        params.Rail,
 			RailSubscriptionID: func() string {
 				if params.RailSubscriptionID != nil {
 					return *params.RailSubscriptionID
@@ -626,7 +626,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		// A membership created with an ALREADY-elapsed period (stale import /
 		// backfill shapes) grants no access window — the period is over.
-		if params.Prepared == nil && !periodEndsAt.UTC().After(s.now().UTC()) {
+		if end := accessEnd(periodStartsAt, subscription.AccessDurationHoursSnapshot); params.Prepared == nil && end != nil && !end.After(s.now().UTC()) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"period_end":      periodEndsAt,
@@ -648,16 +648,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				continue
 			}
 
-			notBefore := periodStartsAt.UTC()
-			endAt := periodEndsAt.UTC()
-			window, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-				UserID:      subscription.CustomerID.String(),
-				Entitlement: ent,
-				NotBefore:   &notBefore,
-				EndsAt:      &endAt,
-				SourceType:  models.EntitlementSourceSubscription,
-				SourceID:    subscription.ID,
-			})
+			window, err := entitlementService.PushNewEntitlement(ctx, subscriptionAccess(subscription, ent, periodStartsAt.UTC()))
 			if err != nil {
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": subscription.ID,
@@ -992,6 +983,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					}
 					// #773 same-product reprice: price re-pin only.
 					subscription.PriceID = repricedTo.ID
+					subscription.AccessDurationHoursSnapshot = repricedTo.AccessDurationHours
 					if err := repriceRepo.Apply(ctx, scheduledReprice.ID); err != nil && !errors.Is(err, ErrRepriceNotScheduled) {
 						return fmt.Errorf("failed to mark reprice applied: %w", err)
 					}
@@ -1026,6 +1018,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 				// Update subscription to new price and product
 				subscription.PriceID = price.ID
+				subscription.AccessDurationHoursSnapshot = price.AccessDurationHours
 				subscription.ProductID = price.ProductID
 				subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
 				subscription.ScheduledPriceID = nil // Clear the scheduled downgrade
@@ -1037,6 +1030,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				}
 			}
 
+		}
+
+		if params.Prepared == nil {
+			subscription.AccessDurationHoursSnapshot = price.AccessDurationHours
 		}
 
 		amount := params.Amount
@@ -1339,10 +1336,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			}).Debug("reactivated subscription accepted no entitlements; restoring none")
 		}
 
-		notBefore := periodStartsAt.UTC()
-		endAt := periodEndsAt.UTC()
 		graceSource := models.EntitlementSourceGrace
-		subSource := models.EntitlementSourceSubscription
 		subID := subscription.ID
 
 		for _, entName := range entNames {
@@ -1356,14 +1350,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 				return fmt.Errorf("failed to clear grace entitlement %s on reactivation: %w", entName, err)
 			}
 
-			if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-				UserID:      subscription.CustomerID.String(),
-				Entitlement: entName,
-				NotBefore:   &notBefore,
-				EndsAt:      &endAt,
-				SourceType:  subSource,
-				SourceID:    subID,
-			}); err != nil {
+			if _, err := entitlementService.PushNewEntitlement(ctx, subscriptionAccess(subscription, entName, periodStartsAt.UTC())); err != nil {
 				return fmt.Errorf("failed to restore entitlement %s on reactivation: %w", entName, err)
 			}
 		}
@@ -1499,7 +1486,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		endAt = *subscription.CurrentPeriodEndsAt
 	}
 
-	immediate := params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)
+	immediate := params.RevokeAccess || params.CancelType == models.CancelTypeChargeback
 	revokeReason := models.EntitlementRevokeAdmin
 	revokeSources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
 	if immediate {
@@ -1641,12 +1628,7 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 			return fmt.Errorf("apply local cancellation: revoke subscription %s entitlements: %w", sub.ID, err)
 		}
 	}
-	// #691 closure: a terminal cancel is PROOF — write the window end on disk now
-	// (period-end cancels leave the paid runway; the standing window must not
-	// outlive it). Idempotent; no-op when the revoke above already closed access.
-	if err := entSvc.BoundSubscriptionAccess(ctx, sub.ID, endedAt); err != nil {
-		return fmt.Errorf("apply local cancellation: bound subscription %s access: %w", sub.ID, err)
-	}
+
 	return nil
 }
 
@@ -1905,32 +1887,15 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			"user_id":         subscription.CustomerID.String(),
 		}).Info("Marked subscription as expired")
 
-		// Revoke entitlements
+		// Provider expiration stops billing and renewal grace, preserving paid access.
 		if entSvc != nil {
-			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-			if err != nil {
-				return fmt.Errorf("list entitlements for expired subscription %s: %w", subscription.ID, err)
-			}
-			st := models.EntitlementSourceSubscription
-			sid := subscription.ID
-			for _, entName := range names {
-				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: entName,
-					SourceType:  &st,
-					SourceID:    &sid,
-					Reason:      models.EntitlementRevokeDunning,
-				}); err != nil {
-					return fmt.Errorf("revoke entitlement %q for expired subscription %s: %w", entName, subscription.ID, err)
-				}
-			}
-
 			// Terminal expiration: immediately remove any grace windows for this subscription too.
 			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
 			if err != nil {
 				return fmt.Errorf("list grace entitlements for expired subscription %s: %w", subscription.ID, err)
 			}
-			st = models.EntitlementSourceGrace
+			st := models.EntitlementSourceGrace
+			sid := subscription.ID
 			for _, entName := range graceNames {
 				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 					UserID:      subscription.CustomerID.String(),
@@ -2282,36 +2247,16 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"next_retry_at":   subscription.NextRetryAt,
 		}).Warn("Updated subscription during failure flow")
 
-		// Revoke entitlements if subscription is canceled after max retries or a
-		// terminal decline.
+		// A terminal billing failure stops renewal grace; previously paid access
+		// retains its independent expiry.
 		if subscription.Status == models.StatusCanceled && entSvc != nil {
-			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
-			if err != nil {
-				return fmt.Errorf("list entitlements for failed subscription %s: %w", subscription.ID, err)
-			}
-			st := models.EntitlementSourceSubscription
-			sid := subscription.ID
-			for _, entName := range names {
-				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: entName,
-					SourceType:  &st,
-					SourceID:    &sid,
-					Reason:      models.EntitlementRevokeDunning,
-				}); err != nil {
-					return fmt.Errorf("revoke entitlement %q for failed subscription %s: %w", entName, subscription.ID, err)
-				}
-			}
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-			}).Warn("Revoked entitlements after max dunning failures")
-
 			// Terminal dunning failure: remove any grace windows too so access doesn't continue.
 			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
 			if err != nil {
 				return fmt.Errorf("list grace entitlements for failed subscription %s: %w", subscription.ID, err)
 			}
-			st = models.EntitlementSourceGrace
+			st := models.EntitlementSourceGrace
+			sid := subscription.ID
 			for _, entName := range graceNames {
 				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
 					UserID:      subscription.CustomerID.String(),
@@ -2454,6 +2399,9 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 // with the paid period. A provider-scheduled member keeps its standing window,
 // or, under suspend, has it bounded at the paid period; a recovery reopens it.
 func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.DB, ent lifecycleEntitlementService, sub *models.Subscription, now time.Time) error {
+	if sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !accessMatchesBillingPeriod(sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt) {
+		return nil
+	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		return s.engineDunningAccess(ctx, d, ent, sub, now)
 	}

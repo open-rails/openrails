@@ -70,7 +70,7 @@ func purchaseTerms(session *models.CheckoutAttempt) (*acceptedPurchaseTerms, err
 }
 
 func permanentPurchase(price *models.Price) bool {
-	return price != nil && !price.AutoRenew && price.AccessDurationHours == nil
+	return price != nil && !price.IsRecurring() && price.AccessDurationHours == nil
 }
 
 func permanentBenefitKeys(spec map[string]*int) []string {
@@ -178,7 +178,7 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 				return err
 			}
 		}
-		if price.AutoRenew || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
+		if price.IsRecurring() || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
 			return fmt.Errorf("%w: purchase terms changed", ErrCheckoutAttemptConflict)
 		}
 		key, _ := session.RailState["requested_entitlement"].(string)

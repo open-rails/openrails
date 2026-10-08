@@ -11,24 +11,25 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// A derived window is [start, end) with end strictly after start, preferring the current period.
+// Derived access is independent of both billing and cancellation dates.
 func TestSubscriptionWindow(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd, ended := start.Add(720*time.Hour), start.Add(100*time.Hour)
-	ptr := func(x time.Time) *time.Time { return &x }
-	for name, tc := range map[string]struct {
-		row        gen.ListUngrantedSubscriptionsRow
-		start, end time.Time
-	}{
-		"period bounds preferred":        {gen.ListUngrantedSubscriptionsRow{StartedAt: start, CurrentPeriodStartsAt: ptr(start), CurrentPeriodEndsAt: ptr(periodEnd), EndedAt: ptr(ended)}, start, periodEnd},
-		"falls back to started..ended":   {gen.ListUngrantedSubscriptionsRow{StartedAt: start, EndedAt: ptr(ended)}, start, ended},
-		"no end is not a window":         {row: gen.ListUngrantedSubscriptionsRow{StartedAt: start}},
-		"end not after start is refused": {row: gen.ListUngrantedSubscriptionsRow{StartedAt: start, CurrentPeriodStartsAt: ptr(periodEnd), CurrentPeriodEndsAt: ptr(start)}},
-	} {
-		s, e, ok := subscriptionWindow(tc.row)
-		require.Equal(t, !tc.end.IsZero(), ok, name)
-		require.True(t, s.Equal(tc.start) && e.Equal(tc.end), "%s: [%s,%s)", name, s, e)
+	billingEnd, ended := start.Add(720*time.Hour), start.Add(100*time.Hour)
+	for _, hours := range []*int32{new(int32(24)), new(int32(1000)), nil} {
+		row := gen.ListUngrantedSubscriptionsRow{StartedAt: start, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd, EndedAt: &ended, AccessDurationHoursSnapshot: hours}
+		gotStart, gotEnd, ok := subscriptionWindow(row)
+		require.True(t, ok)
+		require.Equal(t, start, gotStart)
+		if hours == nil {
+			require.Nil(t, gotEnd)
+		} else {
+			require.Equal(t, start.Add(time.Duration(*hours)*time.Hour), *gotEnd)
+		}
 	}
+	_, _, ok := subscriptionWindow(gen.ListUngrantedSubscriptionsRow{})
+	require.False(t, ok)
+	_, _, ok = subscriptionWindow(gen.ListUngrantedSubscriptionsRow{StartedAt: start, AccessDurationHoursSnapshot: new(int32(0))})
+	require.False(t, ok)
 }
 
 func TestProductSpecKeys(t *testing.T) {

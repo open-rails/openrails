@@ -170,7 +170,7 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 
 	permanent := &models.Price{}
 	finite := &models.Price{AccessDurationHours: intPtr(24)}
-	recurring := &models.Price{AutoRenew: true, AccessDurationHours: intPtr(720)}
+	recurring := &models.Price{BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720)}
 	product := &models.Product{EntitlementsSpec: map[string]*int{"forever": nil, "timed": intPtr(24)}}
 	for _, tc := range []struct {
 		name  string

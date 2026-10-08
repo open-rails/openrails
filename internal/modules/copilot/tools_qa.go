@@ -89,7 +89,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 				ProductKey: p.Key, ProductName: p.DisplayName,
 				PriceKey: price.Key, PriceID: price.ID,
 				Amount: price.Amount, Currency: price.Currency,
-				Interval:   cadence.PriceIntervalLabel(price.AccessDurationHours, price.AutoRenew),
+				Interval:   cadence.PriceIntervalLabel(price.BillingIntervalHours),
 				ActiveSubs: active, Grandfathered: grand,
 			})
 		}
@@ -210,7 +210,7 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 		fmt.Sprintf("price_key: %s", price.Key),
 		fmt.Sprintf("product: %s (%s)", product.DisplayName, product.Key),
 		fmt.Sprintf("amount: %s", moneyutil.FormatAmount(price.Amount, price.Currency)),
-		fmt.Sprintf("interval: %s", cadence.PriceIntervalLabel(price.AccessDurationHours, price.AutoRenew)),
+		fmt.Sprintf("interval: %s", cadence.PriceIntervalLabel(price.BillingIntervalHours)),
 		fmt.Sprintf("active_subscribers: %d", active),
 		fmt.Sprintf("grandfathered (on prior versions): %d", grand),
 		pending,

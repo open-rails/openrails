@@ -281,7 +281,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: period_hours must be in (0, %d]", maxPeriodHours)
 	}
 	// period_hours <-> billing-cycle consistency: the on-chain period is derived
-	// from a price's AccessDurationHours (see catalog_provider_solana.go).
+	// from a price's BillingIntervalHours (see catalog_provider_solana.go).
 	// When a caller threads that cycle through (PublishPlanInput.BillingCycleHours
 	// > 0), enforce period_hours == BillingCycleHours so an admin call can't
 	// publish a plan whose on-chain period silently disagrees with the price.

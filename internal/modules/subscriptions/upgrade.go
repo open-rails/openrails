@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
@@ -50,7 +49,7 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 		return err
 	}
 	for name := range next.EntitlementsSpecSnapshot {
-		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: next.CustomerID.String(), Entitlement: name, NotBefore: &at, EndsAt: next.CurrentPeriodEndsAt, SourceType: models.EntitlementSourceSubscription, SourceID: next.ID}); err != nil {
+		if _, err := ent.PushNewEntitlement(ctx, subscriptionAccess(next, name, at)); err != nil {
 			return err
 		}
 	}
@@ -140,16 +139,17 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 // subscription whose provider schedule was already moved to the new amount.
 // The subscription row, its rail reference and its period end are kept.
 type InPlaceTierChange struct {
-	SubscriptionID     uuid.UUID
-	FromPriceID        uuid.UUID
-	PriceID            uuid.UUID
-	ProductID          uuid.UUID
-	RailSubscriptionID string
-	PeriodEnd          time.Time
-	At                 time.Time
-	Entitlements       map[string]*int
-	Payment            *models.Payment
-	Downgrade          bool
+	AccessDurationHours *int
+	SubscriptionID      uuid.UUID
+	FromPriceID         uuid.UUID
+	PriceID             uuid.UUID
+	ProductID           uuid.UUID
+	RailSubscriptionID  string
+	PeriodEnd           time.Time
+	At                  time.Time
+	Entitlements        map[string]*int
+	Payment             *models.Payment
+	Downgrade           bool
 }
 
 // ChangeTierInPlaceTx commits an in-place tier change in the caller's
@@ -173,6 +173,7 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = c.PriceID, c.ProductID, nil
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(c.Entitlements)
+	sub.AccessDurationHoursSnapshot = c.AccessDurationHours
 	if err := repo.UpdateAt(ctx, sub, c.At); err != nil {
 		return err
 	}
@@ -193,7 +194,7 @@ func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txD
 		return err
 	}
 	for name := range sub.EntitlementsSpecSnapshot {
-		if _, err := ent.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &at, EndsAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID}); err != nil {
+		if _, err := ent.PushNewEntitlement(ctx, subscriptionAccess(sub, name, at)); err != nil {
 			return err
 		}
 	}

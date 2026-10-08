@@ -99,7 +99,7 @@ func routingServiceWith(armed railresolve.FixedSet, catalog pspCatalog) *Checkou
 }
 
 func recurringPrice() *models.Price {
-	return &models.Price{ID: uuid.New(), Key: "pro-monthly", Currency: "usd", Amount: 1_000_000, AutoRenew: true, AccessDurationHours: intPtr(720),
+	return &models.Price{ID: uuid.New(), Key: "pro-monthly", Currency: "usd", Amount: 1_000_000, BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720),
 		PSPLinks: map[string]map[string]string{
 			"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_test"},
 			"nmi":    {models.RailKeyRail: "nmi", models.RailKeyPlanID: "plan_test"},
@@ -204,7 +204,7 @@ func TestRouteDefaultPolicy(t *testing.T) {
 	armed := armedAll()
 	delete(armed, "stripe")
 	oneOff := recurringPrice()
-	oneOff.AutoRenew = false
+	oneOff.BillingIntervalHours = nil
 	decision, err = routingService(armed).Route(merchantCtx(), RoutingInput{Price: oneOff, Mode: models.CheckoutAttemptModeOneOff})
 	require.NoError(t, err)
 	require.Equal(t, "nmi", decision.Selected())
@@ -332,7 +332,7 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 	trial := recurringPrice()
 	trial.TrialUnitAmount = new(int64(0))
 	noCycle := recurringPrice()
-	noCycle.AccessDurationHours = nil
+	noCycle.BillingIntervalHours = nil
 	free := recurringPrice()
 	free.Amount = 0
 	oneOff := &models.Price{ID: uuid.New(), Amount: 1_000_000, Currency: "USD"}

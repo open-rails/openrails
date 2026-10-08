@@ -329,12 +329,8 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 				return fmt.Errorf("revoke access: %w", err)
 			}
 		} else {
-			accessEnd := now
-			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
-				accessEnd = *subscription.CurrentPeriodEndsAt
-			}
-			if err := entSvc.BoundSubscriptionAccess(ctx, subscription.ID, accessEnd); err != nil {
-				return fmt.Errorf("bound subscription access: %w", err)
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceGrace); err != nil {
+				return fmt.Errorf("end renewal grace: %w", err)
 			}
 		}
 		if remote && !deleteHeld {

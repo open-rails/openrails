@@ -400,7 +400,7 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, err
 	}
-	plan, err := checkoutsession.NewPlan(product.DisplayName, price.Amount, price.Currency, price.AccessDurationHours, price.AutoRenew)
+	plan, err := checkoutsession.NewPlan(product.DisplayName, price.Amount, price.Currency, price.BillingIntervalHours, price.AccessDurationHours)
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("checkout session plan: %w", err)
 	}

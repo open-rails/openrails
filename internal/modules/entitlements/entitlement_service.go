@@ -407,30 +407,41 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if err := LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
 			return err
 		}
-		// Replay is scoped to this source. Another source's finite or standing
-		// interval must never replace this purchase/subscription's grant facts.
+		// A subscription's accepted payment interval is immutable, even when a
+		// longer or indefinite grant already covers it. Exact interval replay
+		// keeps every paid period without stacking or truncating overlap.
+		if p.SourceType == models.EntitlementSourceSubscription && (p.EndsAt != nil || p.Indefinite) {
+			start := now
+			if p.NotBefore != nil {
+				start = p.NotBefore.UTC()
+			}
+			if p.EndsAt != nil && !p.EndsAt.After(start) {
+				return errors.New("endAt must be after entitlement start")
+			}
+			ledger := grants.New(gen.New(tx), merchantID.UUID())
+			ledger.SetClock(func() time.Time { return s.now().UTC() })
+			if _, err := ledger.GrantSubscriptionWindow(ctx, p.CustomerID, p.SourceID, []string{p.Entitlement}, start, p.EndsAt); err != nil {
+				return err
+			}
+			row, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
+				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, Entitlement: p.Entitlement,
+				SourceType: string(p.SourceType), SourceID: p.SourceID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			created = models.EntitlementFromGen(row)
+			return nil
+		}
 		previous, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
 			MerchantID: merchantID.UUID(), CustomerID: p.CustomerID,
 			Entitlement: p.Entitlement, SourceType: string(p.SourceType), SourceID: p.SourceID,
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
-		}
-		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceSubscription && p.EndsAt != nil {
-			latest, lookupErr := gen.New(tx).LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
-				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, SourceType: string(grants.Subscription),
-				SourceID: p.SourceID.String(), Entitlement: p.Entitlement,
-			})
-			if lookupErr != nil {
-				return lookupErr
-			}
-			// A newly paid period may restore the same subscription; replaying
-			// the revoked period itself must never restore its effect.
-			if !p.EndsAt.After(latest) {
-				created = models.EntitlementFromGen(previous)
-				return nil
-			}
-			err = pgx.ErrNoRows
 		}
 		// A revoked grace allowance (a canceled engine renewal that was then
 		// resumed) is re-granted, never replayed as its revoked self.
@@ -440,11 +451,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if err == nil && (previous.EndsAt == nil || p.Duration != nil ||
 			(p.EndsAt != nil && !p.EndsAt.After(*previous.EndsAt))) {
 			created = models.EntitlementFromGen(previous)
-			if previous.RevokedAt == nil && p.SourceType == models.EntitlementSourceSubscription && p.EndsAt != nil {
-				if err := s.appendCoveredPeriodGrant(ctx, tx, merchantID.UUID(), p, now); err != nil {
-					return err
-				}
-			}
+
 			return nil
 		}
 		// Duration purchases append paid time; explicit EndsAt/indefinite sources
@@ -460,7 +467,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		start := now
 		if p.NotBefore != nil {
 			nb := p.NotBefore.UTC()
-			if p.EndsAt != nil || nb.After(start) {
+			if p.EndsAt != nil || p.Indefinite || nb.After(start) {
 				start = nb
 			}
 		}
@@ -514,53 +521,6 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		return nil, err
 	}
 	return created, nil
-}
-
-// appendCoveredPeriodGrant records the bounded per-period grant for a renewal
-// whose projection is already covered by the subscription's own standing window
-// (#691). Idempotent: a replayed period whose end is not past the latest
-// recorded bounded end appends nothing. Runs inside the caller's tx with the
-// timeline lock held.
-func (s *EntitlementService) appendCoveredPeriodGrant(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, p PushNewEntitlementParams, now time.Time) error {
-	q := gen.New(tx)
-	end := p.EndsAt.UTC()
-	start := now
-	if p.NotBefore != nil && !p.NotBefore.IsZero() {
-		start = p.NotBefore.UTC()
-	}
-	latest, err := q.LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
-		MerchantID: merchantID, CustomerID: p.CustomerID,
-		SourceType: string(grantSourceType(p.SourceType)), SourceID: p.SourceID.String(),
-		Entitlement: p.Entitlement,
-	})
-	if err != nil {
-		return err
-	}
-	if !latest.IsZero() {
-		if !end.After(latest) {
-			return nil // replay: this period is already recorded
-		}
-		if latest.After(start) {
-			start = latest // contiguous per-period ledger
-		}
-	}
-	if !end.After(start) {
-		return nil
-	}
-	gl := grants.New(q, merchantID)
-	gl.SetClock(func() time.Time { return s.now().UTC() })
-	g, err := gl.Grant(ctx, grants.GrantInput{
-		Customer: p.CustomerID, Kind: grants.Entitlement,
-		Source: grantSourceType(p.SourceType), SourceID: p.SourceID.String(),
-		Spec:     &grants.Spec{Entitlements: []string{p.Entitlement}},
-		StartsAt: start, EndsAt: &end,
-	})
-	if err != nil {
-		return err
-	}
-	// The standing window satisfies the projection; MaterializeGrant is a no-op
-	// window-wise but keeps usage-limit bindings and future retractions wired.
-	return gl.MaterializeGrant(ctx, g)
 }
 
 // BoundSubscriptionAccess writes the PROVEN closure for a subscription's access

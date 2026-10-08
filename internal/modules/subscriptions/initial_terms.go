@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -14,23 +15,24 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
-	CollectionPolicy models.CollectionPolicy `json:"collection_policy"`
-	SubscriptionID   uuid.UUID               `json:"subscription_id"`
-	PaymentID        uuid.UUID               `json:"payment_id"`
-	CustomerID       uuid.UUID               `json:"customer_id"`
-	PSPID            uuid.UUID               `json:"psp_id"`
-	ProductID        uuid.UUID               `json:"product_id"`
-	PriceID          uuid.UUID               `json:"price_id"`
-	PaymentMethodID  uuid.UUID               `json:"payment_method_id"`
-	ProductName      string                  `json:"product_name"`
-	Amount           int64                   `json:"amount,string"`
-	RecurringAmount  int64                   `json:"recurring_amount,string"`
-	Currency         string                  `json:"currency"`
-	AcceptedAt       time.Time               `json:"accepted_at"`
-	PeriodStart      time.Time               `json:"period_start"`
-	PeriodEnd        time.Time               `json:"period_end"`
-	Pending          bool                    `json:"pending"`
-	Entitlements     map[string]*int         `json:"entitlements"`
+	AccessDurationHours *int                    `json:"access_duration_hours"`
+	CollectionPolicy    models.CollectionPolicy `json:"collection_policy"`
+	SubscriptionID      uuid.UUID               `json:"subscription_id"`
+	PaymentID           uuid.UUID               `json:"payment_id"`
+	CustomerID          uuid.UUID               `json:"customer_id"`
+	PSPID               uuid.UUID               `json:"psp_id"`
+	ProductID           uuid.UUID               `json:"product_id"`
+	PriceID             uuid.UUID               `json:"price_id"`
+	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
+	ProductName         string                  `json:"product_name"`
+	Amount              int64                   `json:"amount,string"`
+	RecurringAmount     int64                   `json:"recurring_amount,string"`
+	Currency            string                  `json:"currency"`
+	AcceptedAt          time.Time               `json:"accepted_at"`
+	PeriodStart         time.Time               `json:"period_start"`
+	PeriodEnd           time.Time               `json:"period_end"`
+	Pending             bool                    `json:"pending"`
+	Entitlements        map[string]*int         `json:"entitlements"`
 	// Replaces is set on an engine tier upgrade: accepting this membership
 	// supersedes that one. Amount is then the prorated charge and
 	// RecurringAmount the new price every renewal bills.
@@ -47,6 +49,9 @@ type ReplacedMembership struct {
 }
 
 func (t InitialMembershipTerms) Validate() error {
+	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
+		return err
+	}
 	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 || t.Entitlements == nil {
 		return errors.New("initial membership terms are incomplete")
 	}
@@ -68,4 +73,24 @@ func (t InitialMembershipTerms) Validate() error {
 	}
 	_, err := moneyutil.NativeToRailMinorExact(t.Currency, t.RecurringAmount)
 	return err
+}
+
+// UnmarshalJSON preserves already accepted operations from before access and billing were separated.
+// Only an absent access field uses that operation's original billing period; explicit null is indefinite.
+func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
+	type plain InitialMembershipTerms
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["access_duration_hours"]; !present {
+		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
+		decoded.AccessDurationHours = &hours
+	}
+	*t = InitialMembershipTerms(decoded)
+	return nil
 }

@@ -108,8 +108,8 @@ func TestCCBillCurrencyIngestion(t *testing.T) {
 func TestCCBillPriceSelection(t *testing.T) {
 	t.Parallel()
 	intro, trialHours := int64(19_950_000), 720
-	require.Equal(t, moneyutil.Micros(19_950_000), ccbillInitialChargeAmount(&models.Price{Amount: 14_950_000, AutoRenew: true, TrialUnitAmount: &intro, TrialDurationHours: &trialHours}))
-	require.Equal(t, moneyutil.Micros(14_950_000), ccbillInitialChargeAmount(&models.Price{Amount: 14_950_000, AutoRenew: true}))
+	require.Equal(t, moneyutil.Micros(19_950_000), ccbillInitialChargeAmount(&models.Price{Amount: 14_950_000, BillingIntervalHours: new(720), TrialUnitAmount: &intro, TrialDurationHours: &trialHours}))
+	require.Equal(t, moneyutil.Micros(14_950_000), ccbillInitialChargeAmount(&models.Price{Amount: 14_950_000, BillingIntervalHours: new(720)}))
 	require.Zero(t, ccbillInitialChargeAmount(nil))
 
 	require.Equal(t, "0000007498", ccbillPriceLookupID(" 0000007498 ", "flex-123"))
@@ -143,7 +143,7 @@ func TestBoundCCBillPeriodEndFailsClosed(t *testing.T) {
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	cycle := 720
 	paidEnd := now.Add(10 * 24 * time.Hour)
-	sub := &models.Subscription{CurrentPeriodEndsAt: &paidEnd, Price: &models.Price{AutoRenew: true, AccessDurationHours: &cycle}}
+	sub := &models.Subscription{CurrentPeriodEndsAt: &paidEnd, Price: &models.Price{BillingIntervalHours: &cycle, AccessDurationHours: &cycle}}
 
 	got, err := boundCCBillPeriodEnd(nil, sub, now)
 	require.NoError(t, err)
@@ -167,7 +167,7 @@ func TestBoundCCBillPeriodEndFailsClosed(t *testing.T) {
 	for name, s := range map[string]*models.Subscription{
 		"no subscription": nil,
 		"no price":        {},
-		"no cycle":        {Price: &models.Price{AutoRenew: false, AccessDurationHours: &cycle}},
+		"no cycle":        {Price: &models.Price{AccessDurationHours: &cycle}},
 	} {
 		_, err := boundCCBillPeriodEnd(&far, s, now)
 		require.Error(t, err, name)

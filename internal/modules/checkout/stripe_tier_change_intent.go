@@ -42,6 +42,7 @@ const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
 // StripeTierChangePayload freezes the commercial decision before the first
 // provider request. Replays never recalculate proration, prices or dates.
 type StripeTierChangePayload struct {
+	AccessDurationHours  *int      `json:"access_duration_hours"`
 	RequestedPrice       string    `json:"requested_price"`
 	UserID               string    `json:"user_id"`
 	SubscriptionID       uuid.UUID `json:"subscription_id"`
@@ -543,6 +544,7 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in 
 		default:
 			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
+		sub.AccessDurationHoursSnapshot = p.AccessDurationHours
 		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &start, &end
 		sub.MarkLifecycleDecision("tier_change_paid")
 		if err := repo.UpdateAt(ctx, sub, now); err != nil {
@@ -801,4 +803,22 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 	default:
 		return tierChangeProcessing(resp)
 	}
+}
+
+func (p *StripeTierChangePayload) UnmarshalJSON(data []byte) error {
+	type plain StripeTierChangePayload
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, present := fields["access_duration_hours"]; !present {
+		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
+		decoded.AccessDurationHours = &hours
+	}
+	*p = StripeTierChangePayload(decoded)
+	return nil
 }

@@ -30,7 +30,7 @@ func TestAcceptedPurchasedCreditPromise(t *testing.T) {
 	price.Currency = "EUR"
 	_, err = acceptedCreditGrant(product, price)
 	require.ErrorContains(t, err, "currency")
-	price.Currency, price.AutoRenew = "USD", true
+	price.Currency, price.BillingIntervalHours = "USD", intPtr(720)
 	_, err = acceptedCreditGrant(product, price)
 	require.ErrorContains(t, err, "recurring")
 }

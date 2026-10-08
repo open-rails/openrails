@@ -181,8 +181,12 @@ type Effect interface{ effect() string }
 // GrantPeriod records paid access for the period.
 type GrantPeriod struct{ Start, End time.Time }
 
-// EndAccess closes access at At.
-type EndAccess struct{ At time.Time }
+// EndAccess ends renewal grace. Revoke also ends paid access, only for an
+// explicit access revocation or reversal. Stopping billing preserves purchases.
+type EndAccess struct {
+	At     time.Time
+	Revoke bool
+}
 
 // OpenDunning starts the dunning case for the unpaid period.
 type OpenDunning struct{ PeriodStart time.Time }
@@ -322,7 +326,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 				end = ev.At
 			}
 			s.Status, s.CancelKind, s.EndedAt = Canceled, CancelExpired, end
-			return s, []Effect{CloseDunning{}, EndAccess{end}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
+			return s, []Effect{CloseDunning{}, EndAccess{At: end}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
 		default:
 			effects := []Effect{Notify{NoticePaymentFailed}}
 			if s.Status != PastDue {
@@ -362,7 +366,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			return s, nil, illegal(s, e)
 		}
 		s.Status, s.CancelKind, s.EndedAt = Canceled, CancelExpired, ev.At
-		return s, []Effect{CloseDunning{}, EndAccess{ev.At}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
+		return s, []Effect{CloseDunning{}, EndAccess{At: ev.At}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
 
 	case TerminalHeld:
 		if !s.Status.Live() && s.Status != Pending {
@@ -408,7 +412,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			end = s.PaidThrough // what was paid for is kept
 		}
 		s.Status, s.CancelKind, s.EndedAt = Canceled, CancelProvider, end
-		return s, []Effect{CloseDunning{}, EndAccess{end}, Notify{NoticeEnded}}, nil
+		return s, []Effect{CloseDunning{}, EndAccess{At: end}, Notify{NoticeEnded}}, nil
 
 	case Cancel:
 		if ev.Kind == "" {
@@ -419,7 +423,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			// paid access now; otherwise the first decided cancel stands.
 			if (ev.Immediate || ev.Kind == CancelChargeback) && s.EndedAt.After(ev.At) {
 				s.CancelKind, s.EndedAt = ev.Kind, ev.At
-				return s, []Effect{EndAccess{ev.At}}, nil
+				return s, []Effect{EndAccess{At: ev.At, Revoke: true}}, nil
 			}
 			return s, nil, nil
 		}
@@ -431,7 +435,7 @@ func Apply(s Snapshot, e Event) (Snapshot, []Effect, error) {
 			end = s.PaidThrough // access runs to the end of what was paid
 		}
 		s.Status, s.CancelKind, s.EndedAt = Canceled, ev.Kind, end
-		return s, []Effect{CloseDunning{}, EndAccess{end}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
+		return s, []Effect{CloseDunning{}, EndAccess{At: end, Revoke: ev.Immediate || ev.Kind == CancelChargeback}, QueueProviderCancel{}, Notify{NoticeEnded}}, nil
 
 	case Resume:
 		resumable := s.CancelKind == CancelUser || s.CancelKind == CancelMerchant || s.CancelKind == CancelExpired
