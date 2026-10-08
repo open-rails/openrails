@@ -445,7 +445,7 @@ func insertDeclaredCanceled(
 		CustomerID:                  f.Customer,
 		ProductID:                   price.ProductID,
 		PriceID:                     &priceID,
-		EntitlementsSpecSnapshot:    product.EntitlementsSpec,
+		EntitlementsSnapshot:        product.Entitlements,
 		AccessDurationHoursSnapshot: price.AccessDurationHours,
 		Status:                      string(models.StatusCanceled),
 		StartedAt:                   f.StartedAt.UTC(),

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -19,10 +20,9 @@ type Product struct {
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
 
-	// Named feature grants follow the purchased access window. With an indefinite
-	// purchase, a positive feature duration bounds that feature independently.
-	EntitlementsSpec map[string]*int          `json:"entitlements_spec,omitempty"`
-	CreditGrant      *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	// Entitlements are opaque feature names granted for the purchased access window.
+	Entitlements []string                 `json:"entitlements"`
+	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
@@ -44,21 +44,8 @@ type Product struct {
 // (shown in the public catalog).
 func (p *Product) IsPurchasable() bool { return !p.Archived }
 
-func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
-	if len(spec) == 0 {
-		return nil
-	}
-	out := make(map[string]*int, len(spec))
-	for key, value := range spec {
-		if value == nil {
-			out[key] = nil
-			continue
-		}
-		v := *value
-		out[key] = &v
-	}
-	return out
-}
+// CloneEntitlements copies the accepted names, preserving absent and explicitly empty snapshots.
+func CloneEntitlements(names []string) []string { return slices.Clone(names) }
 
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
@@ -328,9 +315,13 @@ func (p *Product) Summary() *billing.ProductSummary {
 
 // View is the product as the API shows it, without its prices.
 func (p *Product) View() billing.Product {
+	names := p.Entitlements
+	if names == nil {
+		names = []string{}
+	}
 	return billing.Product{Revision: p.Revision,
 		ID: billing.ProductID(p.ID), Key: p.Key,
-		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec, CreditGrant: p.CreditGrant,
+		DisplayName: p.DisplayName, Description: p.Description, Entitlements: names, CreditGrant: p.CreditGrant,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}

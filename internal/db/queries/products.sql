@@ -2,12 +2,12 @@
 
 -- name: CreateProduct :execrows
 INSERT INTO billing.products (
-    id, merchant_id, key, display_name, description, entitlements_spec, credit_grant,
+    id, merchant_id, key, display_name, description, entitlements, credit_grant,
     tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
-    $2, $3, sqlc.narg(description), sqlc.narg(entitlements_spec), sqlc.narg(credit_grant),
+    $2, $3, sqlc.narg(description), sqlc.narg(entitlements), sqlc.narg(credit_grant),
     NULLIF(sqlc.narg(tier_group)::text, ''),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),
     sqlc.arg(archived)::boolean,
@@ -47,7 +47,7 @@ LIMIT sqlc.arg(fetch_limit)::int;
 UPDATE billing.products SET
     display_name = COALESCE(sqlc.narg(display_name)::text, display_name),
     description = CASE WHEN sqlc.arg(set_description)::boolean THEN NULLIF(sqlc.narg(description)::text, '') ELSE description END,
-    entitlements_spec = CASE WHEN sqlc.arg(set_entitlements)::boolean THEN sqlc.narg(entitlements_spec)::jsonb ELSE entitlements_spec END,
+    entitlements = CASE WHEN sqlc.arg(set_entitlements)::boolean THEN sqlc.narg(entitlements)::jsonb ELSE entitlements END,
     credit_grant = CASE WHEN sqlc.arg(set_credit_grant)::boolean THEN sqlc.narg(credit_grant)::jsonb ELSE credit_grant END,
     tier_group = CASE WHEN sqlc.arg(set_tier_group)::boolean THEN NULLIF(sqlc.narg(tier_group)::text, '') ELSE tier_group END,
     tier_rank = COALESCE(sqlc.narg(tier_rank)::int, tier_rank),

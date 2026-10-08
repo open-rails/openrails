@@ -893,7 +893,7 @@ SELECT p.id AS product_id,
 FROM billing.products p
 JOIN billing.entitlements ent
   ON ent.merchant_id = p.merchant_id
- AND ent.entitlement IN (SELECT jsonb_object_keys(p.entitlements_spec))
+ AND ent.entitlement IN (SELECT jsonb_array_elements_text(p.entitlements))
 WHERE p.merchant_id = $1
   AND ent.customer_id = $2
   AND p.tier_group = $3::text
@@ -923,7 +923,7 @@ type ResolveEffectiveTierRow struct {
 
 // or#912: THE effective tier for a customer within one tier group — the
 // highest-ranked non-archived product whose declared entitlements
-// (entitlements_spec keys) intersect the customer's ACTIVE entitlement windows
+// (entitlements keys) intersect the customer's ACTIVE entitlement windows
 // at `at`. Overlapping tiers (mid-upgrade) resolve to the winner, never an
 // error. Deterministic: tier_rank DESC, then product key ASC, then entitlement
 // ASC. Returns the winner's IMMUTABLE identifiers (entitlement string, product

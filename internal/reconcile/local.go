@@ -63,7 +63,7 @@ type LocalSubscription struct {
 	// next renewal; TierChangePending an unresolved in-place tier change.
 	ScheduledPriceID  *uuid.UUID
 	TierChangePending bool
-	// EntitlementNames are the keys of entitlements_spec_snapshot — the
+	// EntitlementNames are the keys of entitlements_snapshot — the
 	// entitlements this subscription is supposed to grant.
 	EntitlementNames []string
 }
@@ -201,14 +201,12 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		if row.RetryAttempts != nil {
 			s.RetryAttempts = int(*row.RetryAttempts)
 		}
-		if len(row.EntitlementsSpecSnapshot) > 0 {
-			var spec map[string]json.RawMessage
-			if err := json.Unmarshal(row.EntitlementsSpecSnapshot, &spec); err == nil {
-				for name := range spec {
-					s.EntitlementNames = append(s.EntitlementNames, name)
-				}
+		if len(row.EntitlementsSnapshot) > 0 {
+			if err := json.Unmarshal(row.EntitlementsSnapshot, &s.EntitlementNames); err != nil {
+				return nil, fmt.Errorf("decode subscription entitlements: %w", err)
 			}
 		}
+
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 

@@ -1253,7 +1253,7 @@ WHERE p.merchant_id = $1::uuid
   AND p.amount > 0
   AND p.subscription_id IS NULL
   AND (
-        (pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
+        (pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb)
       )
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
@@ -1276,7 +1276,7 @@ type ListUngrantedGrantablePaymentsRow struct {
 
 // #511 DERIVE `derive.grant.missing` (grant tier): a customer's completed,
 // positive, one-off (non-subscription) payments for a product that PROMISES
-// grants — a non-empty `entitlements_spec` — yet produced NO
+// grants — a non-empty `entitlements` — yet produced NO
 // grant at all. "Paid for a grantable product, got nothing." Spec-aware (the
 // positive signal is the product's own grant spec via payment→price→product), so
 // empty-spec products / pure fees are never flagged; subscription payments are
@@ -1314,7 +1314,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) AS entitlements_spec
+       COALESCE(s.entitlements_snapshot, pd.entitlements) AS entitlements
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = $1::uuid
@@ -1324,8 +1324,8 @@ WHERE s.merchant_id = $1::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
+  AND COALESCE(s.entitlements_snapshot, pd.entitlements) IS NOT NULL
+  AND COALESCE(s.entitlements_snapshot, pd.entitlements) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= $3::timestamptz)
   AND NOT EXISTS (
@@ -1352,7 +1352,7 @@ type ListUngrantedSubscriptionsRow struct {
 	StartedAt                   time.Time
 	EndedAt                     *time.Time
 	AccessDurationHoursSnapshot *int32
-	EntitlementsSpec            []byte
+	Entitlements                []byte
 }
 
 // #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
@@ -1389,7 +1389,7 @@ func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngran
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.AccessDurationHoursSnapshot,
-			&i.EntitlementsSpec,
+			&i.Entitlements,
 		); err != nil {
 			return nil, err
 		}
@@ -1404,7 +1404,7 @@ func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngran
 const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
 SELECT p.id, p.customer_id, p.purchased_at,
        (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
-       pd.entitlements_spec
+       pd.entitlements
 FROM billing.payments p
 JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
 JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
@@ -1419,7 +1419,7 @@ WHERE p.merchant_id = $1::uuid
   AND p.metadata->>'expiration_rfc3339' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
   AND (p.metadata->>'expiration_rfc3339')::timestamptz > p.purchased_at
   AND (p.metadata->>'expiration_rfc3339')::timestamptz >= $3::timestamptz
-  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
@@ -1435,11 +1435,11 @@ type ListUngrantedWalletPaymentsParams struct {
 }
 
 type ListUngrantedWalletPaymentsRow struct {
-	ID               uuid.UUID
-	CustomerID       uuid.UUID
-	PurchasedAt      time.Time
-	ExpiresAt        time.Time
-	EntitlementsSpec []byte
+	ID           uuid.UUID
+	CustomerID   uuid.UUID
+	PurchasedAt  time.Time
+	ExpiresAt    time.Time
+	Entitlements []byte
 }
 
 // #631 DERIVE `derive.wallet.missing`: completed solana wallet payments
@@ -1464,7 +1464,7 @@ func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngra
 			&i.CustomerID,
 			&i.PurchasedAt,
 			&i.ExpiresAt,
-			&i.EntitlementsSpec,
+			&i.Entitlements,
 		); err != nil {
 			return nil, err
 		}

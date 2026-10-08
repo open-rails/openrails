@@ -326,7 +326,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        canceled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
-       entitlements_spec_snapshot, access_duration_hours_snapshot, scheduled_price_id,
+       entitlements_snapshot, access_duration_hours_snapshot, scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
@@ -441,14 +441,14 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    entitlements_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       p.entitlements, pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
@@ -462,7 +462,7 @@ WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(
         -- provider subscription id is only unique within a gateway account.
         AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
-RETURNING id, entitlements_spec_snapshot, access_duration_hours_snapshot;
+RETURNING id, entitlements_snapshot, access_duration_hours_snapshot;
 
 -- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
@@ -642,12 +642,12 @@ ORDER BY current_period_ends_at;
 -- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       missing.spec AS entitlements_spec
+       missing.spec AS entitlements
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
-    SELECT jsonb_object_agg(feat, NULL::text) AS spec
-    FROM jsonb_object_keys(COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec)) AS feat
+    SELECT jsonb_agg(feat ORDER BY feat) AS spec
+    FROM jsonb_array_elements_text(COALESCE(s.entitlements_snapshot, pd.entitlements)) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -664,8 +664,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
+  AND COALESCE(s.entitlements_snapshot, pd.entitlements) IS NOT NULL
+  AND COALESCE(s.entitlements_snapshot, pd.entitlements) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
@@ -859,8 +859,8 @@ WITH win AS (
      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
        AND s.deleted_at IS NULL AND s.status <> 'pending'
        AND s.cancel_type IS DISTINCT FROM 'chargeback'
-       AND ((pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
-            OR (s.entitlements_spec_snapshot IS NOT NULL AND s.entitlements_spec_snapshot <> '{}'::jsonb))
+       AND ((pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb)
+            OR (s.entitlements_snapshot IS NOT NULL AND s.entitlements_snapshot <> '[]'::jsonb))
     UNION ALL
     SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
            p.purchased_at + make_interval(hours => pr.access_duration_hours)
@@ -870,7 +870,7 @@ WITH win AS (
      WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
        AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
        AND pr.access_duration_hours IS NOT NULL
-       AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+       AND pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb
 ), orphaned AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((
