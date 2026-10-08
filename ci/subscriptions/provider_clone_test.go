@@ -172,11 +172,23 @@ func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
 	before := len(a.w.stripe.submitted("/v1/payment_intents"))
-	// A restored database can diverge from the source. Deliberately change
-	// its economic terms; an obligation key must not become a new-charge key.
-	changed, err := b.w.pool.Exec(t.Context(), b.w.q(`UPDATE billing.prices SET amount=amount+10000 WHERE id=$1`), pid(b.price).UUID())
+	// A restored database can independently author a different next price.
+	// Use the normal immutable-price/versioning and scheduled-reprice APIs.
+	client := b.w.client[embedded]
+	old, err := client.GetPrice(t.Context(), pid(b.price), billing.GetPriceParams{})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, changed.RowsAffected())
+	product, err := client.GetProduct(t.Context(), old.ProductID)
+	require.NoError(t, err)
+	_, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{
+		ProductID: old.ProductID, Key: old.Key, UnitAmount: old.UnitAmount + 10000,
+		Currency: old.Currency, AutoRenew: true, AccessDurationHours: old.AccessDurationHours,
+	})
+	require.NoError(t, err)
+	batch, err := client.CreateRepriceBatch(t.Context(), billing.CreateRepriceBatchParams{
+		ProductKey: product.Key, PriceKey: old.Key, EffectiveAt: paidThrough, AcknowledgeShortNotice: true,
+	})
+	require.NoError(t, err)
+	require.Len(t, batch.Scheduled, 1)
 	b.toPeriodEnd()
 	b.w.runRenewals()
 	require.Equal(t, paidThrough, b.periodEnd(), "conflicting terms are not applied locally")
