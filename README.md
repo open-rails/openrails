@@ -152,7 +152,9 @@ migrated. Omitted entries stay unchanged; use `archived: true` to retire an offe
 
 ### Evolving the catalog
 
-All the changes below are YAML applications. Apply each file through the same
+The following files form a catalog migration: update products in place, create
+new price revisions, retire offers, and restore an earlier revision. All changes
+are YAML applications. Apply each file through the same
 `catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
 or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
 There are no caller-managed application IDs or version numbers. These examples
@@ -188,6 +190,31 @@ entitlements indefinitely. Product descriptions and `entitlements_spec` can also
 be edited in place; changed entitlements apply to new purchases, not retroactively
 to existing grants. Neither a YAML price change nor archival schedules a
 subscription migration.
+
+**Change what a product grants.** Add a named benefit for new memberships on
+both term products. The supplied map replaces the product's entire entitlement
+specification, so retain the original membership key:
+
+```yaml
+# add-membership-benefit.yaml
+schema_version: 1
+products:
+  - key: channel-main-monthly
+    entitlements_spec:
+      "channel:main:membership": null
+      "channel:main:downloads": null
+  - key: channel-main-yearly
+    entitlements_spec:
+      "channel:main:membership": null
+      "channel:main:downloads": null
+```
+
+Your application can check the new downloads key for its download feature. Prices
+are omitted and stay unchanged. Existing subscribers keep their accepted benefit
+snapshot; this file does not grant or remove benefits retroactively. The same
+rule applies to editing a bundle's granted post keys: earlier buyers retain the
+keys they bought. Moving existing customers to new terms is a separate operation
+from changing the offers available to new customers.
 
 **Retire the monthly offer.** Stop new 30-day memberships while keeping the
 separate yearly product on sale:
