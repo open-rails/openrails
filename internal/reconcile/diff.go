@@ -1082,8 +1082,13 @@ func diffDuplicates(provider Provider, idx *localIndex, ridx *remoteIndex) []Fin
 			continue
 		}
 		if l, ok := idx.byPSID[r.RailSubscriptionID]; ok {
-			// Matched: duplicates within one (subject, tier group).
-			addGroup("subject:"+l.CustomerID.String()+"|tier:"+l.TierGroup, r, l)
+			// A tier group makes products mutually exclusive. Without one,
+			// independent products may legitimately bill the same customer.
+			scope := "tier:" + l.TierGroup
+			if l.TierGroup == "" {
+				scope = "product:" + l.ProductID.String()
+			}
+			addGroup("subject:"+l.CustomerID.String()+"|"+scope, r, l)
 			continue
 		}
 		// Unmatched: duplicates on the same rail-side identity + plan.

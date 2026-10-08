@@ -69,6 +69,7 @@ func TestLegacyNMICancel(t *testing.T) {
 				}
 				l := importLegacy(t, w, "nmi", tp)
 				w.converge()
+				w.refreshProviders()
 				end := l.periodEnd()
 				charges := l.engineCharges()
 
@@ -120,7 +121,7 @@ func TestLegacyNMICancel(t *testing.T) {
 					w.advance(time.Hour)
 					w.wake()
 					require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the member's undo window keeps the schedule")
-					w.advance(end.Sub(w.clock.Now()) - 47*time.Hour)
+					w.advanceHealthyTo(end.Add(-47 * time.Hour))
 				}
 				w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 				w.advance(time.Hour)
@@ -188,6 +189,7 @@ func TestLegacyNMIMemberCancelsTheNamedSubscription(t *testing.T) {
 	l := importLegacy(t, w, "nmi", embedded)
 	second, secondRail, secondEnt := l.importAnother(t)
 	w.converge()
+	w.refreshProviders()
 
 	status, body := l.meCancel(second)
 	require.Equal(t, http.StatusOK, status, "%v", body)
@@ -195,7 +197,7 @@ func TestLegacyNMIMemberCancelsTheNamedSubscription(t *testing.T) {
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, second).Status)
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "the other membership is untouched")
 
-	w.advance(w.subscription(embedded, second).CurrentPeriodEndsAt.Sub(w.clock.Now()) - 47*time.Hour)
+	w.advanceHealthyTo(w.subscription(embedded, second).CurrentPeriodEndsAt.Add(-47 * time.Hour))
 	w.until(func() bool { return w.nmi.ScheduleDeletes(secondRail) > 0 }, "the named schedule's delete")
 	require.Equal(t, 1, w.nmi.ScheduleDeletes(secondRail))
 	require.Zero(t, w.nmi.ScheduleDeletes(l.railSub), "the other schedule is never deleted")
@@ -220,6 +222,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			}
 			l := importLegacy(t, w, "nmi", tp)
 			w.converge()
+			w.refreshProviders()
 			update := func(method string) error {
 				if by == "member" {
 					status, body := l.c.call(http.MethodPut, "/subscriptions/"+l.sub.String()+"/payment-method", "", map[string]any{"payment_method_id": method})
@@ -324,6 +327,7 @@ func TestLegacyNMIRefund(t *testing.T) {
 			w.armDestructive()
 			l := importLegacy(t, w, "nmi", tp)
 			w.converge()
+			w.refreshProviders()
 			paid := completed(w.payments(tp, l.c.id))
 			require.Len(t, paid, 1, "the imported legacy charge")
 			legacy := paid[0]
