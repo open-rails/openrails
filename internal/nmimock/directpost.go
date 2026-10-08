@@ -66,9 +66,19 @@ func (m *Mock) sale(form url.Values) string {
 		return rejected(bad)
 	}
 	order := form.Get("orderid")
+	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""
+	if form.Get("recurring") == "rebill_subscription" {
+		s := m.schedules[form.Get("subscription_id")]
+		if s == nil || s.Deleted || s.Vault != v.ID {
+			return rejected("Invalid subscription")
+		}
+		// The schedule supplies the attempted amount on declines as well as
+		// approvals; the request does not repeat those saved terms.
+		amount, currency, scheduleID = s.Amount, "USD", s.ID
+	}
 	if code := charged.Decline; code != "" {
-		d := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: form.Get("amount"),
-			Currency: strings.ToUpper(form.Get("currency")), Card: *charged, Declined: code, At: m.now()}
+		d := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: v.BillingID, Amount: amount, ScheduleID: scheduleID,
+			Currency: currency, Card: *charged, Declined: code, At: m.now()}
 		m.sales = append(m.sales, d)
 		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", d.TransactionID, "avsresponse", charged.AVS, "cvvresponse", charged.CVV,
 			"orderid", order, "type", "sale", "response_code", code, "customer_vault_id", v.ID)
@@ -79,15 +89,6 @@ func (m *Mock) sale(form url.Values) string {
 	}
 	if !m.unsupportedDuplicateCheck && (m.duplicateOf(*charged, form.Get("amount")) || m.withinDupSeconds(*charged, form)) {
 		return rejected("Duplicate transaction REFID:3187654322")
-	}
-	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""
-	if form.Get("recurring") == "rebill_subscription" {
-		s := m.schedules[form.Get("subscription_id")]
-		if s == nil || s.Deleted || s.Vault != v.ID {
-			return rejected("Invalid subscription")
-		}
-		// NMI charges the saved schedule amount and leaves its next date.
-		amount, currency, scheduleID = s.Amount, "USD", s.ID
 	}
 	s := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Vault: v.ID, BillingID: form.Get("billing_id"), Amount: amount, ScheduleID: scheduleID,
 		Currency: currency, InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"),

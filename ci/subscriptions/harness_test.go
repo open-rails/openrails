@@ -446,7 +446,9 @@ func (w *world) refreshProviders() {
 	w.t.Helper()
 	id, _, err := riverjobs.EnqueueMerchantRefresh(w.t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
 	require.NoError(w.t, err)
-	deadline := time.Now().Add(60 * time.Second)
+	// An annual obligation can require hundreds of daily history windows.
+	// This read-completion bound does not change collection or crash deadlines.
+	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		job, err := w.jobs.JobGet(w.t.Context(), id)
 		require.NoError(w.t, err)

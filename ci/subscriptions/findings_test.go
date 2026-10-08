@@ -35,10 +35,11 @@ func TestDuplicateChargeFindings(t *testing.T) {
 			dup := enrollEvery(t, w, "nmi", embedded, hours)
 			retried := enrollEvery(t, w, "stripe", embedded, hours)
 			stale := w.seedFinding(duplicateCharge, "provider_charge:"+clean.c.id+":"+uuid.NewString()+":"+w.clock.Now().Format("2006-01"))
+			retried.refreshBeforePeriodEnd()
 			retried.setDecline(visa.Last4, "insufficient_funds", "202")
 			for i := range 3 {
 				end := clean.periodEnd()
-				clean.toPeriodEnd()
+				clean.toFreshPeriodEnd()
 				w.runRenewals()
 				require.True(t, clean.periodEnd().After(end))
 				if i == 0 {

@@ -123,7 +123,7 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			started := *w.subscription(embedded, sub).CurrentPeriodStartsAt
 			for i := 1; i <= row.renewals; i++ {
 				end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
-				w.advance(end.Sub(w.clock.Now()) + time.Second)
+				w.advanceHealthyTo(end.Add(time.Second))
 				w.runRenewals()
 				require.True(t, w.subscription(embedded, sub).CurrentPeriodEndsAt.After(end), "renewal %d applied", i)
 			}
