@@ -40,9 +40,17 @@ Once destination billing starts, rollback requires another controlled transfer
 of current state. Never restart the stale source snapshot as a rollback.
 
 `provider_write_mode: readonly` blocks provider mutations, but still permits
-local state changes and webhook ingestion. It does not make a running source
+verified local receipt recovery, additive provider reconciliation and webhook
+ingestion. It does not make a running source
 quiescent. Where supported, revoking separately scoped source credentials at the
 provider offers stronger protection against accidentally restarting an old copy.
+
+Established NMI and Stripe books also hold new collections and destructive work
+when completed provider coverage is stale or known financial conflicts remain.
+Startup reads catch up while this gate is closed. Configured `full` resumes
+eligible work automatically after verified catch-up; explicit `readonly` remains
+readonly. See [provider recovery](provider-recovery.md) for the account scope,
+completion rules and limits. CCBill and Solana retain their existing controls.
 
 ## Mutation Flags
 
@@ -267,7 +275,9 @@ one can never fire stale after the mode lifts; the handler re-checks
 relevance (still past_due, same period) at execution. Materialize never
 claims the subscription (claiming writes `last_retry_at`, which is
 dunning-forensics evidence imported from legacy) and never applies failure
-policy. `readonly` is unchanged: pure dry-run observer.
+policy. `readonly` holds new provider writes and policy-held local cancellations;
+provider reads and verified local financial recovery continue. NMI/Stripe
+freshness checks also hold destructive decisions until the account catches up.
 
 ### PSP binding and credential rotation
 
@@ -959,7 +969,10 @@ provider, not even a customer clicking buy — enforced at the transport on
 every rail: NMI direct-post gate, Stripe transport gate, CCBill DataLink
 read-only flag, Solana submission gate). Typical uses: `limited` = migration
 cutover with the site fully usable; `readonly` = reconciliation/forensics
-boots that must only observe.
+boots that may recover local records without initiating provider writes.
+Provider receipt recovery runs in every mode. The NMI/Stripe freshness gate is
+an additional prerequisite for existing-obligation collection and destructive
+work, including under `full`; see [provider recovery](provider-recovery.md).
 
 ### `test_mode` — sandbox credentials
 
@@ -984,11 +997,17 @@ silently disabling the configured rail.
 
 ### Cutover: booting against production credentials
 
-Set the mode **before first start** — imported stale `past_due`
-subscriptions are immediately "due" and full-behavior modes would start
-charging them within hours: `PROVIDER_WRITE_MODE=limited` (site fully
-usable, system-origin writes parked), or `readonly` for a strictly-observing
-boot.
+Set the mode **before first start**. Imported `past_due` subscriptions are
+immediately due for evaluation. With `full`, established NMI/Stripe accounts
+first satisfy the automatic [provider recovery](provider-recovery.md) gate,
+then eligible collection resumes without another operator action. That gate
+does not establish ownership across independent copies; follow the controlled
+transfer procedure above.
+
+For a cutover that needs a manual review before collection, use
+`PROVIDER_WRITE_MODE=limited` (customer writes permitted, system-origin writes
+parked), or `readonly` (provider writes blocked, verified local recovery
+continues). Neither explicit mode is automatically raised to `full`.
 
 Before raising the mode to `full`, check the two places deferred work
 accumulates:
@@ -1004,7 +1023,8 @@ accumulates:
 The sequence: boot `limited` → the first dunning cycle materializes the
 backlog → `openrails intents` shows the real drain forecast → review (and
 fix PSP declarations if credentials moved — see "PSP binding and credential
-rotation") → `PROVIDER_WRITE_MODE=full` drains exactly what you saw. Paused
+rotation") → `PROVIDER_WRITE_MODE=full` resumes eligible work after its current
+policy and freshness checks pass. Paused
 work is delayed, not lost; the workers are state-scan loops, so the first
 enabled run processes whatever is outstanding. Missed billing periods are
 never back-billed: dunning past the staleness window cancels instead of
