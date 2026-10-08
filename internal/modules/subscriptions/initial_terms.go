@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -15,6 +16,7 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
+	LegacyEntitlements  map[string]*int         `json:"legacy_entitlements,omitzero"`
 	CancelAfterInitial  bool                    `json:"cancel_after_initial,omitempty"`
 	AccessDurationHours *int                    `json:"access_duration_hours"`
 	CollectionPolicy    models.CollectionPolicy `json:"collection_policy"`
@@ -33,7 +35,7 @@ type InitialMembershipTerms struct {
 	PeriodStart         time.Time               `json:"period_start"`
 	PeriodEnd           time.Time               `json:"period_end"`
 	Pending             bool                    `json:"pending"`
-	Entitlements        map[string]*int         `json:"entitlements"`
+	Entitlements        []string                `json:"entitlements"`
 	// Replaces is set on an engine tier upgrade: accepting this membership
 	// supersedes that one. Amount is then the prorated charge and
 	// RecurringAmount the new price every renewal bills.
@@ -84,7 +86,16 @@ func (t InitialMembershipTerms) Validate() error {
 func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	type plain InitialMembershipTerms
 	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	wire := struct {
+		*plain
+		Entitlements json.RawMessage `json:"entitlements"`
+	}{plain: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var err error
+	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
+	if err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

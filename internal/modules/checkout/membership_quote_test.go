@@ -23,8 +23,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 	now := time.Date(2026, 9, 21, 0, 0, 0, 123456000, time.UTC)
 	mid, customer, psp, custodian := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	ctx := merchant.WithID(t.Context(), billing.MerchantID(mid))
-	quota := int(9007199254740993) // 2^53+1: a float64 round trip would change it
-	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", EntitlementsSpec: map[string]*int{"quota": &quota}}
+	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", Entitlements: []string{"quota"}}
 	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720)}
 	expiry := now.Add(time.Hour)
 	session := models.CheckoutAttempt{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutAttemptModeSubscription, Rail: models.RailNMI,
@@ -38,12 +37,12 @@ func TestInitialMembershipQuote(t *testing.T) {
 	require.NoError(t, json.Unmarshal(encoded, &restored))
 	quoted, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
-	require.Equal(t, quota, *quoted.Entitlements["quota"])
+	require.Equal(t, []string{"quota"}, quoted.Entitlements)
 	require.Equal(t, 720*time.Hour, quoted.PeriodEnd.Sub(quoted.PeriodStart))
 
 	view := (&CheckoutAttemptService{}).sessionToResponse(&restored)
 	require.Equal(t, "Quoted membership", view.MembershipQuote.ProductName)
-	*view.MembershipQuote.Entitlements["quota"] = 0
+	view.MembershipQuote.Entitlements[0] = "changed"
 	again, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
 	require.Equal(t, quoted, again, "the display projection cannot mutate the accepted quote")

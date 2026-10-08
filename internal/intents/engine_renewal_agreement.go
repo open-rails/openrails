@@ -47,7 +47,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 			return agreement, fmt.Errorf("%w: engine initial agreement lacks its customer acceptance", ErrRebillNotRetryable)
 		}
 		accepted = p.Terms
-		agreement = subscriptions.RenewalTerms{PSPID: accepted.PSPID, SubscriptionID: accepted.SubscriptionID, CustomerID: accepted.CustomerID, FromPriceID: accepted.PriceID, FromProductID: accepted.ProductID, PriceID: accepted.PriceID, ProductID: accepted.ProductID, ProductName: accepted.ProductName, Amount: accepted.RecurringAmount, Currency: accepted.Currency, PeriodStart: accepted.PeriodStart, PeriodEnd: accepted.PeriodEnd, AccessDurationHours: accepted.AccessDurationHours, Entitlements: accepted.Entitlements, PreviousEntitlements: accepted.Entitlements}
+		agreement = subscriptions.RenewalTerms{PSPID: accepted.PSPID, SubscriptionID: accepted.SubscriptionID, CustomerID: accepted.CustomerID, FromPriceID: accepted.PriceID, FromProductID: accepted.ProductID, PriceID: accepted.PriceID, ProductID: accepted.ProductID, ProductName: accepted.ProductName, Amount: accepted.RecurringAmount, Currency: accepted.Currency, PeriodStart: accepted.PeriodStart, PeriodEnd: accepted.PeriodEnd, AccessDurationHours: accepted.AccessDurationHours, Entitlements: accepted.Entitlements}
 		payment, err = d.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: accepted.PaymentID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -78,7 +78,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 			}
 			return agreement, err
 		}
-		accepted = subscriptions.InitialMembershipTerms{PaymentID: payment.ID, PSPID: agreement.PSPID, SubscriptionID: agreement.SubscriptionID, CustomerID: agreement.CustomerID, PriceID: agreement.PriceID, ProductID: agreement.ProductID, Amount: agreement.Amount, RecurringAmount: agreement.Amount, Currency: agreement.Currency, Entitlements: models.CloneEntitlementsSpec(agreement.Entitlements)}
+		accepted = subscriptions.InitialMembershipTerms{PaymentID: payment.ID, PSPID: agreement.PSPID, SubscriptionID: agreement.SubscriptionID, CustomerID: agreement.CustomerID, PriceID: agreement.PriceID, ProductID: agreement.ProductID, Amount: agreement.Amount, RecurringAmount: agreement.Amount, Currency: agreement.Currency, Entitlements: models.CloneEntitlements(agreement.Entitlements)}
 		if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal {
 			return agreement, fmt.Errorf("%w: engine predecessor is not a recurring payment", ErrRebillNotRetryable)
 		}
@@ -100,7 +100,7 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 		return agreement, fmt.Errorf("%w: payment-only completion is not a recurring agreement", ErrRebillNotRetryable)
 	}
 	if accepted.Entitlements == nil {
-		accepted.Entitlements = map[string]*int{}
+		accepted.Entitlements = []string{}
 	}
 	if err := subscriptions.ValidateInitialMembershipPayment(accepted, observed, models.Rail(op.Rail), receipt.TransactionID()); err != nil {
 		return agreement, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)

@@ -550,7 +550,7 @@ func (s *PlanMigrationService) pushStripe(ctx context.Context, req *CreatePlanMi
 func (s *PlanMigrationService) applyImmediately(ctx context.Context, sub *models.Subscription, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
 	sub.PriceID = target.ID
 	sub.ProductID = target.ProductID
-	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(targetProduct.EntitlementsSpec)
+	sub.EntitlementsSnapshot = models.CloneEntitlements(targetProduct.Entitlements)
 	if err := s.reprice.subscriptions.Update(ctx, sub); err != nil {
 		return fmt.Errorf("apply immediately: %w", err)
 	}

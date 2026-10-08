@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -28,6 +29,7 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
+	LegacyEntitlements  map[string]*int             `json:"legacy_entitlements,omitzero"`
 	CheckoutAttemptID   uuid.UUID                   `json:"checkout_attempt_id,omitempty"`
 	RequestFingerprint  string                      `json:"request_fingerprint"`
 	Provider            string                      `json:"provider"`
@@ -45,7 +47,7 @@ type NMISalePayload struct {
 	ListAmount          int64                       `json:"list_amount,string"`
 	AcceptedAt          time.Time                   `json:"accepted_at"`
 	CreditGrant         *models.CreditGrantSnapshot `json:"credit_grant"`
-	Entitlements        map[string]*int             `json:"entitlements"`
+	Entitlements        []string                    `json:"entitlements"`
 	AccessDurationHours *int                        `json:"access_duration_hours"`
 	EntitlementStart    time.Time                   `json:"entitlement_start"`
 	OwnershipStart      time.Time                   `json:"ownership_start"`
@@ -106,4 +108,23 @@ func NMISaleOrderReference(id uuid.UUID, runID string) string {
 		return fmt.Sprintf("%s_e2e_%x", id, sum[:4])
 	}
 	return id.String()
+}
+
+func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
+	type plain NMISalePayload
+	var decoded plain
+	wire := struct {
+		*plain
+		Entitlements json.RawMessage `json:"entitlements"`
+	}{plain: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var err error
+	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
+	if err != nil {
+		return err
+	}
+	*p = NMISalePayload(decoded)
+	return nil
 }

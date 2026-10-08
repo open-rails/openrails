@@ -160,9 +160,9 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		if delayed == nil {
 			startDate = end.Format("20060102")
 		}
-		benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+		benefits := models.CloneEntitlements(product.Entitlements)
 		if benefits == nil {
-			benefits = map[string]*int{}
+			benefits = []string{}
 		}
 		paymentID := uuid.Nil
 		if amount > 0 {

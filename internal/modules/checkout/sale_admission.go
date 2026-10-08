@@ -121,9 +121,9 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 		v := now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
 		end = &v
 	}
-	entitlements := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	entitlements := models.CloneEntitlements(product.Entitlements)
 	if entitlements == nil {
-		entitlements = map[string]*int{}
+		entitlements = []string{}
 	}
 	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
 	out.CreditGrant, err = acceptedCreditGrant(product, price)

@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -36,7 +37,7 @@ type SubscriptionRepo struct {
 func NewSubscriptionRepo(d *db.DB) *SubscriptionRepo { return &SubscriptionRepo{db: d} }
 
 func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionParams, error) {
-	entSnap, err := models.ToJSONB(s.EntitlementsSpecSnapshot)
+	entSnap, err := json.Marshal(s.EntitlementsSnapshot)
 	if err != nil {
 		return gen.CreateSubscriptionParams{}, err
 	}
@@ -55,7 +56,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		ProductID:                   s.ProductID,
 		PriceID:                     priceID,
 		ScheduledPriceID:            s.ScheduledPriceID,
-		EntitlementsSpecSnapshot:    entSnap,
+		EntitlementsSnapshot:        entSnap,
 		AccessDurationHoursSnapshot: models.IntPtrTo32(s.AccessDurationHoursSnapshot),
 		Status:                      string(s.Status),
 		PspID:                       s.PspID,
@@ -145,7 +146,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	}
 	s.UpdatedAt = now
 
-	entSnap, err := models.ToJSONB(s.EntitlementsSpecSnapshot)
+	entSnap, err := json.Marshal(s.EntitlementsSnapshot)
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		ID:                          s.ID,
 		PriceID:                     priceID,
 		ProductID:                   s.ProductID,
-		EntitlementsSpecSnapshot:    entSnap,
+		EntitlementsSnapshot:        entSnap,
 		AccessDurationHoursSnapshot: models.IntPtrTo32(s.AccessDurationHoursSnapshot),
 		Status:                      string(s.Status),
 		StartedAt:                   s.StartedAt,
@@ -842,7 +843,7 @@ func (r *SubscriptionRepo) GetLatestResumableCanceled(ctx context.Context, tenan
 
 func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscriptionDecidedParams {
 	return gen.UpdateSubscriptionDecidedParams{
-		ID: p.ID, PriceID: p.PriceID, ProductID: p.ProductID, EntitlementsSpecSnapshot: p.EntitlementsSpecSnapshot, AccessDurationHoursSnapshot: p.AccessDurationHoursSnapshot, Status: p.Status,
+		ID: p.ID, PriceID: p.PriceID, ProductID: p.ProductID, EntitlementsSnapshot: p.EntitlementsSnapshot, AccessDurationHoursSnapshot: p.AccessDurationHoursSnapshot, Status: p.Status,
 		StartedAt: p.StartedAt, EndedAt: p.EndedAt, CurrentPeriodStartsAt: p.CurrentPeriodStartsAt, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt,
 		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, PaymentMethodID: p.PaymentMethodID,
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,

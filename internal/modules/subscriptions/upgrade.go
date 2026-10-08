@@ -48,7 +48,7 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, old.CustomerID.String(), old.ID, at, models.EntitlementRevokeSuperseded, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 		return err
 	}
-	for name := range next.EntitlementsSpecSnapshot {
+	for _, name := range next.EntitlementsSnapshot {
 		if _, err := ent.PushNewEntitlement(ctx, subscriptionAccess(next, name, at)); err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ type InPlaceTierChange struct {
 	RailSubscriptionID  string
 	PeriodEnd           time.Time
 	At                  time.Time
-	Entitlements        map[string]*int
+	Entitlements        []string
 	Payment             *models.Payment
 	Downgrade           bool
 }
@@ -173,7 +173,7 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 		return repo.UpdateAt(ctx, sub, c.At)
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = c.PriceID, c.ProductID, nil
-	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(c.Entitlements)
+	sub.EntitlementsSnapshot = models.CloneEntitlements(c.Entitlements)
 	if c.AccessEndsAt == nil {
 		sub.AccessDurationHoursSnapshot = c.AccessDurationHours
 	}
@@ -196,7 +196,7 @@ func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txD
 	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, at, models.EntitlementRevokeSuperseded, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 		return err
 	}
-	for name := range sub.EntitlementsSpecSnapshot {
+	for _, name := range sub.EntitlementsSnapshot {
 		grant := subscriptionAccess(sub, name, at)
 		if acceptedEnd != nil {
 			grant.EndsAt, grant.Indefinite = acceptedEnd, false

@@ -18,7 +18,7 @@ import (
 // with exact accepted intervals and validation of original source windows.
 // Ordinary indefinite entitlement insertion can advance a historical NotBefore
 // to now; a delayed accepted purchase must retain its historical start.
-func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, spec map[string]*int, duration *int, accepted time.Time, coverage *CoverageInfo, ownership bool) error {
+func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, spec []string, duration *int, accepted time.Time, coverage *CoverageInfo, ownership bool, historicalHours map[string]int) error {
 	if s.transactionDB == nil || s.transactionDB.Pool() != nil {
 		return errors.New("accepted access requires purchase transaction")
 	}
@@ -34,7 +34,7 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	if coverage != nil && coverage.EndDate != nil {
 		start = *coverage.EndDate
 	}
-	wanted, ownershipWindow := grants.PurchaseWindows(spec, duration, accepted, start)
+	wanted, ownershipWindow := grants.PurchaseWindows(spec, duration, accepted, start, historicalHours)
 	names := make([]string, 0, len(wanted))
 	for name := range wanted {
 		names = append(names, name)

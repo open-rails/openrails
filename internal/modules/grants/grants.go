@@ -14,8 +14,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -444,7 +442,7 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 	if !ok {
 		return nil
 	}
-	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: productSpecKeys(sub.EntitlementsSpec), Start: start, End: end})
+	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: entitlementKeys(sub.Entitlements), Start: start, End: end})
 	return err
 }
 
@@ -465,7 +463,7 @@ func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWal
 	}
 	pid := pay.ID
 	exp := pay.ExpiresAt.UTC()
-	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: pay.CustomerID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Feats: productSpecKeys(pay.EntitlementsSpec), Start: pay.PurchasedAt.UTC(), End: &exp})
+	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: pay.CustomerID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Feats: entitlementKeys(pay.Entitlements), Start: pay.PurchasedAt.UTC(), End: &exp})
 	return err
 }
 
@@ -571,25 +569,13 @@ func subscriptionWindow(s gen.ListUngrantedSubscriptionsRow) (time.Time, *time.T
 	return start, &end, true
 }
 
-// productSpecKeys returns the entitlement feature names — the keys of a product's
-// entitlements_spec ({name: hours} JSONB). Mirrors the retired migrate's
-// billingProductEntitlementNames (sorted, trimmed, empties dropped).
-func productSpecKeys(raw []byte) []string {
-	if len(raw) == 0 {
+// entitlementKeys decodes the already normalized opaque entitlement list.
+func entitlementKeys(raw []byte) []string {
+	var names []string
+	if err := json.Unmarshal(raw, &names); err != nil {
 		return nil
 	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		if k = strings.TrimSpace(k); k != "" {
-			out = append(out, k)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return names
 }
 
 // sourceIDOf is a grant's source id; "" when it has none (NULL).

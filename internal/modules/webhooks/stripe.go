@@ -849,10 +849,9 @@ func parseCheckoutAttemptID(metadata map[string]string) uuid.UUID {
 	return id.UUID()
 }
 
-func stripeEntitlementSet(spec map[string]*int) map[string]bool {
+func stripeEntitlementSet(spec []string) map[string]bool {
 	out := map[string]bool{}
-	for name := range spec {
-		name = strings.TrimSpace(name)
+	for _, name := range spec {
 		if name != "" {
 			out[name] = true
 		}

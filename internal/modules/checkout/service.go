@@ -396,7 +396,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 // GetUserProductCoverage checks if user has active coverage for a product.
 // It checks both:
 // 1. Active/pending subscriptions (using the denormalized ProductID field)
-// 2. Active entitlements matching the product's EntitlementsSpec
+// 2. Active entitlements matching the product's Entitlements
 func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -1262,7 +1262,7 @@ func timePtr(t time.Time) *time.Time {
 //  1. Creating the Payment record
 //  2. Looking up Product from Price
 //  3. Checking coverage for delayed start
-//  4. Granting entitlements from Product.EntitlementsSpec
+//  4. Granting entitlements from Product.Entitlements
 func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")

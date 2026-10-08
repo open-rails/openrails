@@ -954,21 +954,17 @@ func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
 
 	// Build entitlement sets for old and new products
 	oldEntitlements := make(map[string]bool)
-	if len(oldProduct.EntitlementsSpec) > 0 {
-		for name := range oldProduct.EntitlementsSpec {
+	if len(oldProduct.Entitlements) > 0 {
+		for _, name := range oldProduct.Entitlements {
 			oldEntitlements[name] = true
 		}
-	} else {
-		oldEntitlements["premium"] = true // default entitlement
 	}
 
 	newEntitlements := make(map[string]bool)
-	if len(newProduct.EntitlementsSpec) > 0 {
-		for name := range newProduct.EntitlementsSpec {
+	if len(newProduct.Entitlements) > 0 {
+		for _, name := range newProduct.Entitlements {
 			newEntitlements[name] = true
 		}
-	} else {
-		newEntitlements["premium"] = true // default entitlement
 	}
 
 	now := s.now()

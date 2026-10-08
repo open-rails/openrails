@@ -3,6 +3,7 @@ package checkout
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -80,4 +81,10 @@ func TestInitialMembershipReplayPreservesLegacyFingerprint(t *testing.T) {
 		require.NotEqual(t, legacyFingerprint, fingerprint)
 		require.Error(t, ownsInitialMembership(operation, accepted.CustomerID.String(), accepted.PriceID, fingerprint, &sessionID), "changed renewal or access cannot reuse the accepted order")
 	}
+	upgrade := quote
+	upgrade.Amount = 9_000_000
+	upgrade.Replaces = &subscriptions.ReplacedMembership{SubscriptionID: uuid.MustParse("88888888-8888-4888-8888-888888888888"), PriceID: uuid.MustParse("99999999-9999-4999-8999-999999999999"), PeriodEnd: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), Credit: 1_000_000}
+	require.NoError(t, upgrade.Validate())
+	require.Equal(t, "7a009841f20528dbffdbf5ced20c89d114fa4076f33988e3ba83fba1e1f58b1d", initialMembershipQuoteFingerprint(upgrade), "the retained legacy object precedes replacement terms in the original fingerprint")
+
 }

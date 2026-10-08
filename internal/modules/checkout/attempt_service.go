@@ -820,9 +820,9 @@ func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt
 	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
 		return ErrCheckoutAttemptExpired
 	}
-	benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	benefits := models.CloneEntitlements(product.Entitlements)
 	if benefits == nil {
-		benefits = map[string]*int{}
+		benefits = []string{}
 	}
 	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour), Entitlements: benefits}
 	if err := terms.Validate(); err != nil {
@@ -1980,7 +1980,7 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 	}
 
 	if terms, err := readInitialMembershipQuote(session); err == nil {
-		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{AutoRenew: !terms.CancelAfterInitial, ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
+		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{AutoRenew: !terms.CancelAfterInitial, ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlements(terms.Entitlements)}
 	}
 	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
 	// purchase financially failed. Keep callers polling the accepted attempt

@@ -302,7 +302,7 @@ func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, e
 	}
 	return s.db.Gen(ctx).ListCustomersWithEntitlement(ctx, gen.ListCustomersWithEntitlementParams{
 		MerchantID:  scopeMerchantID.UUID(),
-		Entitlement: strings.TrimSpace(entitlement),
+		Entitlement: entitlement,
 		At:          at,
 		AfterID:     afterID,
 		Lim:         int32(limit),
