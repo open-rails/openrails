@@ -214,6 +214,9 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 // provider delete behind the same recovered-account boundary. A positive paid
 // renewal has no cancellation effect and can still settle while writes hold.
 func (s *SubscriptionLifecycleService) CheckCancellationRecovery(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
+	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
+		return nil
+	}
 	if s.Config != nil && config.IsProviderReadOnly(s.Config) {
 		return fmt.Errorf("%w: readonly holds local cancellation", providerrecovery.ErrPending)
 	}

@@ -168,6 +168,7 @@ type txnBreadcrumbs struct {
 	Customer        string `json:"customer"`
 	Invoice         string `json:"invoice"`
 	Charge          string `json:"charge"`
+	PaymentIntent   string `json:"payment_intent"`
 }
 
 func decodeBreadcrumbs(raw json.RawMessage) txnBreadcrumbs {
@@ -1134,8 +1135,25 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 	caps := snap.Capabilities
 	var findings []Finding
 
+	var conflicts map[string]bool
+	if provider == ProviderStripe {
+		conflicts = stripePaymentAliases(snap, paymentsByTxnID)
+	}
+
 	for i := range snap.Transactions {
 		t := &snap.Transactions[i]
+		if provider == ProviderStripe {
+			bc := decodeBreadcrumbs(t.Raw)
+			if conflicts[t.TransactionID] || conflicts[bc.PaymentIntent] || conflicts[bc.Charge] {
+				kind := FindingChargeMissingLocal
+				if t.Type == TransactionTypeRefund {
+					kind = FindingRefundUnrecorded
+				}
+				findings = append(findings, Finding{Provider: provider, Type: kind, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true, RemoteEvidence: remoteTxnEvidence(t), RecommendedAction: "Stripe charge contradicts its retained PaymentIntent allocation"})
+				continue
+			}
+		}
+
 		switch t.Type {
 		case TransactionTypeSale:
 			if !t.Success || t.TransactionID == "" {
@@ -1375,6 +1393,10 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	if bc.Charge != "" {
 		original = paymentsByTxnID[bc.Charge]
 	}
+	if original == nil && provider == ProviderStripe && bc.PaymentIntent != "" {
+		original = paymentsByTxnID[bc.PaymentIntent]
+	}
+
 	sameID := paymentsByTxnID[t.TransactionID]
 	if original == nil && sameID != nil {
 		original = sameID

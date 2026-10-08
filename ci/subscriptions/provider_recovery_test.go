@@ -391,3 +391,32 @@ func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT status FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&status))
 	require.Equal(t, "succeeded", status)
 }
+
+func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
+	w := newWorld(t)
+	e := enroll(t, w, "stripe", embedded)
+	original := completed(w.payments(embedded, e.c.id))[0]
+	charge := e.providerLedger()[0].Charge
+	w.stripe.mu.Lock()
+	status, raw := w.stripe.createRefund(url.Values{"charge": {charge}})
+	w.stripe.mu.Unlock()
+	require.Equal(t, http.StatusOK, status)
+	refund := raw.(obj)
+	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+	w.restart()
+	notice := obj{"id": "evt_readonly_refund", "type": "refund.created", "created": time.Now().Unix(), "data": obj{"object": refund}}
+	require.Equal(t, http.StatusInternalServerError, w.deliver("stripe", notice), "the provider retries policy-held lifecycle work")
+	paid, err := w.client[embedded].GetPayment(t.Context(), original.ID)
+	require.NoError(t, err)
+	require.Equal(t, billing.PaymentRefunded, paid.Status, "authenticated financial facts committed before cancellation was held")
+	require.Equal(t, paid.Amount, paid.AmountRefunded)
+	require.NotEqual(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status)
+	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeFull }
+	w.restart()
+	require.Equal(t, http.StatusOK, w.deliver("stripe", notice), "the same signed event finishes after policy permits")
+	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, e.sub).Status)
+	var refunds int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.payments WHERE refunded_payment_id=$1`), original.ID.UUID()).Scan(&refunds))
+	require.Equal(t, 1, refunds)
+	require.Equal(t, 1, e.providerAttempts())
+}

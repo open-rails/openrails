@@ -6,7 +6,7 @@ and record qualified payments, refunds and missing provider-owned records.
 They do not execute provider writes or policy-held local cancellations.
 Explicit readonly mode is never automatically changed to full mode.
 
-An established account whose completed financial coverage is older than the
+An established NMI or Stripe account whose completed financial coverage is older than the
 four-hour refresh interval (plus the five-minute provider window delay) holds
 renewal/invoice dispatch and destructive work. A new account without older
 billing facts can serve its initial checkout. A fresh row never hides an older
@@ -15,6 +15,8 @@ completion marker is recent; ignoring an alert does not settle its receipt.
 Verified receipt recovery continues while the gate is closed. Configured full
 mode resumes automatically after catch-up completes without those conflicts.
 Starting another replica does not reset healthy shared-database coverage.
+CCBill and Solana retain their existing webhook and destructive-policy behavior;
+this delivery does not give them an automatic stale-backup recovery guarantee.
 
 Observation and application use separate domains in `psp_refresh_watermarks`:
 

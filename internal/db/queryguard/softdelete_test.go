@@ -25,6 +25,8 @@ const (
 var policedTables = []string{"checkout_attempts", "entitlements", "payments", "subscriptions"}
 
 var allow = map[string]string{
+	"InvoiceRecoveryHasOtherPayment":             "a tombstoned payment still owns its provider transaction; recovery must not allocate it to another invoice",
+	"PSPRecoveryBookAge":                         "tombstones do not turn an established restored provider book into a fresh account or authorize new writes",
 	"RestoreLegacySubscriptionEntitlementBounds": "historical archive repair bounds existing grant projections even when the owning subscription is tombstoned; it never revives a row or extends access",
 	"CountErrorEpisodeTotals":                    "episode analytics end an entitlement window at its tombstone (deleted_at), so tombstoned windows are read on purpose",
 	"GetInitialMembershipForUpdate":              "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",

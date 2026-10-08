@@ -913,6 +913,7 @@ func collectTxnLookupIDs(snap *RemoteSnapshot) []string {
 		add(t.TransactionID)
 		bc := decodeBreadcrumbs(t.Raw)
 		add(bc.Charge)
+		add(bc.PaymentIntent)
 	}
 	return out
 }

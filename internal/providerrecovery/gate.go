@@ -33,6 +33,15 @@ func CheckPSP(ctx context.Context, database *db.DB, mid, psp uuid.UUID, now time
 	ctx = merchant.WithID(ctx, billing.MerchantID(mid))
 	return database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := database.Gen(ctx)
+		account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: mid, ID: psp})
+		if err != nil {
+			return fmt.Errorf("%w: read provider account: %v", ErrPending, err)
+		}
+		// This recovery contract qualifies card-account history. Other rails
+		// retain their existing provider-fact and destructive-policy boundaries.
+		if account.Rail != "nmi" && account.Rail != "stripe" {
+			return nil
+		}
 		floor := now.Add(-RefreshInterval - SafetyLag)
 		conflicts, err := q.PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: psp})
 		if err != nil {
