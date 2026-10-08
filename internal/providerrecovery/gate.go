@@ -16,10 +16,17 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// RefreshInterval is the existing provider refresh cadence. SafetyLag is the
+// RefreshInterval is the provider refresh cadence. SafetyLag is the
 // provider-window delay; neither promises that a provider has indexed all truth.
-const RefreshInterval = 4 * time.Hour
+const RefreshInterval = 2 * time.Hour
 const SafetyLag = 5 * time.Minute
+
+// StaleAfter is the completed-coverage age that holds an established book: a
+// whole missed refresh cycle. A refresh's coverage ends at its start less
+// SafetyLag, and the scheduler reshuffles each cycle's merchants over its
+// stagger, so on schedule coverage ages past one interval before the next
+// refresh completes.
+const StaleAfter = 2*RefreshInterval + SafetyLag
 
 var ErrPending = errors.New("provider recovery required")
 
@@ -42,7 +49,7 @@ func CheckPSP(ctx context.Context, database *db.DB, mid, psp uuid.UUID, now time
 		if account.Rail != "nmi" && account.Rail != "stripe" {
 			return nil
 		}
-		floor := now.Add(-RefreshInterval - SafetyLag)
+		floor := now.Add(-StaleAfter)
 		conflicts, err := q.PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: psp})
 		if err != nil {
 			return fmt.Errorf("%w: read unresolved receipts: %v", ErrPending, err)

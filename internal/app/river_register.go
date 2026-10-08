@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -50,7 +51,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
-	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
+	// Provider Refresh (#574/#719): the periodic kind is a SCHEDULER that
 	// fans out one per-merchant refresh job (staggered; unique per merchant),
 	// skipping merchants with no declared rail accounts.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshSchedulerWorker{
@@ -537,17 +538,17 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 4 hours: Provider Refresh scheduler (#574/#719) — fans out one
-	// per-merchant refresh job (bounded event windows, unknown-cohort
-	// reconcile, CCBill DataLink). RunOnStart=true: startup after a stale
-	// dump/outage should not wait for the first 4-hour tick; boot enqueues the
-	// scheduler which enqueues the merchant jobs.
+	// Every providerrecovery.RefreshInterval: Provider Refresh scheduler
+	// (#574/#719) — fans out one per-merchant refresh job (bounded event
+	// windows, unknown-cohort reconcile, CCBill DataLink). RunOnStart=true:
+	// startup after a stale dump/outage should not wait for the first tick;
+	// boot enqueues the scheduler which enqueues the merchant jobs.
 	jobs = append(jobs, r.healthPeriodic(
-		4*time.Hour,
+		providerrecovery.RefreshInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.ProviderRefreshArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 4 * time.Hour, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: providerrecovery.RefreshInterval, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning, rivertype.JobStateRetryable, rivertype.JobStateScheduled}},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},

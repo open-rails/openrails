@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		runOnStart bool
 	}{
 		riverjobs.DunningArgs{}.Kind():                   {riverjobs.DuePassInterval, true},
-		riverjobs.ProviderRefreshArgs{}.Kind():           {4 * time.Hour, true},
+		riverjobs.ProviderRefreshArgs{}.Kind():           {providerrecovery.RefreshInterval, true},
 		riverjobs.JobRescueArgs{}.Kind():                 {time.Minute, true},
 		riverjobs.PlanMigrationRedriveArgs{}.Kind():      {time.Hour, true},
 		riverjobs.AccountUpdaterBatchArgs{}.Kind():       {6 * time.Hour, true},

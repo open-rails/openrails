@@ -6,9 +6,12 @@ and record qualified payments, refunds and missing provider-owned records.
 They do not execute provider writes or policy-held local cancellations.
 Explicit readonly mode is never automatically changed to full mode.
 
-An established NMI or Stripe account whose completed financial coverage is older than the
-four-hour refresh interval (plus the five-minute provider window delay) holds
-renewal/invoice dispatch and destructive work. A new account without older
+Provider refresh runs every two hours. An established NMI or Stripe account
+that has missed a whole refresh cycle (completed financial coverage older than
+four hours plus the five-minute provider window delay) holds renewal/invoice
+dispatch and destructive work. A refresh that is due or still running holds
+nothing: coverage ends at a refresh's start, and each cycle staggers its
+merchants. A new account without older
 billing facts can serve its initial checkout. A fresh row never hides an older
 book. Known unresolved financial findings hold writes even when the last
 completion marker is recent; ignoring an alert does not settle its receipt.

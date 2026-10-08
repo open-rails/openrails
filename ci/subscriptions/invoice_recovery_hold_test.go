@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/stretchr/testify/require"
 )
 
@@ -73,4 +74,34 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.Equal(t, billing.InvoicePaid, paid.Invoice.Status)
 	require.Len(t, w.nmi.Attempts(), 3, "each invoice has one approved sale; the decline stays an attempt")
 	require.Len(t, w.nmi.ledger(""), 2)
+}
+
+// A refresh's coverage ends at its start less the provider window delay, and
+// the scheduler reshuffles each cycle's merchants over its stagger, so an
+// account's next refresh finishes after a full interval has passed. A book
+// refreshed on schedule is not stale: its customer pays while that refresh is
+// still due. Only a whole missed cycle holds the book.
+func TestRefreshedBookStaysPayableUntilACycleIsMissed(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	method := c.saveCard("nmi", visa)
+	w.advance(5 * 24 * time.Hour) // an established book
+	w.refreshProviders()
+	w.settleCollectionScans()
+	refreshed := w.clock.Now()
+
+	onSchedule := observedInvoice(t, w, c, 50_000_000)
+	w.advance(refreshed.Add(providerrecovery.RefreshInterval + 30*time.Minute).Sub(w.clock.Now()))
+	answer := payNMIInvoice(t.Context(), w, c, onSchedule, method, "on-schedule")
+	require.NoError(t, answer.err)
+	require.Equal(t, http.StatusOK, answer.status, "the next refresh running late does not pause billing: %s", answer.body)
+	require.Len(t, w.nmi.Attempts(), 1)
+
+	missed := observedInvoice(t, w, c, 50_000_000)
+	w.advance(refreshed.Add(2*providerrecovery.RefreshInterval + 30*time.Minute).Sub(w.clock.Now()))
+	answer = payNMIInvoice(t.Context(), w, c, missed, method, "missed-cycle")
+	require.NoError(t, answer.err)
+	require.Equal(t, http.StatusServiceUnavailable, answer.status, "a missed refresh cycle holds the book: %s", answer.body)
+	require.Len(t, w.nmi.Attempts(), 1)
 }

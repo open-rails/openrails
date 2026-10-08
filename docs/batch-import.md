@@ -239,7 +239,7 @@ OpenRails.
    deletes its NMI schedule (refused with `provider_cancel_held` while
    disarmed). `Client.RefreshPSPs` (`POST /v1/merchant/psps/refresh`)
    runs the merchant's provider refresh now, from embedded or remote hosts;
-   otherwise it runs every four hours, and NMI's own subscription webhooks
+   otherwise it runs every two hours, and NMI's own subscription webhooks
    converge the schedule they name at once. Tier changes (same tier group,
    same billing cycle) modify the member's existing NMI schedule in place
    (Direct Post `update_subscription`; its next billing date E is kept; no
