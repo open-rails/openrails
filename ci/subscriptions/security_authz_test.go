@@ -90,7 +90,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			require.Len(t, w.railLedger(rail), charges, "no request charged anyone")
 
 			// Each renewal is paid by its own member's card.
-			w.advance(w.subscription(embedded, mallorySub).CurrentPeriodEndsAt.Sub(w.clock.Now()) + 1)
+			w.advanceHealthyTo(w.subscription(embedded, mallorySub).CurrentPeriodEndsAt.Add(time.Nanosecond))
 			w.runRenewals()
 			byCard := map[string]int{}
 			for _, entry := range w.railLedger(rail) {
