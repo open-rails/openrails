@@ -268,14 +268,14 @@ mutation-attempt log — the executor's audit trail.
 
 The dunning worker's scan runs under `limited` and records its decisions
 instead of skipping: window-expired `past_due` subscriptions (a freshly
-migrated backlog's bulk) get the local no-charge cancel + downgrade
-immediately, and in-window charges enqueue as PARKED system-origin
+migrated backlog's bulk) are parked as unknown for provider verification,
+and in-window charges enqueue as PARKED system-origin
 `manual_rebill` intents — bounded by `expires_at` = the dunning window, so
 one can never fire stale after the mode lifts; the handler re-checks
 relevance (still past_due, same period) at execution. Materialize never
 claims the subscription (claiming writes `last_retry_at`, which is
 dunning-forensics evidence imported from legacy) and never applies failure
-policy. `readonly` holds new provider writes and policy-held local cancellations;
+policy or local terminal cancellation. `readonly` holds new provider writes and policy-held local cancellations;
 provider reads and verified local financial recovery continue. NMI/Stripe
 freshness checks also hold destructive decisions until the account catches up.
 
@@ -1027,7 +1027,7 @@ rotation") → `PROVIDER_WRITE_MODE=full` resumes eligible work after its curren
 policy and freshness checks pass. Paused
 work is delayed, not lost; the workers are state-scan loops, so the first
 enabled run processes whatever is outstanding. Missed billing periods are
-never back-billed: dunning past the staleness window cancels instead of
+never back-billed: dunning past the staleness window parks for verification instead of
 charging, and a Solana subscription that skipped whole periods gets exactly
 one pull anchored at the pull moment.
 

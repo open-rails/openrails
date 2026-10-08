@@ -84,9 +84,10 @@ See [provider recovery](provider-recovery.md).
 ### Routine operation
 
 Everything below runs by itself under River once the server (or a `run-worker`
-process) is up. The rails themselves do the recurring billing (NMI/CCBill/Stripe
-bill provider-side and webhook the result; Solana is pulled by our crank);
-OpenRails' workers converge state around that:
+process) is up. Provider-owned schedules bill at the provider and report the
+result. OpenRails-owned NMI/Stripe agreements use the shared-database due
+worker and accepted collection operations; Solana is pulled by its crank.
+Ownership determines which system may initiate the renewal.
 
 | Worker | Cadence | Job |
 |---|---|---|
@@ -94,7 +95,7 @@ OpenRails' workers converge state around that:
 | Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
 | Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
-| Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning)) |
+| Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
@@ -169,9 +170,9 @@ For a cutover requiring manual review before system-origin collection:
    writes park) — or `readonly` to block all provider writes while permitting
    verified local recovery.
 2. Let provider reads catch up. In `limited`, eligible dunning work materializes
-   as parked intents; local expiry cancellation still requires the applicable
-   freshness and destructive-policy checks. In `readonly`, those cancellations
-   remain held.
+   as parked intents and whole missed periods park for verification. Dunning
+   does not cancel locally in this mode. In `readonly`, it only observes due work;
+   provider receipt recovery runs separately.
 3. `openrails intents --merchant=<slug>` shows the real drain forecast
    ("N execute under limited, M require full"). Resolve anything you do not
    want to fire.
