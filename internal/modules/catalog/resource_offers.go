@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -52,7 +53,7 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 	scopes := make(map[string]string, len(keys))
 	arg := gen.ListOffersForEntitlementsParams{MerchantID: mid.UUID(), Kind: string(params.Kind), PreferredCurrency: preferred, PageLimit: int32(params.Limit + 1)}
 	for _, key := range keys {
-		if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+		if strings.TrimSpace(key) == "" || len(key) > catalogwire.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 			return nil, apperr.Invalidf("invalid entitlement key")
 		}
 		if _, seen := result[key]; seen {

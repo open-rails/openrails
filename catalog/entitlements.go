@@ -7,12 +7,18 @@ import (
 	"unicode/utf8"
 )
 
+// MaxEntitlementKeyBytes bounds an opaque entitlement key in current APIs.
+const MaxEntitlementKeyBytes = 256
+
 // NormalizeEntitlements validates opaque entitlement names and sorts a copy.
 // Names retain their exact spelling. Nil remains nil; an empty list remains an
 // explicit empty list, so accepted snapshots can distinguish missing benefits.
 func NormalizeEntitlements(entitlements []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(entitlements))
 	for _, name := range entitlements {
+		if len(name) > MaxEntitlementKeyBytes {
+			return nil, fmt.Errorf("entitlement names must be at most %d bytes", MaxEntitlementKeyBytes)
+		}
 		if !utf8.ValidString(name) || strings.ContainsRune(name, 0) {
 			return nil, fmt.Errorf("entitlements must contain valid UTF-8 strings without NUL")
 		}

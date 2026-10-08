@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,13 @@ func TestEntitlementsAreOpaqueLists(t *testing.T) {
 		if err != nil || (value == nil) != (normalized == nil) {
 			t.Fatalf("nil versus explicit empty lost: input=%#v output=%#v error=%v", value, normalized, err)
 		}
+	}
+	_, err = NormalizeEntitlements([]string{strings.Repeat("x", MaxEntitlementKeyBytes)})
+	if err != nil {
+		t.Fatalf("maximum-size opaque key refused: %v", err)
+	}
+	if _, err := NormalizeEntitlements([]string{strings.Repeat("x", MaxEntitlementKeyBytes+1)}); err == nil {
+		t.Fatal("overlong opaque key accepted")
 	}
 }
 
