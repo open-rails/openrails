@@ -104,6 +104,17 @@ func (m *Mock) AddSale(s Sale) Sale {
 	return m.addSale(s)
 }
 
+// EditSale changes an existing transaction as its processor outcome becomes known.
+func (m *Mock) EditSale(id string, edit func(*Sale)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sale := m.saleByID(id)
+	if sale == nil {
+		panic("nmimock: unknown sale " + id)
+	}
+	edit(sale)
+}
+
 func (m *Mock) addSale(s Sale) Sale {
 	v := m.mustVault(s.Vault)
 	if s.TransactionID == "" {

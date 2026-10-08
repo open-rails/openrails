@@ -73,7 +73,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	if reason := h.submissionHeld(in); reason != "" {
 		return intents.Parked(reason)
 	}
-	if outcome, done := h.obligationPaid(ctx, in, p); done {
+	if outcome, done := h.obligationOutcome(ctx, in, p); done {
 		return outcome
 	}
 	method, _, _, err := h.validateAndFence(ctx, in, p, nil)
@@ -106,11 +106,11 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	return h.dispatchNMI(ctx, in, p, charger, proof)
 }
 
-// obligationPaid reads the obligation's shared order before every new attempt,
+// obligationOutcome reads the obligation's shared order before every new attempt,
 // including the first one in this database. A restored or stale copy may not
-// know about a provider charge yet. This lookup recovers visible payments;
-// it cannot serialize independent senders while provider reads lag.
-func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
+// know about a provider charge yet. Recover qualified payment/refusal facts and
+// hold visible unresolved work. Reads cannot serialize independent senders.
+func (h *SubscriptionCollectionHandler) obligationOutcome(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if in.Rail == "stripe" || p.Instrument.CustodianHeld() {
 		return intents.Outcome{}, false
 	}
@@ -118,10 +118,23 @@ func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in g
 	if err != nil {
 		return h.unresolved(ctx, in, p, "the obligation's order cannot be read before a new attempt: "+err.Error()), true
 	}
-	if !found {
-		return intents.Outcome{}, false
+	if found {
+		return h.completePaid(ctx, in, p, receipt), true
 	}
-	return h.completePaid(ctx, in, p, receipt), true
+	attempts, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
+	if err != nil {
+		return h.unresolved(ctx, in, p, "the obligation's attempts cannot be qualified before submission: "+err.Error()), true
+	}
+	if attempts.Declined {
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
+			return h.unresolved(ctx, in, p, "retain the existing attempt's decline: "+err.Error()), true
+		}
+		return h.completeDeclined(ctx, in, p, attempts.DeclineCode, attempts.DeclineTransactionID), true
+	}
+	if attempts.Transactions != 0 {
+		return h.unresolved(ctx, in, p, "the obligation's order contains a transaction without a definitive outcome"), true
+	}
+	return intents.Outcome{}, false
 }
 
 // hit runs the named failpoint for this operation.

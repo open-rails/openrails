@@ -137,6 +137,9 @@ func (m *Mock) search(form url.Values) string {
 		if s.Voided {
 			condition = "canceled"
 		}
+		if s.Condition != "" {
+			condition = s.Condition
+		}
 		source := "api"
 		if s.ScheduleID != "" {
 			source = "recurring"

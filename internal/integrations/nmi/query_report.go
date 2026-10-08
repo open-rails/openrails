@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +87,18 @@ func (a QueryAction) Is(kind string) bool {
 
 // Succeeded reports an approved action.
 func (a QueryAction) Succeeded() bool { return strings.TrimSpace(a.Success) == "1" }
+
+// DefinitiveDecline distinguishes a completed processor refusal from errors,
+// unreadable outcomes, and transactions the gateway can still execute.
+func (a QueryAction) DefinitiveDecline(condition string) (int, bool) {
+	if strings.TrimSpace(a.Success) != "0" {
+		return 0, false
+	}
+	state := strings.ToLower(strings.TrimSpace(condition))
+	code, err := strconv.Atoi(strings.TrimSpace(a.ResponseCode))
+	return code, err == nil && code >= 200 && code < 300 &&
+		(state == "" || state == "failed" || state == "complete")
+}
 
 // At is the action's time; false when the report garbled it.
 func (a QueryAction) At() (time.Time, bool) {
