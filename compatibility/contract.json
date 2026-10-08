@@ -3287,6 +3287,7 @@
     },
     "internal/modules/checkoutsession/session.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",

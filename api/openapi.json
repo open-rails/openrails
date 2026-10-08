@@ -259,7 +259,7 @@
           }
         },
         "security": [],
-        "x-openrails-auth": "session_id",
+        "x-openrails-auth": "checkout_session",
         "x-openrails-throttle": "checkout_session_read",
         "x-openrails-errors": [
           "card_attempts_blocked",
@@ -280,7 +280,7 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:session_id"
+          "tier:checkout_session"
         ]
       }
     },
@@ -324,7 +324,7 @@
           }
         },
         "security": [],
-        "x-openrails-auth": "session_id",
+        "x-openrails-auth": "checkout_session",
         "x-openrails-throttle": "checkout_session_pay",
         "x-openrails-errors": [
           "card_attempts_blocked",
@@ -350,7 +350,7 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:session_id",
+          "tier:checkout_session",
           "request"
         ]
       }
@@ -23979,6 +23979,13 @@
       "request_body_too_large",
       "unknown_field",
       "unsupported_media_type"
+    ],
+    "tier:checkout_session": [
+      "captcha_invalid",
+      "captcha_required",
+      "database_busy",
+      "internal_error",
+      "rate_limit_exceeded"
     ],
     "tier:customer": [
       "authentication_required",
