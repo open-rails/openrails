@@ -36,6 +36,7 @@ type ledger interface {
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
+	WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
 
@@ -485,6 +486,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	}
 	var err error
 	applied := outcome.Class
+	recoveryHeld, _ := outcome.Evidence["recovery_held"].(bool)
 	switch outcome.Class {
 	case OutcomeSucceeded:
 		if !terminalOwned {
@@ -501,6 +503,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 					break
 				}
 				if held := r.Store.CheckRecovery(ctx, intent, now); held != nil {
+					recoveryHeld = true
 					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), held.Error(), RecoveryHeld(held.Error()).Evidence)
 					applied = OutcomeAmbiguous
 					break
@@ -536,6 +539,9 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	if err != nil {
 		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
 		return
+	}
+	if recoveryHeld {
+		r.wakeRecoveryIfReady(ctx, logEntry, intent, now)
 	}
 	// Reporting follows a confirmed write/read. A failed transition is never a
 	// successful payment or terminal refusal in worker statistics.
@@ -754,6 +760,9 @@ func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *
 			return
 		}
 		stats.Parked++
+		if recovery {
+			r.wakeRecoveryIfReady(writeCtx, logger, in, now)
+		}
 		return
 	}
 	if recovery {
@@ -764,7 +773,23 @@ func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *
 			return
 		}
 		stats.Parked++
+		r.wakeRecoveryIfReady(writeCtx, logger, in, now)
 		return
 	}
 	r.park(ctx, logger, stats, in.ID, now, reason)
+}
+
+// The normal dispatcher commits a hold before this recheck. Completion might
+// have skipped the verifier's live lease just before that commit; a newly ready
+// account must not leave the now-unleased operation sleeping on its old hold.
+func (r *Runner) wakeRecoveryIfReady(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
+	if blocked, _ := GateExecution(r.Config, Origin(in.Origin)); blocked {
+		return
+	}
+	if r.Store.CheckRecovery(ctx, in, now) != nil {
+		return
+	}
+	if err := r.Store.WakeRecoveryHeld(ctx, in.ID, now); err != nil {
+		logger.WithError(err).Warn("provider recovery wake failed; durable retry remains")
+	}
 }

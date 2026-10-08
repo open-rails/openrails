@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -432,6 +433,9 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 		return intents.NewStore(d).CompleteSubscriptionCollection(ctx, in, outcome, h.now())
 	})
 	if err != nil {
+		if errors.Is(err, providerrecovery.ErrPending) {
+			return intents.RecoveryHeld(err.Error())
+		}
 		return intents.Ambiguous("engine local completion resumes from retained custody: " + err.Error())
 	}
 	return outcome

@@ -125,13 +125,24 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 // normal dispatcher. A newly ready account can unblock another account's invoice,
 // so the batch is merchant-scoped; every execution rechecks all its own guards.
 func (s *Store) ResumeRecoveryHeld(ctx context.Context, now time.Time, limit int32) (int, error) {
+	return s.resumeRecoveryHeld(ctx, nil, now, limit)
+}
+
+// WakeRecoveryHeld closes the race with completion that skipped a live verifier.
+// The caller invokes it only after its hold transition has committed.
+func (s *Store) WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error {
+	_, err := s.resumeRecoveryHeld(ctx, &id, now, 1)
+	return err
+}
+
+func (s *Store) resumeRecoveryHeld(ctx context.Context, id *uuid.UUID, now time.Time, limit int32) (int, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
 	count := 0
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), Now: now, BatchSize: limit})
+		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), IntentID: id, Now: now, BatchSize: limit})
 		if err != nil {
 			return err
 		}

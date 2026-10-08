@@ -111,6 +111,12 @@ func (f *fakeLedger) Park(_ context.Context, id uuid.UUID, next time.Time, reaso
 func (f *fakeLedger) ParkForRecovery(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
 	return f.set(id, StatusPending, reason, next, RecoveryHeld(reason).Evidence)
 }
+func (f *fakeLedger) WakeRecoveryHeld(_ context.Context, id uuid.UUID, now time.Time) error {
+	if record := f.recs[id]; record != nil {
+		record.next = now
+	}
+	return nil
+}
 func (f *fakeLedger) MarkSuperseded(_ context.Context, id uuid.UUID, reason string) error {
 	return f.set(id, StatusSuperseded, reason, time.Time{}, nil)
 }
@@ -386,7 +392,7 @@ func TestVerifiedUnsubmittedRecoveryReconsidersOnlyWhenAllowed(t *testing.T) {
 			if tc.held {
 				store.recoveryErr = errors.New("provider recovery required")
 			}
-			handler := &fakeHandler{typ: in.IntentType, verify: Retryable("verified unsubmitted")}
+			handler := &fakeHandler{typ: in.IntentType, relevance: StillRelevant(), verify: Retryable("verified unsubmitted")}
 			before := time.Now()
 			_, err := (&Runner{Store: store, Registry: NewRegistry(handler), Config: tc.mode}).RunVerifyOnce(context.Background())
 			require.NoError(t, err)

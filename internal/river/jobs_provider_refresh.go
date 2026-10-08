@@ -674,6 +674,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			more, err := w.completeRecovery(ctx, mid, pspID, horizon)
 			if err != nil {
 				out.WatermarkErrors++
+				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
 			} else {
 				out.More = more
 			}
@@ -716,7 +717,9 @@ func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp u
 		}
 		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: mid, Collect: true}, InvoiceArgs{MerchantID: mid, Collect: true, UseMonthlyFloor: true}}
 		for _, args := range jobs {
-			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: []rivertype.JobState{rivertype.JobStateAvailable, rivertype.JobStatePending, rivertype.JobStateRunning}}}); err != nil {
+			// Do not deduplicate against a scan sleeping on an earlier outage.
+			// Canonical invoice/renewal admission and durable cadence own money.
+			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
 				return err
 			}
 		}
