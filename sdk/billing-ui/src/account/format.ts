@@ -107,9 +107,8 @@ const future = (at: string | null | undefined) =>
 export const isLive = (s: Subscription) =>
   LIVE_STATUSES.has(s.status) ||
   (s.status === "canceled" &&
-    (s.access
-      ? !s.access.ends_at || future(s.access.ends_at)
-      : (!!s.cancel_scheduled || !!s.resumable) && future(s.current_period_ends_at)))
+    !!s.access &&
+    (!s.access.ends_at || future(s.access.ends_at)))
 
 /** Future billing has stopped or cancellation is scheduled. */
 export const isEnding = (s: Subscription) =>

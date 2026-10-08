@@ -126,7 +126,9 @@ export function SubscriptionsPanel({
           const scheduled = isEnding(s)
           const renews = live && !scheduled && !!s.price?.billing_interval_hours
           const when = !live
-            ? endedAt && t("subscriptions.endedOn", { date: endedAt })
+            ? s.status === "canceled"
+              ? t("subscriptions.noMorePayments")
+              : endedAt && t("subscriptions.endedOn", { date: endedAt })
             : renews && periodEnd
               ? t("subscriptions.renews", { date: periodEnd })
               : accessEnd

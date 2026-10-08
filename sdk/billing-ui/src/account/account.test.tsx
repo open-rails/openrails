@@ -136,6 +136,16 @@ describe("SubscriptionsPanel", () => {
     )
   })
 
+  it("does not infer canceled access from a future billing date", async () => {
+    mount(<SubscriptionsPanel />, fakeBilling({ subscriptions: [subscription({
+      status: "canceled", current_period_ends_at: "2036-10-01T12:00:00Z",
+      cancel_scheduled: true, resumable: true, access: null,
+    })] }))
+    const row = await screen.findByTestId("subscription-row")
+    expect(row).toHaveTextContent("No further payments")
+    expect(row).not.toHaveTextContent("Access until")
+  })
+
   it.each([null, "2036-10-01T12:00:00Z"])("keeps paid access visible after cancellation with expiry %s", async (endsAt) => {
     mount(<SubscriptionsPanel />, fakeBilling({ subscriptions: [subscription({
       status: "canceled", canceled_at: "2025-01-01T00:00:00Z",
