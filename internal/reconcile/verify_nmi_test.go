@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -21,7 +22,7 @@ func TestAttribution(t *testing.T) {
 	records := map[string]nmi.ScheduleRecord{"s-c": {OrderID: "order-c"}}
 	at := newAttribution([]*models.Subscription{a, b, c, d}, vaults, records)
 	sale := func(vault, order, schedule string) nmi.ScheduleSale {
-		return nmi.ScheduleSale{SaleAction: nmi.SaleAction{TransactionID: uuid.NewString(), Success: true, Amount: "9.99", Currency: "USD"}, VaultID: vault, OrderID: order, SubscriptionID: schedule}
+		return nmi.ScheduleSale{SaleAction: nmi.SaleAction{TransactionID: uuid.NewString(), Success: true, Amount: "9.99", Currency: "USD", At: time.Now()}, VaultID: vault, OrderID: order, SubscriptionID: schedule}
 	}
 	require.NoError(t, at.add(sale("v1", "", "")))
 	require.NoError(t, at.add(sale("v2", "order-c", "")))

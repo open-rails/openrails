@@ -91,7 +91,7 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 				probe = bySchedule
 			}
 		}
-		snap.Transactions, err = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
+		snap.Transactions, err = probeSaleTransactions(probe, subj.RailSubscriptionID)
 		if err != nil {
 			return nil, err
 		}
@@ -120,16 +120,9 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 }
 
 // probeSaleTransactions maps an order-reference sale probe onto snapshot
-// transactions. NMI's query response is server-filtered to actions >= since, so
-// an action with an unparseable date is floored to `since` — a provider-proven
-// lower bound, not a fabricated instant.
-func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since time.Time) ([]RemoteTransaction, error) {
-	floored := func(at time.Time) time.Time {
-		if at.IsZero() {
-			return since
-		}
-		return at
-	}
+// transactions. Query filters modification time, so it cannot supply a missing
+// action time or turn an older charge into payment for the current period.
+func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]RemoteTransaction, error) {
 	var out []RemoteTransaction
 	if len(probe.Sales) > 0 {
 		for _, sale := range probe.Sales {
@@ -140,12 +133,14 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 			if err != nil {
 				return nil, err
 			}
-			t.OccurredAt = floored(sale.At)
 			out = append(out, t)
 		}
 		return out, nil
 	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
+		if probe.SuccessAt.IsZero() {
+			return nil, errors.New("NMI sale has no readable action time")
+		}
 		amount, err := nmi.ParseAmountMinor(probe.SuccessAmount, probe.SuccessCurrency)
 		if err != nil {
 			return nil, err
@@ -157,10 +152,13 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 			Success:        true,
 			AmountCents:    int64(amount),
 			Currency:       probe.SuccessCurrency,
-			OccurredAt:     floored(probe.SuccessAt),
+			OccurredAt:     probe.SuccessAt,
 		})
 	}
 	if probe.DeclineFound {
+		if probe.DeclineAt.IsZero() {
+			return nil, errors.New("NMI decline has no readable action time")
+		}
 		amount, err := nmi.ParseAmountMinor(probe.DeclineAmount, probe.DeclineCurrency)
 		if err != nil {
 			return nil, err
@@ -172,7 +170,7 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since ti
 			Success:        false,
 			AmountCents:    int64(amount),
 			Currency:       probe.DeclineCurrency,
-			OccurredAt:     floored(probe.DeclineAt),
+			OccurredAt:     probe.DeclineAt,
 			DeclineReason:  probe.DeclineReason,
 		})
 	}

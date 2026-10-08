@@ -247,6 +247,9 @@ func (a *attribution) add(sale nmi.ScheduleSale) error {
 // remoteSale is one sale action of NMI's transaction report as a snapshot
 // transaction of the schedule railSubID.
 func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error) {
+	if sale.At.IsZero() {
+		return RemoteTransaction{}, errors.New("NMI sale has no readable action time")
+	}
 	amount, err := nmi.ParseAmountMinor(sale.Amount, sale.Currency)
 	if err != nil {
 		return RemoteTransaction{}, err
