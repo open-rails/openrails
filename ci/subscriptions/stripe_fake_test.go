@@ -454,7 +454,7 @@ func (f *stripeFake) createIntent(form url.Values) (int, any) {
 		return http.StatusBadRequest, stripeErr("parameter_invalid_integer")
 	}
 	pm := form.Get("payment_method")
-	if pm == "" || form.Get("customer") == "" || form.Get("currency") == "" {
+	if form.Get("currency") == "" {
 		return http.StatusBadRequest, stripeErr("parameter_missing")
 	}
 	pi := obj{"object": "payment_intent", "id": f.id("pi"), "amount": amount, "amount_received": 0, "currency": form.Get("currency"), "customer": form.Get("customer"),
