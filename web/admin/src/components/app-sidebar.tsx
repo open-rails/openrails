@@ -3,17 +3,10 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,
-  CreditCardIcon,
-  DashboardCircleIcon,
-  PackageIcon,
-  RepeatIcon,
-  Settings01Icon,
   Tick02Icon,
   UnfoldMoreIcon,
-  UserGroupIcon,
-  Wrench01Icon,
 } from "@hugeicons/core-free-icons"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 
 import {
   DropdownMenu,
@@ -39,48 +32,14 @@ import {
   SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { getBootstrap } from "@/lib/api/client"
+import {
+  activeNavPath,
+  buildNav,
+  newMerchantPath,
+  useExtensions,
+} from "@/extensions/registry"
+import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
-
-interface NavItem {
-  title: string
-  url: string
-  icon: typeof DashboardCircleIcon
-  // Sub-items appear beneath the entry once the section is the one being
-  // looked at; they are not a permanently expanded tree.
-  items?: { title: string; url: string }[]
-}
-
-const nav: NavItem[] = [
-  { title: "Dashboard", url: "/", icon: DashboardCircleIcon },
-  { title: "Customers", url: "/customers", icon: UserGroupIcon },
-  { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
-  {
-    title: "Payments",
-    url: "/payments",
-    icon: CreditCardIcon,
-    items: [
-      { title: "Payments", url: "/payments" },
-      { title: "Health", url: "/payments/health" },
-      { title: "Attempts", url: "/payments/attempts" },
-      { title: "Rebill cycles", url: "/payments/cycles" },
-    ],
-  },
-  { title: "Invoices", url: "/invoices", icon: CreditCardIcon },
-  {
-    title: "Catalog",
-    url: "/catalog",
-    icon: PackageIcon,
-    items: [
-      { title: "Products", url: "/catalog" },
-      { title: "Prices", url: "/catalog/prices" },
-      { title: "Metering", url: "/catalog/metering" },
-      { title: "Drift", url: "/catalog/drift" },
-    ],
-  },
-  { title: "Ops", url: "/ops", icon: Wrench01Icon },
-  { title: "Settings", url: "/settings", icon: Settings01Icon },
-]
 
 // A section's first sub-page IS the section URL (/catalog, /payments), so it
 // can only be the active one when nothing deeper is selected.
@@ -90,6 +49,12 @@ function subItemIsActive(pathname: string, url: string, sectionURL: string) {
 
 export function AppSidebar() {
   const { pathname } = useLocation()
+  const { extensions } = useExtensions()
+  const groups = buildNav(extensions, useConsoleContextFor())
+  const active = activeNavPath(
+    pathname,
+    groups.flatMap((group) => group.items)
+  )
   return (
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
@@ -100,53 +65,52 @@ export function AppSidebar() {
         <MerchantSwitcher />
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Billing</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {nav.map((item) => {
-                const inSection =
-                  item.url === "/"
-                    ? pathname === "/"
-                    : pathname.startsWith(item.url)
-                return (
-                  <SidebarMenuItem key={item.url}>
-                    <SidebarMenuButton
-                      isActive={inSection}
-                      tooltip={item.title}
-                      render={
-                        <Link to={item.url}>
-                          <HugeiconsIcon icon={item.icon} />
-                          <span>{item.title}</span>
-                        </Link>
-                      }
-                    />
-                    {item.items && inSection && (
-                      <SidebarMenuSub>
-                        {item.items.map((sub) => (
-                          <SidebarMenuSubItem key={sub.url}>
-                            <SidebarMenuSubButton
-                              isActive={subItemIsActive(
-                                pathname,
-                                sub.url,
-                                item.url
-                              )}
-                              render={
-                                <Link to={sub.url}>
-                                  <span>{sub.title}</span>
-                                </Link>
-                              }
-                            />
-                          </SidebarMenuSubItem>
-                        ))}
-                      </SidebarMenuSub>
-                    )}
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {groups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const inSection = item.path === active
+                  return (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        isActive={inSection}
+                        tooltip={item.title}
+                        render={
+                          <Link to={item.path}>
+                            {item.icon && <HugeiconsIcon icon={item.icon} />}
+                            <span>{item.title}</span>
+                          </Link>
+                        }
+                      />
+                      {item.items && inSection && (
+                        <SidebarMenuSub>
+                          {item.items.map((sub) => (
+                            <SidebarMenuSubItem key={sub.path}>
+                              <SidebarMenuSubButton
+                                isActive={subItemIsActive(
+                                  pathname,
+                                  sub.path,
+                                  item.path
+                                )}
+                                render={
+                                  <Link to={sub.path}>
+                                    <span>{sub.title}</span>
+                                  </Link>
+                                }
+                              />
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      )}
+                    </SidebarMenuItem>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <SidebarRail />
     </Sidebar>
@@ -155,7 +119,8 @@ export function AppSidebar() {
 
 function MerchantSwitcher() {
   const { activeMerchant, merchants, selectMerchant } = useAuth()
-  const newMerchantURL = getBootstrap().new_merchant_url
+  const navigate = useNavigate()
+  const newMerchant = newMerchantPath(useExtensions().extensions)
   const label =
     activeMerchant?.display_name || activeMerchant?.slug || "Select merchant"
   const role = activeMerchant?.role ?? "Merchant console"
@@ -222,13 +187,13 @@ function MerchantSwitcher() {
                 )
               })}
             </DropdownMenuGroup>
-            {/* The engine creates no merchants itself: the entry exists only
-                when the host serves a creation page (NewMerchantURL). */}
-            {newMerchantURL && (
+            {/* The console creates no merchants itself: the entry exists only
+                when a host extension serves a creation page. */}
+            {newMerchant && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => window.location.assign(newMerchantURL)}
+                  onClick={() => void navigate(newMerchant)}
                   className="gap-2 py-2"
                 >
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-dashed border-border">

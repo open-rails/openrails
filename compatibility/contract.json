@@ -1055,7 +1055,7 @@
       "type Card struct{}"
     ],
     "internal/config": [
-      "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tNewMerchantURL string\n\n\tIssuer *ConsoleIssuer\n}",
+      "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n\n\tIssuer *ConsoleIssuer\n}",
       "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming NamingConfig\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
       "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
@@ -1175,7 +1175,7 @@
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
     ],
     "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tNewMerchantURL string `json:\"new_merchant_url\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}"
     ],
     "internal/api": [
@@ -2058,6 +2058,7 @@
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
       "fmt": "fmt",
+      "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "net": "net",

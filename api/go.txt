@@ -232,8 +232,8 @@ pkg openrails, method (StripePSP) PSPConfig() PSPConfig
 pkg openrails, type AdminConsole = config.AdminConsole
 pkg openrails, type AdminConsole struct
 pkg openrails, type AdminConsole struct, AuthBaseURL string
+pkg openrails, type AdminConsole struct, Extensions map[string]any
 pkg openrails, type AdminConsole struct, Issuer *config.ConsoleIssuer
-pkg openrails, type AdminConsole struct, NewMerchantURL string
 pkg openrails, type AdminConsole struct, Path string
 pkg openrails, type AuthConfig = config.AuthConfig
 pkg openrails, type AuthConfig struct

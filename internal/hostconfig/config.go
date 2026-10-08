@@ -152,17 +152,16 @@ func (s *sendGridFile) config() *billing.SendGridConfig {
 // adminConsoleFile is the admin_console section: the server serves the
 // console at path only while enabled.
 type adminConsoleFile struct {
-	Enabled        bool                   `koanf:"enabled"`
-	Path           string                 `koanf:"path"`
-	NewMerchantURL string                 `koanf:"new_merchant_url"`
-	Issuer         *billing.ConsoleIssuer `koanf:"issuer"`
+	Enabled bool                   `koanf:"enabled"`
+	Path    string                 `koanf:"path"`
+	Issuer  *billing.ConsoleIssuer `koanf:"issuer"`
 }
 
 func (a *adminConsoleFile) mount() *billing.AdminConsole {
 	if a == nil || !a.Enabled {
 		return nil
 	}
-	return &billing.AdminConsole{Path: a.Path, NewMerchantURL: a.NewMerchantURL, Issuer: a.Issuer}
+	return &billing.AdminConsole{Path: a.Path, Issuer: a.Issuer}
 }
 
 // config is the loaded file as the server's configuration.
@@ -262,9 +261,6 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.AdminConsole != nil {
 		if err := billing.ValidateMountPath("admin_console.path", billing.AdminConsolePath(cfg.AdminConsole)); err != nil {
-			return err
-		}
-		if err := billing.ValidateNewMerchantURL("admin_console.new_merchant_url", cfg.AdminConsole.NewMerchantURL); err != nil {
 			return err
 		}
 	}

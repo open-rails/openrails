@@ -26,9 +26,6 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if err := config.ValidateMountPath("admin_console.path", path); err != nil {
 		return err
 	}
-	if err := config.ValidateNewMerchantURL("admin_console.new_merchant_url", s.adminConsole.NewMerchantURL); err != nil {
-		return err
-	}
 	for _, entry := range mux.Entries {
 		if entry.Path == path || strings.HasPrefix(entry.Path, path+"/") {
 			return fmt.Errorf("admin_console.path %q overlaps the OpenRails route %s %s; choose another path", path, entry.Method, entry.Path)
@@ -41,7 +38,6 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		AskEnabled:             config.LLMAskConfigured(s.cfg.LLM),
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(s.cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
-		NewMerchantURL:         s.adminConsole.NewMerchantURL,
 	}
 	var rs *config.ResourceServerConfig
 	if s.cfg.ControlPlane != nil {

@@ -15,16 +15,83 @@ const keepGoEmbedPlaceholder: Plugin = {
   },
 }
 
+const consoleSrc = path.resolve(__dirname, "./src")
+
+// A host build (scripts/build-admin-console.sh --extensions) leaves
+// console-host.json beside this file: the host's src, where its own "@/"
+// imports resolve, and the directories Tailwind scans for the host's classes.
+const host: { src?: string; sources: string[] } = (() => {
+  const file = path.resolve(__dirname, "console-host.json")
+  if (!fs.existsSync(file)) return { sources: [] }
+  const { src, sources = [] } = JSON.parse(fs.readFileSync(file, "utf8")) as {
+    src?: string
+    sources?: string[]
+  }
+  return { src: src ? path.resolve(src) : undefined, sources }
+})()
+const hostSrc = host.src
+
+const within = (file: string, dir: string) =>
+  file === dir || file.startsWith(dir + path.sep)
+
+// "@/x" is the importing file's own src: the console's for the console's
+// files, the host's (--extensions-src) for everything the host contributed.
+const srcAlias: Plugin = {
+  name: "console-src-alias",
+  enforce: "pre",
+  resolveId(source, importer) {
+    if (!source.startsWith("@/")) return null
+    const root =
+      hostSrc && importer && !within(importer, consoleSrc)
+        ? hostSrc
+        : consoleSrc
+    return this.resolve(path.join(root, source.slice(2)), importer, {
+      skipSelf: true,
+    })
+  },
+}
+
+const hostTailwindSource: Plugin = {
+  name: "console-host-tailwind-source",
+  enforce: "pre",
+  transform(code, id) {
+    if (
+      host.sources.length === 0 ||
+      id !== path.join(consoleSrc, "index.css")
+    ) {
+      return null
+    }
+    const sources = host.sources.map((dir) => `@source ${JSON.stringify(dir)};`)
+    return `${sources.join("\n")}\n${code}`
+  },
+}
+
 // One build serves any mount path (#1127): built URLs are relative to
 // index.html's <base href>, which the Go handler points at the mount. Dev
 // serves at the default /admin/.
 export default defineConfig(({ command }) => ({
   base: command === "build" ? "./" : "/admin/",
-  plugins: [react(), tailwindcss(), keepGoEmbedPlaceholder],
+  plugins: [
+    srcAlias,
+    hostTailwindSource,
+    react(),
+    tailwindcss(),
+    keepGoEmbedPlaceholder,
+  ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@openrails/console": path.join(consoleSrc, "extensions/public.ts"),
     },
+    // Host extension files resolve their own dependencies from the host's
+    // node_modules; these must be the console's single copies.
+    dedupe: [
+      "react",
+      "react-dom",
+      "react-router-dom",
+      "@tanstack/react-query",
+      "@openrails/auth-ui",
+      "@hugeicons/react",
+    ],
   },
   build: {
     outDir: "dist",

@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useExtensions, userMenuItems } from "@/extensions/registry"
+import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
 
 export interface Crumb {
@@ -87,6 +89,10 @@ function UserMenu() {
   const signOut = useMutation({ mutationKey: ["auth", "logout"], mutationFn: logout })
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
+  const hostItems = userMenuItems(
+    useExtensions().extensions,
+    useConsoleContextFor()
+  )
   if (!me) return null
 
   const name = me.username || me.email || "Signed in"
@@ -128,6 +134,12 @@ function UserMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        {hostItems.map((item) => (
+          <DropdownMenuItem key={item.path} onClick={() => navigate(item.path)}>
+            {item.icon && <HugeiconsIcon icon={item.icon} />}
+            {item.title}
+          </DropdownMenuItem>
+        ))}
         <DropdownMenuItem onClick={() => navigate("/settings")}>
           <HugeiconsIcon icon={Settings01Icon} />
           Settings

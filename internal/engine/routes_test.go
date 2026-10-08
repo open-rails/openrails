@@ -430,15 +430,16 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `<base href="/billing-admin/">host build`)
 	rec = serve(mux, http.MethodGet, "/billing-admin/config.json", "")
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"new_merchant_url":"","issuer":null}`, rec.Body.String())
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null}`, rec.Body.String())
 
-	// A host's merchant-creation page reaches the console only through config.json.
+	// A host's extension data reaches its console extensions only through
+	// config.json, verbatim and keyed by extension id.
 	hosted := httpRuntime(true)
 	hosted.App.ConsoleAssets, hosted.authAPIBase = rt.App.ConsoleAssets, "/api/v1"
-	_, err = hosted.Routes(config.Routes{Merchant: true, AdminConsole: &config.AdminConsole{NewMerchantURL: "javascript:alert(1)"}})
-	require.ErrorContains(t, err, "invalid Routes.AdminConsole.NewMerchantURL")
-	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, AdminConsole: &config.AdminConsole{NewMerchantURL: "/merchants/new"}}, "")
-	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"new_merchant_url":"/merchants/new"`)
+	_, err = hosted.Routes(config.Routes{Merchant: true, AdminConsole: &config.AdminConsole{Extensions: map[string]any{"Hosted": true}}})
+	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
+	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, AdminConsole: &config.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
+	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/capabilities", "").Code)
 
 	off := mountAt(t, httpRuntime(true), config.Routes{Prefix: "/billing", Merchant: true}, "")

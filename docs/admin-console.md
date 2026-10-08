@@ -16,8 +16,7 @@ On is one switch, where the HTTP surface is chosen:
 - **Embedded:** `Routes.AdminConsole` in the `openrails.Routes` given to the
   adapter's `Mount` (or `Client.Routes`). Omit it to turn the console off.
 - **Standalone server:** `admin_console.enabled: true` in `config.yaml`
-  (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path` and
-  `admin_console.new_merchant_url`.
+  (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path`.
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
@@ -31,10 +30,9 @@ err := openrailsgin.Mount(r, client, openrails.Routes{
 admin_console:
   enabled: true
   # path: /admin             # default; e.g. /billing/admin when /admin is taken
-  # new_merchant_url: /merchants/new  # host page behind "New merchant"; unset hides it
 ```
 
-Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`, `ADMIN_CONSOLE_NEW_MERCHANT_URL`.
+Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`.
 
 Mounting the console fails loudly, before anything registers, when:
 
@@ -51,12 +49,11 @@ URL from `document.baseURI`.
 
 **Users without a merchant.** A signed-in user who belongs to no merchant sees
 an empty state instead of a dashboard. OpenRails creates no merchants itself, so
-by default it tells them to ask an operator. A host that does (a hosted product)
-sets `AdminConsole.NewMerchantURL` (standalone: `new_merchant_url`) to its own
-page: the empty state and the merchant switcher then offer "New merchant",
-which navigates there. The value is a same-origin path or an https URL. The host
-sends the user back with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the
-console selects that merchant if the user belongs to it, and drops the fragment.
+by default it tells them to ask an operator. A host that does declares a
+creation page in its console extension (`newMerchantPath`, below); the empty
+state and the merchant switcher then offer "New merchant". Any link may open the
+console on a merchant with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`);
+the console selects it if the user belongs to it and drops the fragment.
 
 **Where staff sign in.** At a trusted issuer when `AdminConsole.Issuer`
 (standalone: `admin_console.issuer`) names one of the resource server's trusted
@@ -133,6 +130,67 @@ OpenRails module (the standalone binary's). The console handler answers a
 request outside its path with 500 and a log line rather than serving a page
 whose assets cannot load.
 
+### Extending the console
+
+A host can build its own console: the OpenRails console plus its own pages,
+sidebar entries and account-menu items, all inside the same shell, session and
+merchant switcher. Standalone builds carry no extensions.
+
+The host writes a module whose default export is a list of extensions, typed by
+`@openrails/console` (which resolves to `web/admin/src/extensions/public.ts`):
+
+```ts
+import { defineConsoleExtension } from "@openrails/console"
+
+export default [
+  defineConsoleExtension({
+    id: "hosted", // also its key in Routes.AdminConsole.Extensions
+    routes: [
+      { path: "/account", scope: "user", lazy: () => import("./account").then((m) => ({ Component: m.AccountPage })) },
+      { path: "/plan", scope: "merchant", lazy: () => import("./plan").then((m) => ({ Component: m.PlanPage })) },
+    ],
+    nav: [
+      { title: "Overview", path: "/account", scope: "user" },
+      { title: "Plan", path: "/plan", scope: "merchant", group: "Setup", roles: ["owner"] },
+    ],
+    newMerchantPath: "/merchants/new",
+  }),
+]
+```
+
+- **Scope.** `merchant` pages act on the selected merchant: they sit in the
+  console's groups and, for a user with no merchant, show the empty state.
+  `user` pages belong to the signed-in user and stay reachable without one.
+- **Navigation.** `nav` entries join the sidebar by `group` (merchant entries
+  default to the console's "Billing" group, user entries to "Account") and
+  `order`; `roles` and `visible(ctx)` hide them. `userMenu` adds account-menu
+  entries. A path the console already routes refuses to start.
+- **Runtime.** `useConsole(id)` gives the user, their merchants, the selected
+  one and the extension's `Routes.AdminConsole.Extensions[id]`; `authFetch()` calls
+  the host's own APIs with the console's session (local or a trusted
+  issuer's) instead of starting a second one, and `authClient()` is the AuthKit
+  client when staff sign in to the deployment's own accounts; `consoleHref(path, merchant?)` links into the
+  console. `Provider` wraps the console for host context (outside the router).
+
+Build it with the extension module and the host's source root, which its `@/`
+imports resolve against and whose classes Tailwind compiles:
+
+```sh
+bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" \
+  --extensions web/console/index.ts --extensions-src web/src internal/consoleassets/dist
+```
+
+The host installs its own dependencies first; its files resolve them from its
+`node_modules`, while React, React Router, TanStack Query, auth-ui and the icon
+set are always the console's single copies. The console's own sources are
+type-checked in OpenRails; the host type-checks its extension against the three
+self-contained files `web/admin/src/extensions/{public,types,runtime}.ts`.
+
+**Embedding contract.** The Go side is unchanged by extensions: supply the
+combined build as `Deps.ConsoleAssets`, select `Routes.AdminConsole` at any
+`Path`, and pass extension data as `Routes.AdminConsole.Extensions`, served
+verbatim in `config.json` under `extensions`. OpenRails never reads it.
+
 ### Security posture
 
 What the engine enforces:
@@ -166,7 +224,7 @@ permission; with other auth, `Deps.Authorize` decides.
 
 Browse to the console path, `https://<your-host>/admin/` by default (the bare
 path redirects). The SPA bootstraps from `config.json` beneath it:
-`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, new_merchant_url, issuer}`.
+`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer}`.
 
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers

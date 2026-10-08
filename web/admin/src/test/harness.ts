@@ -53,7 +53,7 @@ const BOOTSTRAP = {
   ask_enabled: true,
   catalog_copilot_enabled: true,
   catalog_drafting_enabled: false,
-  new_merchant_url: "",
+  extensions: {},
   issuer: null,
 }
 

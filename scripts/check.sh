@@ -34,6 +34,21 @@ checks() {
     echo "console: web/admin/dist/index.html missing — the embed gate would prove nothing" >&2
     exit 1
   }
+  # A host build: the console plus a host's extension, its "@/" imports and
+  # Tailwind classes resolved against the host's own tree.
+  host_build="$(mktemp -d)"
+  bash scripts/build-admin-console.sh \
+    --extensions scripts/testdata/console-host/console/index.ts \
+    --extensions-src scripts/testdata/console-host/src "$host_build"
+  grep -qs 'Console host fixture' "$host_build"/assets/*.js || {
+    echo "console: the host build is missing the extension's page" >&2
+    exit 1
+  }
+  grep -qs '0a1b2c' "$host_build"/assets/*.css || {
+    echo "console: the host build is missing the extension's Tailwind classes" >&2
+    exit 1
+  }
+  rm -rf "$host_build"
   # One build serves any admin_console.path (#1127).
   bash scripts/go-test-gate.sh ./web/admin TestBuiltConsoleServesAtAnyPath
   git diff --quiet -- web/admin/dist || {

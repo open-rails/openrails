@@ -6,6 +6,14 @@ import { QueryClientProvider } from "@tanstack/react-query"
 import "./index.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
+import extensions from "@/extensions/host"
+import {
+  ConsoleExtensions,
+  extensionRoutes,
+  validateExtensions,
+} from "@/extensions/registry"
+import { bindConsoleRuntime } from "@/extensions/runtime"
+import { useConsoleHandle } from "@/extensions/use-console"
 import { AppLayout } from "@/layouts/app-layout"
 import { loadBootstrap } from "@/lib/api/client"
 import { bootstrapURL, routerBasename } from "@/lib/mount"
@@ -16,6 +24,8 @@ const routeLoading = (
     Loading…
   </div>
 )
+
+validateExtensions(extensions)
 
 const router = createBrowserRouter(
   [
@@ -194,6 +204,7 @@ const router = createBrowserRouter(
               Component: module.SettingsPage,
             })),
         },
+        ...extensionRoutes(extensions, routeLoading),
       ],
     },
   ],
@@ -204,12 +215,24 @@ const root = createRoot(document.getElementById("root")!)
 loadBootstrap(bootstrapURL()).then(
   (config) => {
     const session = createConsoleSession(config)
+    bindConsoleRuntime({
+      useConsole: useConsoleHandle,
+      authClient: () =>
+        session.kind === "local" ? session.client : undefined,
+      authFetch: (input, init) => session.client.authFetch(input, init),
+      mountPath: () => `${routerBasename().replace(/\/$/, "")}/`,
+    })
     root.render(
       <StrictMode>
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
             <ConsoleSession session={session}>
-              <RouterProvider router={router} />
+              <ConsoleExtensions
+                extensions={extensions}
+                config={config.extensions ?? {}}
+              >
+                <RouterProvider router={router} />
+              </ConsoleExtensions>
               <Toaster />
             </ConsoleSession>
           </QueryClientProvider>
