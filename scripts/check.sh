@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-checks() {
+guards() {
   # Keep the source-level safety checks in the compact entrypoint. These are
   # cheap and catch regressions that a build or an end-to-end journey cannot
   # observe (business-time injection, raw SQL, and migration lock hazards).
@@ -22,11 +22,21 @@ checks() {
     exit 1
   fi
   bash scripts/check-embedded-auth-boundary.sh
+}
+
+# These builds embed only web/admin/dist/.gitkeep: Go must build without a
+# console build.
+build() {
   go build ./...
+}
+
+go_tests() {
   # Package tests are guards, contracts and focused regressions; database and
   # provider behavior is covered by the e2e suite in End-to-end.
   go test -vet=all -race -count=1 -cover ./...
-  # The builds above embedded only web/admin/dist/.gitkeep; now the console.
+}
+
+console() {
   bash scripts/build-admin-console.sh
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2
@@ -43,6 +53,13 @@ checks() {
   go build -o /dev/null ./cmd/openrails
 }
 
+checks() {
+  guards
+  build
+  go_tests
+  console
+}
+
 e2e() {
   : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL server}"
   bash scripts/e2e.sh
@@ -50,7 +67,10 @@ e2e() {
 
 case "${1:-all}" in
   checks) checks ;;
+  build) build ;;
+  go) guards; go_tests ;;
+  console) console ;;
   e2e) e2e ;;
   all) checks; e2e ;;
-  *) echo "usage: bash scripts/check.sh [checks|e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: bash scripts/check.sh [checks|build|go|console|e2e|all]" >&2; exit 2 ;;
 esac

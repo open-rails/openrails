@@ -1,0 +1,52 @@
+name: Go caches
+description: >-
+  Restores or saves one family of Go build and module caches. Master builds each
+  revision from empty and saves it, whatever its tests concluded; pull requests
+  only restore, so they neither pay the upload nor evict the shared entries. A
+  pull request saves only when nothing was restored (before master has saved
+  that family).
+inputs:
+  family:
+    description: Cache family; jobs that build the same way share one.
+    required: true
+  save:
+    description: "'true' saves (end of job); otherwise restores (after setup-go)."
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Name the cache
+      id: name
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        sum="$(sha256sum go.sum | cut -c1-16)"
+        prefix="go-v2-${RUNNER_OS}-${RUNNER_ARCH}-${{ inputs.family }}-$(go env GOVERSION)"
+        printf 'prefix=%s\nsum=%s\nkey=%s\n' "$prefix-" "$prefix-$sum-" "$prefix-$sum-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+    - name: Restore Go caches
+      id: restore
+      if: ${{ inputs.save != 'true' && github.event_name == 'pull_request' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.name.outputs.build }}
+          ${{ steps.name.outputs.modules }}
+        key: ${{ steps.name.outputs.key }}
+        restore-keys: |
+          ${{ steps.name.outputs.sum }}
+          ${{ steps.name.outputs.prefix }}
+    - name: Remember what was restored
+      if: ${{ inputs.save != 'true' }}
+      shell: bash
+      env:
+        MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+      run: echo "GO_CACHE_RESTORED=${MATCHED:-none}" >> "$GITHUB_ENV"
+    - name: Save Go caches
+      if: ${{ !cancelled() && inputs.save == 'true' && (github.event_name != 'pull_request' || env.GO_CACHE_RESTORED == 'none') }}
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ${{ steps.name.outputs.build }}
+          ${{ steps.name.outputs.modules }}
+        key: ${{ steps.name.outputs.key }}
