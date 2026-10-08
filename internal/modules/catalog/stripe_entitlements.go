@@ -1,8 +1,8 @@
 package catalog
 
 // Stripe Entitlements (Features) — the catalog-level mirror of OpenRails product
-// entitlements (#586). OpenRails entitlements are plain strings (the keys of
-// product.EntitlementsSpec). Each maps 1:1 onto a Stripe Feature whose
+// entitlements (#586). OpenRails entitlements are opaque strings in
+// product.Entitlements. Each maps 1:1 onto a Stripe Feature whose
 // lookup_key IS the string; the feature is then attached to the synced Stripe
 // Product as a Product Feature. Sync is ONE-WAY (OpenRails -> Stripe): OpenRails
 // stays the source of truth, and the per-customer "active entitlements" Stripe
@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	catalogwire "github.com/open-rails/openrails/catalog"
 )
 
 // StripeMetadataOpenRailsManaged marks a Stripe Feature as OpenRails-owned.
@@ -52,8 +54,7 @@ func (s *StripeCatalogService) CreateFeature(ctx context.Context, lookupKey, nam
 	if stripeProc == nil || stripeProc.SecretKey == "" {
 		return "", fmt.Errorf("stripe is not configured")
 	}
-	lookupKey = strings.TrimSpace(lookupKey)
-	if lookupKey == "" {
+	if strings.TrimSpace(lookupKey) == "" {
 		return "", fmt.Errorf("feature lookup_key required")
 	}
 	name = strings.TrimSpace(name)
@@ -215,11 +216,13 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 		return fmt.Errorf("stripe_product_id required")
 	}
 
+	desiredKeys, err := catalogwire.NormalizeEntitlements(desiredKeys)
+	if err != nil {
+		return err
+	}
 	desired := make(map[string]struct{}, len(desiredKeys))
-	for _, k := range desiredKeys {
-		if k = strings.TrimSpace(k); k != "" {
-			desired[k] = struct{}{}
-		}
+	for _, key := range desiredKeys {
+		desired[key] = struct{}{}
 	}
 
 	// All account features, indexed by lookup_key, plus the managed subset.
@@ -230,7 +233,7 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 	featureByKey := make(map[string]StripeFeature, len(allFeatures))
 	managedKeys := make(map[string]struct{}, len(allFeatures))
 	for _, f := range allFeatures {
-		key := strings.TrimSpace(f.LookupKey)
+		key := f.LookupKey
 		if key == "" {
 			continue
 		}
@@ -247,7 +250,7 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 	}
 	attachedKeys := make(map[string]struct{}, len(attached))
 	for _, pf := range attached {
-		if key := strings.TrimSpace(pf.EntitlementFeature.LookupKey); key != "" {
+		if key := pf.EntitlementFeature.LookupKey; key != "" {
 			attachedKeys[key] = struct{}{}
 		}
 	}
@@ -277,7 +280,7 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 
 	// Detach OpenRails-managed features that are attached but no longer desired.
 	for _, pf := range attached {
-		key := strings.TrimSpace(pf.EntitlementFeature.LookupKey)
+		key := pf.EntitlementFeature.LookupKey
 		if key == "" {
 			continue
 		}

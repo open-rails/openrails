@@ -14,7 +14,7 @@ products:
     display_name: Membership
     archived: false
     tier_group: null
-    entitlements_spec: {}
+    entitlements: []
     prices:
       - key: monthly
         unit_amount: 9007199254740993
@@ -25,7 +25,7 @@ products:
 		t.Fatal(err)
 	}
 	p := a.Products[0]
-	if !p.Archived.Set || p.Archived.Value || p.Description.Set || !p.TierGroup.Null || !p.EntitlementsSpec.Set || p.EntitlementsSpec.Null {
+	if !p.Archived.Set || p.Archived.Value || p.Description.Set || !p.TierGroup.Null || !p.Entitlements.Set || p.Entitlements.Null {
 		t.Fatalf("field presence lost: %+v", p)
 	}
 	if got := p.Prices[0].UnitAmount.Value; got != 9007199254740993 {
@@ -87,7 +87,7 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 		"duplicate field":         head + `,"prune":true,"prune":false}`,
 		"case alias":              head + `,"prune":false,"Prune":true}`,
 		"nested case alias":       head + `,"products":[{"key":"p","Archived":true}]}`,
-		"duplicate map key":       head + `,"products":[{"key":"a","entitlements_spec":{"premium":1,"premium":2}}]}`,
+		"removed entitlement map": head + `,"products":[{"key":"a","entitlements":{"premium":1,"premium":2}}]}`,
 		"trailing document":       head + `} {}`,
 		"excessive depth":         strings.Repeat("[", 34) + strings.Repeat("]", 34),
 		"empty":                   ``,
@@ -137,13 +137,13 @@ func TestApplicationValidateBounds(t *testing.T) {
 		"too many items": func(a *Application) { a.Meters = manyMeters.Meters },
 		// Direct Go requests must not carry values their JSON form would drop.
 		"hidden value on omitted field": func(a *Application) {
-			a.Products = []ApplyProduct{{Key: "p", EntitlementsSpec: Field[map[string]*int]{Value: map[string]*int{"premium": nil}}}}
+			a.Products = []ApplyProduct{{Key: "p", Entitlements: Field[[]string]{Value: []string{"premium"}}}}
 		},
 		"hidden value on null field": func(a *Application) {
-			a.Products = []ApplyProduct{{Key: "p", EntitlementsSpec: Field[map[string]*int]{Set: true, Null: true, Value: map[string]*int{"premium": nil}}}}
+			a.Products = []ApplyProduct{{Key: "p", Entitlements: Field[[]string]{Set: true, Null: true, Value: []string{"premium"}}}}
 		},
 		"null without set": func(a *Application) {
-			a.Products = []ApplyProduct{{Key: "p", EntitlementsSpec: Field[map[string]*int]{Null: true}}}
+			a.Products = []ApplyProduct{{Key: "p", Entitlements: Field[[]string]{Null: true}}}
 		},
 	} {
 		a := ok()

@@ -202,6 +202,9 @@ func fieldsOf(t reflect.Type) []field {
 			}
 			if strings.HasPrefix(f.Type.String(), "catalog.Field[") {
 				member.nullable = true
+				if name == "entitlements" && f.Type == reflect.TypeFor[catalog.Field[[]string]]() {
+					member.nullable = false // [] clears the list; null is refused.
+				}
 			}
 			if at, dup := seen[name]; dup {
 				out[at] = member // the outer member shadows the embedded one

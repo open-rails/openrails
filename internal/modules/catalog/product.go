@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -63,7 +64,15 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		return fmt.Errorf("product merchant does not match the authorized merchant")
 	}
 	product.MerchantID = mid.UUID()
-	entSpec, err := models.ToJSONB(product.EntitlementsSpec)
+	entitlements, err := catalogwire.NormalizeEntitlements(product.Entitlements)
+	if err != nil {
+		return apperr.Invalidf("%v", err)
+	}
+	if entitlements == nil {
+		entitlements = []string{}
+	}
+	product.Entitlements = entitlements
+	entitlementsJSON, err := json.Marshal(entitlements)
 	if err != nil {
 		return err
 	}
@@ -80,12 +89,12 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		return err
 	}
 	rows, err := s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
-		ID:               product.ID,
-		MerchantID:       product.MerchantID,
-		Key:              product.Key,
-		DisplayName:      product.DisplayName,
-		Description:      desc,
-		EntitlementsSpec: entSpec, CreditGrant: credit,
+		ID:           product.ID,
+		MerchantID:   product.MerchantID,
+		Key:          product.Key,
+		DisplayName:  product.DisplayName,
+		Description:  desc,
+		Entitlements: entitlementsJSON, CreditGrant: credit,
 		TierGroup: product.TierGroup,
 		TierRank:  tierRank32,
 		Archived:  product.Archived,
@@ -254,16 +263,16 @@ func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, de
 }
 
 type ProductDefinitionUpdateParams struct {
-	CreditGrant      *catalogwire.CreditGrantSpec
-	SetCreditGrant   bool
-	DisplayName      *string
-	Description      *string
-	EntitlementsSpec map[string]*int
-	SetEntitlements  bool
-	TierGroup        *string
-	SetTierGroup     bool
-	TierRank         *int
-	Archived         *bool
+	CreditGrant     *catalogwire.CreditGrantSpec
+	SetCreditGrant  bool
+	DisplayName     *string
+	Description     *string
+	Entitlements    []string
+	SetEntitlements bool
+	TierGroup       *string
+	SetTierGroup    bool
+	TierRank        *int
+	Archived        *bool
 }
 
 // UpdateDefinition atomically applies only the supplied fields. Set flags
@@ -274,7 +283,14 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
-	entSpec, err := models.ToJSONB(params.EntitlementsSpec)
+	if params.SetEntitlements && params.Entitlements == nil {
+		return nil, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
+	}
+	entitlements, err := catalogwire.NormalizeEntitlements(params.Entitlements)
+	if err != nil {
+		return nil, apperr.Invalidf("%v", err)
+	}
+	entitlementsJSON, err := json.Marshal(entitlements)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +309,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{MerchantID: queryMerchant.UUID(),
 		ID: id, DisplayName: params.DisplayName,
 		Description: params.Description, SetDescription: params.Description != nil,
-		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements, CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
+		Entitlements: entitlementsJSON, SetEntitlements: params.SetEntitlements, CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
 		TierRank: rank, Archived: params.Archived,
 	})

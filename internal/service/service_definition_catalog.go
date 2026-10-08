@@ -64,12 +64,12 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 	p := &models.Product{
 		// #662: the product id is a pure function of its immutable natural key
 		// (merchant_id, key) — same logical product → same id in every DB.
-		ID:               uuidutil.DeterministicID(uuidutil.DeterministicNamespace, tid.UUID().String(), req.Key),
-		MerchantID:       tid.UUID(),
-		Key:              req.Key,
-		DisplayName:      req.DisplayName,
-		Description:      req.Description,
-		EntitlementsSpec: req.EntitlementsSpec, CreditGrant: req.CreditGrant,
+		ID:           uuidutil.DeterministicID(uuidutil.DeterministicNamespace, tid.UUID().String(), req.Key),
+		MerchantID:   tid.UUID(),
+		Key:          req.Key,
+		DisplayName:  req.DisplayName,
+		Description:  req.Description,
+		Entitlements: req.Entitlements, CreditGrant: req.CreditGrant,
 		TierGroup: req.TierGroup,
 		TierRank:  req.TierRank,
 		Archived:  req.Archived,
@@ -97,7 +97,7 @@ type UpdateProductRequest struct {
 	DeferCreditPriceValidation bool
 	DisplayName                *string
 	Description                *string
-	EntitlementsSpec           map[string]*int
+	Entitlements               []string
 	SetEntitlements            bool
 	TierGroup                  *string
 	SetTierGroup               bool
@@ -106,8 +106,8 @@ type UpdateProductRequest struct {
 	SkipRailSync               bool
 }
 
-// productPatch reads a merge patch: null clears description,
-// entitlements_spec and tier_group, and is refused elsewhere.
+// productPatch reads a merge patch: null clears description and tier_group.
+// Entitlements must be a list; [] clears it and omission leaves it unchanged.
 func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	var req UpdateProductRequest
 	if p.DisplayName.Null || p.TierRank.Null || p.Archived.Null {
@@ -119,8 +119,11 @@ func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	if p.Description.Set {
 		req.Description = &p.Description.Value
 	}
-	if p.EntitlementsSpec.Set {
-		req.SetEntitlements, req.EntitlementsSpec = true, p.EntitlementsSpec.Value
+	if p.Entitlements.Set {
+		if p.Entitlements.Null || p.Entitlements.Value == nil {
+			return req, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
+		}
+		req.SetEntitlements, req.Entitlements = true, p.Entitlements.Value
 	}
 	if p.CreditGrant.Set {
 		req.SetCreditGrant = true
@@ -199,10 +202,10 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 	}
 	productID := id.UUID()
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
-		DisplayName:      req.DisplayName,
-		Description:      req.Description,
-		EntitlementsSpec: req.EntitlementsSpec,
-		SetEntitlements:  req.SetEntitlements, CreditGrant: req.CreditGrant, SetCreditGrant: req.SetCreditGrant,
+		DisplayName:     req.DisplayName,
+		Description:     req.Description,
+		Entitlements:    req.Entitlements,
+		SetEntitlements: req.SetEntitlements, CreditGrant: req.CreditGrant, SetCreditGrant: req.SetCreditGrant,
 		TierGroup:    req.TierGroup,
 		SetTierGroup: req.SetTierGroup,
 		TierRank:     req.TierRank,
@@ -249,11 +252,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		if !s.localCatalogOnly && !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
 			if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
 				stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-				keys := make([]string, 0, len(p.EntitlementsSpec))
-				for k := range p.EntitlementsSpec {
-					keys = append(keys, k)
-				}
-				_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys)
+				_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, p.Entitlements)
 			}
 		}
 

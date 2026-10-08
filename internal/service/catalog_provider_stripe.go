@@ -234,12 +234,8 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	// One-way (OpenRails -> Stripe); OpenRails stays the source of truth.
 	// Best-effort: a feature-sync failure must not fail the price link — catalog
 	// drift surfaces on the next reconcile, like the other Stripe propagations.
-	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.EntitlementsSpec) > 0 {
-		keys := make([]string, 0, len(in.Product.EntitlementsSpec))
-		for k := range in.Product.EntitlementsSpec {
-			keys = append(keys, k)
-		}
-		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys); err != nil {
+	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.Entitlements) > 0 {
+		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, in.Product.Entitlements); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
 				Warn("stripe entitlement-feature sync failed (best-effort); drift surfaces on reconcile")
 		}

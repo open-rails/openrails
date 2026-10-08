@@ -105,8 +105,8 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 			value := int(*row.AccessDurationHours)
 			offer.AccessDurationHours = &value
 		}
-		if len(row.EntitlementsSpec) > 0 {
-			if err := json.Unmarshal(row.EntitlementsSpec, &offer.EntitlementsSpec); err != nil {
+		if len(row.Entitlements) > 0 {
+			if err := json.Unmarshal(row.Entitlements, &offer.Entitlements); err != nil {
 				return nil, err
 			}
 		}
