@@ -154,7 +154,9 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 }
 
 func TestCheckoutOrderRenewalAPIContract(t *testing.T) {
-	w := newWorld(t)
+	w := prepareWorld(t, 12)
+	w.selfService = true
+	w.start()
 	product, err := w.client[remote].CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "renewal-choice", DisplayName: "Order renewal", EntitlementsSpec: map[string]*int{"content:renewal-choice": nil},
 	})
