@@ -1144,7 +1144,7 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 			if payment, ok := paymentsByTxnID[t.TransactionID]; ok {
 				if payment.InvoiceID != nil && (payment.AmountCents != t.AmountCents || !strings.EqualFold(payment.Currency, t.Currency)) {
 					findings = append(findings, Finding{Provider: provider, Type: FindingChargeMissingLocal, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
-						LocalEvidence: map[string]any{"invoice_id": payment.InvoiceID.String(), "amount_cents": payment.AmountCents, "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
+						LocalEvidence: map[string]any{"invoice_id": payment.InvoiceID.String(), "amount_cents": strconv.FormatInt(payment.AmountCents, 10), "currency": payment.Currency}, RemoteEvidence: remoteTxnEvidence(t),
 						RecommendedAction: "provider charge contradicts the canonical invoice receipt; reconcile the exact operation before collection resumes"})
 				}
 				continue

@@ -859,6 +859,12 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.PriceID != priceID {
 				return errors.New("confirmed charge replay belongs to different accepted terms")
 			}
+			// This writer records the original financial fact without granting
+			// access. A later refund may already have changed its mutable status
+			// while the accepted operation still awaits policy-held cancellation.
+			if existing.Status == payments.PaymentStatusRefundedValue && existing.Amount == amount && strings.EqualFold(existing.Currency, currency) {
+				return nil
+			}
 			return validateCompletedPayment(existing, amount, currency)
 		}
 		if created && terminal {
