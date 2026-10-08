@@ -71,8 +71,8 @@ func (f *nmiBulkFake) fetch(t *testing.T, params FetchParams) *RemoteSnapshot {
 		}
 		f.queries = append(f.queries, r.Form)
 		page, _ := strconv.Atoi(r.Form.Get("page_number"))
-		if page >= 1 && page <= len(f.txnPages) {
-			fmt.Fprint(w, f.txnPages[page-1])
+		if page >= 0 && page < len(f.txnPages) {
+			fmt.Fprint(w, f.txnPages[page])
 			return
 		}
 		fmt.Fprint(w, `<?xml version="1.0"?><nm_response></nm_response>`)
@@ -183,6 +183,8 @@ func TestNMIFetcher(t *testing.T) {
 		require.Equal(t, []string{"", "1"}, f.cursors["subscriptions"])
 		require.Equal(t, []string{"", "1"}, f.cursors["customers"])
 		require.Len(t, f.queries, 2)
+		require.Empty(t, f.queries[0].Get("page_number"), "omitted page_number means first page (zero)")
+		require.Equal(t, "1", f.queries[1].Get("page_number"))
 		require.True(t, snap.Coverage.TransactionsPaginatedComplete)
 	})
 

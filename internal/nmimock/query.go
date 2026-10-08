@@ -96,7 +96,7 @@ func binFor(c Card) string {
 
 // search is the transaction report: every sale, validation and refund in
 // arrival order, filtered as NMI filters and paged by result_limit and
-// page_number (off when zero). Like NMI's, it names no schedule.
+// zero-based page_number. Like NMI's, it names no schedule.
 func (m *Mock) search(form url.Values) string {
 	match := func(field string, value string) bool {
 		want := form.Get(field)
@@ -161,7 +161,7 @@ func (m *Mock) search(form url.Values) string {
 	limit, _ := strconv.Atoi(form.Get("result_limit"))
 	page, _ := strconv.Atoi(form.Get("page_number"))
 	if limit > 0 {
-		from := min(max(page-1, 0)*limit, len(rows))
+		from := min(max(page, 0)*limit, len(rows))
 		rows = rows[from:min(from+limit, len(rows))]
 	}
 	var b strings.Builder
