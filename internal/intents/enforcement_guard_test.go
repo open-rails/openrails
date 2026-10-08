@@ -88,6 +88,7 @@ var providerWriteSurface = map[string]string{
 	"ConfirmRefund":                "read",
 	"ReadSaleEvidence":             "read",
 	"ReadInvoiceSaleEvidence":      "read",
+	"FindInvoiceSaleEvidence":      "read",
 	"PrepareRecurringSale":         "read",
 	"ReadRecurringSaleEvidence":    "read",
 	"AccountIdentity":              "read",
