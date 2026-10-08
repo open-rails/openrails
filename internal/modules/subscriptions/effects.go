@@ -44,9 +44,6 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 		switch e := effect.(type) {
 		case lifecycle.GrantPeriod:
 			granted = &e
-			if end := accessEnd(e.Start, sub.AccessDurationHoursSnapshot); end != nil && !end.After(now) {
-				continue
-			}
 			for name := range sub.EntitlementsSpecSnapshot {
 				grace, source := models.EntitlementSourceGrace, sub.ID
 				if err := ents.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &grace, SourceID: &source, Reason: models.EntitlementRevokeSuperseded}); err != nil {
@@ -188,5 +185,5 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
-	return s.switchTierAccess(ctx, d, sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
+	return nil // The caller grants the newly paid period from this snapshot.
 }

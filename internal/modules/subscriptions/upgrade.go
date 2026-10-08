@@ -139,6 +139,7 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 // subscription whose provider schedule was already moved to the new amount.
 // The subscription row, its rail reference and its period end are kept.
 type InPlaceTierChange struct {
+	AccessEndsAt        *time.Time
 	AccessDurationHours *int
 	SubscriptionID      uuid.UUID
 	FromPriceID         uuid.UUID
@@ -173,11 +174,13 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = c.PriceID, c.ProductID, nil
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(c.Entitlements)
-	sub.AccessDurationHoursSnapshot = c.AccessDurationHours
+	if c.AccessEndsAt == nil {
+		sub.AccessDurationHoursSnapshot = c.AccessDurationHours
+	}
 	if err := repo.UpdateAt(ctx, sub, c.At); err != nil {
 		return err
 	}
-	if err := s.switchTierAccess(ctx, txDB, sub, c.At, c.PeriodEnd); err != nil {
+	if err := s.switchTierAccess(ctx, txDB, sub, c.At, c.AccessEndsAt); err != nil {
 		return err
 	}
 	if c.Payment != nil {
@@ -188,13 +191,17 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 
 // switchTierAccess ends the subscription's access sources at `at` and opens
 // the current snapshot's features for [at, end).
-func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at, end time.Time) error {
+func (s *SubscriptionLifecycleService) switchTierAccess(ctx context.Context, txDB *db.DB, sub *models.Subscription, at time.Time, acceptedEnd *time.Time) error {
 	ent := s.newLifecycleEntitlementService(txDB)
 	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, at, models.EntitlementRevokeSuperseded, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
 		return err
 	}
 	for name := range sub.EntitlementsSpecSnapshot {
-		if _, err := ent.PushNewEntitlement(ctx, subscriptionAccess(sub, name, at)); err != nil {
+		grant := subscriptionAccess(sub, name, at)
+		if acceptedEnd != nil {
+			grant.EndsAt, grant.Indefinite = acceptedEnd, false
+		}
+		if _, err := ent.PushNewEntitlement(ctx, grant); err != nil {
 			return err
 		}
 	}

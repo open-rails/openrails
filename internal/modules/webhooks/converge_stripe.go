@@ -496,7 +496,7 @@ func (s *StripeConvergeService) revokeDowngradedEntitlements(ctx context.Context
 	entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
 	oldEnts := stripeEntitlementSet(oldSpec)
 	newEnts := stripeEntitlementSet(newSpec)
-	sourceType := models.EntitlementSourceSubscription
+	sourceType := models.EntitlementSourceGrace
 	sourceID := sub.ID
 	for entName := range oldEnts {
 		if newEnts[entName] {

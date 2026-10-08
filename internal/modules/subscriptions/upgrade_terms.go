@@ -20,6 +20,8 @@ const TypeNMIUpgrade = "nmi_upgrade"
 // RecurringAmount; a downgrade charges nothing, moves the amount (NMI bills it
 // from the next renewal) and schedules the local price for that renewal.
 type NMIUpgradePayload struct {
+	// AccessEndsAt preserves an already accepted pre-split partial-period upgrade.
+	AccessEndsAt              *time.Time              `json:"access_ends_at,omitempty"`
 	AccessDurationHours       *int                    `json:"access_duration_hours"`
 	Action                    string                  `json:"action"` // upgrade | downgrade
 	Instrument                charge.FrozenInstrument `json:"instrument"`
@@ -56,6 +58,9 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 	var p NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return p, err
+	}
+	if p.AccessEndsAt != nil && (!p.AccessEndsAt.Equal(p.PeriodEnd) || p.AccessDurationHours != nil) {
+		return p, errors.New("legacy accepted upgrade access contradicts its paid period")
 	}
 	if err := validateAccessDuration(p.AccessDurationHours); err != nil {
 		return p, err
@@ -99,8 +104,7 @@ func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if _, present := fields["access_duration_hours"]; !present {
-		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
-		decoded.AccessDurationHours = &hours
+		decoded.AccessEndsAt = &decoded.PeriodEnd
 	}
 	*p = NMIUpgradePayload(decoded)
 	return nil

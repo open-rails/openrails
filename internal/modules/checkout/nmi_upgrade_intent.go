@@ -549,7 +549,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if completion.committed {
 			return nil
 		}
-		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, Entitlements: p.Entitlements, AccessDurationHours: p.AccessDurationHours, Payment: payment, Downgrade: p.Downgrade()}
+		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, Entitlements: p.Entitlements, AccessDurationHours: p.AccessDurationHours, AccessEndsAt: p.AccessEndsAt, Payment: payment, Downgrade: p.Downgrade()}
 		if err := h.Checkout.Lifecycle.ChangeTierInPlaceTx(ctx, txDB, change); err != nil {
 			return err
 		}

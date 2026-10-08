@@ -55,10 +55,8 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 				return nil, err
 			}
 		}
-		if end := accessEnd(effects.PeriodStart, sub.AccessDurationHoursSnapshot); end == nil || end.After(s.now().UTC()) {
-			if _, err := entitlementsService.PushNewEntitlement(ctx, subscriptionAccess(sub, name, effects.PeriodStart)); err != nil {
-				return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
-			}
+		if _, err := entitlementsService.PushNewEntitlement(ctx, subscriptionAccess(sub, name, effects.PeriodStart)); err != nil {
+			return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
 		}
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
@@ -67,9 +65,9 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		}
 	}
 	if effects.RevokeRemoved {
-		// A benefit the new plan drops ends now, including the renewal grace
-		// the old plan pre-appended past its period.
-		for _, source := range []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace} {
+		// Dropped benefits stop receiving renewal grace. Prior paid grants
+		// retain their own duration, even when it exceeds the billing period.
+		for _, source := range []models.EntitlementSourceType{models.EntitlementSourceGrace} {
 			names, err := entitlementsService.ListDistinctEntitlementNamesBySource(ctx, source, sub.ID)
 			if err != nil {
 				return nil, err

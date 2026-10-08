@@ -45,7 +45,7 @@ func TestRenewalTermsBindCoverageWithoutAdmissionNoise(t *testing.T) {
 	boundary := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	p := SubscriptionCollectionPayload{PreviousPeriodEnd: boundary, AcceptedAt: boundary,
 		Renewal: RenewalTerms{SubscriptionID: uuid.New(), PriceID: uuid.New(), ProductID: uuid.New(), Amount: 1_000_000,
-			Currency: "USD", PeriodStart: boundary, PeriodEnd: boundary.Add(24 * time.Hour)}}
+			Currency: "USD", PeriodStart: boundary, PeriodEnd: boundary.Add(24 * time.Hour), AccessDurationHours: new(24)}}
 	p.OrderReference = ObligationOrderReference(p.Renewal.SubscriptionID, boundary)
 	terms, err := NewStripeRenewal(p)
 	require.NoError(t, err)
@@ -61,6 +61,8 @@ func TestRenewalTermsBindCoverageWithoutAdmissionNoise(t *testing.T) {
 		func(p *SubscriptionCollectionPayload) { p.Renewal.PeriodStart = p.Renewal.PeriodStart.Add(time.Minute) },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.PeriodEnd = p.Renewal.PeriodEnd.Add(time.Minute) },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.Amount++ },
+		func(p *SubscriptionCollectionPayload) { p.Renewal.AccessDurationHours = new(48) },
+		func(p *SubscriptionCollectionPayload) { p.Renewal.AccessDurationHours = nil },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.Currency = "EUR" },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.Entitlements = map[string]*int{"new_access": nil} },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.PriceID = uuid.New() },
@@ -79,7 +81,7 @@ func TestStripeRenewalTermsCanonicalVector(t *testing.T) {
 	downloads := 3
 	p := SubscriptionCollectionPayload{Renewal: RenewalTerms{
 		PriceID: uuid.MustParse("10000000-0000-0000-0000-000000000002"), ProductID: uuid.MustParse("10000000-0000-0000-0000-000000000003"),
-		Amount: 1_000_000, Currency: "USD", PeriodStart: start, PeriodEnd: start.Add(24 * time.Hour),
+		Amount: 1_000_000, Currency: "USD", PeriodStart: start, PeriodEnd: start.Add(24 * time.Hour), AccessDurationHours: new(24),
 		Entitlements: map[string]*int{"view": nil, "download": &downloads},
 	}}
 	terms, err := NewStripeRenewal(p)

@@ -112,3 +112,30 @@ func TestExplicitRevokeAfterCanceledBillingPeriod(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, effects, lifecycle.EndAccess{At: end.Add(time.Hour), Revoke: true}, "refund still revokes longer or perpetual access after recurrence has ended")
 }
+
+func TestAcceptedLegacyUpgradeRetainsPartialPeriodAccess(t *testing.T) {
+	var legacy NMIUpgradePayload
+	require.NoError(t, json.Unmarshal([]byte(`{"period_start":"2026-10-08T12:45:00Z","period_end":"2026-10-08T13:00:00Z"}`), &legacy))
+	require.Nil(t, legacy.AccessDurationHours, "an accepted fifteen-minute remainder is never rounded to zero hours")
+	require.Equal(t, legacy.PeriodEnd, *legacy.AccessEndsAt)
+	raw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	var restored NMIUpgradePayload
+	require.NoError(t, json.Unmarshal(raw, &restored))
+	require.Equal(t, legacy, restored, "retries retain the original accepted access end")
+	var indefinite NMIUpgradePayload
+	require.NoError(t, json.Unmarshal([]byte(`{"period_start":"2026-10-08T12:45:00Z","period_end":"2026-10-08T13:00:00Z","access_duration_hours":null}`), &indefinite))
+	require.Nil(t, indefinite.AccessEndsAt, "explicit null is independent of the billing boundary")
+}
+
+func TestLatePaidPeriodRetainsExpiredAccessHistory(t *testing.T) {
+	start := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
+	now := start.Add(48 * time.Hour)
+	recorded := &recordedAccess{}
+	svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(now), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return recorded }}
+	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: new(24), EntitlementsSpecSnapshot: map[string]*int{"premium": nil}}
+	_, err := svc.ApplyEffects(t.Context(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: start.Add(720 * time.Hour)}}, now, EffectOptions{})
+	require.NoError(t, err)
+	require.Len(t, recorded.grants, 1, "late settlement still records what was bought")
+	require.Equal(t, start.Add(24*time.Hour), *recorded.grants[0].EndsAt, "it never invents fresh access from settlement time")
+}
