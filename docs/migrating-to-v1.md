@@ -284,6 +284,12 @@ fields (`400 unknown_field`), and every error code is in
   `payment_token` or `card`, and `billing_details` (`name`, `email`, `phone`,
   `address`), and answers 201. A save the PSP refuses is 502
   `payment_provider_rejected`.
+- **Product entitlements.** `entitlements_spec` maps are replaced by
+  `entitlements: ["course:101", "premium"]`. These are opaque strings with no
+  content/service classification or per-key duration. Set access duration on
+  the price. An omitted product update preserves the list; `[]` clears it;
+  `null`, maps, duplicates and blank keys are refused. Existing paid grants and
+  historical accepted purchase durations are preserved by migration.
 - **Prices.** One `Price`: `product_id`, `archived`, `access_duration_hours`
   (null: for good), `billing_interval_hours` (null: one-time), `psps`.
   Price `auto_renew` is removed. Existing recurring prices migrate their former
