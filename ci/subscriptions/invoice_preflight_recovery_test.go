@@ -109,7 +109,8 @@ func TestInvoicePreflightHoldsVisibleUnknownUntilPositiveReceipt(t *testing.T) {
 	t.Cleanup(w.nmi.ClearIntercepts)
 	answer := payNMIInvoice(t.Context(), w, c, invoice, method, "visible-unknown")
 	require.NoError(t, answer.err)
-	require.GreaterOrEqual(t, answer.status, 400, string(answer.body))
+	require.Equal(t, http.StatusServiceUnavailable, answer.status, string(answer.body))
+	require.Contains(t, string(answer.body), `"code":"service_unavailable"`)
 	require.Empty(t, w.nmi.Attempts(), "visible uncertainty is not absence and never authorizes another sale")
 	var operations int
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
