@@ -88,11 +88,11 @@ access; null `access_duration_hours` gives indefinite access:
 
 ```yaml
       - key: course-101
-        display_name: Course 101
+        display_name: Course 101 — Intro to CSS
         entitlements: ["course:101"]
         prices:
-          - key: course-101-usd
-            amount: 20 USD
+          - key: purchase
+            amount: 4.99 USD
             access_duration_hours: null
             billing_interval_hours: null
 ```

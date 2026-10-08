@@ -131,7 +131,7 @@ also accepted; use only one form of each field.
 access content now. That includes individual purchases, bundles and unexpired
 rentals. `ListProductAccess` identifies the product actually acquired and its
 expiry: a bundle purchase records the bundle product, while its entitlement
-grants unlock the constituent posts. Current access alone does not prove a
+grants unlock the constituent courses. Current access alone does not prove a
 permanent purchase. Refunds and revocations can withdraw granted access.
 
 **Billing and access.** `billing_interval` sets the time between payments. A
@@ -291,8 +291,8 @@ products:
     archived: true
 ```
 
-The bundle stops selling, while existing buyers keep access to both posts. The
-individual post products and the membership products are omitted and stay
+The bundle stops selling, while existing buyers keep access to both courses. The
+individual course products and the membership product are omitted and stay
 unchanged. Archiving one product does not retire other products granting the same
 keys. To make the bundle available again, apply a new batch:
 
@@ -546,16 +546,16 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// The host decides which key grants access to each post. Paid posts stay
-	// separate from membership-included posts; a bundle grants both paid keys.
-	postAccess := map[string]string{
+	// The host decides which key grants access to each content item. Paid courses
+	// stay separate from membership-included posts; the bundle grants both course keys.
+	contentAccess := map[string]string{
 		"101": "course:101",
 		"102": "course:102",
 		"103": "channel:main:membership",
 	}
 	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
 		id := c.Param("id")
-		entitlement, exists := postAccess[id]
+		entitlement, exists := contentAccess[id]
 		if !exists {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
@@ -719,7 +719,7 @@ function BuyButton({ productKey, priceKey, label }: { productKey: string; priceK
 
 After a bundle checkout, the same `course:101` and `course:102` checks used for
 individual purchases allow both pieces of content. A rental makes its course accessible until
-expiry. Either membership product allows membership-included post 103 through
+expiry. Either membership price allows membership-included post 103 through
 `channel:main:membership`; it does not mark courses 101 and 102 as purchased. Failed
 renewals follow the configured dunning policy, and `AccountBilling` lets members
 fix their payment method.
@@ -847,7 +847,7 @@ Customer side (your users):
 
 ### Checkout catalog references
 
-Use a stable product/price key pair such as `post-123.purchase`. `ApplyCatalog` changes its terms by
+Use a stable product/price key pair such as `course-101.purchase`. `ApplyCatalog` changes its terms by
 creating an immutable price version and retiring its predecessor. Checkout owns
 current availability, amount, permanent ownership eligibility and payment
 idempotency; a host wrapper supplies verified identity and its content policy.

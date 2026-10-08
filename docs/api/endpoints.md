@@ -86,7 +86,7 @@ checkout, config}`: `flow` is `tokenize`, `elements`, `redirect` or `wallet`,
 values that are public by nature (an NMI `tokenization_key`, a Stripe
 `publishable_key`, a Basis Theory `public_api_key`). With a Solana PSP armed,
 `solana` carries the network and accepted tokens. The merchant's
-`GET /v1/merchant/checkout-config` adds, for a `price_id` or `price_key`, the
+`GET /v1/merchant/checkout-config` adds, for a `price_id` or a `product_key` and `price_key`, the
 `options` that can sell that price.
 
 ## Subscriptions

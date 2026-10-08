@@ -141,7 +141,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `PriceKey`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
+| `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `ProductKey` + `PriceKey`, `AutoRenew`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
 | `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | `client.CreateCheckoutAttempt(` (creating it accepts the terms), `client.GetCheckoutAttempt(`, `client.ConfirmCheckoutAttempt(` (Solana) |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
 | `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey`; `GetCheckoutConfig(ctx)` | `client.GetCheckoutConfig(` with `billing.GetCheckoutConfigParams`; a price in the query fills `options` |
