@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -211,6 +212,13 @@ func fieldsOf(t reflect.Type) []field {
 		}
 	}
 	walk(t)
+	// ApplyPrice accepts these input aliases through UnmarshalJSON and writes
+	// only normalized *_hours fields. Reflection alone cannot see the aliases.
+	if t == reflect.TypeFor[catalog.ApplyPrice]() {
+		for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
+			out = append(out, field{name: name, t: reflect.TypeFor[string](), optional: true, nullable: true})
+		}
+	}
 	return out
 }
 

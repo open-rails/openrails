@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
@@ -137,6 +138,22 @@ func (m *model) objectSchema(o *object) *obj {
 		}
 	}
 	s := newObj("type", "object", "properties", props)
+	if o.t == reflect.TypeFor[catalog.ApplyPrice]() {
+		var aliases []any
+		for _, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
+			props.set(name, newObj("oneOf", []any{
+				newObj("type", "string", "description", "A positive whole number of hours, days, or weeks; for example, 72 hours or 3 days. Normalized to "+name+"_hours. Calendar months and years are not supported."),
+				newObj("type", "null"),
+			}))
+			props.set(name+"_hours", newObj("oneOf", []any{
+				newObj("type", "integer", "minimum", 1, "maximum", catalog.MaxDurationHours),
+				newObj("type", "null"),
+			}))
+			aliases = append(aliases, newObj("not", newObj("required", []string{name, name + "_hours"})))
+		}
+		s.set("allOf", aliases)
+		s.set("description", "Omitted fields preserve existing terms on updates. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive.")
+	}
 	if len(required) > 0 {
 		s.set("required", required)
 	}
