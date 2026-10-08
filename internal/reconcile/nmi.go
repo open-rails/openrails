@@ -297,14 +297,24 @@ func qualifyNMITransaction(t nmi.QueryTransaction) error {
 }
 
 func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
-	// A voided or fully refunded sale paid nothing: its sale is neither a
-	// payment nor a decline. Its refunds stay visible to the refund plane.
+	// A reversed sale is neither a payment nor a decline. A void must still
+	// be observed: a retained local allocation may need reconciliation. Keep
+	// its original sale reference, amount and date, not an invented refund.
 	reversed := t.Reversed()
+	voided := strings.EqualFold(strings.TrimSpace(t.Condition), "canceled")
+	for _, action := range t.Actions {
+		voided = voided || action.Is("void") && action.Succeeded()
+	}
+	voidRecorded := false
 	var out []RemoteTransaction
 	for _, a := range t.Actions {
 		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
 		if ok && reversed && txnType == TransactionTypeSale {
-			continue
+			amount, err := nmi.ParseAmountMinor(a.Amount, t.Currency)
+			if !voided || voidRecorded || !a.Succeeded() || err != nil || amount <= 0 {
+				continue
+			}
+			txnType, voidRecorded = TransactionTypeVoid, true
 		}
 		if !ok {
 			// settle/check/void/etc. — settlement plumbing, not a
@@ -333,6 +343,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"customer_vault_id": strings.TrimSpace(t.CustomerVaultID),
 				"email":             strings.TrimSpace(t.Email),
 				"action":            a,
+				"actions":           t.Actions,
 			}),
 		}
 		if minor, err := nmi.ParseAmountMinor(a.Amount, t.Currency); err == nil {

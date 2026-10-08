@@ -1163,6 +1163,22 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 		}
 
 		switch t.Type {
+		case TransactionTypeVoid:
+			if !t.Success || t.TransactionID == "" || t.AmountCents <= 0 {
+				continue
+			}
+			known := paymentsByTxnID[t.TransactionID]
+			// NMI same-ID partial refunds can mark the original "refunded"
+			// without a full reversal allocation. Status alone cannot clear this.
+			finding := Finding{Provider: provider, Type: FindingReversalUnlinked, SubjectKey: t.TransactionID, Severity: SeverityHigh, Status: FindingStatusRequiresReview, RequiresAdmin: true,
+				RemoteEvidence: remoteTxnEvidence(t), RecommendedAction: "provider reports a voided sale; reconcile its retained or missing billing allocation before collection resumes; observation does not create a refund"}
+			if known != nil {
+				finding.LocalEvidence = map[string]any{"payment_id": known.ID.String(), "status": known.Status, "amount_cents": strconv.FormatInt(known.AmountCents, 10), "currency": known.Currency}
+				if known.InvoiceID != nil {
+					finding.LocalEvidence["invoice_id"] = known.InvoiceID.String()
+				}
+			}
+			findings = append(findings, finding)
 		case TransactionTypeSale:
 			if !t.Success || t.TransactionID == "" {
 				continue
