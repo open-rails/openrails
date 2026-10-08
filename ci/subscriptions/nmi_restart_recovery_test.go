@@ -322,17 +322,27 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			// completed monthly job: billing cadence must outlive this queue GC.
 			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`))
 			require.NoError(t, err)
-			var before int64
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(max(id),0) FROM billing.river_job`)).Scan(&before))
+			var completed int
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed))
+			require.Zero(t, completed, "GC removed every completed monthly scan")
+			var retainedPeriod, retainedCompletion time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&retainedPeriod, &retainedCompletion))
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
 			require.NoError(t, err)
 			third := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			// Startup may reuse the original monthly job, still waiting on its
+			// one-minute readonly snooze or recovery retry. Its ID need not be
+			// new. With old completions gone, any completed scan proves that the
+			// restarted worker checked the durable cadence after queue GC.
 			require.Eventually(t, func() bool {
 				var passes int
-				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND id>$1 AND state='completed'`), before).Scan(&passes)
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&passes)
 				return err == nil && passes > 0
-			}, 30*time.Second, 50*time.Millisecond, "the replacement monthly job has checked retained cadence")
+			}, 90*time.Second, 50*time.Millisecond, "a post-GC monthly scan has checked retained cadence")
 			third.kill(t)
+			var checkedPeriod, checkedCompletion time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&checkedPeriod, &checkedCompletion))
+			require.True(t, retainedPeriod.Equal(checkedPeriod) && retainedCompletion.Equal(checkedCompletion), "post-GC scanning preserves the completed billing cadence")
 			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
 			w.start()
 			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
