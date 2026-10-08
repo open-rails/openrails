@@ -348,9 +348,10 @@ atomically and makes no provider calls. It does not overwrite an existing
 catalog or reprice subscriptions. Repeating the same successful restore is a
 no-op, even after later catalog edits.
 
-Payments, subscriptions, grants and balances are not catalog records. Use the
-[merchant archive](internal/merchantarchive/README.md) to back up and restore that
-complete billing state together with its catalog.
+Payments, subscriptions, grants and balances are not included in a catalog
+snapshot. The [merchant archive](internal/merchantarchive/README.md) covers
+financial state and its referenced catalog; review its documented exclusions
+before a whole billing migration.
 
 For an editable declaration containing only current, unarchived offers, use the
 lighter dump/apply workflow instead:
