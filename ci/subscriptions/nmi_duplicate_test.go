@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // nmiDupWindow is the duplicate window the fake NMI applies in these rows.
@@ -158,19 +157,24 @@ func TestTinyBookCancellationConverges(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
-	book := w.mirrorBook(embedded, w.bookTier("monthly", 999, 30), 4)
-	// Another schedule stays live at NMI, so the roster is non-empty.
-	vault := w.nmi.AddVault(mastercard)
-	w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "legacy_plan_other", Amount: "9.99", NextBilling: w.clock.Now().Add(20 * day)})
-	for _, l := range book {
+	book := w.mirrorBook(embedded, w.bookTier("monthly", 999, 30), 5)
+	// A known fifth membership keeps the roster non-empty without adding an
+	// unrelated unimported provider book that must hold financial recovery.
+	keeper, ended := book[0], book[1:]
+	w.refreshProviders()
+	w.settleCollectionScans()
+	for _, l := range ended {
 		w.nmi.DeleteSchedule(l.railSub)
 	}
 	w.advance(time.Hour)
 	w.pull()
-	for _, l := range book {
+	for _, l := range ended {
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 	}
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, keeper.sub).Status)
+	require.True(t, w.nmi.ScheduleLive(keeper.railSub))
+	require.Zero(t, w.nmi.ScheduleDeletes(keeper.railSub))
 	require.Empty(t, w.openFindings("pull.cancellation.capped"))
 	require.Zero(t, len(w.nmi.Attempts()))
 }
