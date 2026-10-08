@@ -52,7 +52,7 @@ test("seeded customer lists and manages their own billing", async ({
       currency: "USD",
       subscription_id: sub.id,
       price: expect.objectContaining({
-        auto_renew: true,
+        billing_interval_hours: 720,
         access_duration_hours: 720,
       }),
       product: expect.objectContaining({ display_name: "Membership" }),

@@ -27,6 +27,7 @@ export function subscription(overrides: Partial<Row> = {}): Row {
     payments: undefined,
     cancel_portal_url: undefined,
     current_period_ends_at: "2036-09-16T12:00:00Z",
+    access: { starts_at: "2036-08-17T12:00:00Z", ends_at: "2036-09-16T12:00:00Z" },
     price: {
       ...subscriptionFixture.price,
       unit_amount: "9990000",
@@ -83,10 +84,10 @@ export function payment(overrides: Partial<Row> = {}): Row {
   } as Row
 }
 
-/** A wire price: hours of access, renewing when autoRenew. */
+/** A wire price with separate billing and access durations. */
 export function price(
   hours: number | null,
-  autoRenew: boolean,
+  billingHours: number | null,
   overrides: Partial<Row> = {}
 ): Row {
   return {
@@ -97,7 +98,7 @@ export function price(
     unit_amount: "19990000",
     currency: "USD",
     access_duration_hours: hours,
-    auto_renew: autoRenew,
+    billing_interval_hours: billingHours,
     trial_unit_amount: null,
     trial_duration_hours: null,
     psps: {},
@@ -128,7 +129,7 @@ export function product(overrides: Partial<Row> = {}): Row {
         unit_amount: "19990000",
         currency: "USD",
         access_duration_hours: 720,
-        auto_renew: true,
+        billing_interval_hours: 720,
         trial_unit_amount: null,
         trial_duration_hours: null,
         psps: { mobius: { status: "linked", ids: null, sync_status: "unknown" } },

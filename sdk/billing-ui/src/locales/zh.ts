@@ -45,6 +45,7 @@ export const zh: BillingUiMessageBundle = {
       week: { other: "{count} 周访问权限" },
     },
     once: "一次性",
+    permanent: "无预定到期时间的访问权限",
   },
   subscriptions: {
     title: "订阅",
@@ -55,6 +56,7 @@ export const zh: BillingUiMessageBundle = {
     fallbackName: "订阅",
     renews: "{date} 续订",
     endsOn: "可使用至 {date}",
+    noMorePayments: "不再付款",
     endedOn: "已于 {date} 结束",
     pastDue: "付款失败。请更新你的银行卡以保留访问权限。",
     cancel: "取消订阅",
@@ -78,9 +80,8 @@ export const zh: BillingUiMessageBundle = {
   },
   cancel: {
     title: "取消 {name}？",
-    description:
-      "除非服务商提前终止，你可以使用到当前计费周期结束。在此之前可以随时恢复。",
-    solanaDescription: "你的钱包将签署链上取消。访问权限保留到已付费周期结束。",
+    description: "停止后续付款。已购买的访问权限予以保留。",
+    solanaDescription: "你的钱包将签署链上取消交易。已购买的访问权限予以保留。",
     reasonLabel: "为什么要取消？",
     reasonPlaceholder: "你的反馈能帮助我们改进。",
     reasonHint: "{count}/{max}",

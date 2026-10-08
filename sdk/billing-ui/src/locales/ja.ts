@@ -45,6 +45,7 @@ export const ja: BillingUiMessageBundle = {
       week: { other: "{count}週間のアクセス" },
     },
     once: "買い切り",
+    permanent: "有効期限のないアクセス",
   },
   subscriptions: {
     title: "サブスクリプション",
@@ -55,6 +56,7 @@ export const ja: BillingUiMessageBundle = {
     fallbackName: "サブスクリプション",
     renews: "{date}に更新",
     endsOn: "{date}まで利用可能",
+    noMorePayments: "今後の支払いはありません",
     endedOn: "{date}に終了",
     pastDue:
       "お支払いに失敗しました。引き続き利用するにはカードを更新してください。",
@@ -79,10 +81,8 @@ export const ja: BillingUiMessageBundle = {
   },
   cancel: {
     title: "{name}を解約しますか？",
-    description:
-      "プロバイダーが早期に終了しない限り、現在の請求期間の終わりまで利用できます。それまでは再開できます。",
-    solanaDescription:
-      "ウォレットでオンチェーンの解約に署名します。支払い済みの期間が終わるまで利用できます。",
+    description: "今後の支払いは停止します。購入済みのアクセスは維持されます。",
+    solanaDescription: "ウォレットでオンチェーンの解約に署名します。購入済みのアクセスは維持されます。",
     reasonLabel: "解約の理由を教えてください",
     reasonPlaceholder: "ご意見はサービス改善に役立てます。",
     reasonHint: "{count}/{max}",

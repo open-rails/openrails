@@ -150,7 +150,7 @@ export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> =
 })
 export const aPrice = (id: string, productId: string, overrides: Partial<Price> = {}): Price => ({
   id, key: id, revision: 0, product_id: productId, archived: false, currency: "USD",
-  unit_amount: "20000000", access_duration_hours: 720, auto_renew: true, trial_unit_amount: null, trial_duration_hours: null,
+  unit_amount: "20000000", access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: null, trial_duration_hours: null,
   psps: {}, pending_manual_actions: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,
 })

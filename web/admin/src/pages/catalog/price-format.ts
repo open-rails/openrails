@@ -1,12 +1,9 @@
 import type { Price } from "@/lib/api/generated/wire"
 import { formatNativeAmount } from "@/lib/format"
 
-// Access duration is stored in hours because that is the unit the engine
-// charges on. Nobody reads "744h" as a month, so whole days, weeks and months
-// are named; anything that does not divide evenly keeps its hours.
+// Durations are fixed hours; whole weeks and days get exact readable labels.
 export function durationLabel(hours: number): string {
   const units: [number, string][] = [
-    [720, "month"],
     [168, "week"],
     [24, "day"],
   ]
@@ -23,12 +20,10 @@ export function durationLabel(hours: number): string {
 // catalog list and the #777 price-change wizard so "currency + interval
 // locked" always reads identically in both places.
 export function priceIntervalLabel(
-  price: Pick<Price, "auto_renew" | "access_duration_hours">
+  price: Pick<Price, "billing_interval_hours" | "access_duration_hours">
 ): string {
-  if (price.auto_renew) {
-    return price.access_duration_hours
-      ? `every ${durationLabel(price.access_duration_hours)}`
-      : "every period"
+  if (price.billing_interval_hours) {
+    return `every ${durationLabel(price.billing_interval_hours)}`
   }
   if (price.access_duration_hours) {
     return `${durationLabel(price.access_duration_hours)} once`

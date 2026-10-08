@@ -199,10 +199,10 @@ describe("money submitted by console forms", () => {
   })
 
   it("reads a price as a cadence or a stretch of access", () => {
-    expect([durationLabel(720), durationLabel(168), durationLabel(36)]).toEqual(["1 month", "1 week", "36 hours"])
-    expect(priceIntervalLabel({ auto_renew: true, access_duration_hours: 744 })).toBe("every 31 days")
-    expect(priceIntervalLabel({ auto_renew: false, access_duration_hours: 48 })).toBe("2 days once")
-    expect(priceIntervalLabel({ auto_renew: false, access_duration_hours: null })).toBe("one-time")
+    expect([durationLabel(720), durationLabel(168), durationLabel(36)]).toEqual(["30 days", "1 week", "36 hours"])
+    expect(priceIntervalLabel({ billing_interval_hours: 744, access_duration_hours: 48 })).toBe("every 31 days")
+    expect(priceIntervalLabel({ billing_interval_hours: null, access_duration_hours: 48 })).toBe("2 days once")
+    expect(priceIntervalLabel({ billing_interval_hours: null, access_duration_hours: null })).toBe("one-time")
   })
 })
 

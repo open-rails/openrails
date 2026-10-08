@@ -45,6 +45,7 @@ export const de: BillingUiMessageBundle = {
       week: { one: "1 Woche Zugang", other: "{count} Wochen Zugang" },
     },
     once: "einmalig",
+    permanent: "Zugriff ohne geplantes Ablaufdatum",
   },
   subscriptions: {
     title: "Abonnements",
@@ -55,6 +56,7 @@ export const de: BillingUiMessageBundle = {
     fallbackName: "Abonnement",
     renews: "Verlängert sich am {date}",
     endsOn: "Zugriff bis {date}",
+    noMorePayments: "Keine weiteren Zahlungen",
     endedOn: "Beendet am {date}",
     pastDue:
       "Zahlung fehlgeschlagen. Aktualisiere deine Karte, um den Zugriff zu behalten.",
@@ -80,10 +82,8 @@ export const de: BillingUiMessageBundle = {
   },
   cancel: {
     title: "{name} kündigen?",
-    description:
-      "Du behältst den Zugriff bis zum Ende des laufenden Abrechnungszeitraums, sofern der Anbieter ihn nicht früher beendet. Bis dahin kannst du fortsetzen.",
-    solanaDescription:
-      "Deine Wallet signiert eine On-Chain-Kündigung. Der Zugriff bleibt bis zum Ende des bezahlten Zeitraums bestehen.",
+    description: "Künftige Zahlungen werden eingestellt. Bereits gekaufter Zugriff bleibt bestehen.",
+    solanaDescription: "Deine Wallet signiert eine On-Chain-Kündigung. Bereits gekaufter Zugriff bleibt bestehen.",
     reasonLabel: "Warum kündigst du?",
     reasonPlaceholder: "Dein Feedback hilft uns, besser zu werden.",
     reasonHint: "{count}/{max}",

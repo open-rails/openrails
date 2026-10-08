@@ -38,14 +38,12 @@ export function formatMoney(
 
 /** "every 30 days", "30 days of access" or "one-time". */
 export function intervalLabel(
-  price: Pick<Price, "access_duration_hours" | "auto_renew"> | null | undefined,
+  price: Pick<Price, "access_duration_hours" | "billing_interval_hours"> | null | undefined,
   m: Translator
 ): string | null {
   if (!price) return null
-  const hours = price.access_duration_hours
-  if (price.auto_renew === false)
-    return accessLabel(hours, m) ?? m.t("interval.once")
-  return everyLabel(hours, m)
+  if (price.billing_interval_hours) return everyLabel(price.billing_interval_hours, m)
+  return accessLabel(price.access_duration_hours, m) ?? m.t("interval.once")
 }
 
 export function subscriptionName(s: Subscription, { t }: Translator): string {
@@ -61,13 +59,13 @@ export function paymentItem(
   p: Payment,
   m: Translator
 ): { name: string; detail: string | null } {
-  const recurring = !!p.price?.auto_renew || !!p.subscription_id
+  const recurring = !!p.price?.billing_interval_hours || !!p.subscription_id
   const name =
     p.product?.display_name?.trim() ||
     m.t(recurring ? "history.subscription" : "history.purchase")
   return {
     name,
-    detail: recurring ? everyLabel(p.price?.access_duration_hours, m) : null,
+    detail: recurring ? everyLabel(p.price?.billing_interval_hours, m) : null,
   }
 }
 
@@ -105,14 +103,14 @@ export const LIVE_STATUSES = new Set([
 const future = (at: string | null | undefined) =>
   !!at && new Date(at).getTime() > Date.now()
 
-/** Still grants access: live, or canceled with the paid period running. */
+/** A current subscription, or a canceled subscription retaining paid access. */
 export const isLive = (s: Subscription) =>
   LIVE_STATUSES.has(s.status) ||
   (s.status === "canceled" &&
     (!!s.cancel_scheduled || !!s.resumable) &&
-    future(s.current_period_ends_at))
+    (s.access ? !s.access.ends_at || future(s.access.ends_at) : future(s.current_period_ends_at)))
 
-/** Access ends at period end and nothing renews it. */
+/** Future billing has stopped or cancellation is scheduled. */
 export const isEnding = (s: Subscription) =>
   isLive(s) && (!!s.cancel_scheduled || s.status === "canceled")
 

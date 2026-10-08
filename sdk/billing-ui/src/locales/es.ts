@@ -45,6 +45,7 @@ export const es: BillingUiMessageBundle = {
       week: { one: "1 semana de acceso", other: "{count} semanas de acceso" },
     },
     once: "pago único",
+    permanent: "Acceso sin vencimiento programado",
   },
   subscriptions: {
     title: "Suscripciones",
@@ -55,6 +56,7 @@ export const es: BillingUiMessageBundle = {
     fallbackName: "Suscripción",
     renews: "Se renueva el {date}",
     endsOn: "Acceso hasta el {date}",
+    noMorePayments: "No habrá más pagos",
     endedOn: "Finalizó el {date}",
     pastDue: "El pago falló. Actualiza tu tarjeta para mantener el acceso.",
     cancel: "Cancelar",
@@ -79,10 +81,8 @@ export const es: BillingUiMessageBundle = {
   },
   cancel: {
     title: "¿Cancelar {name}?",
-    description:
-      "Conservas el acceso hasta el final del periodo de facturación actual, salvo que el proveedor lo termine antes. Puedes reanudarla hasta entonces.",
-    solanaDescription:
-      "Tu billetera firma una cancelación en cadena. El acceso se mantiene hasta que termine el periodo pagado.",
+    description: "Se detienen los pagos futuros. Conservas el acceso ya adquirido.",
+    solanaDescription: "Tu cartera firma una cancelación en la cadena. Conservas el acceso ya adquirido.",
     reasonLabel: "¿Por qué cancelas?",
     reasonPlaceholder: "Tus comentarios nos ayudan a mejorar.",
     reasonHint: "{count}/{max}",

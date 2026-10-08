@@ -705,8 +705,7 @@ function PriceDialog({ products }: { products: Product[] }) {
       amount: "",
       currency: "USD",
       durationHours: "",
-      // Off by default because the duration it renews over starts empty.
-      autoRenew: false,
+      billingHours: "",
     },
     onSubmit: async ({ value }) => {
       const unitAmount = nativeAmountFromInput(value.amount, value.currency)
@@ -719,7 +718,9 @@ function PriceDialog({ products }: { products: Product[] }) {
           ...(value.durationHours
             ? { access_duration_hours: Number(value.durationHours) }
             : {}),
-          auto_renew: value.autoRenew,
+          ...(value.billingHours
+            ? { billing_interval_hours: Number(value.billingHours) }
+            : {}),
         })
         form.reset()
         toast.success("Price created")
@@ -871,44 +872,41 @@ function PriceDialog({ products }: { products: Product[] }) {
                     min="1"
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(event) => {
-                      // Renewal has nothing to renew without a duration, and
-                      // the engine rejects that pair, so the switch follows.
-                      if (!event.target.value.trim()) {
-                        form.setFieldValue("autoRenew", false)
-                      }
-                      field.handleChange(event.target.value)
-                    }}
+                    onChange={(event) => field.handleChange(event.target.value)}
                   />
                 </Field>
               )}
             </form.Field>
-            <form.Subscribe selector={(state) => state.values.durationHours}>
-              {(durationHours) => (
-                <form.Field name="autoRenew">
-                  {(field) => (
-                    <div className="grid gap-1.5 rounded-md border p-3">
-                      <div className="flex items-center justify-between gap-4">
-                        <Label htmlFor="pr-renew" className="font-normal">
-                          Charge the customer again each period
-                        </Label>
-                        <Switch
-                          id="pr-renew"
-                          checked={field.state.value}
-                          disabled={!durationHours.trim()}
-                          onCheckedChange={field.handleChange}
-                        />
-                      </div>
-                      {durationHours.trim() ? null : (
-                        <p className="text-[13px] text-muted-foreground">
-                          Set an access duration to charge again each period.
-                        </p>
-                      )}
-                    </div>
+            <form.Field name="billingHours">
+              {(field) => (
+                <div className="grid gap-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label htmlFor="pr-renew">Recurring billing</Label>
+                    <Switch
+                      id="pr-renew"
+                      checked={!!field.state.value}
+                      onCheckedChange={(checked) => field.handleChange(checked ? "720" : "")}
+                    />
+                  </div>
+                  {field.state.value ? (
+                    <Field label="Billing interval" id="pr-billing" hint="Hours between payments, until the customer cancels.">
+                      <Input
+                        id="pr-billing"
+                        type="number"
+                        min="1"
+                        step="1"
+                        required
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                    </Field>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">One-time payment.</p>
                   )}
-                </form.Field>
+                </div>
               )}
-            </form.Subscribe>
+            </form.Field>
           </div>
           <DialogFooter>
             <Button

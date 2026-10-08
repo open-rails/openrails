@@ -14,8 +14,8 @@ import { priceSchema, productSchema, subscriptionSchema } from "./types"
 
 describe("wire fixtures", () => {
   it("preserves catalog revisions and accepts prices from older servers", () => {
-    expect(priceSchema.parse(price(720, true, { revision: 2 })).revision).toBe(2)
-    expect(priceSchema.parse(price(720, true)).revision).toBeUndefined()
+    expect(priceSchema.parse(price(720, 720, { revision: 2 })).revision).toBe(2)
+    expect(priceSchema.parse(price(720, 720)).revision).toBeUndefined()
     expect(productSchema.parse(product({ revision: 3 })).revision).toBe(3)
     expect(productSchema.parse(product()).revision).toBeUndefined()
   })

@@ -74,7 +74,7 @@ export const pspLinkStateSchema = z.object({
 /**
  * A catalog price (`GET /prices`, embedded in a product): `unit_amount` of
  * `currency` for `access_duration_hours` of access (null: for good),
- * renewing when `auto_renew`.
+ * charging every `billing_interval_hours` (null: one-time).
  */
 export const priceSchema = z.object({
   id: z.string(),
@@ -90,7 +90,7 @@ export const priceSchema = z.object({
     .nullish(),
   currency: z.string(),
   access_duration_hours: z.number().nullable(),
-  auto_renew: z.boolean(),
+  billing_interval_hours: z.number().nullable(),
   trial_unit_amount: amount.nullable(),
   trial_duration_hours: z.number().nullable(),
   /** Keyed by PSP key. */
@@ -165,6 +165,7 @@ export const subscriptionSchema = z.object({
   /** `reversible | destructive | external_portal` */
   cancel_mode: z.string().nullish(),
   cancel_portal_url: z.string().nullish(),
+  access: z.object({ starts_at: time, ends_at: time.nullish() }).nullish(),
   grace_ends_at: time.nullish(),
   next_retry_at: time.nullish(),
   price: priceSchema.nullish(),

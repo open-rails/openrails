@@ -44,6 +44,7 @@ export const en = {
       week: { one: "1 week of access", other: "{count} weeks of access" },
     },
     once: "one-time",
+    permanent: "Access with no scheduled expiry",
   },
   subscriptions: {
     title: "Subscriptions",
@@ -54,6 +55,7 @@ export const en = {
     fallbackName: "Subscription",
     renews: "Renews {date}",
     endsOn: "Access until {date}",
+    noMorePayments: "No further payments",
     endedOn: "Ended {date}",
     pastDue: "Payment failed. Update your card to keep access.",
     cancel: "Cancel",
@@ -78,9 +80,9 @@ export const en = {
   cancel: {
     title: "Cancel {name}?",
     description:
-      "You keep access until the end of the current billing period unless the provider ends it sooner. You can resume before then.",
+      "Future payments stop. You keep access already purchased.",
     solanaDescription:
-      "Your wallet signs an on-chain cancellation. Access remains until the paid period ends.",
+      "Your wallet signs an on-chain cancellation. You keep access already purchased.",
     reasonLabel: "Why are you cancelling?",
     reasonPlaceholder: "Your feedback helps us improve.",
     reasonHint: "{count}/{max}",

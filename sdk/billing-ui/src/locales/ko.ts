@@ -45,6 +45,7 @@ export const ko: BillingUiMessageBundle = {
       week: { other: "{count}주 이용" },
     },
     once: "일회성",
+    permanent: "예정된 만료일이 없는 이용권",
   },
   subscriptions: {
     title: "구독",
@@ -55,6 +56,7 @@ export const ko: BillingUiMessageBundle = {
     fallbackName: "구독",
     renews: "{date}에 갱신",
     endsOn: "{date}까지 이용 가능",
+    noMorePayments: "추가 결제 없음",
     endedOn: "{date}에 종료됨",
     pastDue: "결제에 실패했습니다. 계속 이용하려면 카드를 업데이트하세요.",
     cancel: "해지",
@@ -78,10 +80,8 @@ export const ko: BillingUiMessageBundle = {
   },
   cancel: {
     title: "{name}을(를) 해지할까요?",
-    description:
-      "제공업체가 먼저 종료하지 않는 한 현재 결제 기간이 끝날 때까지 이용할 수 있습니다. 그 전까지 재개할 수 있습니다.",
-    solanaDescription:
-      "지갑으로 온체인 해지에 서명합니다. 결제된 기간이 끝날 때까지 이용할 수 있습니다.",
+    description: "향후 결제가 중단됩니다. 이미 구매한 이용권은 유지됩니다.",
+    solanaDescription: "지갑에서 온체인 해지에 서명합니다. 이미 구매한 이용권은 유지됩니다.",
     reasonLabel: "해지하는 이유를 알려 주세요",
     reasonPlaceholder: "의견은 서비스 개선에 도움이 됩니다.",
     reasonHint: "{count}/{max}",

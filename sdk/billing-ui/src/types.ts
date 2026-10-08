@@ -152,8 +152,8 @@ export const checkoutPlanSchema = z.object({
   unit_amount: amountSchema,
   currency: z.string().min(1),
   unit_decimals: unitDecimalsSchema,
-  period_hours: optional(z.number()),
-  automatically_renews: z.boolean(),
+  billing_interval_hours: optional(z.number()),
+  access_duration_hours: optional(z.number()),
 })
 export type CheckoutPlan = z.infer<typeof checkoutPlanSchema>
 

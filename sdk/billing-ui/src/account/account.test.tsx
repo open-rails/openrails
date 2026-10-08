@@ -56,7 +56,7 @@ describe("AccountBilling", () => {
       payments: [
         payment({
           subscription_id: "sub_1",
-          price: price(720, true),
+          price: price(720, 720),
           product: { id: "prod_1", display_name: "Pro" },
         }),
         payment({
@@ -286,14 +286,14 @@ describe("PaymentHistory", () => {
     const server = fakeBilling({
       payments: [
         payment({
-          price: price(168, true),
+          price: price(168, 168),
           product: { id: "prod_1", display_name: "Weekly pass" },
         }),
-        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720, true) }),
-        payment({ id: "pay_3", price: price(null, false) }),
+        payment({ id: "pay_2", subscription_id: "sub_1", price: price(720, 720) }),
+        payment({ id: "pay_3", price: price(null, null) }),
         payment({
           id: "pay_4",
-          price: price(null, false),
+          price: price(null, null),
           product: { id: "prod_2", display_name: "Post purchase" },
         }),
       ],
@@ -319,7 +319,7 @@ describe("PaymentHistory", () => {
 
   it("localizes the fallback name and period", async () => {
     const server = fakeBilling({
-      payments: [payment({ subscription_id: "sub_1", price: price(720, true) })],
+      payments: [payment({ subscription_id: "sub_1", price: price(720, 720) })],
     })
     mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
     const row = await screen.findByTestId("payment-row")

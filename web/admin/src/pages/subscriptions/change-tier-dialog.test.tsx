@@ -200,7 +200,7 @@ describe("tier change options", () => {
           aPrice("basic-usd", "basic", { currency: "usd" }),
           aPrice("pro-usd", "pro"),
           aPrice("pro-eur", "pro", { currency: "eur" }),
-          aPrice("pro-once", "pro", { auto_renew: false }),
+          aPrice("pro-once", "pro", { billing_interval_hours: null }),
           aPrice("other-usd", "other"),
           aPrice("archived-product", "archived"),
           aPrice("archived-price", "pro", { archived: true }),

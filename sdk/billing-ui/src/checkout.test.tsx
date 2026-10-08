@@ -87,7 +87,7 @@ describe("Checkout", () => {
               unit_amount: "9223372036854775807",
               currency: "JPY",
               unit_decimals: 4,
-              automatically_renews: false,
+              billing_interval_hours: undefined,
             },
             line_items: [
               { label: "Lifetime", amount: "9223372036854775807" },

@@ -575,7 +575,7 @@ Mounting gives your users these routes under `/billing`:
 | Route | What it does |
 |---|---|
 | `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
-| `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?auto_renew=`, `?limit=`, `?cursor=`) |
+| `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?recurring=`, `?limit=`, `?cursor=`) |
 | `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
 | `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
 | `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |

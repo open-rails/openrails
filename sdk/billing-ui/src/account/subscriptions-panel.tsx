@@ -118,18 +118,20 @@ export function SubscriptionsPanel({
             : null
           const interval = intervalLabel(s.price, m)
           const periodEnd = formatDate(s.current_period_ends_at, locale)
+          const accessEnd = formatDate(s.access?.ends_at, locale)
           const endedAt = formatDate(
             s.ended_at ?? s.canceled_at ?? s.current_period_ends_at,
             locale
           )
           const scheduled = isEnding(s)
-          const renews = live && !scheduled && s.price?.auto_renew !== false
+          const renews = live && !scheduled && !!s.price?.billing_interval_hours
           const when = !live
             ? endedAt && t("subscriptions.endedOn", { date: endedAt })
-            : periodEnd &&
-              (renews
-                ? t("subscriptions.renews", { date: periodEnd })
-                : t("subscriptions.endsOn", { date: periodEnd }))
+            : renews && periodEnd
+              ? t("subscriptions.renews", { date: periodEnd })
+              : accessEnd
+                ? t("subscriptions.endsOn", { date: accessEnd })
+                : t("subscriptions.noMorePayments")
           const paidWith =
             s.rail === "solana"
               ? t("subscriptions.wallet")

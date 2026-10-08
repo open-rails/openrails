@@ -81,7 +81,7 @@ export function tierChangeOptions({
       if (
         !product ||
         price.archived ||
-        !price.auto_renew ||
+        !price.billing_interval_hours ||
         price.currency.trim().toLowerCase() !== currency
       ) {
         return []

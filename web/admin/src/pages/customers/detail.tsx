@@ -889,7 +889,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                       {(prices?.data ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {priceAmountLabel(p)}
-                          {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})
+                          {p.billing_interval_hours ? " · recurring" : ""} ({shortId(p.id)})
                         </SelectItem>
                       ))}
                     </SelectContent>

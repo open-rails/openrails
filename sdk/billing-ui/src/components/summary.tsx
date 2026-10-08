@@ -6,14 +6,18 @@ import { cn } from "cn"
 import { useMessages } from "#orck/i18n/context"
 import type { Translator } from "#orck/i18n/messages"
 import { addAmounts, formatAmount, type Amount } from "#orck/lib/money"
-import { everyLabel, perLabel } from "#orck/lib/period"
+import { accessLabel, everyLabel, perLabel } from "#orck/lib/period"
 import type { CheckoutLineItem, CheckoutSession } from "#orck/types"
 
 function renewsLabel(session: CheckoutSession, m: Translator) {
-  const every = session.plan.automatically_renews
-    ? everyLabel(session.plan.period_hours, m)
+  const every = session.plan.billing_interval_hours
+    ? everyLabel(session.plan.billing_interval_hours, m)
     : null
-  return every ? m.t("checkout.renews", { period: every }) : undefined
+  const access = session.plan.access_duration_hours !== session.plan.billing_interval_hours
+    ? accessLabel(session.plan.access_duration_hours, m) ?? m.t("interval.permanent")
+    : undefined
+  return [every ? m.t("checkout.renews", { period: every }) : undefined, access]
+    .filter(Boolean).join(" · ") || undefined
 }
 
 function lineItems(
@@ -104,7 +108,7 @@ export function OrderSummary({ session }: { session: CheckoutSession }) {
       <div className="text-[38px] leading-[1.05] font-semibold tracking-[-0.02em] tabular-nums">
         {money(session.plan.unit_amount)}
         <span className="ml-1 text-[15px] font-normal tracking-normal text-muted-foreground">
-          {perLabel(session.plan.period_hours, m)}
+          {perLabel(session.plan.billing_interval_hours, m)}
         </span>
       </div>
       <div className="grid">
@@ -139,7 +143,7 @@ export function CompactSummary({
 }) {
   const m = useMessages()
   const renews = renewsLabel(session, m)
-  const per = perLabel(session.plan.period_hours, m)
+  const per = perLabel(session.plan.billing_interval_hours, m)
   return (
     <div
       className={cn(

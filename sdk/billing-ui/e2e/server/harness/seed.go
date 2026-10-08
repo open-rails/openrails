@@ -32,7 +32,7 @@ type Catalog struct {
 func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Node, merchant solanago.PublicKey) (Catalog, error) {
 	month := 720
 	sub, subPrice, err := product(ctx, c, "e2e-membership", "Membership", billing.CreatePriceParams{
-		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, AutoRenew: true,
+		Key: "e2e-membership-monthly", UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &month, BillingIntervalHours: &month,
 	})
 	if err != nil {
 		return Catalog{}, err
@@ -64,13 +64,13 @@ products:
   - key: e2e-card-once
     currency: usd
     unit_amount: 2990000
-    auto_renew: false
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [%s]
   - key: e2e-card-monthly
     currency: usd
     unit_amount: 4990000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [%s]
   entitlements_spec:
@@ -108,13 +108,13 @@ products:
   - key: e2e-crypto-pass
     currency: usd
     unit_amount: 2990000
-    auto_renew: false
+    billing_interval_hours: null
     access_duration_hours: 720
     psps: [solana]
   - key: e2e-crypto-monthly
     currency: usd
     unit_amount: 4990000
-    auto_renew: true
+    billing_interval_hours: 720
     access_duration_hours: 720
     psps: [solana]
     psp_links:

@@ -17,8 +17,8 @@ as an exact signed int64 decimal string of `plan.currency`'s native unit, and
     "unit_amount": "99000000",
     "currency": "USD",
     "unit_decimals": 6,
-    "period_hours": 720,
-    "automatically_renews": true
+    "billing_interval_hours": 720,
+    "access_duration_hours": 720
   },
   "line_items": [{ "label": "Premium Membership", "amount": "99000000" }],
   "tax": "0",

@@ -532,19 +532,19 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** Prices on sale. `productId` is a `prod_` id; `autoRenew` selects subscriptions or one-time prices. */
+    /** Prices on sale. `productId` is a `prod_` id; `recurring` selects subscriptions or one-time prices. */
     listPrices(
       opts: ListOptions & {
         currency?: string
         productId?: string
-        autoRenew?: boolean
+        recurring?: boolean
       } = {}
     ): Promise<Page<Price>> {
       return json(pricePage, "/prices", {
         query: {
           currency: opts.currency,
           product_id: opts.productId,
-          auto_renew: opts.autoRenew,
+          recurring: opts.recurring,
           limit: opts.limit ?? 100,
           cursor: opts.cursor,
         },

@@ -112,7 +112,7 @@ export function PriceChangeWizard({
             unit_amount: newAmount,
             currency: price.currency,
             access_duration_hours: price.access_duration_hours ?? undefined,
-            auto_renew: price.auto_renew,
+            billing_interval_hours: price.billing_interval_hours ?? undefined,
             trial_unit_amount: price.trial_unit_amount ?? undefined,
             trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,

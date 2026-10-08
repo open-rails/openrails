@@ -17,8 +17,8 @@ const session = fixtureSession({
     unit_amount: "7990000",
     currency: "USD",
     unit_decimals: 6,
-    period_hours: renews ? 1 : undefined,
-    automatically_renews: renews,
+    billing_interval_hours: renews ? 1 : undefined,
+    access_duration_hours: renews ? 1 : undefined,
   },
   expires_at: undefined,
 })

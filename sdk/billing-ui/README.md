@@ -142,7 +142,7 @@ checkout routes.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts()`, `listPrices({ currency, productId, autoRenew })`                                  | `GET /products`, `GET /prices`                                  |
+| `listProducts()`, `listPrices({ currency, productId, recurring })`                                  | `GET /products`, `GET /prices`                                  |
 | `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |

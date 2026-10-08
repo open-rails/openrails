@@ -60,7 +60,7 @@ export interface RawPrice {
   // version chain — see Price.key.
   key?: string
   access_duration_hours?: number
-  auto_renew?: boolean
+  billing_interval_hours?: number
   [k: string]: unknown
 }
 
