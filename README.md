@@ -51,22 +51,66 @@ schema_version: 1 # the file format
 products:
   - key: premium
     display_name: Premium
-    entitlements_spec: {premium: null} # owning this product grants the "premium" entitlement
+    entitlements_spec: {premium: null} # named feature; follows the subscription's access policy
     prices:
       - key: monthly
         currency: USD
-        unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
-        access_duration_hours: 720 # 30 days of access per payment
-        auto_renew: true # rebill every 30 days until canceled
+        unit_amount: 9990000 # $9.99; amounts are currency micros (millionths of a dollar)
+        access_duration_hours: 720 # a 30-day paid period; also the recurring billing interval
+        auto_renew: true
 
   - key: video-101
     display_name: Video 101
-    entitlements_spec: {"video:101": null}
+    entitlements_spec: {} # access to this product is recorded without a separate feature name
     prices:
       - key: purchase
         currency: USD
         unit_amount: 4990000 # $4.99, paid once
-        access_duration_hours: null # permanent access to this video
+        access_duration_hours: null # permanent ownership; no time-based expiry
+        auto_renew: false
+      - key: rental-3-days
+        currency: USD
+        unit_amount: 1990000 # $1.99, paid once
+        access_duration_hours: 72 # access ends after three days
+        auto_renew: false
+
+  - key: api-credit-10
+    display_name: $10 of API credit
+    credit_grant:
+      currency: USD
+      amount: 10000000 # $10 of spendable API balance
+      # expires_after_days defaults to 365, starting when payment succeeds
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 10000000 # pay $10
+        auto_renew: false
+
+  - key: api-credit-100
+    display_name: $100 of API credit
+    credit_grant:
+      currency: USD
+      amount: 100000000
+      expires_after_days: 365
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        auto_renew: false
+
+  - key: api-deposit
+    display_name: Add money to your API balance
+    credit_grant:
+      currency: USD
+      from_payment: true # grant exactly the amount paid
+      expires_after_days: 365
+    prices:
+      - key: deposit
+        currency: USD
+        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
+        customer_amount:
+          min_amount: 1000000 # at least $1
+          max_amount: 1000000000 # at most $1,000
         auto_renew: false
 ```
 
@@ -75,29 +119,56 @@ therefore identifies this subscription offer. OpenRails assigns immutable price
 revisions automatically (`premium.monthly.v0`, then `v1` when its terms change).
 Existing subscribers keep their accepted price and benefits until explicitly
 migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
-A video buyer's permanent access is checked with the `video:101` entitlement.
 
-**Prepaid API credits** are a spendable balance. After your trusted payment flow
-confirms a payment specifically for credit funding, grant its paid amount once:
+**Features, ownership, and rental access.** An entitlement is a named permission
+that your application understands. Here, `premium` allows watching the whole
+library. `null` follows the purchased access terms; it does not by itself mean
+forever. The video needs no invented `video:101` feature: OpenRails records access
+to product `video-101` directly. Its purchase price creates permanent ownership;
+its rental price creates access with an expiry. `CheckProductAccess` checks either
+kind; `ListProductAccess` exposes each grant's `EndsAt` (nil for permanent ownership).
+Refunds and revocations can withdraw grants, including permanent ones.
+
+**Paid time and dunning access are separate.** For the current recurring contract,
+`access_duration_hours` is both the paid period and the billing interval. A monthly
+and yearly price can belong to the same Premium product. For a one-off purchase,
+it is the access duration; nil means no time-based expiry. Dunning can maintain
+access after paid coverage ends: 30 paid days plus 15 days of grace is still a
+30-day price, with a separate grace grant. The current dunning policy can keep
+access while collection continues or suspend it; it does not silently label grace
+as paid time. Independent recurring schedules, such as monthly installments buying
+a year of access, are not expressed by this field.
+
+**Prepaid API credits** use the existing currency balance and usage ledger.
+The two packs above give different value per dollar. Each successful purchase
+automatically and idempotently creates a credit lot; another purchase creates
+another lot. Credit-only products do not create permanent ownership that would
+prevent repeat purchases. The amount and expiry policy are frozen at checkout;
+expiry starts when payment succeeds. Omitted expiry means 365 days. Later catalog
+changes affect new checkouts, preserving existing lots.
+
+The deposit is also a product: it names what is bought, its currency, limits, and
+expiry policy. The amount is selected for each checkout without creating a new
+price revision. For a $100 deposit, your trusted server mints the session with:
 
 ```go
-func grantPurchasedAPICredits(ctx context.Context, bill *openrails.Client, paid billing.PaymentSettledEvent) error {
-    _, err := bill.CreateCreditGrant(ctx, paid.CustomerID, billing.CreateCreditGrantParams{
-        Currency: paid.Currency,
-        Amount:   paid.Amount,             // e.g. 10000000 = $10 of USD credit
-        Source:   "purchase",
-        SourceID: paid.PaymentID.String(), // retries cannot grant twice
-    })
-    return err
-}
+amount := int64(100_000_000) // $100 in USD micros
+session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
+    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
+    ProductKey: "api-deposit",
+    PriceKey: "deposit",
+    Amount: &amount,
+    SuccessURL: "https://example.com/billing/success",
+})
 ```
 
-Only invoke this for a verified credit-funding payment, never for the Premium
-subscription or video payment. A host-event consumer acknowledges the event after
-the grant succeeds. `CreateCreditGrant` records credit; it does not collect payment.
-Native repeat-buyable credit packs and recurring credit benefits declared on a
-product are [covered by the credit-benefit design](https://github.com/open-rails/tracker/blob/master/openrails/1132.md),
-but are not implemented yet, so the YAML above includes only the supported products.
+Hand the session to that customer's browser. Its amount cannot be changed after
+minting. Fixed-price packs reject an amount override. Customer-selected deposits
+currently support Stripe and NMI checkout; recurring credit benefits are not yet
+supported. These are monetary API balances, consumed by priced usage, rather than
+a separate request-count or token-count wallet. A voluntary refund requires the
+corresponding credits to remain unused and unheld; forced reversals use the source
+lot and preserve the existing rules for already-authorized usage.
 
 ### Evolving the catalog
 
@@ -396,12 +467,13 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			productKey := "video-" + c.Param("id")
+			access, err := bill.CheckProductAccess(c, customer, billing.CheckProductAccessParams{ProductKeys: []string{productKey}})
 			if err != nil {
 				c.AbortWithStatus(http.StatusServiceUnavailable)
 				return
 			}
-			if !owned {
+			if !access[productKey] {
 				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
 				return
 			}

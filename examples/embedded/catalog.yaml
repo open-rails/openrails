@@ -3,20 +3,64 @@ schema_version: 1 # the file format
 products:
   - key: premium
     display_name: Premium
-    entitlements_spec: {premium: null} # owning this product grants the "premium" entitlement
+    entitlements_spec: {premium: null} # named feature; follows the subscription's access policy
     prices:
       - key: monthly
         currency: USD
-        unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
-        access_duration_hours: 720 # 30 days of access per payment
-        auto_renew: true # rebill every 30 days until canceled
+        unit_amount: 9990000 # $9.99; amounts are currency micros (millionths of a dollar)
+        access_duration_hours: 720 # a 30-day paid period; also the recurring billing interval
+        auto_renew: true
 
   - key: video-101
     display_name: Video 101
-    entitlements_spec: {"video:101": null}
+    entitlements_spec: {} # access to this product is recorded without a separate feature name
     prices:
       - key: purchase
         currency: USD
         unit_amount: 4990000 # $4.99, paid once
-        access_duration_hours: null # permanent access to this video
+        access_duration_hours: null # permanent ownership; no time-based expiry
+        auto_renew: false
+      - key: rental-3-days
+        currency: USD
+        unit_amount: 1990000 # $1.99, paid once
+        access_duration_hours: 72 # access ends after three days
+        auto_renew: false
+
+  - key: api-credit-10
+    display_name: $10 of API credit
+    credit_grant:
+      currency: USD
+      amount: 10000000 # $10 of spendable API balance
+      # expires_after_days defaults to 365, starting when payment succeeds
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 10000000 # pay $10
+        auto_renew: false
+
+  - key: api-credit-100
+    display_name: $100 of API credit
+    credit_grant:
+      currency: USD
+      amount: 100000000
+      expires_after_days: 365
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        auto_renew: false
+
+  - key: api-deposit
+    display_name: Add money to your API balance
+    credit_grant:
+      currency: USD
+      from_payment: true # grant exactly the amount paid
+      expires_after_days: 365
+    prices:
+      - key: deposit
+        currency: USD
+        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
+        customer_amount:
+          min_amount: 1000000 # at least $1
+          max_amount: 1000000000 # at most $1,000
         auto_renew: false
