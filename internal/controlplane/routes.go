@@ -9,8 +9,8 @@ import (
 	riverhelpers "github.com/open-rails/helpers/river"
 )
 
-// IntentionalRouteGroups are the AuthKit route groups OpenRails exposes in
-// locked-down / self-hosted mode (issue #224 task 4), deliberately not AuthKit's
+// IntentionalRouteGroups are the AuthKit route groups OpenRails exposes when
+// registration is closed (issue #224 task 4), deliberately not AuthKit's
 // full surface:
 //
 //   - RouteAuth: discovery, login, refresh, logout, password reset, JWKS.
@@ -21,8 +21,9 @@ import (
 // Registration, AuthKit's admin surface and browser OIDC are not mounted.
 var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
 
-// hostedRouteGroups is AuthKit's whole JSON API. Browser OIDC stays unmounted.
-var hostedRouteGroups = []iam.RouteGroup{
+// registrationRouteGroups is AuthKit's whole JSON API, mounted when people can
+// register (open or invite-only). Browser OIDC stays unmounted.
+var registrationRouteGroups = []iam.RouteGroup{
 	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount, iam.RouteAdmin,
 	iam.RoutePermissionGroups, iam.RouteDeviceKeys, iam.RouteDelegated,
 }
@@ -31,10 +32,10 @@ var hostedRouteGroups = []iam.RouteGroup{
 // plane mounts (a nil list would mount AuthKit's default surface plus browser
 // OIDC).
 func (c *ControlPlane) MountedRouteGroups() []iam.RouteGroup {
-	if c.SelfHostedPosture() {
+	if !c.registers() {
 		return append([]iam.RouteGroup(nil), IntentionalRouteGroups...)
 	}
-	return append([]iam.RouteGroup(nil), hostedRouteGroups...)
+	return append([]iam.RouteGroup(nil), registrationRouteGroups...)
 }
 
 // AuthKit's routes live beneath the issuer's path, AuthKit's base path, or

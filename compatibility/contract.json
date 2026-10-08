@@ -1034,7 +1034,7 @@
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
       "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tSchema string\n\n\tSchemaOwner string\n\n\tRiver RiverOwnership\n\n\tRiverSchema string\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tHTTP *HTTPConfig\n\n\tControlPlane *ControlPlaneConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSendGrid *SendGridConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tAdminConsole *AdminConsoleConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tAllowCatalogUpdates bool\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
-      "type ControlPlaneConfig struct {\n\tAuth AuthConfig\n\n\tHostedPosture bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n}",
+      "type ControlPlaneConfig struct {\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type CustomerHTTPScope uint8",
@@ -2032,6 +2032,7 @@
     },
     "internal/config/control_plane.go": {
       "fmt": "fmt",
+      "iam": "github.com/open-rails/authkit/iam",
       "strings": "strings",
       "time": "time"
     },

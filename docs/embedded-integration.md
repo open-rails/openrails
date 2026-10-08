@@ -423,9 +423,13 @@ selectors require the same operation permission; neither acts as authorization.
 ### 8. The control plane (hosted products)
 
 A hosted product runs OpenRails' own AuthKit control plane instead of bringing
-its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `HostedPosture`,
-`MerchantCreation`). Its AuthKit mail goes through the deployment's one email
-sender (`Config.SendGrid` or `Deps.EmailSender`), rendered; text goes through
+its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `Registration`,
+`MerchantCreation`). `Registration` is AuthKit's self-registration mode
+(`iam.RegistrationModeOpen`, `iam.RegistrationModeInviteOnly` or
+`iam.RegistrationModeClosed`); empty is closed. Open and invite-only mount
+AuthKit's self-service API and need an email or SMS sender. Its AuthKit mail
+goes through the deployment's one email sender (`Config.SendGrid` or
+`Deps.EmailSender`), rendered; text goes through
 `Deps.SMSSender` (AuthKit's `adapters/twilio` provides one). `Routes` is then the standalone surface
 (billing, AuthKit and the admin console), mounted at the router's root
 (`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer

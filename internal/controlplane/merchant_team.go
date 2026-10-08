@@ -103,7 +103,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing
 	case err != nil && !errors.Is(err, iam.ErrUserNotFound):
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: resolve invite email: %w", err)
 	}
-	if c.SelfHostedPosture() {
+	if !c.registers() {
 		return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
 	}
 	link, err := c.client.CreateInvitation(ctx, actor, group, iam.NewInvitation{Role: role})
@@ -143,7 +143,7 @@ func teamInvite(inv iam.Invitation) MerchantTeamInvite {
 // InvitesEnabled reports whether the deployment can mint register+join links
 // (the console tailors its invite affordance on this).
 func (c *ControlPlane) InvitesEnabled() bool {
-	return c != nil && c.Core() != nil && !c.SelfHostedPosture()
+	return c != nil && c.Core() != nil && c.registers()
 }
 
 // RevokeMerchantTeamInvite revokes an invite link of the merchant as actor.
