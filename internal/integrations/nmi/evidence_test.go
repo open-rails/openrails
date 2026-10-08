@@ -460,3 +460,44 @@ func TestReadOrderAttemptsOnlyReportsDefiniteSoleDecline(t *testing.T) {
 	_, err := f.client(t).ReadOrderAttempts(t.Context(), "order")
 	require.Error(t, err, "an error response is an inconclusive read, never zero attempts")
 }
+
+func TestRecurringDeclineRequiresExactAttemptAndTerms(t *testing.T) {
+	const description = "OpenRails renewal 00000000-0000-4000-8000-000000000001"
+	accepted := SaleParams{OrderID: "period", OrderDescription: description, CustomerVaultID: "vault", BillingID: "card", Amount: 500, Currency: "USD"}
+	base := strings.Replace(saleTxn("declined", "period", "0", "202", "20260101000000"), "<currency>", "<order_description>"+description+"</order_description><customer_vault_id>vault</customer_vault_id><currency>", 1)
+	for _, tc := range []struct {
+		name, before, after string
+		declined, invalid   bool
+	}{
+		{name: "qualified", declined: true},
+		{name: "earlier attempt", before: description, after: "OpenRails renewal another-operation"},
+		{name: "wrong vault", before: ">vault<", after: ">another-vault<", invalid: true},
+		{name: "wrong currency", before: ">USD<", after: ">EUR<", invalid: true},
+		{name: "wrong amount", before: ">5.00<", after: ">6.00<", invalid: true},
+		{name: "inexact amount", before: ">5.00<", after: ">5.001<", invalid: true},
+		{name: "gateway failure", before: ">202<", after: ">300<"},
+		{name: "uncertain failure", before: ">202<", after: ">420<"},
+		{name: "missing transaction", before: ">declined<", after: "><"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := base
+			if tc.before != "" {
+				body = strings.ReplaceAll(body, tc.before, tc.after)
+			}
+			f := newNMIFake(t, func(c nmiCall) (int, string) {
+				if c.Path == "/query" {
+					return 200, nmResponse(body)
+				}
+				require.Equal(t, "/customers/vault", c.Path)
+				return 200, `{"object":"customer","id":"vault","billing":[{"id":"card"}]}`
+			})
+			got, err := f.client(t).ReadRecurringOrderAttempts(t.Context(), accepted)
+			if tc.invalid {
+				require.ErrorIs(t, err, ErrReceiptMismatch)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.declined, got.Declined)
+		})
+	}
+}

@@ -162,9 +162,10 @@ rows; unique indexes allow one unresolved charge operation per subscription
 and one engine operation per (period, attempt) slot; the write-once submission
 fence admits one sender per charge; completion re-reads the operation under the
 same locks. A pass that finds its membership already settled by another replica
-does nothing. Leases and the lost-submission settle delay (5 minutes) use each
-process's clock, so keep replicas NTP-synchronized: skew must stay well under
-the settle delay minus the 25-second provider timeout. `ci/`'s
+does nothing. Lease checks and provider-call deadlines require synchronized
+instance clocks; keep replicas NTP-synchronized. A known failure before dispatch
+retains proof that permits another attempt. A crashed sender cannot supply that
+proof merely because a provider lookup is empty. `ci/`'s
 `TestReplicas*` fleets exercise shared-database concurrency and recovery.
 Database claims are not a provider-enforced fence against an arbitrarily paused
 sender or an independently writable database copy.
@@ -184,8 +185,12 @@ or paid attempt require reconciliation. This uses customer listing rather than
 Stripe's [eventually consistent Search API](https://docs.stripe.com/api/payment_intents/search).
 Native NMI saved-card renewals use the persistent obligation
 order reference and check for a qualified existing payment even before the
-first local attempt. These lookups can find charges after a provider's duplicate
-window has elapsed, but a lookup and a subsequent charge are not atomic.
+first local attempt. The `order_description` identifies the exact operation
+(`OpenRails renewal <operation UUID>`), so a previous attempt's decline cannot
+release a newer uncertain payment. Decline recovery also checks the frozen
+instrument, amount and currency. These lookups can find charges after a
+provider's duplicate window has elapsed, but a lookup and a subsequent charge
+are not atomic.
 
 [Stripe may discard idempotency keys after 24 hours](https://docs.stripe.com/api/idempotent_requests).
 Automatic resubmission of an
@@ -195,7 +200,38 @@ existing payment continue. An empty or unavailable lookup after that deadline
 leaves an unresolved-submission finding; it does not authorize another charge.
 Provider receipts and operator reconciliation must resolve that uncertainty.
 NMI duplicate-check behavior depends on the account/processor; an order reference
-is a lookup key, not a provider-enforced uniqueness constraint.
+is a lookup key, not a provider-enforced uniqueness constraint. Once an NMI
+submission may have reached the gateway, OpenRails only reads its outcome and
+never automatically submits it again. Empty Query API results have no documented
+visibility deadline. An unknown outcome keeps its durable claim and raises
+`life.submission.unresolved`; a later matching receipt completes it. If the
+request actually never arrived but its sender crashed after the submission
+fence, operator/provider reconciliation is necessary. NMI cannot provide both
+unconditional automatic recovery and a guarantee against duplicate charges in
+that ambiguous window.
+
+**Outages within a billing period.** After a five-day outage of a monthly book,
+startup's normal due and rescue jobs recover queued work and overdue renewals.
+The payment covers the original due period and preserves its next billing date.
+Fresh collection is refused once the entire next renewal period has elapsed;
+an accepted but never-submitted operation also expires at its frozen period end.
+This produces a reviewable finding instead of shifting the schedule or charging
+a backlog. Already submitted payments continue receipt recovery even after that
+boundary. `TestNMIFiveDayRestartRecovery` exercises real process termination and
+restart with two replicas; provider fixtures establish the local contract, not
+live processor qualification.
+
+Invoice collection and finalization also scan at startup. Monthly small-balance
+collection retains its last completed thirty-day period in the merchant book,
+including export/restore; pruning completed River jobs cannot reset its cadence.
+The marker advances only after the entire eligible scan succeeds. Partial errors
+leave the scan retryable, while already accepted payment operations retain their
+own claims and receipts. Monthly scans serialize through a PostgreSQL session
+lock without holding a transaction across provider requests. Worker pools need
+at least two connections (coordination and billing); a five-second coordination
+acquisition failure leaves the scan retryable. A collection scan held by
+`limited` or `readonly` remains queued,
+so it can resume after writes are enabled instead of consuming its monthly slot.
 
 **Inbound — durability is the PROVIDER's job.** NMI, CCBill and Stripe
 deliver webhooks at-least-once and retry from their end; our handlers are
@@ -630,10 +666,11 @@ and the oldest held age; when collection resumes they are charged normally, a
 decline enters dunning, and the finding resolves. Issuer authentication a customer never completes is closed after one
 hour for a first payment and after the renewal period's allowance for a
 renewal. A
-renewal whose submission never reached the provider is re-sent under the same
-reference once the provider's read shows nothing for 5 minutes (at most twice);
-an unreadable provider or spent cap raises `life.submission.unresolved`
-(docs/provider-uncertainty.md).
+renewal with an unknown NMI submission is never automatically sent again:
+provider records may lag even when its charge succeeded. Stripe alone can replay
+its original idempotency key after a five-minute observation delay, at most
+twice and only inside the key retention window. Unresolved outcomes raise
+`life.submission.unresolved` (docs/provider-uncertainty.md).
 
 ## Provider Refresh and the unknown cohort
 

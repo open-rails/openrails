@@ -48,8 +48,8 @@ func TestTerminalCancellationBlocksReactivation(t *testing.T) {
 	}
 }
 
-// An on-time or late-within-period renewal keeps the ordinary next period; once
-// a whole period is missed, the admitted attempt buys one period from admission.
+// An on-time or late-within-period renewal keeps its original due period;
+// a wholly missed period must never silently become a new billing schedule.
 func TestSelectEngineRenewalPeriod(t *testing.T) {
 	oldEnd := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	cycle := 30 * 24 * time.Hour
@@ -60,9 +60,7 @@ func TestSelectEngineRenewalPeriod(t *testing.T) {
 	}{
 		{"on time", oldEnd, oldEnd},
 		{"late within next period", oldEnd.Add(cycle - time.Second), oldEnd},
-		{"whole period missed", oldEnd.Add(cycle), oldEnd.Add(cycle)},
-		{"several periods missed", oldEnd.Add(100 * 24 * time.Hour), oldEnd.Add(100 * 24 * time.Hour)},
-		{"sub-microsecond admission truncates", oldEnd.Add(cycle + 1500), oldEnd.Add(cycle + time.Microsecond)},
+		{"five-day outage", oldEnd.Add(5 * 24 * time.Hour), oldEnd},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			terms, err := SelectEngineRenewalPeriod(accepted, tc.now)
@@ -72,7 +70,16 @@ func TestSelectEngineRenewalPeriod(t *testing.T) {
 			require.Equal(t, accepted.Amount, terms.Amount)
 		})
 	}
-	_, err := SelectEngineRenewalPeriod(accepted, oldEnd.Add(-time.Second))
+	for _, now := range []time.Time{oldEnd.Add(cycle), oldEnd.Add(cycle + time.Microsecond), oldEnd.Add(100 * 24 * time.Hour)} {
+		_, err := SelectEngineRenewalPeriod(accepted, now)
+		require.ErrorContains(t, err, "entire renewal period elapsed")
+	}
+	shortAccess := accepted
+	shortAccess.AccessDurationHours = new(72)
+	terms, err := SelectEngineRenewalPeriod(shortAccess, oldEnd.Add(5*24*time.Hour))
+	require.NoError(t, err, "short access duration does not shorten the monthly billing recovery window")
+	require.Equal(t, oldEnd.Add(cycle), terms.PeriodEnd)
+	_, err = SelectEngineRenewalPeriod(accepted, oldEnd.Add(-time.Second))
 	require.Error(t, err, "not yet due")
 	_, err = SelectEngineRenewalPeriod(accepted, time.Time{})
 	require.Error(t, err)

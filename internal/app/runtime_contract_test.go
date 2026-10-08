@@ -50,7 +50,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
 		riverjobs.CatalogReconciliationPullArgs{}.Kind(): {time.Hour, false},
 		riverjobs.StripeWebhookReconcileArgs{}.Kind():    {time.Hour, false},
-		riverjobs.InvoiceArgs{}.Kind():                   {time.Hour, false}, // hourly + daily + monthly; shortest wins
+		riverjobs.InvoiceArgs{}.Kind():                   {time.Hour, true}, // hourly + daily + monthly; shortest wins
 		riverjobs.DelinquencyArgs{}.Kind():               {15 * time.Minute, false},
 		riverjobs.CreditReconcileArgs{}.Kind():           {30 * time.Minute, false},
 		riverjobs.NotificationEmailSweepArgs{}.Kind():    {10 * time.Minute, false},

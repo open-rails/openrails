@@ -11,6 +11,7 @@ sql:
       - "internal/migrate/postgres/0006_catalog_snapshots.up.sql"
       - "internal/migrate/postgres/0007_checkout_session_directory.up.sql"
       - "internal/migrate/postgres/0008_billing_access_intervals.up.sql"
+      - "internal/migrate/postgres/0009_invoice_collection_cadence.up.sql"
       - "internal/migrate/postgres/0010_provider_applied_coverage.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"

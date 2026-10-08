@@ -68,7 +68,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 		if in.Rail == "stripe" {
 			return h.executeStripeEngineDecline(ctx, in)
 		}
-		return h.resendLostNMISubmission(ctx, in, p)
+		return h.Verify(ctx, in)
 	}
 	if reason := h.submissionHeld(in); reason != "" {
 		return intents.Parked(reason)
@@ -103,7 +103,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	if err := h.hit(ctx, in, failpoint.AfterFence); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	return h.dispatchNMI(ctx, in, p, charger, proof, 0)
+	return h.dispatchNMI(ctx, in, p, charger, proof)
 }
 
 // obligationPaid reads the obligation's shared order before every new attempt,
@@ -150,8 +150,8 @@ func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingProviderInt
 }
 
 // dispatchNMI sends the accepted charge under its order reference. Only the
-// writer of a fresh submission or resend fence calls it.
-func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof, dupSeconds int) intents.Outcome {
+// writer of the original submission fence calls it.
+func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof) intents.Outcome {
 	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
@@ -162,12 +162,11 @@ func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.
 		return intents.Ambiguous(err.Error())
 	}
 	if err := intents.NewStore(h.DB).RequireClaim(ctx, in.ID, h.now()); err != nil {
-		return intents.Ambiguous("nothing sent: " + err.Error())
+		return h.completeNotExecuted(ctx, in, p, "not_dispatched", "execution claim unavailable before provider call: "+err.Error(), proof)
 	}
 	result, refusal, err := execute(ctx, charge.Request{
 		Instrument:  charge.Instrument{PaymentMethodID: p.PaymentMethodID, Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
-		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: chargeContext,
-		DupSeconds: dupSeconds,
+		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: subscriptions.SubscriptionCollectionDescription(in.ID), Context: chargeContext,
 	})
 	if hitErr := h.hit(ctx, in, failpoint.AfterProvider); hitErr != nil {
 		return intents.Ambiguous(hitErr.Error())
@@ -225,6 +224,9 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 	var method gen.BillingPaymentMethod
 	if h.now().Before(p.AcceptedAt) {
 		return method, intents.CollectionNonexecutionProof{}, false, errors.New("engine admission time has not arrived")
+	}
+	if intents.EvidenceString(in, "submitted_at") == "" && !h.now().Before(p.Renewal.PeriodEnd) {
+		return method, intents.CollectionNonexecutionProof{}, false, errors.Join(errEngineObligationChanged, errors.New("the entire accepted renewal period elapsed before submission"))
 	}
 	var proof intents.CollectionNonexecutionProof
 	var first bool
@@ -339,6 +341,9 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 		return h.unresolved(ctx, in, p, "order read is inconclusive: "+err.Error())
 	}
 	if attempts.Declined {
+		if reference != "" && attempts.DeclineTransactionID != reference {
+			return h.unresolved(ctx, in, p, "the order's decline contradicts the retained transaction reference")
+		}
 		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
 			return h.unresolved(ctx, in, p, "retain the order's decline: "+err.Error())
 		}

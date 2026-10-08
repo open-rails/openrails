@@ -239,6 +239,67 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 	return count, errors.Join(errs...)
 }
 
+// ChargeMonthlyOutstanding scans one fixed thirty-day period per merchant.
+// The marker belongs to the billing book, not River's prunable job history.
+// Concurrent scans share the normal invoice admission locks and receipts; no
+// database transaction stays open across a provider request.
+func (s *MoneyService) ChargeMonthlyOutstanding(ctx context.Context, runner *intents.Runner, minThreshold int64) (int, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	pool := s.db.Pool()
+	if pool == nil {
+		return 0, errors.New("monthly invoice collection requires its coordination pool")
+	}
+	acquireCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	conn, err := pool.Acquire(acquireCtx)
+	cancel()
+	if err != nil {
+		return 0, fmt.Errorf("acquire monthly invoice coordination connection: %w", err)
+	}
+	defer conn.Release()
+	coordination := gen.New(conn)
+	held, err := coordination.TryLockInvoiceMonthlyCollection(ctx, mid.UUID())
+	if err != nil {
+		return 0, fmt.Errorf("lock monthly invoice collection: %w", err)
+	}
+	if !held {
+		return 0, errors.New("monthly invoice collection is already running")
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := coordination.UnlockInvoiceMonthlyCollection(unlockCtx, mid.UUID()); err != nil {
+			_ = conn.Conn().Close(unlockCtx)
+		}
+	}()
+	period := s.now().UTC().Truncate(30 * 24 * time.Hour)
+	last, err := s.db.Gen(ctx).GetInvoiceMonthlyCollectionPeriod(ctx, mid.UUID())
+	if err == nil && !last.Before(period) {
+		return 0, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, fmt.Errorf("read monthly invoice cadence: %w", err)
+	}
+	// ListChargeableOpenInvoices scans every eligible row without a page limit.
+	// Partial admission errors leave the period open; accepted intents already
+	// own any submitted or deferred payments and recover independently.
+	count, err := s.ChargeOutstanding(ctx, runner, minThreshold)
+	if err != nil {
+		return count, err
+	}
+	if err := conn.Ping(ctx); err != nil {
+		return count, fmt.Errorf("monthly invoice coordination connection was lost: %w", err)
+	}
+	if err := s.db.Gen(ctx).CompleteInvoiceMonthlyCollectionPeriod(ctx, gen.CompleteInvoiceMonthlyCollectionPeriodParams{
+		MerchantID: mid.UUID(), MonthlyPeriodStartedAt: period, CompletedAt: s.now().UTC(),
+	}); err != nil {
+		return count, fmt.Errorf("complete monthly invoice cadence: %w", err)
+	}
+	return count, nil
+}
+
 // RetryInvoiceCollection binds a client retry key to one saved payment method
 // and runs the durable collection operation. Reusing the key returns that
 // operation's durable state without another provider charge; a different

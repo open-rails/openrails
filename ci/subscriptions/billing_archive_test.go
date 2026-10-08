@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -38,6 +40,9 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 2_500_000, balance.BalanceAmount)
 	w.settle()
+	cadence, err := w.jobs.Insert(t.Context(), riverjobs.InvoiceArgs{Collect: true, UseMonthlyFloor: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	w.waitJob(cadence.Job.ID)
 	merchantID := client.MerchantID()
 	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
 	require.NoError(t, err)
@@ -118,6 +123,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	// Compare stored JSONB, including its exact numeric values and SQL nulls,
 	// independently of archive parsing and without decoding through float64.
 	for _, tc := range []struct{ table, key, fields string }{
+		{"invoice_collection_cadence", "merchant_id", "monthly_period_started_at,completed_at"},
 		{"payments", "id", "metadata,discount_metadata,amount,list_amount,currency,status,subscription_id,transaction_id"},
 		{"payment_methods", "id", "metadata,rail_customer_ref,rail_method_ref,card_last4"},
 		{"checkout_attempts", "id", "metadata,payment_id,subscription_id,status"},
