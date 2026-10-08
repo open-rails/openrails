@@ -3,7 +3,7 @@ schema_version: 1 # the file format
 products:
   - key: post-101
     display_name: Post 101 — Behind the scenes
-    entitlements_spec: {"post:101": null}
+    entitlements: ["post:101"]
     prices:
       - key: purchase
         currency: USD
@@ -18,7 +18,7 @@ products:
 
   - key: post-102
     display_name: Post 102 — The full shoot
-    entitlements_spec: {"post:102": null}
+    entitlements: ["post:102"]
     prices:
       - key: purchase
         currency: USD
@@ -28,7 +28,7 @@ products:
 
   - key: featured-posts-bundle
     display_name: Featured posts — 101 and 102
-    entitlements_spec: {"post:101": null, "post:102": null} # the same keys as individual sales
+    entitlements: ["post:101", "post:102"] # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD
@@ -38,7 +38,7 @@ products:
 
   - key: channel-main-monthly
     display_name: Main channel — 30-day membership
-    entitlements_spec: {"channel:main:membership": null}
+    entitlements: ["channel:main:membership"]
     tier_group: channel-main # the two term products are mutually exclusive memberships
     tier_rank: 1
     prices:
@@ -50,7 +50,7 @@ products:
 
   - key: channel-main-yearly
     display_name: Main channel — 365-day membership
-    entitlements_spec: {"channel:main:membership": null} # same benefit, separate product
+    entitlements: ["channel:main:membership"] # same benefit, separate product
     tier_group: channel-main
     tier_rank: 1
     prices:

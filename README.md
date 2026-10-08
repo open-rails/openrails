@@ -51,7 +51,7 @@ schema_version: 1 # the file format
 products:
   - key: post-101
     display_name: Post 101 — Behind the scenes
-    entitlements_spec: {"post:101": null}
+    entitlements: ["post:101"]
     prices:
       - key: purchase
         currency: USD
@@ -66,7 +66,7 @@ products:
 
   - key: post-102
     display_name: Post 102 — The full shoot
-    entitlements_spec: {"post:102": null}
+    entitlements: ["post:102"]
     prices:
       - key: purchase
         currency: USD
@@ -76,7 +76,7 @@ products:
 
   - key: featured-posts-bundle
     display_name: Featured posts — 101 and 102
-    entitlements_spec: {"post:101": null, "post:102": null} # the same keys as individual sales
+    entitlements: ["post:101", "post:102"] # the same keys as individual sales
     prices:
       - key: purchase
         currency: USD
@@ -86,7 +86,7 @@ products:
 
   - key: channel-main-monthly
     display_name: Main channel — 30-day membership
-    entitlements_spec: {"channel:main:membership": null}
+    entitlements: ["channel:main:membership"]
     tier_group: channel-main # the two term products are mutually exclusive memberships
     tier_rank: 1
     prices:
@@ -98,7 +98,7 @@ products:
 
   - key: channel-main-yearly
     display_name: Main channel — 365-day membership
-    entitlements_spec: {"channel:main:membership": null} # same benefit, separate product
+    entitlements: ["channel:main:membership"] # same benefit, separate product
     tier_group: channel-main
     tier_rank: 1
     prices:
@@ -123,9 +123,13 @@ without changing what was purchased. OpenRails treats these keys as opaque
 strings. A post can contain several media files; the host decides what access to
 that post includes.
 
-This executable example uses the current schema: `entitlements_spec` is a map
-of keys, with `null` following the purchased access terms. A product's name or key
-does not implicitly grant a same-named entitlement. Durations accept positive
+`entitlements` is a list of arbitrary, opaque strings. OpenRails does not
+distinguish a content key such as `post:101` from a service key such as `premium`;
+your application decides what each permits. The list has no per-key durations.
+A product name or key does not implicitly grant an entitlement. Use `[]` to grant
+none; omitted fields preserve an existing product's list.
+
+Durations accept positive
 whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
 `access_duration_hours`, `billing_interval_hours` and `trial_duration_hours` are
 also accepted; use only one form of each field.
@@ -218,7 +222,7 @@ products:
 For the initial catalog, this creates `channel-main-monthly.subscription.v1` at
 $12.99 and archives `channel-main-monthly.subscription.v0` at $9.99. The old price
 record is retained unchanged. New subscribers buy v1; existing subscribers keep their exact accepted price and
-entitlements indefinitely. Product descriptions and `entitlements_spec` can also
+entitlements indefinitely. Product descriptions and `entitlements` can also
 be edited in place; changed entitlements apply to new purchases, not retroactively
 to existing grants. Neither a YAML price change nor archival schedules a
 subscription migration.
@@ -232,13 +236,9 @@ specification, so retain the original membership key:
 schema_version: 1
 products:
   - key: channel-main-monthly
-    entitlements_spec:
-      "channel:main:membership": null
-      "channel:main:downloads": null
+    entitlements: ["channel:main:membership", "channel:main:downloads"]
   - key: channel-main-yearly
-    entitlements_spec:
-      "channel:main:membership": null
-      "channel:main:downloads": null
+    entitlements: ["channel:main:membership", "channel:main:downloads"]
 ```
 
 Your application can check the new downloads key for its download feature. Prices
