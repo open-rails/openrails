@@ -73,6 +73,42 @@ func snapshotWireUncheckedYAML(t *testing.T, document CatalogSnapshot) []byte {
 	return raw
 }
 
+func TestCatalogSnapshotHistoricalBillingTerms(t *testing.T) {
+	for _, recurring := range []bool{false, true} {
+		document := snapshotWireFixture(t)
+		row := snapshotWireRow(t, "prices", map[string]string{
+			"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000003",
+			"product_id": "10000000-0000-0000-0000-000000000002", "revision": "0",
+			"access_duration_hours": "72", "amount": "1000000", "currency": "USD",
+		})
+		row["auto_renew"], _ = json.Marshal(recurring)
+		document.Tables["prices"] = []map[string]json.RawMessage{row}
+		raw := snapshotWireUncheckedYAML(t, document)
+		read, _, err := readCatalogSnapshot(bytes.NewReader(raw))
+		require.NoError(t, err)
+		for _, profile := range catalogProfiles {
+			if profile.Name != "prices" {
+				continue
+			}
+			values, err := catalogValues(profile, read.Tables["prices"][0], snapshotTestMerchant)
+			require.NoError(t, err)
+			for i, c := range profile.Columns {
+				if c.Name == "billing_interval_hours" {
+					if recurring {
+						require.Equal(t, new("72"), values[i])
+					} else {
+						require.Nil(t, values[i])
+					}
+				}
+			}
+		}
+		_, legacy := read.Tables["prices"][0]["auto_renew"]
+		require.True(t, legacy, "the original document and its digest stay intact")
+		_, err = validateCatalogSnapshot(read)
+		require.NoError(t, err)
+	}
+}
+
 func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T) {
 	document := snapshotWireFixture(t)
 	document.CatalogRevision = 9007199254740993

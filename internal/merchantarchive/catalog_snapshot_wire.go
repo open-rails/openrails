@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 
 	"github.com/goccy/go-yaml"
 	"github.com/open-rails/openrails/billing"
@@ -80,6 +81,26 @@ func catalogRow(p contract.Profile, values []*string) (map[string]json.RawMessag
 	return row, nil
 }
 func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantID string) ([]*string, error) {
+	// Historical snapshots carry auto_renew in place of billing cadence. Read
+	// those exact persisted terms without changing the document or its digest.
+	if raw, legacy := row["auto_renew"]; p.Name == "prices" && legacy {
+		if _, mixed := row["billing_interval_hours"]; mixed {
+			return nil, fmt.Errorf("catalog price mixes legacy and current billing terms")
+		}
+		var recurring bool
+		if err := json.Unmarshal(raw, &recurring); err != nil || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return nil, fmt.Errorf("invalid legacy catalog recurrence")
+		}
+		row = maps.Clone(row)
+		delete(row, "auto_renew")
+		if recurring {
+			var hours int
+			if err := json.Unmarshal(row["access_duration_hours"], &hours); err != nil || hours <= 0 {
+				return nil, fmt.Errorf("legacy recurring catalog price needs a positive duration")
+			}
+			row["billing_interval_hours"] = row["access_duration_hours"]
+		}
+	}
 	if len(row) > len(p.Columns) {
 		return nil, fmt.Errorf("unknown catalog columns in %s", p.Name)
 	}

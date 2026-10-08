@@ -233,6 +233,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if invalidReceipts {
 			return &Error{Code: "integrity", Table: "catalog_applications"}
 		}
+		if info.LegacyDurations {
+			if err := q.RestoreLegacySubscriptionEntitlementBounds(ctx, id.UUID()); err != nil {
+				return err
+			}
+		}
 		if err := validateReferences(ctx, tx, id); err != nil {
 			return err
 		}

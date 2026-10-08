@@ -2,6 +2,7 @@ package merchantarchive
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/ccoveille/go-safecast/v2"
@@ -109,15 +110,25 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if err != nil {
 		return err
 	}
-	// Both paths are authored by the shared renewal writer in the same local
-	// transaction as this payment: expired periods and refund-review payments do
-	// not emit a fresh grant. A later cancellation only adds termination events.
+	// Refund-review payments confer no access. Every accepted paid window is
+	// otherwise retained, even when completion arrives after its expiry.
 	_, moneyOnly := payment.Metadata["refund_review"]
-	if moneyOnly || !payment.CreatedAt.Before(t.PeriodEnd) {
+	if moneyOnly {
 		if len(history) != 0 {
 			return errors.New("withheld engine renewal has access grants")
 		}
 		return nil
+	}
+	if len(history) == 0 && !payment.CreatedAt.Before(t.PeriodEnd) {
+		var legacy struct {
+			Renewal map[string]json.RawMessage `json:"renewal"`
+		}
+		if err := json.Unmarshal(op.Payload, &legacy); err != nil {
+			return err
+		}
+		if _, explicitAccess := legacy.Renewal["access_duration_hours"]; !explicitAccess {
+			return nil // Older writers omitted already elapsed paid windows.
+		}
 	}
 	return subscriptions.ValidateInitialMembershipHistory(op.MerchantID, accepted, history)
 }
