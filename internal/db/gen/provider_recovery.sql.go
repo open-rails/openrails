@@ -30,39 +30,53 @@ func (q *Queries) GetPSPAppliedRefreshWatermark(ctx context.Context, arg GetPSPA
 	return watermark_at, err
 }
 
-const pSPHasEstablishedBook = `-- name: PSPHasEstablishedBook :one
-SELECT EXISTS (
-  SELECT 1 FROM billing.subscriptions
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND started_at < $3::timestamptz
+const pSPRecoveryBookAge = `-- name: PSPRecoveryBookAge :one
+SELECT COALESCE(bool_or(at < $1::timestamptz), false)::boolean AS established,
+       COALESCE(bool_or(at > $2::timestamptz), false)::boolean AS future
+FROM (
+  SELECT started_at AS at FROM billing.subscriptions
+    WHERE merchant_id=$3::uuid AND psp_id=$4::uuid
   UNION ALL
-  SELECT 1 FROM billing.payment_methods
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND created_at < $3::timestamptz
+  SELECT purchased_at FROM billing.payments
+    WHERE merchant_id=$3::uuid AND psp_id=$4::uuid
   UNION ALL
-  SELECT 1 FROM billing.provider_intents
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND created_at < $3::timestamptz
+  SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
+    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
+    WHERE pi.merchant_id=$3::uuid AND pi.psp_id=$4::uuid
+      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
   UNION ALL
-  SELECT 1 FROM billing.payments
-    WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
-      AND purchased_at < $3::timestamptz
-)::boolean
+  SELECT i.period_starts_at FROM billing.invoices i
+    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
+    WHERE i.merchant_id=$3::uuid AND pm.psp_id=$4::uuid
+      AND i.status IN ('draft','open','past_due','uncollectible')
+) facts
 `
 
-type PSPHasEstablishedBookParams struct {
+type PSPRecoveryBookAgeParams struct {
+	Before     time.Time
+	Latest     time.Time
 	MerchantID uuid.UUID
 	PspID      uuid.UUID
-	Before     time.Time
 }
 
-// Any older bound fact requires observation; adding a recent fact cannot make
-// an inherited book fresh. This is a staleness detector, not a clone fence.
-func (q *Queries) PSPHasEstablishedBook(ctx context.Context, arg PSPHasEstablishedBookParams) (bool, error) {
-	row := q.db.QueryRow(ctx, pSPHasEstablishedBook, arg.MerchantID, arg.PspID, arg.Before)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
+type PSPRecoveryBookAgeRow struct {
+	Established bool
+	Future      bool
+}
+
+// Semantic obligation dates survive process clocks and invoice-only books.
+// A recent additional fact cannot hide older state; impossible future evidence
+// is not permission to treat an inherited book as new.
+func (q *Queries) PSPRecoveryBookAge(ctx context.Context, arg PSPRecoveryBookAgeParams) (PSPRecoveryBookAgeRow, error) {
+	row := q.db.QueryRow(ctx, pSPRecoveryBookAge,
+		arg.Before,
+		arg.Latest,
+		arg.MerchantID,
+		arg.PspID,
+	)
+	var i PSPRecoveryBookAgeRow
+	err := row.Scan(&i.Established, &i.Future)
+	return i, err
 }
 
 const pSPRecoveryHistoryFloor = `-- name: PSPRecoveryHistoryFloor :one
@@ -71,9 +85,15 @@ SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
     WHERE merchant_id=$2::uuid AND psp_id=$3::uuid
       AND status IN ('active','past_due','awaiting_method','unverified') AND deleted_at IS NULL
   UNION ALL
-  SELECT created_at FROM billing.provider_intents
-    WHERE merchant_id=$2::uuid AND psp_id=$3::uuid
-      AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+  SELECT COALESCE(i.period_starts_at, NULLIF(pi.payload->>'accepted_at','')::timestamptz, NULLIF(pi.result_evidence->>'submitted_at','')::timestamptz, pi.created_at)
+    FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
+    WHERE pi.merchant_id=$2::uuid AND pi.psp_id=$3::uuid
+      AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+  UNION ALL
+  SELECT i.period_starts_at FROM billing.invoices i
+    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
+    WHERE i.merchant_id=$2::uuid AND pm.psp_id=$3::uuid
+      AND i.status IN ('draft','open','past_due','uncollectible')
 ) facts
 `
 

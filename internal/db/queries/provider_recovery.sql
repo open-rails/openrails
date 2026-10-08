@@ -21,6 +21,11 @@ SELECT COALESCE(min(at), sqlc.arg(fallback)::timestamptz)::timestamptz AS oldest
     FROM billing.provider_intents pi LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'
     WHERE pi.merchant_id=sqlc.arg(merchant_id)::uuid AND pi.psp_id=sqlc.arg(psp_id)::uuid
       AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+  UNION ALL
+  SELECT i.period_starts_at FROM billing.invoices i
+    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND pm.psp_id=sqlc.arg(psp_id)::uuid
+      AND i.status IN ('draft','open','past_due','uncollectible')
 ) facts;
 
 -- name: PSPRecoveryBookAge :one
@@ -42,8 +47,7 @@ FROM (
       AND pi.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
   UNION ALL
   SELECT i.period_starts_at FROM billing.invoices i
-    JOIN billing.money_settings ms ON ms.merchant_id=i.merchant_id AND ms.customer_id=i.customer_id AND ms.currency=i.currency
-    JOIN billing.payment_methods pm ON pm.merchant_id=ms.merchant_id AND pm.id=ms.collection_payment_method
+    JOIN billing.payment_methods pm ON pm.merchant_id=i.merchant_id AND pm.customer_id=i.customer_id
     WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND pm.psp_id=sqlc.arg(psp_id)::uuid
-      AND i.status IN ('draft','open')
+      AND i.status IN ('draft','open','past_due','uncollectible')
 ) facts;
