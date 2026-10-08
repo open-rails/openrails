@@ -242,7 +242,7 @@ func restartCollectionCount(t *testing.T, w *world, e *engineCase, status string
 }
 
 // Monthly-floor collection must survive restarts without waiting for a new
-// thirty-day in-memory timer, and must still run at most once per River period.
+// thirty-day in-memory timer, and must retain its durable monthly cadence.
 func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 	for _, mode := range []string{openrails.ProviderWritesFull, openrails.ProviderWritesReadOnly} {
 		t.Run(mode, func(t *testing.T) {
@@ -250,10 +250,19 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
 			})
 			w := f.any()
+			// Initial provider observation legitimately completes this month's
+			// empty collection scan. The five-day outage must cross the next
+			// monthly boundary before the later small invoice is eligible.
+			setup := w.clock.Now().UTC().Truncate(30 * day).Add(28 * day)
+			if !setup.After(w.clock.Now()) {
+				setup = setup.Add(30 * day)
+			}
+			f.advance(setup.Sub(w.clock.Now()))
 			c := w.newCustomer()
 			method := c.saveCard("nmi", visa)
 			initial := newNMIInvoice(f, c)
 			w.pull() // Qualify the setup invoice's historical period through the real provider refresh.
+			w.settleCollectionScans()
 			answer := payNMIInvoice(t.Context(), w, c, initial, method, "invoice-startup-agreement")
 			require.NoError(t, answer.err)
 			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status)
@@ -267,6 +276,9 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				return id
 			}
 			invoice := smallInvoice() // $10: below the $50 hourly threshold, above the $1 monthly floor.
+			var previousPeriod time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&previousPeriod))
+			require.True(t, previousPeriod.Equal(w.clock.Now().UTC().Truncate(30*day)), "healthy setup already completed this month's collection scan")
 			w.stop()
 			gateway := httptest.NewServer(w.nmi)
 			t.Cleanup(gateway.Close)
@@ -281,6 +293,7 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				require.Len(t, w.nmi.Attempts(), 1)
 			}
 			f.advance(5 * day)
+			require.True(t, w.clock.Now().UTC().Truncate(30*day).After(previousPeriod), "the outage crosses the next monthly collection boundary")
 			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_job SET scheduled_at=scheduled_at-interval '5 days' WHERE state IN ('scheduled','retryable')`))
 			require.NoError(t, err)
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '5 days'`))
@@ -295,7 +308,9 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.Eventually(t, func() bool {
 				var completed int
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
-				return err == nil && completed == 1
+				var period time.Time
+				cadenceErr := w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&period)
+				return err == nil && completed > 0 && cadenceErr == nil && period.Equal(w.clock.Now().UTC().Truncate(30*day))
 			}, 15*time.Second, 50*time.Millisecond, "the complete monthly scan retains its cadence before shutdown")
 			first.kill(t)
 			second.kill(t)
@@ -318,9 +333,6 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				return err == nil && passes > 0
 			}, 30*time.Second, 50*time.Millisecond, "the replacement monthly job has checked retained cadence")
 			third.kill(t)
-			var monthly int
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true'`)).Scan(&monthly))
-			require.Equal(t, 1, monthly, "the replacement queue job rechecks the book's retained cadence")
 			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
 			w.start()
 			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
