@@ -22,7 +22,7 @@ func CheckoutSessionMerchant(rt *app.Runtime) router.Middleware {
 		return func(r *request.Request) {
 			r.SetHeader("Cache-Control", "no-store")
 			if !checkoutsession.ValidID(r.Param("id")) {
-				r.AbortCode(checkoutsession.ErrNotFound.Code, "")
+				r.AbortCode("checkout_session_not_found", "")
 				return
 			}
 			if rt == nil || rt.CheckoutSessions == nil {
@@ -33,7 +33,7 @@ func CheckoutSessionMerchant(rt *app.Runtime) router.Middleware {
 			mid, err := rt.CheckoutSessions.Merchant(ctx, r.Param("id"), r.Clock.Now())
 			if err != nil {
 				if errors.Is(err, checkoutsession.ErrNotFound) {
-					r.AbortCode(checkoutsession.ErrNotFound.Code, "")
+					r.AbortCode("checkout_session_not_found", "")
 				} else {
 					log.WithError(err).Error("checkout capability lookup unavailable")
 					r.AbortCode(billing.CodeServiceUnavailable, "")
@@ -47,7 +47,7 @@ func CheckoutSessionMerchant(rt *app.Runtime) router.Middleware {
 			target, _ := merchanttarget.FromContext(ctx)
 			for _, bound := range []billing.MerchantID{rt.ConfiguredMerchant(), pinned, host, target.MerchantID} {
 				if !bound.IsZero() && bound != mid {
-					r.AbortCode(checkoutsession.ErrNotFound.Code, "")
+					r.AbortCode("checkout_session_not_found", "")
 					return
 				}
 			}
@@ -60,7 +60,7 @@ func CheckoutSessionMerchant(rt *app.Runtime) router.Middleware {
 				if errors.As(err, &refusal) && refusal.Code == billing.CodeMerchantDirectoryUnavailable {
 					r.AbortCode(billing.CodeServiceUnavailable, "")
 				} else {
-					r.AbortCode(checkoutsession.ErrNotFound.Code, "")
+					r.AbortCode("checkout_session_not_found", "")
 				}
 				return
 			}
