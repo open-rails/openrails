@@ -217,12 +217,17 @@ type TokenPriceProvider interface {
 
 // CalculateTokenQuote converts registered native currency units to token base
 // units. Token-denominated prices pay exactly in that token; fiat prices use
-// the existing FX and token-price quote.
+// the existing FX and token-price quote. quotedAt is supplied by the owning
+// checkout clock; external feed freshness is checked by the feed providers.
 //
 // `decimals` is the mint's ON-CHAIN base-unit precision (#817) and is an
 // explicit parameter so no caller can fall back to an assumed 6; resolve it via
 // MintDecimals.ForMint.
-func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider) (*TokenQuote, error) {
+func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
+	if quotedAt.IsZero() {
+		return nil, fmt.Errorf("token quote requires its creation time")
+	}
+	quotedAt = quotedAt.UTC()
 	tokenSymbol = strings.ToUpper(strings.TrimSpace(tokenSymbol))
 	if tokenSymbol == "" {
 		return nil, fmt.Errorf("token symbol is required")
@@ -251,13 +256,11 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 			return nil, fmt.Errorf("token amount cannot be negative")
 		}
 		amount := uint64(amountMicros)
-		return &TokenQuote{Units: amount, Amount: FormatBaseUnits(amount, decimals), FXRate: 1, FXCurrency: currency, QuotedAt: time.Now()}, nil
+		return &TokenQuote{Units: amount, Amount: FormatBaseUnits(amount, decimals), FXRate: 1, FXCurrency: currency, QuotedAt: quotedAt}, nil
 	}
 	if amountMicros <= 0 {
-		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil
+		return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: quotedAt}, nil
 	}
-
-	quotedAt := time.Now()
 
 	fxRate := 1.0
 	if currency != money.DefaultCurrency {

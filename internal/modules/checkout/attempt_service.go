@@ -1397,12 +1397,13 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 				return fmt.Errorf("%w: %s has a transfer hook; pay it by transfer request", ErrCheckoutAttemptValidation, tokenSymbol)
 			}
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider)
+		quotedAt := s.now().UTC()
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider, quotedAt)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutAttemptValidation, err)
 		}
 		session.Status = models.CheckoutAttemptStatusRequiresAction
-		expiresAt := s.now().Add(defaultCheckoutAttemptTTL)
+		expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
 		session.ExpiresAt = &expiresAt
 		if session.RailState == nil {
 			session.RailState = map[string]any{}

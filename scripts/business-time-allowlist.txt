@@ -52,8 +52,6 @@ internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:                time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:  time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|2
 internal/modules/solana/solanasubs/subscription_repo.go|now := time.Now().UTC()|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
-internal/modules/solana/support.go|quotedAt := time.Now()|external_protocol_time|Oracle quote freshness uses physical time|1
-internal/modules/solana/support.go|return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil|external_protocol_time|Oracle quote freshness uses physical time|1
 internal/modules/solana/transaction.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/email_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

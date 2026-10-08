@@ -379,7 +379,7 @@ func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr 
 }
 
 func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSymbol, mint string, decimals int, amountMicros int64, currency string, quotedAt, expiresAt time.Time) *TokenQuote {
-	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, mint, decimals, moneyutil.Micros(amountMicros), currency, r.State.FXProvider, r.State.SolanaPriceProvider)
+	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, mint, decimals, moneyutil.Micros(amountMicros), currency, r.State.FXProvider, r.State.SolanaPriceProvider, quotedAt)
 	if err != nil {
 		log.WithError(err).WithField("token", tokenSymbol).Warn("Failed to calculate token quote")
 		return nil
