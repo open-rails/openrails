@@ -28,9 +28,9 @@ func newApplyCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply-catalog",
 		Short: "Apply one idempotent catalog batch to an explicitly selected merchant",
-		Long: "Loads a catalog application, applies it atomically, and prints its receipt. Without application_id " +
-			"and expected_revision the document is declarative: rerun it on every boot; it replays while the catalog " +
-			"is unchanged and otherwise converges the catalog to the file. With both, it is a guarded one-off change. " +
+		Long: "Loads one catalog application, applies it atomically, and prints its receipt. " +
+			"The canonical content hash is remembered permanently: applying the same document again " +
+			"returns the original receipt even after later catalog edits. A prior document is not a rollback. " +
 			"Omitted items are preserved unless the document explicitly sets prune: true.",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

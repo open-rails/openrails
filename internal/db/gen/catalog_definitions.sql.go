@@ -204,7 +204,7 @@ func (q *Queries) ListDefaultCatalogRateCards(ctx context.Context, merchantID uu
 
 const listLiveCatalogPricesWithPSPLinks = `-- name: ListLiveCatalogPricesWithPSPLinks :many
 SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
-       p.trial_unit_amount, p.trial_duration_hours,
+       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount,
        COALESCE((
            SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
@@ -230,6 +230,7 @@ type ListLiveCatalogPricesWithPSPLinksRow struct {
 	AutoRenew           bool
 	TrialUnitAmount     *int64
 	TrialDurationHours  *int32
+	CustomerAmount      []byte
 	PspLinks            []byte
 	Archived            bool
 }
@@ -252,6 +253,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 			&i.AutoRenew,
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
+			&i.CustomerAmount,
 			&i.PspLinks,
 			&i.Archived,
 		); err != nil {
@@ -266,7 +268,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 }
 
 const listLiveCatalogProducts = `-- name: ListLiveCatalogProducts :many
-SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec,
+SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec, credit_grant,
        tier_group, tier_rank, archived
 FROM billing.products
 WHERE merchant_id = $1::uuid AND NOT archived
@@ -279,6 +281,7 @@ type ListLiveCatalogProductsRow struct {
 	DisplayName      string
 	Description      string
 	EntitlementsSpec []byte
+	CreditGrant      []byte
 	TierGroup        *string
 	TierRank         int32
 	Archived         bool
@@ -299,6 +302,7 @@ func (q *Queries) ListLiveCatalogProducts(ctx context.Context, merchantID uuid.U
 			&i.DisplayName,
 			&i.Description,
 			&i.EntitlementsSpec,
+			&i.CreditGrant,
 			&i.TierGroup,
 			&i.TierRank,
 			&i.Archived,

@@ -21,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
+// CatalogDumpOptions exports current, unarchived offers as an editable catalog
+// application. Use the merchant archive for immutable identities and history.
 type CatalogDumpOptions struct {
 	Config   *config.Config
 	PGXPool  *pgxpool.Pool
@@ -127,6 +129,13 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		if row.TierGroup != nil {
 			p.TierGroup = catalog.Value(*row.TierGroup)
 		}
+		p.CreditGrant = catalog.Null[catalog.CreditGrantSpec]()
+		if len(row.CreditGrant) > 0 && string(row.CreditGrant) != "null" {
+			p.CreditGrant = catalog.Field[catalog.CreditGrantSpec]{Set: true}
+			if err := json.Unmarshal(row.CreditGrant, &p.CreditGrant.Value); err != nil {
+				return nil, nil, fmt.Errorf("decode product %q credit grant: %w", row.Key, err)
+			}
+		}
 		p.EntitlementsSpec.Set = true
 		p.RateCards = catalog.Value([]catalog.RateCard{})
 		if len(row.EntitlementsSpec) == 0 || string(row.EntitlementsSpec) == "null" {
@@ -187,7 +196,17 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if row.TrialUnitAmount != nil && row.TrialDurationHours != nil {
 			price.TrialUnitAmount, price.TrialDurationHours = catalog.Value(*row.TrialUnitAmount), catalog.Value(int(*row.TrialDurationHours))
 		}
-		links := providerLinks(row.PspLinks)
+		price.CustomerAmount = catalog.Null[catalog.CustomerAmount]()
+		if len(row.CustomerAmount) > 0 && string(row.CustomerAmount) != "null" {
+			price.CustomerAmount = catalog.Field[catalog.CustomerAmount]{Set: true}
+			if err := json.Unmarshal(row.CustomerAmount, &price.CustomerAmount.Value); err != nil {
+				return fmt.Errorf("decode price %q customer amount: %w", row.Key, err)
+			}
+		}
+		links, err := providerLinks(row.PspLinks)
+		if err != nil {
+			return fmt.Errorf("decode price %q provider links: %w", row.Key, err)
+		}
 		if links == nil {
 			links = map[string]map[string]string{}
 		}
@@ -212,7 +231,9 @@ func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.
 		if row.MeterKey != nil {
 			rc.Meter = *row.MeterKey
 		}
-		_ = json.Unmarshal(row.Filter, &rc.Filter)
+		if err := json.Unmarshal(row.Filter, &rc.Filter); err != nil {
+			return fmt.Errorf("decode rate-card filter: %w", err)
+		}
 		if len(row.Allowance) > 0 {
 			var a catalog.Allowance
 			if err := json.Unmarshal(row.Allowance, &a); err != nil {
@@ -230,18 +251,21 @@ func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.
 	return nil
 }
 
-func providerLinks(raw []byte) map[string]map[string]string {
+func providerLinks(raw []byte) (map[string]map[string]string, error) {
 	var links map[string]map[string]string
-	_ = json.Unmarshal(raw, &links)
+	if err := json.Unmarshal(raw, &links); err != nil {
+		return nil, err
+	}
 	if len(links) == 0 {
-		return nil
+		return nil, nil
 	}
 	// The stored blob is account-keyed with the rail stamped inside each
 	// entry; the manifest derives the rail from the account key, so the stamp
 	// is storage detail, not manifest content.
-	for psp, cfg := range links {
+	for _, cfg := range links {
+		rail := cfg[models.RailKeyRail]
 		delete(cfg, models.RailKeyRail)
-		if strings.EqualFold(strings.TrimSpace(psp), string(models.RailSolana)) {
+		if strings.EqualFold(strings.TrimSpace(rail), string(models.RailSolana)) {
 			// mint_symbol is the resolved on-chain snapshot. The push manifest
 			// declares token only when selecting a new non-default plan, so
 			// never emit snapshot metadata as input. A stored plan_pda is
@@ -254,5 +278,5 @@ func providerLinks(raw []byte) map[string]map[string]string {
 			}
 		}
 	}
-	return links
+	return links, nil
 }

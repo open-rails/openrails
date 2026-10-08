@@ -51,7 +51,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
 | `apply-catalog --merchant NAME --file PATH` | atomic local catalog application; declarative by default, guarded with `application_id` + `expected_revision` |
-| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
+| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
