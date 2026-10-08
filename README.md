@@ -101,43 +101,132 @@ but are not implemented yet, so the YAML above includes only the supported produ
 
 ### Evolving the catalog
 
-Keep the product and price keys when editing an offer. For example, apply this
-second file after the initial catalog:
+All the changes below are YAML applications. Apply each file through the same
+`catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
+or through `openrails apply-catalog --merchant myvideos --file FILE.yaml`.
+There are no caller-managed application IDs or version numbers. These examples
+build on the initial `catalog.yaml` above.
+
+| YAML change | What happens |
+|---|---|
+| Edit fields under an existing product key | Update that product in place; its revision counter advances. |
+| Change financial terms under an existing product/price key | Create a new immutable price revision and archive the previous live revision. |
+| Add a different price key under a product | Create a separate offer; the other prices stay unchanged. |
+| Set `archived: true` on a price | Stop new sales at that price; the product and its other prices stay available. |
+| Set `archived: true` on a product | Stop new sales of the product through all its prices. Their individual archive flags stay unchanged. |
+| Omit a product, price, or field | Preserve its stored state. Omission never means deletion. |
+
+**Change a product and raise its price.** Keep the keys to identify the same
+product and offer:
 
 ```yaml
 # catalog-update.yaml
 schema_version: 1
 products:
   - key: premium
-    display_name: Premium Plus # update the existing product in place
+    display_name: Premium Plus # mutate the existing product
     prices:
       - key: monthly
-        unit_amount: 12990000 # new customers pay $12.99; omitted terms stay unchanged
-  - key: video-101
-    archived: true # stop new sales; existing buyers keep their access
+        unit_amount: 12990000 # $12.99; currency, duration and renewal terms are preserved
 ```
 
-Apply it with the same `catalog.ParseApplicationYAML` → `client.ApplyCatalog` calls.
-On a fresh merchant this changes `premium.monthly.v0` ($9.99) to a new immutable
-`premium.monthly.v1` ($12.99) and archives v0 for new sales. Existing subscribers
-keep their exact old price and accepted entitlements indefinitely; a price edit
-or archive does not schedule a subscription migration. To move existing
-subscribers later, explicitly preview and create a reprice batch for the product
-and price key with an effective date. Changing accepted benefits uses the
+For the initial catalog, this creates `premium.monthly.v1` at $12.99 and archives
+`premium.monthly.v0` at $9.99. The old price record is retained unchanged. New
+subscribers buy v1; existing subscribers keep their exact accepted price and
+entitlements indefinitely. Product descriptions and `entitlements_spec` can also
+be edited in place; changed entitlements apply to new purchases, not retroactively
+to existing grants. Neither a YAML price change nor archival schedules a
+subscription migration.
+
+**Retire one price and add another.** This stops new monthly signups and adds an
+annual offer on the same product:
+
+```yaml
+# replace-monthly-with-yearly.yaml
+schema_version: 1
+products:
+  - key: premium
+    prices:
+      - key: monthly
+        archived: true
+      - key: yearly
+        currency: USD
+        unit_amount: 99990000 # $99.99
+        access_duration_hours: 8760 # 365 days
+        auto_renew: true
+```
+
+`premium.yearly` is a new price key, starting at v0. It does not replace the
+price ID held by monthly subscribers: their billing continues at their accepted
+monthly terms. Archival prevents new sales; it does not cancel subscriptions,
+revoke paid access, or delete history. A price cannot move to another product.
+
+**Retire an entire product.** There is no need to repeat its prices:
+
+```yaml
+# retire-video.yaml
+schema_version: 1
+products:
+  - key: video-101
+    archived: true
+```
+
+The video stops selling, while existing buyers retain their permanent access.
+`premium` is omitted and stays unchanged. To make the video available again,
+apply a new batch:
+
+```yaml
+# restore-video.yaml
+schema_version: 1
+products:
+  - key: video-101
+    archived: false
+```
+
+Restoring a product makes its unarchived prices available again. It does not
+restore any prices that were individually archived.
+
+**Restore an earlier price.** After both monthly revisions have been archived,
+give the complete financial terms to select the intended historical revision:
+
+```yaml
+# restore-original-monthly.yaml
+schema_version: 1
+products:
+  - key: premium
+    prices:
+      - key: monthly
+        currency: USD
+        unit_amount: 9990000 # the original $9.99 terms
+        access_duration_hours: 720
+        auto_renew: true
+        trial_unit_amount: null
+        trial_duration_hours: null
+        archived: false
+```
+
+This restores the original monthly price ID and v0; it does not rewrite history
+or create another copy of the same terms. If a different monthly revision is
+currently live, it is archived. The yearly offer remains available because it is
+omitted. Complete terms, including explicit null trial fields, avoid ambiguity
+when a key has several archived revisions; a known immutable price `id` can also
+select a particular revision.
+
+**Replay is not rollback.** Each successful application's canonical content hash
+is remembered per merchant. Reapplying any of these files changes nothing, even
+after later edits. Reapplying the initial `catalog.yaml` therefore does not undo
+the price increase or restore an archived video. The same rule applies to already
+used archive and restore files. Comments, formatting, and product/price ordering
+do not make a new application. A new document is a new atomic batch; different,
+previously unseen documents have no ordering guarantee, so apply intended changes
+in order.
+
+All these examples preserve omitted entries. `prune: true` is an explicit
+bulk-archive option for omitted products and prices; it never deletes them.
+Changing existing subscribers' accepted prices requires an explicit scheduled
+reprice operation. Changing their accepted benefits uses the
 [planned agreement-change workflow](https://github.com/open-rails/tracker/blob/master/openrails/1132.md).
-
-Omission preserves both records and fields. Explicit `archived: false` restores
-an offer; restoring an earlier price's exact terms reuses its original immutable
-ID and revision. Products update in place and have an automatic revision counter,
-without a separate history of product versions. Purchases and subscriptions retain
-the entitlement terms they accepted.
-
-The server remembers each successfully applied batch's content hash **per merchant**.
-Reapplying either file returns its receipt and changes nothing—even after later
-programmatic or HTTP edits. Comments, formatting, and product/price ordering do
-not create a new batch. A modified file is a new batch, committed atomically.
-There is no ordering guarantee between different, previously unseen files; an
-already-applied file is not a rollback command.
+Those subscriber migrations are separate from the YAML offer changes above.
 
 ### Turning catalog HTTP writes on and off
 
