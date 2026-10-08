@@ -116,7 +116,11 @@ Price amounts include an explicit currency: `amount: 9.99 USD`, `amount: 1 SOL`,
 or `amount: 10 USDC`. A bare `amount: 9.99` is invalid. Conversion uses the
 currency's registered precision exactly, without rounding. A price can use
 `amount` or the numeric `unit_amount` and `currency` fields, never both forms.
-Payment rails still determine which currencies they can charge.
+Payment rails still determine which currencies they can charge. One-time Solana
+checkout supports SOL or USDC prices paid in the matching token when the merchant
+accepts it; those amounts need no FX conversion. Paying a token-denominated price
+with a different token is unsupported. New Solana recurring plans remain
+USD-denominated, and card rails accept only supported fiat currencies.
 
 Durations accept positive
 whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
