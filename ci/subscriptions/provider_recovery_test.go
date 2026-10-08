@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerrecovery"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -316,7 +318,9 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 	provider.mu.Unlock()
 	t.Cleanup(func() { provider.mu.Lock(); provider.intents[payment]["status"] = "succeeded"; provider.mu.Unlock() })
 	b.w.stop()
-	b.w.advance(end.Add(time.Second).Sub(b.w.clock.Now()))
+	// The general clone helper observes just before due; this scenario
+	// deliberately restores beyond that observation's freshness window.
+	b.w.advance(end.Add(5 * time.Hour).Sub(b.w.clock.Now()))
 	b.w.start()
 	b.w.runRenewals()
 	require.Eventually(t, func() bool {
@@ -364,17 +368,29 @@ func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	a.w.stripe.mu.Unlock()
 	b.w.stop()
 	b.w.advance(end.Add(time.Hour).Sub(b.w.clock.Now()))
+	read := a.w.stripe.hold(newGate(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents" }, false))
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(read.release) }); a.w.stripe.unhold() }
+	t.Cleanup(unblock)
 	b.w.start()
-	b.w.runRenewals()
+	_, err = b.w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	select {
+	case <-read.arrived:
+	case <-time.After(30 * time.Second):
+		t.Fatal("accepted operation did not reach receipt verification")
+	}
+	// No receipt has been read in full mode. Restart the retained operation
+	// under readonly before the financial/cancellation phase can execute.
+	b.w.stop()
+	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+	unblock()
+	b.w.start()
 	b.w.until(func() bool {
 		var count int
 		err := b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND transaction_id=$2`), b.sub.UUID(), transaction).Scan(&count)
 		return err == nil && count == 1
 	}, "confirmed money commits even though readonly holds cancellation")
-	b.w.stop()
-	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
-	b.w.start()
-	b.w.wake()
 	require.NotEqual(t, billing.SubscriptionCanceled, b.w.subscription(embedded, b.sub).Status)
 	var status string
 	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT status FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&status))

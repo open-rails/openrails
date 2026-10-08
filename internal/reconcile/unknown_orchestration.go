@@ -215,6 +215,8 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 					log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
 						"subscription_id": r.ID, "rail": rail,
 					}).Warn("reconcile unknown: per-subscription probe failed; staying unknown")
+					res.StillUnknown++
+					continue
 				} else {
 					decision = Decide(state, EvidenceBundle{Snapshot: psnap, EvidenceFloor: floor}, now, opts.DunningWindow)
 				}
