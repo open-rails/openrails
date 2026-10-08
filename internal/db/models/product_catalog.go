@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // Product represents a product offering (e.g., Premium Membership)
@@ -18,8 +19,10 @@ type Product struct {
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
 
-	// Entitlements configuration: map entitlement name -> duration HOURS (nil or 0 means indefinite)
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
+	// Named feature grants follow the purchased access window. With an indefinite
+	// purchase, a positive feature duration bounds that feature independently.
+	EntitlementsSpec map[string]*int          `json:"entitlements_spec,omitempty"`
+	CreditGrant      *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
@@ -60,10 +63,11 @@ func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
-	Revision   int64     `json:"revision"`
-	ID         uuid.UUID `json:"id"`
-	MerchantID uuid.UUID `json:"merchant_id"`
-	ProductID  uuid.UUID `json:"product_id"`
+	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
+	Revision       int64                   `json:"revision"`
+	ID             uuid.UUID               `json:"id"`
+	MerchantID     uuid.UUID               `json:"merchant_id"`
+	ProductID      uuid.UUID               `json:"product_id"`
 	// Archived: retired. Not purchasable, but grandfathered subscriptions keep
 	// billing it indefinitely.
 	Archived bool `json:"archived"`
@@ -328,7 +332,7 @@ func (p *Product) Summary() *billing.ProductSummary {
 func (p *Product) View() billing.Product {
 	return billing.Product{Revision: p.Revision,
 		ID: billing.ProductID(p.ID), Key: p.Key,
-		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec,
+		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec, CreditGrant: p.CreditGrant,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
@@ -361,7 +365,7 @@ func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.Revision,
 		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
 		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, AutoRenew: p.AutoRenew,
-		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours,
+		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount,
 		PSPs: make(map[string]billing.PSPLinkState, len(p.PSPLinks)), PendingManualActions: []billing.PendingAction{},
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}

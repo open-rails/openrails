@@ -67,6 +67,7 @@ type Offer struct {
 	MerchantDisplayName string              `json:"merchant_display_name"`
 	Plan                CheckoutSessionPlan `json:"plan"`
 	DueToday            int64               `json:"due_today,string"`
+	CustomerAmount      *int64              `json:"customer_amount,string,omitempty"`
 	Options             []Option            `json:"options"`
 	Buyer               Buyer               `json:"buyer"`
 }

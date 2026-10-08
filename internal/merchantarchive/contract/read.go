@@ -21,14 +21,17 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			return nil
 		}
 		p := Profiles[table]
-		// Earlier archives predate product and price revisions.
-		// This column was added immediately after merchant_id; the original
-		// wire reader still verifies the untouched stream's digest.
-		if len(r.Values) == len(p.Columns)-1 && (p.Name == "prices" || p.Name == "products") {
-			values := make([]*string, len(p.Columns))
+		// Revisions were inserted after merchant_id; the later credit columns
+		// are appended. Older archives retain their identities and explicitly
+		// promise no credit. The wire reader verifies the original digest.
+		if (p.Name == "prices" || p.Name == "products") && len(r.Values) > 1 && r.Values[1] != nil && uuidPattern.MatchString(*r.Values[1]) {
+			values := make([]*string, len(r.Values)+1)
 			values[0] = r.Values[0]
 			copy(values[2:], r.Values[1:])
 			r.Values = values
+		}
+		if (p.Name == "prices" || p.Name == "products" || p.Name == "payments") && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
 		}
 		if err := ValidateValues(p, r.Values); err != nil {
 			return err

@@ -48,4 +48,9 @@ export type {
   TierChange,
   TierChangePreview,
 } from "./types"
-export { amountToDecimal, formatAmount, type Amount } from "../lib/money"
+export {
+  amountToDecimal,
+  decimalToAmount,
+  formatAmount,
+  type Amount,
+} from "../lib/money"

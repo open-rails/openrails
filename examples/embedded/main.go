@@ -178,12 +178,13 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			productKey := "video-" + c.Param("id")
+			access, err := bill.CheckProductAccess(c, customer, billing.CheckProductAccessParams{ProductKeys: []string{productKey}})
 			if err != nil {
 				c.AbortWithStatus(http.StatusServiceUnavailable)
 				return
 			}
-			if !owned {
+			if !access[productKey] {
 				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
 				return
 			}

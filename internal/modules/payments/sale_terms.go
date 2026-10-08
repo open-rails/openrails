@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -27,28 +28,29 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
-	CheckoutAttemptID   uuid.UUID               `json:"checkout_attempt_id,omitempty"`
-	RequestFingerprint  string                  `json:"request_fingerprint"`
-	Provider            string                  `json:"provider"`
-	PSP                 string                  `json:"psp"`
-	Amount              int64                   `json:"amount,string"`
-	Currency            string                  `json:"currency"`
-	Description         string                  `json:"description"`
-	UserID              string                  `json:"user_id"`
-	PriceID             uuid.UUID               `json:"price_id"`
-	E2ERunID            string                  `json:"e2e_run_id,omitempty"`
-	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
-	Instrument          charge.FrozenInstrument `json:"instrument"`
-	PaymentID           uuid.UUID               `json:"payment_id"`
-	ProductID           uuid.UUID               `json:"product_id"`
-	ListAmount          int64                   `json:"list_amount,string"`
-	AcceptedAt          time.Time               `json:"accepted_at"`
-	Entitlements        map[string]*int         `json:"entitlements"`
-	AccessDurationHours *int                    `json:"access_duration_hours"`
-	EntitlementStart    time.Time               `json:"entitlement_start"`
-	OwnershipStart      time.Time               `json:"ownership_start"`
-	OwnershipEnd        *time.Time              `json:"ownership_end"`
-	Eligibility         string                  `json:"eligibility"`
+	CheckoutAttemptID   uuid.UUID                   `json:"checkout_attempt_id,omitempty"`
+	RequestFingerprint  string                      `json:"request_fingerprint"`
+	Provider            string                      `json:"provider"`
+	PSP                 string                      `json:"psp"`
+	Amount              int64                       `json:"amount,string"`
+	Currency            string                      `json:"currency"`
+	Description         string                      `json:"description"`
+	UserID              string                      `json:"user_id"`
+	PriceID             uuid.UUID                   `json:"price_id"`
+	E2ERunID            string                      `json:"e2e_run_id,omitempty"`
+	PaymentMethodID     uuid.UUID                   `json:"payment_method_id"`
+	Instrument          charge.FrozenInstrument     `json:"instrument"`
+	PaymentID           uuid.UUID                   `json:"payment_id"`
+	ProductID           uuid.UUID                   `json:"product_id"`
+	ListAmount          int64                       `json:"list_amount,string"`
+	AcceptedAt          time.Time                   `json:"accepted_at"`
+	CreditGrant         *models.CreditGrantSnapshot `json:"credit_grant"`
+	Entitlements        map[string]*int             `json:"entitlements"`
+	AccessDurationHours *int                        `json:"access_duration_hours"`
+	EntitlementStart    time.Time                   `json:"entitlement_start"`
+	OwnershipStart      time.Time                   `json:"ownership_start"`
+	OwnershipEnd        *time.Time                  `json:"ownership_end"`
+	Eligibility         string                      `json:"eligibility"`
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -90,6 +92,9 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, errors.New("sale access window is invalid")
 	}
 	if _, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount); err != nil {
+		return p, err
+	}
+	if err := p.CreditGrant.Validate(); err != nil {
 		return p, err
 	}
 	return p, nil

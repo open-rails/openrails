@@ -98,6 +98,17 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				}
 				product = &billing.Product{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
 			}
+			if declared.CreditGrant.Set {
+				product.CreditGrant = nil
+				if !declared.CreditGrant.Null {
+					product.CreditGrant = &declared.CreditGrant.Value
+				}
+			}
+			credit, err := normalizeCreditGrant(product.CreditGrant)
+			if err != nil {
+				return nil, err
+			}
+			product.CreditGrant = credit
 			reactivatingProduct := product.Archived && declared.Archived.Set && !declared.Archived.Value
 			if declared.Archived.Set {
 				product.Archived = declared.Archived.Value
@@ -134,6 +145,9 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					return nil, err
 				}
 				if err := validateCatalogPriceTerms(request); err != nil {
+					return nil, err
+				}
+				if err := validateCreditPrice(product.CreditGrant, request); err != nil {
 					return nil, err
 				}
 				links := catalogPriceLinks(current)
@@ -184,6 +198,9 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						rail := links[key]["rail"]
 						if rail == "" {
 							rail = key
+						}
+						if request.CustomerAmount != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
+							return nil, apperr.Invalidf("customer_amount requires Stripe or NMI checkout without provider catalog links")
 						}
 						declaredRails = append(declaredRails, rail)
 						continue

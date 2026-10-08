@@ -383,6 +383,7 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 		PriceID     string
 		PriceKey    string `json:",omitempty"`
 		ProductKey  string `json:",omitempty"`
+		Amount      *int64 `json:",omitempty"`
 		Mode        string
 		Payment     CheckoutAttemptPaymentRequest
 		Metadata    map[string]string
@@ -392,7 +393,7 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 		OfferKind   billing.OfferKind `json:",omitempty"`
 	}{
 		PriceID:  strings.TrimSpace(req.PriceID),
-		PriceKey: req.PriceKey, ProductKey: req.ProductKey,
+		PriceKey: req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
 		Mode:        strings.TrimSpace(req.Mode),
 		Payment:     payment,
 		Metadata:    normalizeMetadata(req.Metadata),
@@ -455,6 +456,10 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	}
 	if !product.IsPurchasable() {
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutAttemptValidation)
+	}
+	price, err = CheckoutPriceForAmount(price, req.Amount)
+	if err != nil {
+		return nil, err
 	}
 	if err := validateOfferAssertion(price, product, req.Entitlement, req.OfferKind); err != nil {
 		return nil, err
@@ -537,6 +542,9 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		requestFingerprint = checkoutAttemptRequestFingerprintForRail(req, user, rail)
 	}
 	railState := map[string]any{}
+	if req.Amount != nil {
+		railState["customer_selected"] = true
+	}
 	if req.OfferKind != "" {
 		railState["requested_offer_kind"] = string(req.OfferKind)
 	}
@@ -1784,6 +1792,10 @@ func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, 
 		LastFour:          payment.LastFour,
 		CardType:          payment.CardType,
 		ExpiryDate:        payment.ExpiryDate,
+	}
+
+	if selected, _ := session.RailState["customer_selected"].(bool); selected {
+		req.Amount = session.Amount
 	}
 
 	// The accepted operation belongs to this persisted session. The caller's

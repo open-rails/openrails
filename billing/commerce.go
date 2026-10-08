@@ -125,6 +125,10 @@ type CreateCheckoutAttemptParams struct {
 	PriceID    PriceID `json:"price_id"`
 	PriceKey   string  `json:"price_key"`
 	ProductKey string  `json:"product_key,omitempty"`
+	// Amount selects the deposit in the price currency's native units. Required
+	// for customer_amount prices; forbidden for fixed prices. The accepted
+	// amount is retained on retries and cannot change within a session.
+	Amount *int64 `json:"amount,string,omitempty"`
 	// Entitlement optionally binds admission to the opaque resource the host
 	// showed. OpenRails verifies the selected product grants this key.
 	Entitlement    string                 `json:"entitlement"`

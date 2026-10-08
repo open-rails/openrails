@@ -17,10 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
+import { formatDate, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
-import { priceIntervalLabel } from "@/pages/catalog/price-format"
+import {
+  priceAmountLabel,
+  priceIntervalLabel,
+} from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
 import { adminQueries } from "@/lib/queries"
@@ -101,9 +104,7 @@ export function PriceDetailPage() {
             {product?.display_name ?? shortId(price.product_id, 13)}
           </Link>
         </Fact>
-        <Fact label="Amount">
-          {formatNativeAmount(price.unit_amount, price.currency)}
-        </Fact>
+        <Fact label="Amount">{priceAmountLabel(price)}</Fact>
         <Fact label="Renews">
           {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
         </Fact>
@@ -141,12 +142,7 @@ export function PriceDetailPage() {
               <TableBody>
                 {history.data.map((entry) => (
                   <TableRow key={`${entry.price.id}-${entry.effective_at}`}>
-                    <TableCell>
-                      {formatNativeAmount(
-                        entry.price.unit_amount,
-                        entry.price.currency
-                      )}
-                    </TableCell>
+                    <TableCell>{priceAmountLabel(entry.price)}</TableCell>
                     <TableCell>{formatDate(entry.effective_at)}</TableCell>
                     <TableCell>
                       {entry.archived ? (

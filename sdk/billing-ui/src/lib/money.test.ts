@@ -4,6 +4,7 @@ import {
   addAmounts,
   amountToDecimal,
   amountUnits,
+  decimalToAmount,
   formatAmount,
   intlFormatsDecimalStringsExactly,
   isAmount,
@@ -50,6 +51,28 @@ describe("amounts", () => {
     expect(addAmounts()).toBe("0")
     expect(addAmounts(maxInt64, "1")).toBeNull()
     expect(addAmounts("1", "x")).toBeNull()
+  })
+
+  it("parses selected deposits without rounding or a JS number", () => {
+    expect(decimalToAmount("100.25", 6)).toBe("100250000")
+    expect(decimalToAmount("1234", 4)).toBe("12340000")
+    expect(decimalToAmount("9007199254740993", 0)).toBe("9007199254740993")
+    expect(decimalToAmount("9223372036854.775807", 6)).toBe(maxInt64)
+    expect(decimalToAmount("-9223372036854.775808", 6)).toBe(minInt64)
+    for (const decimal of [
+      "1.0000001",
+      "1e2",
+      "100,00",
+      " 100",
+      "+100",
+      "",
+      ".5",
+      "100.",
+      "9223372036854.775808",
+    ]) {
+      expect(decimalToAmount(decimal, 6), decimal).toBeNull()
+    }
+    expect(decimalToAmount("100", 19)).toBeNull()
   })
 
   it("render the exact major-unit decimal at the currency scale", () => {

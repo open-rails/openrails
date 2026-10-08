@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -66,6 +67,10 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 	if err != nil {
 		return err
 	}
+	credit, err := models.PointerToJSONB(product.CreditGrant)
+	if err != nil {
+		return err
+	}
 	var desc *string
 	if product.Description != "" {
 		desc = &product.Description
@@ -80,12 +85,12 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		Key:              product.Key,
 		DisplayName:      product.DisplayName,
 		Description:      desc,
-		EntitlementsSpec: entSpec,
-		TierGroup:        product.TierGroup,
-		TierRank:         tierRank32,
-		Archived:         product.Archived,
-		CreatedAt:        product.CreatedAt,
-		UpdatedAt:        product.UpdatedAt,
+		EntitlementsSpec: entSpec, CreditGrant: credit,
+		TierGroup: product.TierGroup,
+		TierRank:  tierRank32,
+		Archived:  product.Archived,
+		CreatedAt: product.CreatedAt,
+		UpdatedAt: product.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -249,6 +254,8 @@ func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, de
 }
 
 type ProductDefinitionUpdateParams struct {
+	CreditGrant      *catalogwire.CreditGrantSpec
+	SetCreditGrant   bool
 	DisplayName      *string
 	Description      *string
 	EntitlementsSpec map[string]*int
@@ -271,6 +278,10 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	if err != nil {
 		return nil, err
 	}
+	credit, err := models.PointerToJSONB(params.CreditGrant)
+	if err != nil {
+		return nil, err
+	}
 	var rank *int32
 	if params.TierRank != nil {
 		value, err := productTierRankInt32(*params.TierRank)
@@ -282,7 +293,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{MerchantID: queryMerchant.UUID(),
 		ID: id, DisplayName: params.DisplayName,
 		Description: params.Description, SetDescription: params.Description != nil,
-		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements,
+		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements, CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
 		TierRank: rank, Archived: params.Archived,
 	})

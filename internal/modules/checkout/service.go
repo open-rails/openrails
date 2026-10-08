@@ -234,6 +234,10 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
+	price, err = CheckoutPriceForAmount(price, req.Amount)
+	if err != nil {
+		return nil, err
+	}
 	if !price.IsPurchasable() {
 		return nil, errors.New("price is not available for purchase")
 	}
@@ -328,7 +332,9 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 
 	// Check for existing coverage and determine if purchase is allowed
 	var coverage *CoverageInfo
-	if permanentPurchase(price) && s.PurchaseService != nil {
+	if product.CreditGrant != nil && !price.AutoRenew {
+		coverage = &CoverageInfo{}
+	} else if permanentPurchase(price) && s.PurchaseService != nil {
 		coverage, err = s.PurchaseService.purchaseCoverage(ctx, user.ID, price, product)
 	} else {
 		coverage, err = s.GetUserProductCoverage(ctx, user.ID, product)
@@ -426,6 +432,9 @@ func (s *CheckoutService) processOneTimePurchase(
 	target, err := s.resolveRailTarget(ctx, rail)
 	if err != nil {
 		return nil, err
+	}
+	if (price.CustomerAmount != nil || req.Amount != nil) && target.Rail != "nmi" && target.Rail != "stripe" {
+		return nil, fmt.Errorf("%w: customer-selected deposits require NMI or Stripe", ErrCheckoutAttemptValidation)
 	}
 	price = priceForCheckoutTarget(price, target)
 	switch {

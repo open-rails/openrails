@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -76,7 +77,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return err
 	}
 	customer, _ := uuid.Parse(p.UserID)
-	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || observed.PriceID != p.PriceID || observed.Rail == nil || *observed.Rail != "nmi" || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
+	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || observed.PriceID != p.PriceID || observed.Rail == nil || *observed.Rail != op.Rail || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
 		return errors.New("sale result points to another payment or commercial decision")
 	}
 	if !payments.PaymentStatusCompleted(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
@@ -101,7 +102,14 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if !reflect.DeepEqual(snapshot, p.Entitlements) {
 		return errors.New("sale payment has another benefit snapshot")
 	}
-	limit, err := safecast.Convert[int32](len(p.Entitlements) + 2)
+	retained, err := models.PaymentFromGen(observed)
+	if err != nil {
+		return err
+	}
+	if !models.SameCreditGrantPromise(p.CreditGrant, retained.CreditGrantSnapshot) {
+		return errors.New("sale payment has another credit promise")
+	}
+	limit, err := safecast.Convert[int32](len(p.Entitlements) + 3)
 	if err != nil {
 		return err
 	}
@@ -109,12 +117,18 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if err != nil {
 		return err
 	}
+	access := original[:0]
+	for _, event := range original {
+		if event.Kind != string(grants.Credit) {
+			access = append(access, event)
+		}
+	}
 	windows, ownership := grants.PurchaseWindows(p.Entitlements, p.AccessDurationHours, p.AcceptedAt, p.EntitlementStart)
-	history, err := grants.ValidatePurchaseHistory(op.MerchantID, customer, p.ProductID, paymentID, windows, ownership, original)
+	history, err := grants.ValidatePurchaseHistory(op.MerchantID, customer, p.ProductID, paymentID, windows, ownership, access)
 	if err != nil {
 		return err
 	}
-	if history.Ownership == nil || len(history.Entitlements) != len(windows) {
+	if (p.CreditGrant == nil || len(p.Entitlements) > 0) && history.Ownership == nil || len(history.Entitlements) != len(windows) {
 		return errors.New("terminal sale has incomplete original benefits")
 	}
 	return nil

@@ -54,6 +54,8 @@ type Spec struct {
 type DepositProvenance struct {
 	Source  string `json:"source"`
 	Invoker string `json:"invoker"`
+	// PaidAmount distinguishes purchased credits from manually granted deposits.
+	PaidAmount *int64 `json:"paid_amount,string,omitempty"`
 }
 
 // Ledger is the append-only grant ledger for one merchant. It composes a #512
@@ -283,8 +285,18 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		if g.Amount == nil || g.Currency == nil {
 			return fmt.Errorf("grants: credit grant %s missing amount/currency", g.ID)
 		}
-		if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount,
-			ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: g.ID.String()}, g.ID); err != nil {
+		var spec Spec
+		if len(g.SpecSnapshot) > 0 {
+			if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
+				return fmt.Errorf("grants: decode credit funding: %w", err)
+			}
+		}
+		coord := ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: g.ID.String()}
+		if spec.Deposit != nil && spec.Deposit.PaidAmount != nil {
+			if err := l.money.PurchasedDeposit(ctx, g.CustomerID, *g.Currency, *g.Amount, *spec.Deposit.PaidAmount, coord, g.ID); err != nil {
+				return err
+			}
+		} else if _, err := l.money.Deposit(ctx, g.CustomerID, *g.Currency, *g.Amount, coord, g.ID); err != nil {
 			return fmt.Errorf("grants: materialize credit deposit: %w", err)
 		}
 		return nil

@@ -3,7 +3,7 @@
 -- name: CreatePrice :one
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, customer_amount, key, created_at, updated_at
 ) SELECT
     sqlc.arg(id),
     sqlc.arg(merchant_id)::uuid,
@@ -11,6 +11,7 @@ INSERT INTO billing.prices (
     sqlc.arg(archived)::boolean,
     sqlc.arg(amount), sqlc.arg(currency),
     sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours),
+    sqlc.narg(customer_amount)::jsonb,
     sqlc.arg(key)::text,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -147,4 +148,5 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND product_id=sqlc.arg(product_id
   AND access_duration_hours IS NOT DISTINCT FROM sqlc.narg(access_duration_hours)::int
   AND auto_renew=sqlc.arg(auto_renew)::boolean
   AND trial_unit_amount IS NOT DISTINCT FROM sqlc.narg(trial_unit_amount)::bigint
-  AND trial_duration_hours IS NOT DISTINCT FROM sqlc.narg(trial_duration_hours)::int;
+  AND trial_duration_hours IS NOT DISTINCT FROM sqlc.narg(trial_duration_hours)::int
+  AND customer_amount IS NOT DISTINCT FROM sqlc.narg(customer_amount)::jsonb;

@@ -1,6 +1,5 @@
-import type {
-  Price,
-} from "@/lib/api/generated/wire"
+import type { Price } from "@/lib/api/generated/wire"
+import { formatNativeAmount } from "@/lib/format"
 
 // Access duration is stored in hours because that is the unit the engine
 // charges on. Nobody reads "744h" as a month, so whole days, weeks and months
@@ -35,4 +34,13 @@ export function priceIntervalLabel(
     return `${durationLabel(price.access_duration_hours)} once`
   }
   return "one-time"
+}
+
+// A deposit descriptor has no fixed amount: zero is not its purchase price.
+export function priceAmountLabel(
+  price: Pick<Price, "unit_amount" | "currency" | "customer_amount">
+): string {
+  const range = price.customer_amount
+  if (!range) return formatNativeAmount(price.unit_amount, price.currency)
+  return `Customer chooses ${formatNativeAmount(range.min_amount, price.currency)}–${formatNativeAmount(range.max_amount, price.currency)}`
 }

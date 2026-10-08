@@ -10,6 +10,10 @@ type CreateCheckoutSessionParams struct {
 	PriceID    PriceID                  `json:"price_id"`
 	PriceKey   string                   `json:"price_key"`
 	ProductKey string                   `json:"product_key,omitempty"`
+	// Amount selects the deposit in the price currency's native units. Required
+	// for customer_amount prices; forbidden for fixed prices. The accepted
+	// amount is retained on retries and cannot change within a session.
+	Amount *int64 `json:"amount,string,omitempty"`
 	// SuccessURL is where a redirect step returns the buyer; its origin must
 	// be one of Config.ReturnOrigins.
 	SuccessURL string `json:"success_url"`

@@ -4,6 +4,8 @@
 migration 0001_schema.up.sql sha256:b40b5e21d163cd7e62199bd626411064e59789d70116e39624036e1db467b8db
 migration 0002_catalog_batch_hash.up.sql sha256:7c1b9d10c7d1d2d4300963e93fe9a5f18be6043a875201acac88e7db0b3145be
 migration 0003_product_price_keys.up.sql sha256:86d4b378bbdc547fe3d617034749fb4af880510983c465e48fa8bac29e3d4abe
+migration 0004_catalog_credit_benefits.up.sql sha256:70d01a7b2e045503724d00488ff4601b68dd613c236fc67c8904e9c1392d541f
+migration 0005_purchased_credit_accounting.up.sql sha256:a60a5b3a64bbe0a882350e3decadc89566e09fcfe008cd22cacc6e22c6899e41
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -582,6 +584,7 @@ table billing.grants
   index CREATE INDEX grants_payment_id_idx ON billing.grants USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
   index CREATE UNIQUE INDEX grants_pkey ON billing.grants USING btree (merchant_id, id)
   index CREATE INDEX grants_product_id_idx ON billing.grants USING btree (merchant_id, product_id) WHERE (product_id IS NOT NULL)
+  index CREATE UNIQUE INDEX grants_purchased_credit_payment_key ON billing.grants USING btree (merchant_id, payment_id) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (payment_id IS NOT NULL) AND (((spec_snapshot -> 'deposit'::text) -> 'paid_amount'::text) IS NOT NULL))
   index CREATE INDEX grants_source_type_source_id_idx ON billing.grants USING btree (merchant_id, source_type, source_id) WHERE (source_id IS NOT NULL)
   index CREATE INDEX grants_supersedes_id_idx ON billing.grants USING btree (merchant_id, supersedes_id) WHERE (supersedes_id IS NOT NULL)
   index CREATE UNIQUE INDEX grants_supersedes_id_key ON billing.grants USING btree (merchant_id, supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])))
@@ -798,7 +801,7 @@ table billing.ledger_accounts
   constraint ledger_accounts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint ledger_accounts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint ledger_accounts_pkey PRIMARY KEY (merchant_id, id)
-  constraint ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text])))
+  constraint ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text, 'promotional_funding'::text, 'credit_refund_clearing'::text, 'credit_refund_loss'::text])))
   index CREATE UNIQUE INDEX ledger_accounts_account_type_currency_key ON billing.ledger_accounts USING btree (merchant_id, account_type, currency) WHERE (customer_id IS NULL)
   index CREATE UNIQUE INDEX ledger_accounts_customer_id_account_type_currency_key ON billing.ledger_accounts USING btree (merchant_id, customer_id, account_type, currency) WHERE (customer_id IS NOT NULL)
   index CREATE UNIQUE INDEX ledger_accounts_customer_id_currency_id_key ON billing.ledger_accounts USING btree (merchant_id, customer_id, currency, id)
@@ -837,14 +840,14 @@ table billing.ledger_transfers
   constraint ledger_transfers_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
-  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text])))
+  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text])))
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_customer_id_currency_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL)
   index CREATE UNIQUE INDEX ledger_transfers_customer_id_currency_id_key ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, id)
   index CREATE INDEX ledger_transfers_debit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, debit_account_id)
   index CREATE INDEX ledger_transfers_grant_id_idx ON billing.ledger_transfers USING btree (merchant_id, grant_id) WHERE (grant_id IS NOT NULL)
-  index CREATE UNIQUE INDEX ledger_transfers_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, grant_id, transfer_type) WHERE ((grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'credit_expire'::text, 'credit_revoke'::text])))
+  index CREATE UNIQUE INDEX ledger_transfers_grant_id_transfer_type_key ON billing.ledger_transfers USING btree (merchant_id, grant_id, transfer_type) WHERE ((grant_id IS NOT NULL) AND (transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_expire'::text, 'credit_revoke'::text])))
   index CREATE UNIQUE INDEX ledger_transfers_operation_once_key ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, transfer_type, operation, source, source_id, grant_id) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX ledger_transfers_pkey ON billing.ledger_transfers USING btree (merchant_id, id)
   index CREATE INDEX ledger_transfers_source_source_id_idx ON billing.ledger_transfers USING btree (merchant_id, source, source_id)
@@ -1356,6 +1359,7 @@ table billing.payments
   column destructive_run_id uuid
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column money_movement text NOT NULL DEFAULT 'none'::text
+  column credit_grant_snapshot jsonb
   constraint payments_attempt_kind_check CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
   constraint payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
   constraint payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
@@ -1385,6 +1389,7 @@ table billing.payments
   index CREATE INDEX payments_destructive_run_id_idx ON billing.payments USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
   index CREATE INDEX payments_metadata_nmi_order_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'nmi_subscription_order_id'::text))) WHERE ((metadata ->> 'nmi_subscription_order_id'::text) IS NOT NULL)
   index CREATE INDEX payments_metadata_stripe_invoice_idx ON billing.payments USING btree (merchant_id, ((metadata ->> 'stripe_invoice_id'::text))) WHERE ((metadata ->> 'stripe_invoice_id'::text) IS NOT NULL)
+  index CREATE INDEX payments_pending_credit_refunds_idx ON billing.payments USING btree (merchant_id, customer_id, currency, refunded_payment_id) WHERE ((status = 'pending'::text) AND (amount < 0) AND (deleted_at IS NULL))
   index CREATE UNIQUE INDEX payments_pkey ON billing.payments USING btree (merchant_id, id)
   index CREATE INDEX payments_price_id_idx ON billing.payments USING btree (merchant_id, price_id)
   index CREATE INDEX payments_psp_id_idx ON billing.payments USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
@@ -1450,15 +1455,17 @@ table billing.prices
   column trial_duration_hours integer
   column key text NOT NULL
   column revision bigint NOT NULL
+  column customer_amount jsonb
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_auto_renew_needs_duration_check CHECK (((NOT auto_renew) OR (access_duration_hours IS NOT NULL)))
   constraint prices_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint prices_customer_amount_terms CHECK (((customer_amount IS NULL) OR ((jsonb_typeof(customer_amount) = 'object'::text) AND (amount = 0) AND (NOT auto_renew) AND (access_duration_hours IS NULL) AND (trial_unit_amount IS NULL) AND (trial_duration_hours IS NULL) AND (customer_amount ? 'min_amount'::text) AND (customer_amount ? 'max_amount'::text) AND COALESCE((((customer_amount ->> 'min_amount'::text))::bigint > 0), false) AND COALESCE((((customer_amount ->> 'max_amount'::text))::bigint >= ((customer_amount ->> 'min_amount'::text))::bigint), false))))
   constraint prices_id_product_id_key UNIQUE (merchant_id, id, product_id)
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint prices_pkey PRIMARY KEY (merchant_id, id)
-  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours)
+  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, customer_amount)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
   constraint prices_revision_nonnegative CHECK ((revision >= 0))
@@ -1471,7 +1478,7 @@ table billing.prices
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, customer_amount) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
@@ -1516,6 +1523,8 @@ table billing.products
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column merchant_id uuid NOT NULL
   column revision bigint NOT NULL DEFAULT 0
+  column credit_grant jsonb
+  constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
   constraint products_entitlement_hours_nonnegative_check CHECK ((NOT jsonb_path_exists(COALESCE(entitlements_spec, '{}'::jsonb), '$.*?(@.type() == "number" && @ < 0)'::jsonpath)))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT

@@ -6,8 +6,8 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Product is something a customer buys: what owning it grants
-// (EntitlementsSpec) and, in Prices, its current prices. A product in a tier
+// Product is something a customer buys: its named features (EntitlementsSpec),
+// optional prepaid balance (CreditGrant), and its current prices. A product in a tier
 // group is one tier of a plan family, ranked by TierRank. Archived products
 // keep their purchases and subscribers but are not sold.
 type Product struct {
@@ -19,11 +19,13 @@ type Product struct {
 	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
 	// EntitlementsSpec maps each entitlement the product grants to its access
-	// in hours; null hours last as long as the purchase.
-	EntitlementsSpec map[string]*int `json:"entitlements_spec"`
-	TierGroup        *string         `json:"tier_group"`
-	TierRank         int             `json:"tier_rank"`
-	Archived         bool            `json:"archived"`
+	// in hours. Null follows the purchased access terms, including subscription
+	// access policy; it does not independently promise permanent ownership.
+	EntitlementsSpec map[string]*int          `json:"entitlements_spec"`
+	CreditGrant      *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	TierGroup        *string                  `json:"tier_group"`
+	TierRank         int                      `json:"tier_rank"`
+	Archived         bool                     `json:"archived"`
 	// Prices are the product's current prices; archived ones are listed with
 	// ListPrices.
 	Prices    []Price   `json:"prices"`
@@ -34,13 +36,14 @@ type Product struct {
 // CreateProductParams creates a product. Archived creates it retired, for a
 // historical plan that still has subscribers.
 type CreateProductParams struct {
-	Key              string          `json:"key"`
-	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description,omitempty"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	TierRank         int             `json:"tier_rank,omitempty"`
-	Archived         bool            `json:"archived,omitempty"`
+	Key              string                   `json:"key"`
+	DisplayName      string                   `json:"display_name"`
+	Description      string                   `json:"description,omitempty"`
+	EntitlementsSpec map[string]*int          `json:"entitlements_spec,omitempty"`
+	CreditGrant      *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
+	TierGroup        *string                  `json:"tier_group,omitempty"`
+	TierRank         int                      `json:"tier_rank,omitempty"`
+	Archived         bool                     `json:"archived,omitempty"`
 }
 
 // UpdateProductParams changes a product's fields: an omitted field is left
@@ -48,12 +51,13 @@ type CreateProductParams struct {
 // Archiving takes the product off sale; its purchases and subscribers keep
 // their access.
 type UpdateProductParams struct {
-	DisplayName      catalog.Field[string]          `json:"display_name,omitzero"`
-	Description      catalog.Field[string]          `json:"description,omitzero"`
-	EntitlementsSpec catalog.Field[map[string]*int] `json:"entitlements_spec,omitzero"`
-	TierGroup        catalog.Field[string]          `json:"tier_group,omitzero"`
-	TierRank         catalog.Field[int]             `json:"tier_rank,omitzero"`
-	Archived         catalog.Field[bool]            `json:"archived,omitzero"`
+	DisplayName      catalog.Field[string]                  `json:"display_name,omitzero"`
+	Description      catalog.Field[string]                  `json:"description,omitzero"`
+	EntitlementsSpec catalog.Field[map[string]*int]         `json:"entitlements_spec,omitzero"`
+	CreditGrant      catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
+	TierGroup        catalog.Field[string]                  `json:"tier_group,omitzero"`
+	TierRank         catalog.Field[int]                     `json:"tier_rank,omitzero"`
+	Archived         catalog.Field[bool]                    `json:"archived,omitzero"`
 }
 
 // ProductListParams filters ListProducts. A nil Archived lists both live and
@@ -65,12 +69,15 @@ type ProductListParams struct {
 }
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
-// AccessDurationHours of access (null: for good), renewing when AutoRenew,
-// optionally after a first trial period at TrialUnitAmount. A price's terms
+// AccessDurationHours of one-off access (null: permanent), or one paid period
+// and billing interval when AutoRenew. Dunning access is separate from paid time.
+// A recurring price may start with a trial at TrialUnitAmount. A credit-only
+// product delivers a credit lot instead of product ownership. A price's terms
 // never change; Key names its current version, and selling on other terms
 // means a new price under the same key. PSPs is the price's state on each PSP
 // it is linked to.
 type Price struct {
+	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Revision is assigned automatically within this product/key, starting at zero.
 	Revision            int64                   `json:"revision"`
 	ID                  PriceID                 `json:"id"`
@@ -162,14 +169,16 @@ var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict
 // {lookup_key}; nmi {plan_id}; ccbill {form_name, flex_id}; solana {token} or
 // {plan_pda}. A PSP named in PSPLinks is sold on too.
 type CreatePriceParams struct {
-	ProductID   ProductID           `json:"product_id,omitzero"`
-	ProductKey  string              `json:"product_key,omitempty"`
-	ProductData *CreatePriceProduct `json:"product_data,omitempty"`
-	Key         string              `json:"key,omitempty"`
-	UnitAmount  int64               `json:"unit_amount,string"`
-	Currency    string              `json:"currency"`
-	// AccessDurationHours is the access a purchase grants; nil is for good.
-	// AutoRenew charges again after each period, and needs a duration.
+	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
+	ProductID      ProductID               `json:"product_id,omitzero"`
+	ProductKey     string                  `json:"product_key,omitempty"`
+	ProductData    *CreatePriceProduct     `json:"product_data,omitempty"`
+	Key            string                  `json:"key,omitempty"`
+	UnitAmount     int64                   `json:"unit_amount,string"`
+	Currency       string                  `json:"currency"`
+	// AccessDurationHours is the one-off access window (nil: permanent), or
+	// the paid period and billing interval when AutoRenew. Grace access does
+	// not extend paid coverage. Credit lot expiry is configured on the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
 	AutoRenew           bool `json:"auto_renew,omitempty"`
 	// TrialUnitAmount and TrialDurationHours are a first period on other

@@ -82,6 +82,10 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 		if err != nil {
 			return out, err
 		}
+		price, err = CheckoutPriceForAmount(price, req.Amount)
+		if err != nil {
+			return out, err
+		}
 		product, err = purchase.ProductService.GetByID(ctx, price.ProductID)
 		if err != nil {
 			return out, err
@@ -122,7 +126,12 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 		entitlements = map[string]*int{}
 	}
 	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
+	out.CreditGrant, err = acceptedCreditGrant(product, price)
+	if err != nil {
+		return out, err
+	}
 	if req.acceptedPurchase != nil {
+		out.CreditGrant = models.CloneCreditGrantSnapshot(req.acceptedPurchase.CreditGrant)
 		out.PaymentID = req.acceptedPurchase.PaymentID
 		id, err := billing.ParseCheckoutAttemptID(req.CheckoutAttemptID)
 		if err != nil {

@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -150,6 +151,25 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 			return ErrCreditGrantUnavailable
 		}
+		original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
+		if err != nil {
+			return err
+		}
+		var provenance grants.Spec
+		if len(original.SpecSnapshot) > 0 {
+			if err := json.Unmarshal(original.SpecSnapshot, &provenance); err != nil {
+				return err
+			}
+		}
+		if original.PaymentID != nil && provenance.Deposit != nil && provenance.Deposit.PaidAmount != nil {
+			pending, err := q.GetPurchasedCreditPendingRefunds(ctx, gen.GetPurchasedCreditPendingRefundsParams{MerchantID: mid.UUID(), PaymentID: *original.PaymentID})
+			if err != nil {
+				return err
+			}
+			if pending > 0 {
+				return ErrCreditGrantHeld
+			}
+		}
 		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer.UUID(), row.Currency)
 		if err != nil {
 			return err
@@ -167,10 +187,6 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		ledger := grants.New(q, mid.UUID())
 		ledger.SetClock(s.now)
 		if _, err := ledger.Revoke(ctx, grantID, reason); err != nil {
-			return err
-		}
-		original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
-		if err != nil {
 			return err
 		}
 		if err := ledger.MaterializeGrant(ctx, original); err != nil {

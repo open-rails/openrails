@@ -236,6 +236,30 @@ describe("checkout sessions", () => {
     expect(JSON.parse(String(init.body))).toEqual({ price_id: "price_1" })
   })
 
+  it("binds a customer-selected deposit to the minted checkout", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          id: `ocs_${"a".repeat(64)}`,
+          url: null,
+          expires_at: "2026-10-03T00:00:00Z",
+        },
+        { status: 201 }
+      )
+    )
+    await createBillingClient({ fetch }).createCheckoutSession({
+      productKey: "api-credits",
+      priceKey: "deposit",
+      amount: "100000000",
+    })
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      product_key: "api-credits",
+      price_key: "deposit",
+      amount: "100000000",
+    })
+  })
+
   it("mints with the customer's bearer and pays with the id alone", async () => {
     const calls: { url: string; init: RequestInit }[] = []
     const replies = [

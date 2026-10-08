@@ -355,7 +355,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			if p.E2ERunID != "" {
 				metadata["e2e_run_id"] = p.E2ERunID
 			}
-			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID)
+			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID, p.CreditGrant)
 			if err != nil {
 				return err
 			}

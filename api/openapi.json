@@ -13439,6 +13439,16 @@
               }
             ]
           },
+          "customer_amount": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CustomerAmount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psps": {
             "oneOf": [
               {
@@ -13540,6 +13550,16 @@
                     }
                   ]
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credit_grant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CreditGrantSpec"
               },
               {
                 "type": "null"
@@ -15413,6 +15433,10 @@
           "product_key": {
             "type": "string"
           },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "entitlement": {
             "type": "string"
           },
@@ -15462,6 +15486,10 @@
           },
           "product_key": {
             "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
           },
           "success_url": {
             "type": "string"
@@ -15683,6 +15711,9 @@
       "CreatePriceParams": {
         "type": "object",
         "properties": {
+          "customer_amount": {
+            "$ref": "#/components/schemas/CustomerAmount"
+          },
           "product_id": {
             "type": "string"
           },
@@ -15800,6 +15831,9 @@
                 }
               ]
             }
+          },
+          "credit_grant": {
+            "$ref": "#/components/schemas/CreditGrantSpec"
           },
           "tier_group": {
             "type": "string"
@@ -16035,6 +16069,27 @@
           "replayed"
         ]
       },
+      "CreditGrantSpec": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "from_payment": {
+            "type": "boolean"
+          },
+          "expires_after_days": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency"
+        ]
+      },
       "CreditLimit": {
         "type": "object",
         "properties": {
@@ -16202,6 +16257,23 @@
           "email",
           "created_at",
           "last_seen_at"
+        ]
+      },
+      "CustomerAmount": {
+        "type": "object",
+        "properties": {
+          "min_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "max_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "min_amount",
+          "max_amount"
         ]
       },
       "CustomerBillingPolicy": {
@@ -18767,6 +18839,10 @@
           "product_key": {
             "type": "string"
           },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "success_url": {
             "type": "string"
           }
@@ -20634,6 +20710,9 @@
       "Price": {
         "type": "object",
         "properties": {
+          "customer_amount": {
+            "$ref": "#/components/schemas/CustomerAmount"
+          },
           "revision": {
             "type": "integer"
           },
@@ -20845,6 +20924,9 @@
                 "type": "null"
               }
             ]
+          },
+          "credit_grant": {
+            "$ref": "#/components/schemas/CreditGrantSpec"
           },
           "tier_group": {
             "oneOf": [
@@ -23371,6 +23453,16 @@
                     }
                   ]
                 }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credit_grant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CreditGrantSpec"
               },
               {
                 "type": "null"

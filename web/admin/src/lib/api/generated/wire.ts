@@ -123,6 +123,7 @@ export type ApplyPrice = {
   archived?: boolean | null
   trial_unit_amount?: string | null
   trial_duration_hours?: number | null
+  customer_amount?: CustomerAmount | null
   psps?: string[] | null
   psp_links?: Record<string, Record<string, string>> | null
 }
@@ -135,6 +136,7 @@ export type ApplyProduct = {
   tier_rank?: number | null
   archived?: boolean | null
   entitlements_spec?: Record<string, number | null> | null
+  credit_grant?: CreditGrantSpec | null
   prices?: ApplyPrice[]
   rate_cards?: RateCard[] | null
 }
@@ -557,6 +559,7 @@ export type CreateCheckoutAttemptParams = {
   price_id?: string
   price_key?: string
   product_key?: string
+  amount?: string
   entitlement?: string
   offer_kind?: "finite" | "permanent" | "recurring"
   payment?: CheckoutPaymentOptions
@@ -570,6 +573,7 @@ export type CreateCheckoutSessionParams = {
   price_id?: string
   price_key?: string
   product_key?: string
+  amount?: string
   success_url?: string
 }
 
@@ -640,6 +644,7 @@ export type CreatePlanMigrationParams = {
 }
 
 export type CreatePriceParams = {
+  customer_amount?: CustomerAmount
   product_id?: string
   product_key?: string
   product_data?: CreatePriceProduct
@@ -671,6 +676,7 @@ export type CreateProductParams = {
   display_name?: string
   description?: string
   entitlements_spec?: Record<string, number | null>
+  credit_grant?: CreditGrantSpec
   tier_group?: string
   tier_rank?: number
   archived?: boolean
@@ -716,6 +722,13 @@ export type CreditGrant = {
   replayed: boolean
 }
 
+export type CreditGrantSpec = {
+  currency: string
+  amount?: string
+  from_payment?: boolean
+  expires_after_days?: number
+}
+
 export type CreditLimit = {
   customer_id: string
   currency: string
@@ -751,6 +764,11 @@ export type Customer = {
   email: string | null
   created_at: string
   last_seen_at: string
+}
+
+export type CustomerAmount = {
+  min_amount: string
+  max_amount: string
 }
 
 export type CustomerBillingPolicy = {
@@ -1334,6 +1352,7 @@ export type MintCheckoutSessionParams = {
   price_id?: string
   price_key?: string
   product_key?: string
+  amount?: string
   success_url?: string
 }
 
@@ -1736,6 +1755,7 @@ export type PreviewRepriceBatchParams = {
 }
 
 export type Price = {
+  customer_amount?: CustomerAmount
   revision: number
   id: string
   key: string
@@ -1778,6 +1798,7 @@ export type Product = {
   display_name: string
   description: string
   entitlements_spec: Record<string, number | null> | null
+  credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
   archived: boolean
@@ -2377,6 +2398,7 @@ export type UpdateProductParams = {
   display_name?: string | null
   description?: string | null
   entitlements_spec?: Record<string, number | null> | null
+  credit_grant?: CreditGrantSpec | null
   tier_group?: string | null
   tier_rank?: number | null
   archived?: boolean | null

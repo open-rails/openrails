@@ -1111,6 +1111,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			RefundedPaymentID: &original.ID,
 			Rail:              original.Rail,
 			TransactionID:     recoveryID,
+			Metadata:          map[string]any{"reverses_payment_id": disputeReversal.ID.String()},
 			Amount:            -disputeReversal.Amount,
 			ListAmount:        original.ListAmount,
 			Currency:          original.Currency,

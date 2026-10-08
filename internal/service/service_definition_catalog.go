@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
+	catalogwire "github.com/open-rails/openrails/catalog"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -50,6 +51,11 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		return nil, apperr.Invalidf("display_name required")
 	}
 
+	credit, err := normalizeCreditGrant(req.CreditGrant)
+	if err != nil {
+		return nil, err
+	}
+	req.CreditGrant = credit
 	now := time.Now().UTC()
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -63,12 +69,12 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		Key:              req.Key,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
-		EntitlementsSpec: req.EntitlementsSpec,
-		TierGroup:        req.TierGroup,
-		TierRank:         req.TierRank,
-		Archived:         req.Archived,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		EntitlementsSpec: req.EntitlementsSpec, CreditGrant: req.CreditGrant,
+		TierGroup: req.TierGroup,
+		TierRank:  req.TierRank,
+		Archived:  req.Archived,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	if err := products.Create(ctx, p); err != nil {
 		return nil, catalogWrite(err)
@@ -84,15 +90,20 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 // empty description clears it. SkipRailSync keeps the change local; the
 // catalog application reconciles PSPs itself.
 type UpdateProductRequest struct {
-	DisplayName      *string
-	Description      *string
-	EntitlementsSpec map[string]*int
-	SetEntitlements  bool
-	TierGroup        *string
-	SetTierGroup     bool
-	TierRank         *int
-	Archived         *bool
-	SkipRailSync     bool
+	CreditGrant    *catalogwire.CreditGrantSpec
+	SetCreditGrant bool
+	// DeferCreditPriceValidation is used only by an atomic catalog batch, which
+	// validates the final product and live prices after applying every edit.
+	DeferCreditPriceValidation bool
+	DisplayName                *string
+	Description                *string
+	EntitlementsSpec           map[string]*int
+	SetEntitlements            bool
+	TierGroup                  *string
+	SetTierGroup               bool
+	TierRank                   *int
+	Archived                   *bool
+	SkipRailSync               bool
 }
 
 // productPatch reads a merge patch: null clears description,
@@ -110,6 +121,12 @@ func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	}
 	if p.EntitlementsSpec.Set {
 		req.SetEntitlements, req.EntitlementsSpec = true, p.EntitlementsSpec.Value
+	}
+	if p.CreditGrant.Set {
+		req.SetCreditGrant = true
+		if !p.CreditGrant.Null {
+			req.CreditGrant = &p.CreditGrant.Value
+		}
 	}
 	if p.TierGroup.Set {
 		req.SetTierGroup = true
@@ -155,16 +172,41 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 	if id.IsZero() {
 		return nil, apperr.Invalidf("product_id required")
 	}
+	if req.SetCreditGrant {
+		credit, err := normalizeCreditGrant(req.CreditGrant)
+		if err != nil {
+			return nil, err
+		}
+		req.CreditGrant = credit
+	}
+	if !req.DeferCreditPriceValidation && (req.SetCreditGrant || req.Archived != nil && !*req.Archived) {
+		current, err := products.GetByID(ctx, id.UUID())
+		if err != nil {
+			return nil, productLookup(err)
+		}
+		credit, archived := current.CreditGrant, current.Archived
+		if req.SetCreditGrant {
+			credit = req.CreditGrant
+		}
+		if req.Archived != nil {
+			archived = *req.Archived
+		}
+		if !archived {
+			if err := s.validateProductCreditUpdate(ctx, id, credit); err != nil {
+				return nil, err
+			}
+		}
+	}
 	productID := id.UUID()
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
-		SetEntitlements:  req.SetEntitlements,
-		TierGroup:        req.TierGroup,
-		SetTierGroup:     req.SetTierGroup,
-		TierRank:         req.TierRank,
-		Archived:         req.Archived,
+		SetEntitlements:  req.SetEntitlements, CreditGrant: req.CreditGrant, SetCreditGrant: req.SetCreditGrant,
+		TierGroup:    req.TierGroup,
+		SetTierGroup: req.SetTierGroup,
+		TierRank:     req.TierRank,
+		Archived:     req.Archived,
 	})
 	if err != nil {
 		return nil, productLookup(err)
@@ -385,6 +427,9 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		return nil, productLookup(err)
 	}
 	req.ProductID = billing.ProductID(product.ID)
+	if err := validateCreditPrice(product.CreditGrant, req); err != nil {
+		return nil, err
+	}
 
 	// #662: the price id is a pure function of its immutable financial tuple —
 	// exactly the prices_product_amount_window_key columns. A reprice hashes
@@ -392,6 +437,9 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// equal, so the id can never violate that unique constraint.
 	key, _ := resolvePriceKey(product, req)
 	priceID := priceDeterministicID(req.ProductID.UUID(), key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	if req.CustomerAmount != nil {
+		priceID = uuidutil.DeterministicID(priceID, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
+	}
 	existing, err := prices.FindByTerms(ctx, req, key)
 	if err == nil {
 		priceID = existing.ID
@@ -541,6 +589,13 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 	existing, getErr := prices.GetByID(ctx, priceID)
 	if getErr != nil {
 		return nil, priceLookup(getErr)
+	}
+	if existing.CustomerAmount != nil {
+		for _, link := range req.PSPLinks {
+			if len(link) > 0 {
+				return nil, apperr.Invalidf("customer_amount uses checkout amounts, not provider catalog links")
+			}
+		}
 	}
 	var preparedProduct *models.Product
 	var next map[string]map[string]string
@@ -703,6 +758,19 @@ func priceToCatalogPrice(p *models.Price) *billing.Price {
 }
 
 func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
+	if req.CustomerAmount != nil {
+		if req.UnitAmount != 0 || req.AutoRenew || req.AccessDurationHours != nil || req.TrialUnitAmount != nil || req.TrialDurationHours != nil {
+			return apperr.Invalidf("customer_amount requires a one-off price with unit_amount zero and no access or trial duration")
+		}
+		if req.CustomerAmount.MinAmount <= 0 || req.CustomerAmount.MaxAmount < req.CustomerAmount.MinAmount {
+			return apperr.Invalidf("customer_amount requires positive inclusive min_amount and max_amount")
+		}
+		for _, amount := range []int64{req.CustomerAmount.MinAmount, req.CustomerAmount.MaxAmount} {
+			if _, err := moneyutil.NativeToRailMinorExact(req.Currency, amount); err != nil {
+				return apperr.Invalidf("customer_amount: %v", err)
+			}
+		}
+	}
 	if req.UnitAmount < 0 {
 		return apperr.Invalidf("unit_amount must be non-negative")
 	}
@@ -744,5 +812,5 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
 	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
 		p.AutoRenew == req.AutoRenew && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
-		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours)
+		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount)
 }

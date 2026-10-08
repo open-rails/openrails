@@ -35,6 +35,7 @@ type acceptedPurchaseTerms struct {
 	Amount              int64                        `json:"amount,string"`
 	Currency            string                       `json:"currency"`
 	AccessDurationHours *int                         `json:"access_duration_hours"`
+	CreditGrant         *models.CreditGrantSnapshot  `json:"credit_grant"`
 	Entitlements        map[string]*int              `json:"entitlements"`
 	PSPLinks            map[string]map[string]string `json:"psp_links,omitempty"`
 	AcceptedAt          time.Time                    `json:"accepted_at"`
@@ -61,6 +62,9 @@ func purchaseTerms(session *models.CheckoutAttempt) (*acceptedPurchaseTerms, err
 	}
 	if session.Mode != models.CheckoutAttemptModeOneOff || session.PriceID == nil || terms.PriceID != *session.PriceID || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || session.Amount == nil || terms.Amount != *session.Amount || session.Currency == nil || terms.Currency != *session.Currency || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.AccessDurationHours != nil && *terms.AccessDurationHours <= 0 {
 		return nil, errors.New("checkout accepted purchase terms contradict session")
+	}
+	if err := terms.CreditGrant.Validate(); err != nil {
+		return nil, err
 	}
 	return &terms, nil
 }
@@ -108,6 +112,9 @@ func (s *CheckoutPurchaseService) permanentCoverage(ctx context.Context, user st
 }
 
 func (s *CheckoutPurchaseService) purchaseCoverage(ctx context.Context, user string, price *models.Price, product *models.Product) (*CoverageInfo, error) {
+	if product.CreditGrant != nil {
+		return &CoverageInfo{}, nil
+	}
 	if permanentPurchase(price) && s.database != nil {
 		return s.permanentCoverage(ctx, user, product, false, uuid.Nil)
 	}
@@ -115,7 +122,7 @@ func (s *CheckoutPurchaseService) purchaseCoverage(ctx context.Context, user str
 }
 
 func (s *CheckoutPurchaseService) checkPermanentOwnership(ctx context.Context, user string, price *models.Price, product *models.Product) error {
-	if !permanentPurchase(price) || s.database == nil {
+	if !permanentPurchase(price) || product.CreditGrant != nil || s.database == nil {
 		return nil
 	}
 	mid, err := merchant.Require(ctx)
@@ -165,6 +172,12 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 		if err != nil {
 			return err
 		}
+		if price.CustomerAmount != nil {
+			price, err = CheckoutPriceForAmount(price, session.Amount)
+			if err != nil {
+				return err
+			}
+		}
 		if price.AutoRenew || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
 			return fmt.Errorf("%w: purchase terms changed", ErrCheckoutAttemptConflict)
 		}
@@ -182,7 +195,7 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 		if eligibility.Status != EligibilityAllowed {
 			return fmt.Errorf("%w: %s", ErrCheckoutAttemptConflict, eligibility.Reason)
 		}
-		if permanentPurchase(price) {
+		if permanentPurchase(price) && product.CreditGrant == nil {
 			coverage, err := purchase.permanentCoverage(ctx, session.CustomerID.String(), product, true, session.ID)
 			if err != nil {
 				return err
@@ -207,6 +220,10 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
 		terms := acceptedPurchaseTerms{PriceID: price.ID, ProductID: product.ID, PaymentID: uuidutil.NewV7(), ProductKey: product.Key, ProductName: product.DisplayName, Amount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, Entitlements: models.CloneEntitlementsSpec(product.EntitlementsSpec), PSPLinks: price.PSPLinks, AcceptedAt: now, EntitlementStart: now}
+		terms.CreditGrant, err = acceptedCreditGrant(product, price)
+		if err != nil {
+			return err
+		}
 		if eligibility.Coverage != nil && eligibility.Coverage.EndDate != nil && eligibility.Coverage.EndDate.After(now) {
 			terms.EntitlementStart = eligibility.Coverage.EndDate.UTC().Truncate(time.Microsecond)
 		}
@@ -266,7 +283,7 @@ func (s *CheckoutPurchaseService) registerSessionPurchase(ctx context.Context, r
 			coverage.HasCoverage = true
 			coverage.EndDate = &terms.EntitlementStart
 		}
-		result, err = bound.applyPurchase(ctx, req, price, product, &EligibilityResult{Status: EligibilityAllowed, Coverage: coverage}, terms.AcceptedAt, terms.PaymentID)
+		result, err = bound.applyPurchase(ctx, req, price, product, &EligibilityResult{Status: EligibilityAllowed, Coverage: coverage}, terms.AcceptedAt, terms.PaymentID, terms.CreditGrant)
 		if err != nil {
 			return err
 		}

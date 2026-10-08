@@ -1468,6 +1468,7 @@ pkg openrails/billing, type CreateAlertWebhookParams struct, Format AlertWebhook
 pkg openrails/billing, type CreateAlertWebhookParams struct, Name string `json:"name"`
 pkg openrails/billing, type CreateAlertWebhookParams struct, URL string `json:"url"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct
+pkg openrails/billing, type CreateCheckoutAttemptParams struct, Amount *int64 `json:"amount,string,omitempty"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, CancelURL string `json:"cancel_url"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, Customer CheckoutCustomerIdentity `json:"customer"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, Entitlement string `json:"entitlement"`
@@ -1480,6 +1481,7 @@ pkg openrails/billing, type CreateCheckoutAttemptParams struct, PriceKey string 
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, ProductKey string `json:"product_key,omitempty"`
 pkg openrails/billing, type CreateCheckoutAttemptParams struct, SuccessURL string `json:"success_url"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct
+pkg openrails/billing, type CreateCheckoutSessionParams struct, Amount *int64 `json:"amount,string,omitempty"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, Customer CheckoutCustomerIdentity `json:"customer"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, PriceID PriceID `json:"price_id"`
 pkg openrails/billing, type CreateCheckoutSessionParams struct, PriceKey string `json:"price_key"`
@@ -1540,6 +1542,7 @@ pkg openrails/billing, type CreatePriceParams struct, AccessDurationHours *int `
 pkg openrails/billing, type CreatePriceParams struct, Archived bool `json:"archived,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, AutoRenew bool `json:"auto_renew,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Currency string `json:"currency"`
+pkg openrails/billing, type CreatePriceParams struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, Key string `json:"key,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 pkg openrails/billing, type CreatePriceParams struct, PSPs []string `json:"psps,omitempty"`
@@ -1558,6 +1561,7 @@ pkg openrails/billing, type CreateProductAccessParams struct, EndsAt *time.Time 
 pkg openrails/billing, type CreateProductAccessParams struct, ProductID ProductID `json:"product_id"`
 pkg openrails/billing, type CreateProductParams struct
 pkg openrails/billing, type CreateProductParams struct, Archived bool `json:"archived,omitempty"`
+pkg openrails/billing, type CreateProductParams struct, CreditGrant *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, Description string `json:"description,omitempty"`
 pkg openrails/billing, type CreateProductParams struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type CreateProductParams struct, EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
@@ -2511,6 +2515,7 @@ pkg openrails/billing, type Price struct, Archived bool `json:"archived"`
 pkg openrails/billing, type Price struct, AutoRenew bool `json:"auto_renew"`
 pkg openrails/billing, type Price struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Price struct, Currency string `json:"currency"`
+pkg openrails/billing, type Price struct, CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 pkg openrails/billing, type Price struct, ID PriceID `json:"id"`
 pkg openrails/billing, type Price struct, Key string `json:"key"`
 pkg openrails/billing, type Price struct, PSPs map[string]PSPLinkState `json:"psps"`
@@ -2545,6 +2550,7 @@ pkg openrails/billing, type PriceListParams struct, embedded PageRequest
 pkg openrails/billing, type Product struct
 pkg openrails/billing, type Product struct, Archived bool `json:"archived"`
 pkg openrails/billing, type Product struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type Product struct, CreditGrant *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 pkg openrails/billing, type Product struct, Description string `json:"description"`
 pkg openrails/billing, type Product struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type Product struct, EntitlementsSpec map[string]*int `json:"entitlements_spec"`
@@ -3014,6 +3020,7 @@ pkg openrails/billing, type UpdatePriceParams struct, Archived catalog.Field[boo
 pkg openrails/billing, type UpdatePriceParams struct, PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
 pkg openrails/billing, type UpdateProductParams struct
 pkg openrails/billing, type UpdateProductParams struct, Archived catalog.Field[bool] `json:"archived,omitzero"`
+pkg openrails/billing, type UpdateProductParams struct, CreditGrant catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, Description catalog.Field[string] `json:"description,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, DisplayName catalog.Field[string] `json:"display_name,omitzero"`
 pkg openrails/billing, type UpdateProductParams struct, EntitlementsSpec catalog.Field[map[string]*int] `json:"entitlements_spec,omitzero"`
@@ -3138,6 +3145,8 @@ pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)
 pkg openrails/catalog, func Value[T any](T) Field[T]
+pkg openrails/catalog, method (*CreditGrantSpec) UnmarshalJSON([]byte) error
+pkg openrails/catalog, method (*CustomerAmount) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (*Field[T]) UnmarshalJSON([]byte) error
 pkg openrails/catalog, method (Application) CanonicalDigest() ([32]byte, error)
 pkg openrails/catalog, method (Application) Validate() error
@@ -3165,6 +3174,7 @@ pkg openrails/catalog, type ApplyPrice struct, AccessDurationHours Field[int] `j
 pkg openrails/catalog, type ApplyPrice struct, Archived Field[bool] `json:"archived,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, AutoRenew Field[bool] `json:"auto_renew,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, Currency Field[string] `json:"currency,omitzero"`
+pkg openrails/catalog, type ApplyPrice struct, CustomerAmount Field[CustomerAmount] `json:"customer_amount,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, ID string `json:"id,omitempty"`
 pkg openrails/catalog, type ApplyPrice struct, Key string `json:"key"`
 pkg openrails/catalog, type ApplyPrice struct, PSPLinks Field[map[string]map[string]string] `json:"psp_links,omitzero"`
@@ -3174,6 +3184,7 @@ pkg openrails/catalog, type ApplyPrice struct, TrialUnitAmount Field[int64] `jso
 pkg openrails/catalog, type ApplyPrice struct, UnitAmount Field[int64] `json:"unit_amount,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct
 pkg openrails/catalog, type ApplyProduct struct, Archived Field[bool] `json:"archived,omitzero"`
+pkg openrails/catalog, type ApplyProduct struct, CreditGrant Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Description Field[string] `json:"description,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, DisplayName Field[string] `json:"display_name,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, EntitlementsSpec Field[map[string]*int] `json:"entitlements_spec,omitzero"`
@@ -3182,6 +3193,14 @@ pkg openrails/catalog, type ApplyProduct struct, Prices []ApplyPrice `json:"pric
 pkg openrails/catalog, type ApplyProduct struct, RateCards Field[[]RateCard] `json:"rate_cards,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierGroup Field[string] `json:"tier_group,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierRank Field[int] `json:"tier_rank,omitzero"`
+pkg openrails/catalog, type CreditGrantSpec struct
+pkg openrails/catalog, type CreditGrantSpec struct, Amount *int64 `json:"amount,omitempty,string"`
+pkg openrails/catalog, type CreditGrantSpec struct, Currency string `json:"currency"`
+pkg openrails/catalog, type CreditGrantSpec struct, ExpiresAfterDays *int `json:"expires_after_days,omitempty"`
+pkg openrails/catalog, type CreditGrantSpec struct, FromPayment bool `json:"from_payment,omitempty"`
+pkg openrails/catalog, type CustomerAmount struct
+pkg openrails/catalog, type CustomerAmount struct, MaxAmount int64 `json:"max_amount,string"`
+pkg openrails/catalog, type CustomerAmount struct, MinAmount int64 `json:"min_amount,string"`
 pkg openrails/catalog, type Field struct, Null bool
 pkg openrails/catalog, type Field struct, Set bool
 pkg openrails/catalog, type Field struct, Value T

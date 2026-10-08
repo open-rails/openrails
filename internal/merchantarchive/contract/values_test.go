@@ -249,3 +249,21 @@ func TestTextArraySpelling(t *testing.T) {
 		}
 	}
 }
+
+func TestPurchasedCreditSnapshotRequiresFulfillmentDates(t *testing.T) {
+	for _, tc := range []struct {
+		snapshot string
+		valid    bool
+	}{
+		{`{"amount":"120000000","currency":"USD","expires_after_days":365,"starts_at":"2026-01-01T00:00:00Z","expires_at":"2027-01-01T00:00:00Z"}`, true},
+		{`{"amount":"120000000","currency":"USD","expires_after_days":365}`, false},
+		{`{"amount":"120000000","currency":"USD","expires_after_days":365,"starts_at":"2026-01-01T00:00:00Z","expires_at":"2026-02-01T00:00:00Z"}`, false},
+		{`{"amount":"120000000","currency":"EUR","expires_after_days":365,"starts_at":"2026-01-01T00:00:00Z","expires_at":"2027-01-01T00:00:00Z"}`, false},
+	} {
+		p, v := row(t, "payments", map[string]string{"currency": "USD", "status": "completed", "credit_grant_snapshot": tc.snapshot})
+		err := ValidateValues(p, v)
+		if (err == nil) != tc.valid {
+			t.Errorf("snapshot %s valid=%v: %v", tc.snapshot, tc.valid, err)
+		}
+	}
+}

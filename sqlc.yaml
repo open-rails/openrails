@@ -6,6 +6,8 @@ sql:
       - "internal/migrate/postgres/0001_schema.up.sql"
       - "internal/migrate/postgres/0002_catalog_batch_hash.up.sql"
       - "internal/migrate/postgres/0003_product_price_keys.up.sql"
+      - "internal/migrate/postgres/0004_catalog_credit_benefits.up.sql"
+      - "internal/migrate/postgres/0005_purchased_credit_accounting.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -166,6 +166,15 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		return "", nil, fmt.Errorf("price_key %q not found — call list_catalog to see valid keys", key)
 	}
 
+	if current.CustomerAmount != nil {
+		refusal := &billing.CatalogDraftRefusal{
+			Code:       "customer_amount_price",
+			Reason:     "This price lets customers choose a deposit amount and has no fixed purchase amount.",
+			Workaround: "Change customer_amount limits through a catalog application or the OpenRails client.",
+		}
+		return refusal.Reason + " " + refusal.Workaround, &billing.CatalogDraft{Kind: billing.CatalogDraftRefused, Refusal: refusal}, nil
+	}
+
 	if toKey := strings.TrimSpace(args.MigrateToPriceKey); toKey != "" && (toKey != key || args.MigrateToProductKey != args.ProductKey) {
 		to, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), args.MigrateToProductKey, toKey)
 		if err != nil {

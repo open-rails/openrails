@@ -314,7 +314,11 @@ WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
  AND (p.id IS NULL
    OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
    OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
-   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
+   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM s.amount::text
+   OR (p.customer_amount IS NULL AND s.amount IS DISTINCT FROM p.amount)
+   OR (p.customer_amount IS NOT NULL AND (s.amount IS NULL
+       OR s.amount < (p.customer_amount->>'min_amount')::bigint
+       OR s.amount > (p.customer_amount->>'max_amount')::bigint))
    OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
    OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
    OR p.auto_renew)

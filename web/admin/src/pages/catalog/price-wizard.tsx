@@ -101,7 +101,7 @@ export function PriceChangeWizard({
   const form = useForm({
     defaultValues: priceChangeFormValues(price, draft),
     onSubmit: async ({ value }) => {
-      if (!productKey) return
+      if (!productKey || price.customer_amount) return
       const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
       if (newAmount === null || BigInt(newAmount) <= 0n) return
 
@@ -160,7 +160,7 @@ export function PriceChangeWizard({
   }
 
   const enterStep2 = () => {
-    if (!productKey) return
+    if (!productKey || price.customer_amount) return
     const amount = nativeAmountFromInput(
       form.state.values.amountInput,
       price.currency
@@ -185,16 +185,18 @@ export function PriceChangeWizard({
   // Archived (prior-version) rows are history, not the editable current
   // price. Each product/key pair has exactly one live edit target.
   // Wait for the product before allowing previews or scheduling a migration.
-  if (price.archived || !productKey) {
+  if (price.archived || !productKey || price.customer_amount) {
     return (
       <Button
         variant="outline"
         size="sm"
         disabled
         title={
-          price.archived
-            ? "This is an archived version. Change the current price for this key instead."
-            : "Load the product before changing its price."
+          price.customer_amount
+            ? "This price lets customers choose an amount. Change its limits through a catalog application or the client."
+            : price.archived
+              ? "This is an archived version. Change the current price for this key instead."
+              : "Load the product before changing its price."
         }
       >
         Change price
