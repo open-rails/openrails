@@ -1,6 +1,7 @@
 package hostconfig
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -85,4 +86,45 @@ func TestConfigExampleLoads(t *testing.T) {
 	require.Equal(t, 2160*time.Hour, *cfg.Auth.Naming.FormerNames.Duration)
 	require.Equal(t, 1200, (*cfg.RateLimits)["webhook"].RequestsPerMinute)
 	require.Contains(t, cfg.DB.URL, "@localhost:5434/openrails_db")
+}
+
+// resource_server reaches the control plane's trusted issuers, keys and all.
+func TestResourceServerLoads(t *testing.T) {
+	example, err := os.ReadFile(filepath.Join("..", "..", "config.example.yaml"))
+	require.NoError(t, err)
+	bootEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, append(example, []byte(`
+resource_server:
+  identifier: https://openrails.example.com
+  dpop_nonce_key: 0123456789abcdef0123456789abcdef
+  trusted_issuers:
+    - name: example
+      issuer: https://example.com/auth
+      merchants: [example]
+      permissions: ["merchant:*"]
+      allowed_origins: [https://admin.example.com]
+      group_roles: {billing-admins: owner}
+      keys:
+        - kid: k1
+          jwk: {kty: EC, crv: P-256, x: abc, y: def}
+`)...), 0o600))
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	rs := cfg.ResourceServer
+	require.NotNil(t, rs)
+	require.Equal(t, "https://openrails.example.com", rs.Identifier)
+	require.Len(t, rs.TrustedIssuers, 1)
+	is := rs.TrustedIssuers[0]
+	require.Equal(t, "https://example.com/auth", is.Issuer)
+	require.Equal(t, []string{"example"}, is.Merchants)
+	require.Equal(t, []string{"merchant:*"}, is.Permissions)
+	require.Equal(t, []string{"https://admin.example.com"}, is.AllowedOrigins)
+	require.Equal(t, map[string]string{"billing-admins": "owner"}, is.GroupRoles)
+	require.Equal(t, "k1", is.Keys[0].KID)
+	require.Equal(t, "P-256", is.Keys[0].JWK.Crv)
+	require.NoError(t, Validate(cfg))
+
+	rs.DPoPNonceKey = "short"
+	require.ErrorContains(t, Validate(cfg), "dpop_nonce_key")
 }

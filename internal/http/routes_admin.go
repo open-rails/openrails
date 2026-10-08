@@ -10,6 +10,7 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 	opts := httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{
 			Authenticator:             s.authenticator,
+			ResourceTokenResolver:     s.controlPlane,
 			AdminPermissionChecker:    s.controlPlane,
 			ServiceCredentialResolver: s.controlPlane,
 			DelegatedResolver:         s.controlPlane,
@@ -35,10 +36,10 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 			ChangeTeamRole:   router.Handler(standalonehandlers.MerchantChangeTeamRole(s.controlPlane)),
 			RemoveTeamMember: router.Handler(standalonehandlers.MerchantRemoveTeamMember(s.controlPlane)),
 		}
-		httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordRoute), s.runtime, control)
+		httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, control)
 	}
 
-	httproutes.RegisterMerchantRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterMerchantRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts)
 }
 
 func (s *Server) registerMerchantActionRoutes(mux router.Registrar) {

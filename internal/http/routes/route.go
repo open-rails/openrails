@@ -341,6 +341,8 @@ func TierErrors(tier Tier) []string {
 			billing.CodeDelegatedVerificationUnavailable, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
 			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch, billing.CodeStepUpRequired,
 			billing.CodeStepUpUnavailable, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
+			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,
+			billing.CodeDPoPNonceRequired,
 		}, selectorErrors...)
 	case AuthOperator:
 		own = []string{billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodePermissionRequired}

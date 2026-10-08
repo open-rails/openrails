@@ -179,6 +179,9 @@ func (r *Request) AbortGate(err error) {
 	if refusal.Code == billing.CodeSenderProofRequired {
 		r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
 	}
+	for name, value := range refusal.Headers {
+		r.SetHeader(name, value)
+	}
 	r.AbortAPIError(billingauth.RefusalError(refusal))
 }
 

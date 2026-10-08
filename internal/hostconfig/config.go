@@ -16,6 +16,9 @@ import (
 type Config struct {
 	*billing.Config
 	Auth *billing.AuthConfig
+	// ResourceServer accepts trusted issuers' access tokens on the merchant
+	// API (resource_server).
+	ResourceServer *billing.ResourceServerConfig
 	// Host and Port are the HTTP listener (default 0.0.0.0:3053).
 	Host string
 	Port int
@@ -102,6 +105,8 @@ type fileConfig struct {
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
 
 	Auth *billing.AuthConfig `koanf:"auth"`
+
+	ResourceServer *billing.ResourceServerConfig `koanf:"resource_server"`
 }
 
 // defaults is the file before any source is read: local infrastructure and
@@ -195,6 +200,7 @@ func (f *fileConfig) config() (*Config, error) {
 			EngineAdmissionHold:               f.EngineAdmissionHold,
 		},
 		Auth:                     f.Auth,
+		ResourceServer:           f.ResourceServer,
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
@@ -256,5 +262,9 @@ func Validate(cfg *Config) error {
 			return err
 		}
 	}
-	return billing.ValidateAuthTransport(cfg.Auth)
+	if err := billing.ValidateAuthTransport(cfg.Auth); err != nil {
+		return err
+	}
+	allowLoopback := cfg.Auth != nil && cfg.Auth.AllowLoopbackHTTP
+	return billing.ValidateResourceServer(cfg.ResourceServer, allowLoopback)
 }

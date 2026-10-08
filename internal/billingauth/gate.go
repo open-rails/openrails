@@ -48,6 +48,9 @@ type GateError struct {
 	Message  string
 	Code     string
 	Metadata map[string]any
+	// Headers are set on the refusal (a DPoP challenge's WWW-Authenticate
+	// and DPoP-Nonce).
+	Headers map[string]string
 }
 
 func (e GateError) Error() string {

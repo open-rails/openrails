@@ -54,6 +54,9 @@ type ControlPlane struct {
 	// issuers (remote applications): delegated tokens, application tokens
 	// and service JWTs, for the openrails audience.
 	delegatedVerifier *authkit.Verifier
+	// resource verifies trusted issuers' RFC 9068 access tokens (#1140); nil
+	// accepts none.
+	resource *resourceServer
 }
 
 type options struct {
@@ -71,6 +74,7 @@ type options struct {
 	rateLimitOverrides           map[string]authkit.RateLimit
 	redis                        *redis.Client
 	merchantCreation             *MerchantCreationConfig
+	resourceServer               *config.ResourceServerConfig
 }
 
 // Option configures the control plane for embedding hosts.
@@ -384,6 +388,12 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	if cp.delegatedVerifier, err = client.NewVerifier([]string{billingauth.TokenAudience}, verifierOpts...); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("controlplane: delegated verifier: %w", err)
+	}
+	if options.resourceServer != nil {
+		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
+			client.Close()
+			return nil, err
+		}
 	}
 	return cp, nil
 }

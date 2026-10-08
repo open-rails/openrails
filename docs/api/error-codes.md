@@ -6,6 +6,9 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 
 | Code | Status | Type | Meaning |
 |---|---|---|---|
+| `access_token_invalid` | 401 | `authentication_error` | The access token is invalid, expired or not issued for this deployment. |
+| `access_token_issuer_unknown` | 401 | `authentication_error` | The access token's issuer is not trusted by this deployment. |
+| `access_token_merchant_not_bound` | 403 | `authorization_error` | The access token's issuer is not trusted for this merchant. |
 | `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
 | `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
 | `allowance_meter_not_found` | 404 | `invalid_request_error` | The rate card's allowance meter does not exist. |
@@ -231,6 +234,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
+| `use_dpop_nonce` | 401 | `authentication_error` | The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |
 | `webhook_invalid` | 400 | `invalid_request_error` | The outbound webhook is invalid. |
 | `widget_generation_invalid` | 422 | `invalid_request_error` | The model could not produce a valid query for the prompt. |

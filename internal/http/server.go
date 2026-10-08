@@ -86,6 +86,9 @@ type Server struct {
 	// registerSelfServiceRoutes mount their routes, consulted by
 	// wrapPublicHandler's PermissiveCORSHTTP. Never nil once New() has run.
 	browserTierRoutes *middleware.BrowserTierRoutes
+	// merchantTierRoutes are the merchant API's patterns, which trusted
+	// issuers' origins may call cross-origin (#1140).
+	merchantTierRoutes *middleware.BrowserTierRoutes
 
 	// publicHandler is the single "full surface" HTTP handler: health + user +
 	// self/customer + merchant + control-plane auth + webhook routes AND the
@@ -123,6 +126,21 @@ func (s *Server) recordBrowserRoute(pattern string) {
 		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
 	}
 	s.browserTierRoutes.Add(pattern)
+}
+
+// recordMerchantRoute is recordRoute for a merchant API route: trusted
+// issuers' origins may call it cross-origin (#1140).
+func (s *Server) recordMerchantRoute(pattern string) {
+	s.recordRoute(pattern)
+	if s.merchantTierRoutes == nil {
+		s.merchantTierRoutes = middleware.NewBrowserTierRoutes()
+	}
+	s.merchantTierRoutes.Add(pattern)
+}
+
+// allowedIssuerOrigin reports whether a trusted issuer declared origin.
+func (s *Server) allowedIssuerOrigin(origin string) bool {
+	return s != nil && s.controlPlane != nil && s.controlPlane.AllowedOrigin(origin)
 }
 
 // RouteTable returns the registered route surface (guard tests).
@@ -235,6 +253,7 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		catalogEdits:           deps.CatalogEdits,
 		adminConsole:           deps.AdminConsole,
 		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
+		merchantTierRoutes:     middleware.NewBrowserTierRoutes(),
 	}
 	if err := deps.Runtime.CatalogEdits.Decide(deps.CatalogEdits); err != nil {
 		return nil, err
@@ -369,6 +388,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
 		// browser refuses cross-origin script access to those by default.
 		middleware.PermissiveCORSHTTP(browser),
+		middleware.IssuerOriginCORSHTTP(func(r *http.Request) bool { return s.merchantTierRoutes.Match(r) }, s.allowedIssuerOrigin),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		s.billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any

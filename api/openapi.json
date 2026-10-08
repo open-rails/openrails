@@ -24074,6 +24074,9 @@
       "sender_proof_required"
     ],
     "tier:merchant": [
+      "access_token_invalid",
+      "access_token_issuer_unknown",
+      "access_token_merchant_not_bound",
       "authentication_required",
       "authentication_unavailable",
       "authorization_unavailable",
@@ -24102,7 +24105,8 @@
       "service_credential_merchant_unresolved",
       "service_credential_resource_scope_denied",
       "step_up_required",
-      "step_up_unavailable"
+      "step_up_unavailable",
+      "use_dpop_nonce"
     ],
     "tier:operator": [
       "authentication_required",
@@ -24156,6 +24160,21 @@
     ]
   },
   "x-openrails-error-codes": {
+    "access_token_invalid": {
+      "status": 401,
+      "type": "authentication_error",
+      "meaning": "The access token is invalid, expired or not issued for this deployment."
+    },
+    "access_token_issuer_unknown": {
+      "status": 401,
+      "type": "authentication_error",
+      "meaning": "The access token's issuer is not trusted by this deployment."
+    },
+    "access_token_merchant_not_bound": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The access token's issuer is not trusted for this merchant."
+    },
     "admission_captured": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25280,6 +25299,11 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The usage rate card is invalid."
+    },
+    "use_dpop_nonce": {
+      "status": 401,
+      "type": "authentication_error",
+      "meaning": "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."
     },
     "webhook_account_mismatch": {
       "status": 400,

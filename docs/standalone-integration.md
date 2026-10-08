@@ -248,6 +248,44 @@ exchange-endpoint pattern, and checkout flows are in
 two-token model is in [auth.md](auth.md). CORS requires zero configuration
 (see below).
 
+### Your staff on the merchant API
+
+Your identity provider can let your own staff and admin UI call the merchant
+API (`/v1/merchant/*`) directly, without OpenRails holding accounts for them.
+OpenRails is then an OAuth 2.0 resource server: it accepts RFC 9068 access
+tokens (`typ: at+jwt`) that a trusted issuer minted for this deployment's
+resource identifier (`aud`).
+
+```yaml
+resource_server:
+  identifier: https://openrails.example.com
+  dpop_nonce_key: ""            # >= 32 bytes, the same on every replica
+  trusted_issuers:
+    - name: example
+      issuer: https://example.com/auth   # keys from <issuer>/.well-known/jwks.json, or pin them with keys:
+      merchants: [example]
+      permissions: ["merchant:*"]        # the ceiling
+      allowed_origins: [https://admin.example.com]
+```
+
+- A token's `permissions` claim is what it grants, within the issuer's ceiling
+  (`permissions`), on the issuer's `merchants` only. A token never names its
+  merchant: it acts for the one the request selects (`OpenRails-Merchant`), or
+  the issuer's only merchant. An issuer that cannot mint OpenRails permissions
+  maps the roles in its tokens' `roles` claim to merchant roles with
+  `group_roles` (`owner`, `support`, `viewer`).
+- A token with `sub` equal to its `client_id` is a machine acting for itself.
+- A token bound to a DPoP key (`cnf.jkt`) is accepted only with
+  `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
+  first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
+  header to retry with.
+- Browsers on `allowed_origins` may call the merchant API across origins.
+  Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
+  headers, never cookies.
+- Refusals: `access_token_issuer_unknown` (untrusted `iss`),
+  `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
+  `access_token_merchant_not_bound` (another merchant), `permission_required`.
+
 ### Webhooks
 
 Point each rail's webhook directly at OpenRails — not through your app:

@@ -79,6 +79,10 @@ const (
 	CodeDelegatedPrincipalInvalid             = "delegated_principal_invalid"
 	CodeDelegatedMerchantUnresolved           = "delegated_merchant_unresolved"
 	CodeDelegatedVerificationUnavailable      = "delegated_verification_unavailable"
+	CodeAccessTokenInvalid                    = "access_token_invalid"
+	CodeAccessTokenIssuerUnknown              = "access_token_issuer_unknown"
+	CodeAccessTokenMerchantNotBound           = "access_token_merchant_not_bound"
+	CodeDPoPNonceRequired                     = "use_dpop_nonce"
 	CodeHostPrincipalInvalid                  = "host_principal_invalid"
 	CodePermissionRequired                    = "permission_required"
 	CodeMerchantUnresolved                    = "merchant_unresolved"
@@ -154,6 +158,9 @@ var errorCodes = []ErrorCode{
 	{CodeHostPrincipalInvalid, 401, authn, "The in-process host principal is bound to no merchant."},
 	{CodeAuthenticationUnavailable, 503, fault, "The credential could not be verified right now; retry."},
 	{CodeDelegatedVerificationUnavailable, 503, fault, "Delegated tokens cannot be verified right now; retry."},
+	{CodeAccessTokenInvalid, 401, authn, "The access token is invalid, expired or not issued for this deployment."},
+	{CodeAccessTokenIssuerUnknown, 401, authn, "The access token's issuer is not trusted by this deployment."},
+	{CodeDPoPNonceRequired, 401, authn, "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."},
 
 	// Authorization.
 	{CodePermissionRequired, 403, authz, "The credential lacks the permission the route requires."},
@@ -164,6 +171,7 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialResourceScopeDenied, 403, authz, "The service credential is scoped to other resources."},
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
+	{CodeAccessTokenMerchantNotBound, 403, authz, "The access token's issuer is not trusted for this merchant."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},

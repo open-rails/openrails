@@ -19,6 +19,7 @@ import (
 
 type GateOptions struct {
 	Authenticator             billingauth.Authenticator
+	ResourceTokenResolver     ResourceTokenResolver
 	AdminPermissionChecker    authpolicy.AdminPermissionChecker
 	ServiceCredentialResolver ServiceCredentialResolver
 	DelegatedResolver         DelegatedResolver
@@ -40,6 +41,12 @@ type ServiceCredentialResolver interface {
 // resolves its merchant + acting user (#259/#555).
 type DelegatedResolver interface {
 	ResolveDelegated(r *http.Request) (*credential.ResolvedDelegated, error)
+}
+
+// ResourceTokenResolver verifies a trusted issuer's RFC 9068 access token
+// and resolves its merchant and permissions (#1140).
+type ResourceTokenResolver interface {
+	ResolveResourceToken(r *http.Request) (*credential.ResolvedResourceAccess, error)
 }
 
 type serviceJWTResolver interface {
@@ -69,6 +76,9 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}
 		return billingauth.Principal{MerchantID: hp.MerchantID, Kind: billingauth.Machine, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
+	}
+	if req != nil && credential.LooksLikeResourceToken(authorizationToken(req.Header.Get("Authorization"))) {
+		return g.authorizeResourceToken(req, perm)
 	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
@@ -216,6 +226,57 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantContextMismatch)
 	}
 	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
+}
+
+// authorizeResourceToken gates an RFC 9068 access token: only its own
+// verifier sees it, and it never falls through to another credential kind.
+func (g legacyGate) authorizeResourceToken(req *http.Request, perm string) (billingauth.Principal, error) {
+	if g.ResourceTokenResolver == nil {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenIssuerUnknown)
+	}
+	resolved, err := g.ResourceTokenResolver.ResolveResourceToken(req)
+	if err != nil {
+		var challenge credential.ChallengeError
+		switch {
+		case errors.As(err, &challenge):
+			refusal := billingauth.Refusal(billing.CodeAccessTokenInvalid)
+			switch challenge.Code {
+			case billing.CodeDPoPNonceRequired:
+				refusal = billingauth.Refusal(billing.CodeDPoPNonceRequired)
+			case billing.CodeSenderProofRequired:
+				refusal = billingauth.Refusal(billing.CodeSenderProofRequired)
+			case billing.CodeCredentialExpired:
+				refusal = billingauth.Refusal(billing.CodeCredentialExpired)
+			}
+			refusal.Headers = challenge.Headers
+			return billingauth.Principal{}, refusal
+		case errors.Is(err, credential.ErrResourceTokenIssuerUnknown), errors.Is(err, credential.ErrResourceServerNotConfigured):
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenIssuerUnknown)
+		case errors.Is(err, credential.ErrResourceTokenMerchantNotBound):
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenMerchantNotBound)
+		case errors.Is(err, billing.ErrMerchantUnresolved):
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
+		case errors.Is(err, credential.ErrResourceTokenUnavailable):
+			return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthenticationUnavailable)
+		}
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenInvalid)
+	}
+	if !resolved.HasPermission(perm) {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
+	}
+	if hostMID, ok := merchant.HostMerchant(req.Context()); ok && hostMID != resolved.MerchantID {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
+	}
+	principal := billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Delegated, Subject: resolved.Subject, Permissions: resolved.Permissions}
+	if resolved.Machine {
+		principal.Kind = billingauth.Machine
+		return principal, nil
+	}
+	principal.UserContext = billingauth.UserContext{
+		UserID: resolved.Subject, Email: resolved.Email, EmailVerified: resolved.EmailVerified,
+		Username: resolved.Username, Merchant: resolved.MerchantSlug,
+	}
+	return principal, nil
 }
 
 // RequireRecentSignIn implements billingauth.Gate with the control plane's
