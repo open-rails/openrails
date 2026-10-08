@@ -33,8 +33,8 @@ type ccbillDataLink interface {
 //     so "missing from the snapshot" is NOT proof a subscription never
 //     existed — the phase-2 diff engine must treat CCBill absence as
 //     inactive-or-out-of-window, not unknown-to-CCBill.
-//   - Rebill amounts are USD (DataLink does not echo a currency; legacy
-//     integrations hardcode USD likewise).
+//   - DataLink rows carry no currency, so Currency stays empty (not reported);
+//     the matched local record denominates the row downstream, never a default.
 //   - The ACTIVEMEMBERS roster has no server-side subscription filter;
 //     FetchParams.SubscriptionID narrowing is applied client-side here.
 type CCBillFetcher struct {
@@ -123,7 +123,6 @@ func normalizeCCBillActiveMember(rec ccbill.CCBillRecord) RemoteSubscription {
 		Email:              strings.TrimSpace(rec.Email),
 		Username:           strings.TrimSpace(rec.Username),
 		PlanID:             strings.TrimSpace(rec.Field2),
-		Currency:           "USD",
 		Raw: rawJSON(map[string]any{
 			"source": "ccbill_activemembers",
 			"record": rec,
@@ -147,7 +146,6 @@ func normalizeCCBillTermination(row ccbill.DataLinkExportRow) RemoteSubscription
 		RailSubscriptionID: row.SubscriptionID(),
 		Status:             status,
 		RawStatus:          string(row.TransactionType),
-		Currency:           "USD",
 		Raw:                ccbillRowRaw(row),
 	}
 }
@@ -157,7 +155,6 @@ func normalizeCCBillTransaction(row ccbill.DataLinkExportRow) RemoteTransaction 
 		TransactionID:  row.TransactionID(),
 		SubscriptionID: row.SubscriptionID(),
 		Success:        true,
-		Currency:       "USD",
 		Raw:            ccbillRowRaw(row),
 	}
 	switch row.TransactionType {
@@ -168,9 +165,7 @@ func normalizeCCBillTransaction(row ccbill.DataLinkExportRow) RemoteTransaction 
 	default:
 		txn.Type = TransactionTypeSale
 	}
-	if cents, err := parseAmountCents(row.Amount()); err == nil {
-		txn.AmountCents = cents
-	}
+	txn.setAmount(row.Amount())
 	if ts, err := timeutil.ParseFirstUTC(row.Timestamp(), "2006-01-02 15:04:05", "2006-01-02", "20060102150405", "01/02/2006"); err == nil {
 		txn.OccurredAt = ts
 	}

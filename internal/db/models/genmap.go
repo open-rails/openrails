@@ -137,7 +137,10 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payments.metadata"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(p.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "payments.entitlements_spec_snapshot"); err != nil {
+	if err := FromJSONB(p.LegacyEntitlementHours, &m.LegacyEntitlementHours, "payments.legacy_entitlement_hours"); err != nil {
+		return nil, err
+	}
+	if err := FromJSONB(p.EntitlementsSnapshot, &m.EntitlementsSnapshot, "payments.entitlements_snapshot"); err != nil {
 		return nil, err
 	}
 	if err := FromJSONB(p.CreditGrantSnapshot, &m.CreditGrantSnapshot, "payments.credit_grant_snapshot"); err != nil {
@@ -196,7 +199,7 @@ func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
 	}
-	if err := FromJSONB(p.EntitlementsSpec, &m.EntitlementsSpec, "products.entitlements_spec"); err != nil {
+	if err := FromJSONB(p.Entitlements, &m.Entitlements, "products.entitlements"); err != nil {
 		return nil, err
 	}
 	if err := FromJSONB(p.CreditGrant, &m.CreditGrant, "products.credit_grant"); err != nil {
@@ -244,7 +247,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		m.CancelType = &ct
 	}
 	m.RememberLifecycle()
-	if err := FromJSONB(s.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "subscriptions.entitlements_spec_snapshot"); err != nil {
+	if err := FromJSONB(s.EntitlementsSnapshot, &m.EntitlementsSnapshot, "subscriptions.entitlements_snapshot"); err != nil {
 		return nil, err
 	}
 	return m, nil

@@ -42,7 +42,7 @@ const (
 // product X?" and powers purchased-library views without walking payment history.
 //
 // It is DISTINCT from billing.entitlements (feature access). A product may carry
-// EntitlementsSpec and produce a grant.
+// Entitlements and produce a grant.
 type ProductAccessGrant struct {
 	ID uuid.UUID `json:"id"`
 

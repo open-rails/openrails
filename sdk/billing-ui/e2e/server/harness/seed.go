@@ -73,8 +73,7 @@ products:
     billing_interval_hours: 720
     access_duration_hours: 720
     psps: [%s]
-  entitlements_spec:
-    e2e-card: null
+  entitlements: ["e2e-card"]
 `, CardPSPKey, CardPSPKey)))
 	if err != nil {
 		return "", "", err
@@ -121,8 +120,7 @@ products:
       solana:
         plan_pda: %s
         plan_id: "1078"
-  entitlements_spec:
-    e2e-crypto: null
+  entitlements: ["e2e-crypto"]
 `, plan)))
 	if err != nil {
 		return "", "", err
@@ -142,7 +140,7 @@ products:
 }
 
 func product(ctx context.Context, c *openrails.Client, key, name string, price billing.CreatePriceParams) (string, string, error) {
-	p, err := c.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: name, EntitlementsSpec: map[string]*int{key: nil}})
+	p, err := c.CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: name, Entitlements: []string{key}})
 	if err != nil {
 		return "", "", err
 	}

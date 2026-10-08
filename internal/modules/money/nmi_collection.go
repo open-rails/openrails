@@ -28,7 +28,7 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.BillingPaym
 	// or#864: NO default. A guessed currency here mints a real charge in a
 	// currency nobody established; the gate answers before anything else.
 	currency := normalizeCurrency(req.Currency)
-	if err := moneyutil.ValidateCurrency(currency); err != nil {
+	if err := moneyutil.RequireFiatCurrency(currency); err != nil {
 		return nil, fmt.Errorf("nmi collection: refusing to charge without an established currency: %w", err)
 	}
 	if a == nil || a.Charger == nil || a.Charger.Client == nil {

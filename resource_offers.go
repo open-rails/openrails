@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // ListOffers returns one page of live offers for each requested entitlement
@@ -17,7 +18,7 @@ func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams,
 		return nil, invalidErr("at most 100 entitlements are allowed")
 	}
 	for _, key := range params.Entitlements {
-		if strings.TrimSpace(key) == "" || len(key) > 256 {
+		if strings.TrimSpace(key) == "" || len(key) > catalog.MaxEntitlementKeyBytes {
 			return nil, invalidErr("entitlement must be a nonempty key of at most 256 bytes")
 		}
 	}

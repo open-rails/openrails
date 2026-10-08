@@ -45,7 +45,7 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 	for _, hours := range []*int{new(24), new(1000), nil} {
 		r := &recordedAccess{}
 		svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(start), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return r }}
-		sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: hours, EntitlementsSpecSnapshot: map[string]*int{"premium": nil}, Status: models.StatusActive, CollectionPolicy: models.CollectionPolicyEngine, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd}
+		sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: hours, EntitlementsSnapshot: []string{"premium"}, Status: models.StatusActive, CollectionPolicy: models.CollectionPolicyEngine, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd}
 		_, err := svc.ApplyEffects(context.Background(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: billingEnd}}, start, EffectOptions{})
 		require.NoError(t, err)
 		require.Len(t, r.grants, 1)
@@ -97,7 +97,7 @@ func TestAcceptedAccessDurationReplay(t *testing.T) {
 			// Immutable history validates the access interval, independently of billing.
 			merchant, customer, subscription := uuid.New(), uuid.New(), uuid.New()
 			initial.CustomerID, initial.SubscriptionID = customer, subscription
-			initial.Entitlements = map[string]*int{"premium": nil}
+			initial.Entitlements = []string{"premium"}
 			source := subscription.String()
 			row := gen.BillingGrant{MerchantID: merchant, CustomerID: customer, Kind: "entitlement", SourceType: "subscription", SourceID: &source, Event: "grant", StartsAt: start, EndsAt: accessEnd(start, tc.want), SpecSnapshot: []byte(`{"entitlements":["premium"]}`)}
 			require.NoError(t, ValidateInitialMembershipHistory(merchant, initial, []gen.BillingGrant{row}))
@@ -135,7 +135,7 @@ func TestLatePaidPeriodRetainsExpiredAccessHistory(t *testing.T) {
 	now := start.Add(48 * time.Hour)
 	recorded := &recordedAccess{}
 	svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(now), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return recorded }}
-	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: new(24), EntitlementsSpecSnapshot: map[string]*int{"premium": nil}}
+	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: new(24), EntitlementsSnapshot: []string{"premium"}}
 	_, err := svc.ApplyEffects(t.Context(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: start.Add(720 * time.Hour)}}, now, EffectOptions{})
 	require.NoError(t, err)
 	require.Len(t, recorded.grants, 1, "late settlement still records what was bought")
@@ -148,7 +148,7 @@ func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
 	paidEnd := start.Add(24 * time.Hour)
 	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), Status: models.StatusPastDue, CollectionPolicy: models.CollectionPolicyNMISchedule,
 		Price: &models.Price{BillingIntervalHours: new(24)}, AccessDurationHoursSnapshot: new(24), CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &providerEnd,
-		EntitlementsSpecSnapshot: map[string]*int{"premium": nil}, DunningPolicy: []byte(`{"access_during_dunning":"keep","access_while_renewal_held":"keep"}`)}
+		EntitlementsSnapshot: []string{"premium"}, DunningPolicy: []byte(`{"access_during_dunning":"keep","access_while_renewal_held":"keep"}`)}
 	r := &recordedAccess{}
 	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
 	require.Len(t, r.grants, 1)

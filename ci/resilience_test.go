@@ -124,7 +124,7 @@ func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 // recurring price and returns the HTTP status of the refusal (0 on success).
 func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool) int {
 	t.Helper()
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", EntitlementsSpec: map[string]*int{"content:sol": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
 	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
 	kind := billing.OfferPermanent
@@ -160,7 +160,7 @@ func waitReady(t *testing.T, rt *openrails.Client) {
 
 func stripeCheckout(t *testing.T, client *openrails.Client) {
 	t.Helper()
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Post", Entitlements: []string{"content:post"}})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)

@@ -39,7 +39,7 @@ func importLegacyEvery(t *testing.T, w *world, tp topology, days int, c *custome
 	client := w.client[tp]
 	plan := "legacy_plan_" + uuid.NewString()[:8]
 	w.nmi.AddPlan(nmimock.Plan{ID: plan, Name: "Legacy " + plan, Amount: "9.99", Days: days})
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", EntitlementsSpec: map[string]*int{l.ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-" + uuid.NewString()[:8], DisplayName: "Legacy", Entitlements: []string{l.ent}})
 	require.NoError(t, err)
 	hours := days * 24
 	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": plan}}})

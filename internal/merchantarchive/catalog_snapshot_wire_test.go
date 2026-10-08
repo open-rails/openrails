@@ -109,12 +109,34 @@ func TestCatalogSnapshotHistoricalBillingTerms(t *testing.T) {
 	}
 }
 
+func TestCatalogSnapshotHistoricalEntitlementMap(t *testing.T) {
+	document := snapshotWireFixture(t)
+	product := snapshotWireProduct(t)
+	product["entitlements_spec"] = json.RawMessage(`{"opaque:z":24,"service:any":null,"article:42":0}`)
+	document.Tables["products"] = []map[string]json.RawMessage{product}
+	restored, _, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
+	require.NoError(t, err)
+	profile := snapshotWireProfile(t, "products")
+	values, err := catalogValues(profile, restored.Tables["products"][0], snapshotTestMerchant)
+	require.NoError(t, err)
+	for i, field := range profile.Columns {
+		if field.Name == "entitlements" {
+			require.JSONEq(t, `["article:42","opaque:z","service:any"]`, *values[i])
+		}
+	}
+	_, historical := restored.Tables["products"][0]["entitlements_spec"]
+	require.True(t, historical, "reading does not rewrite the signed document")
+	_, err = validateCatalogSnapshot(restored)
+	require.NoError(t, err)
+}
+
 func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T) {
 	document := snapshotWireFixture(t)
 	document.CatalogRevision = 9007199254740993
 	product := snapshotWireProduct(t)
-	product["entitlements_spec"] = json.RawMessage("null")
-	// credit_grant is SQL NULL (absent), while entitlements_spec is JSON null.
+	product["entitlements"] = json.RawMessage(`["opaque:name"]`)
+	product["credit_grant"] = json.RawMessage("null")
+	// description is SQL NULL (absent), while credit_grant is JSON null.
 	document.Tables["products"] = []map[string]json.RawMessage{product}
 	document.Tables["prices"] = []map[string]json.RawMessage{snapshotWireRow(t, "prices", map[string]string{
 		"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000003",
@@ -149,10 +171,10 @@ func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T)
 	require.NoError(t, err)
 	for i, column := range profile.Columns {
 		switch column.Name {
-		case "entitlements_spec":
+		case "credit_grant":
 			require.NotNil(t, values[i])
 			require.Equal(t, "null", *values[i])
-		case "credit_grant":
+		case "description":
 			require.Nil(t, values[i])
 		}
 	}

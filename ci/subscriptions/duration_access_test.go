@@ -17,7 +17,7 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 	t.Helper()
 	product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "duration-" + uuid.NewString(), DisplayName: "Independent access",
-		EntitlementsSpec: map[string]*int{"content:duration": nil},
+		Entitlements: []string{"content:duration"},
 	})
 	require.NoError(t, err)
 	price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{
@@ -154,7 +154,7 @@ func TestDurationOrderCanDisableRenewalAtCreation(t *testing.T) {
 func TestDurationOrderWithoutRenewalRefusesUnsupportedTrialBeforeCharge(t *testing.T) {
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
-		product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{Key: "trial-order", DisplayName: "Trial order", EntitlementsSpec: map[string]*int{"content:trial-order": nil}})
+		product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{Key: "trial-order", DisplayName: "Trial order", Entitlements: []string{"content:trial-order"}})
 		require.NoError(t, err)
 		price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: new(720), AccessDurationHours: new(24), TrialUnitAmount: new(int64(0)), TrialDurationHours: new(24)})
 		require.NoError(t, err)

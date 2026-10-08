@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,8 +148,8 @@ func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db
 			"solana_payer_wallet": strings.TrimSpace(t.Payer),
 			"solana_token_symbol": getStringField(session.RailState, "token_symbol"),
 			"solana_token_mint":   getStringField(session.RailState, "token_mint"),
-			"solana_token_amount": getUint64Field(session.RailState, "token_amount"),
-			"solana_received":     t.Amount,
+			"solana_token_amount": strconv.FormatUint(getUint64Field(session.RailState, "token_amount"), 10),
+			"solana_received":     strconv.FormatUint(t.Amount, 10),
 			"solana_recipient":    getStringField(session.RailState, "recipient"),
 		},
 		AttemptKind: payments.AttemptInitial,

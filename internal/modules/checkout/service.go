@@ -396,7 +396,7 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 // GetUserProductCoverage checks if user has active coverage for a product.
 // It checks both:
 // 1. Active/pending subscriptions (using the denormalized ProductID field)
-// 2. Active entitlements matching the product's EntitlementsSpec
+// 2. Active entitlements matching the product's Entitlements
 func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -433,6 +433,12 @@ func (s *CheckoutService) processOneTimePurchase(
 	if err != nil {
 		return nil, err
 	}
+	if target.Rail != string(models.RailSolana) {
+		if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+			return nil, err
+		}
+	}
+
 	if (price.CustomerAmount != nil || req.Amount != nil) && target.Rail != "nmi" && target.Rail != "stripe" {
 		return nil, fmt.Errorf("%w: customer-selected deposits require NMI or Stripe", ErrCheckoutAttemptValidation)
 	}
@@ -757,6 +763,9 @@ func (s *CheckoutService) processStripeSubscription(
 	price *models.Price,
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+		return nil, err
+	}
 	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
@@ -839,6 +848,9 @@ func (s *CheckoutService) processStripePayment(
 	price *models.Price,
 	product *models.Product,
 ) (*CheckoutResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
+		return nil, err
+	}
 	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
@@ -1123,6 +1135,11 @@ type stripeCheckoutParams struct {
 }
 
 func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
+	if params.InlinePrice != nil {
+		if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
+			return "", err
+		}
+	}
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return "", err
@@ -1262,7 +1279,7 @@ func timePtr(t time.Time) *time.Time {
 //  1. Creating the Payment record
 //  2. Looking up Product from Price
 //  3. Checking coverage for delayed start
-//  4. Granting entitlements from Product.EntitlementsSpec
+//  4. Granting entitlements from Product.Entitlements
 func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")

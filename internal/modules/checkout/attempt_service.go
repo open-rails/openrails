@@ -820,9 +820,9 @@ func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt
 	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
 		return ErrCheckoutAttemptExpired
 	}
-	benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	benefits := models.CloneEntitlements(product.Entitlements)
 	if benefits == nil {
-		benefits = map[string]*int{}
+		benefits = []string{}
 	}
 	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour), Entitlements: benefits}
 	if err := terms.Validate(); err != nil {
@@ -1335,6 +1335,9 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: unsupported token", ErrCheckoutAttemptValidation)
 	}
 	tokenMint := tokenCfg.Mint
+	if err := solanamodule.ValidateQuoteCurrency(*session.Currency, tokenSymbol, tokenMint); err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
+	}
 	if !strings.EqualFold(tokenSymbol, "SOL") && solanamodule.IsNativeSOLMint(tokenMint) {
 		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutAttemptValidation)
 	}
@@ -1394,12 +1397,13 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 				return fmt.Errorf("%w: %s has a transfer hook; pay it by transfer request", ErrCheckoutAttemptValidation, tokenSymbol)
 			}
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider)
+		quotedAt := s.now().UTC()
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider, quotedAt)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutAttemptValidation, err)
 		}
 		session.Status = models.CheckoutAttemptStatusRequiresAction
-		expiresAt := s.now().Add(defaultCheckoutAttemptTTL)
+		expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
 		session.ExpiresAt = &expiresAt
 		if session.RailState == nil {
 			session.RailState = map[string]any{}
@@ -1980,7 +1984,7 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 	}
 
 	if terms, err := readInitialMembershipQuote(session); err == nil {
-		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{AutoRenew: !terms.CancelAfterInitial, ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
+		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{AutoRenew: !terms.CancelAfterInitial, ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlements(terms.Entitlements)}
 	}
 	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
 	// purchase financially failed. Keep callers polling the accepted attempt

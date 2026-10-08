@@ -443,8 +443,8 @@ WITH win AS (
      WHERE s.merchant_id = $1::uuid
        AND s.deleted_at IS NULL AND s.status <> 'pending'
        AND s.cancel_type IS DISTINCT FROM 'chargeback'
-       AND ((pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb)
-            OR (s.entitlements_spec_snapshot IS NOT NULL AND s.entitlements_spec_snapshot <> '{}'::jsonb))
+       AND ((pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb)
+            OR (s.entitlements_snapshot IS NOT NULL AND s.entitlements_snapshot <> '[]'::jsonb))
     UNION ALL
     SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
            p.purchased_at + make_interval(hours => pr.access_duration_hours)
@@ -454,7 +454,7 @@ WITH win AS (
      WHERE p.merchant_id = $1::uuid
        AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
        AND pr.access_duration_hours IS NOT NULL
-       AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+       AND pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb
 ), orphaned AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((
@@ -1071,12 +1071,12 @@ func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error
 const listActiveSubsMissingEntitlementProjection = `-- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       missing.spec AS entitlements_spec
+       missing.spec AS entitlements
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
-    SELECT jsonb_object_agg(feat, NULL::text) AS spec
-    FROM jsonb_object_keys(COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec)) AS feat
+    SELECT jsonb_agg(feat ORDER BY feat) AS spec
+    FROM jsonb_array_elements_text(COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements)) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -1093,8 +1093,8 @@ WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
-  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) IS NOT NULL
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > $3::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= $3::timestamptz
@@ -1123,7 +1123,7 @@ type ListActiveSubsMissingEntitlementProjectionRow struct {
 	StartedAt                   time.Time
 	EndedAt                     *time.Time
 	AccessDurationHoursSnapshot *int32
-	EntitlementsSpec            []byte
+	Entitlements                []byte
 }
 
 // #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
@@ -1156,7 +1156,7 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 			&i.StartedAt,
 			&i.EndedAt,
 			&i.AccessDurationHoursSnapshot,
-			&i.EntitlementsSpec,
+			&i.Entitlements,
 		); err != nil {
 			return nil, err
 		}
@@ -2649,22 +2649,25 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
-SELECT id, customer_id, price_id, product_id, status, rail, collection_policy,
-       rail_subscription_id, payment_method_id,
-       current_period_starts_at, current_period_ends_at, started_at, ended_at,
-       canceled_at, cancel_type, deletion_scheduled_at, tier_group,
-       last_retry_at, retry_attempts, next_retry_at,
-       entitlements_spec_snapshot, access_duration_hours_snapshot, scheduled_price_id,
+SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
+       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
+       subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
+       subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
+       subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
+       subscriptions.retry_attempts, subscriptions.next_retry_at, subscriptions.entitlements_snapshot,
+       subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
+       price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
 FROM billing.subscriptions
-WHERE subscriptions.merchant_id = $1::uuid AND rail = ANY ($2::text[])
-  AND deleted_at IS NULL
-  AND psp_id = $3::uuid
+LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
+WHERE subscriptions.merchant_id = $1::uuid AND subscriptions.rail = ANY ($2::text[])
+  AND subscriptions.deleted_at IS NULL
+  AND subscriptions.psp_id = $3::uuid
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
@@ -2694,10 +2697,11 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	LastRetryAt                 *time.Time
 	RetryAttempts               *int32
 	NextRetryAt                 *time.Time
-	EntitlementsSpecSnapshot    []byte
+	EntitlementsSnapshot        []byte
 	AccessDurationHoursSnapshot *int32
 	ScheduledPriceID            *uuid.UUID
 	CustomerEmail               *string
+	PriceCurrency               *string
 	TierChangePending           bool
 }
 
@@ -2734,10 +2738,11 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
-			&i.EntitlementsSpecSnapshot,
+			&i.EntitlementsSnapshot,
 			&i.AccessDurationHoursSnapshot,
 			&i.ScheduledPriceID,
 			&i.CustomerEmail,
+			&i.PriceCurrency,
 			&i.TierChangePending,
 		); err != nil {
 			return nil, err
@@ -2773,14 +2778,14 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    entitlements_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
-       p.entitlements_spec, pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
+       p.entitlements, pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
@@ -2794,7 +2799,7 @@ WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
         -- provider subscription id is only unique within a gateway account.
         AND s.psp_id = $9::uuid
   )
-RETURNING id, entitlements_spec_snapshot, access_duration_hours_snapshot
+RETURNING id, entitlements_snapshot, access_duration_hours_snapshot
 `
 
 type ReconcileMaterializeSubscriptionParams struct {
@@ -2814,7 +2819,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 
 type ReconcileMaterializeSubscriptionRow struct {
 	ID                          uuid.UUID
-	EntitlementsSpecSnapshot    []byte
+	EntitlementsSnapshot        []byte
 	AccessDurationHoursSnapshot *int32
 }
 
@@ -2847,7 +2852,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 	var items []ReconcileMaterializeSubscriptionRow
 	for rows.Next() {
 		var i ReconcileMaterializeSubscriptionRow
-		if err := rows.Scan(&i.ID, &i.EntitlementsSpecSnapshot, &i.AccessDurationHoursSnapshot); err != nil {
+		if err := rows.Scan(&i.ID, &i.EntitlementsSnapshot, &i.AccessDurationHoursSnapshot); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

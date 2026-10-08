@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // OrderAttempts describes the visible transactions for one accepted attempt.
@@ -44,8 +46,8 @@ func (t QueryTransaction) at() (time.Time, error) {
 func (t QueryTransaction) approvedSale() int64 {
 	for _, action := range t.Actions {
 		if action.Is("sale") && action.Succeeded() {
-			if cents, ok := exactMinorAmount(action.Amount, t.Currency); ok && cents > 0 {
-				return cents
+			if cents, err := moneyutil.DecimalToRailMinor(t.Currency, action.Amount); err == nil && cents > 0 {
+				return int64(cents)
 			}
 			return -1
 		}
@@ -115,8 +117,8 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 		if txn.CustomerVaultID != accepted.CustomerVaultID || !strings.EqualFold(txn.Currency, accepted.Currency) {
 			return OrderAttempts{}, receiptMismatch("decline does not match accepted instrument and currency")
 		}
-		amount, ok := exactMinorAmount(action.Amount, txn.Currency)
-		if !ok || amount != int64(accepted.Amount) {
+		amount, err := moneyutil.DecimalToRailMinor(txn.Currency, action.Amount)
+		if err != nil || amount != accepted.Amount {
 			return OrderAttempts{}, receiptMismatch("decline does not match accepted amount")
 		}
 		if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {

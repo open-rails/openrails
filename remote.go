@@ -260,8 +260,7 @@ func (c *Client) HasEntitlement(ctx context.Context, customerID billing.Customer
 	if err != nil {
 		return false, err
 	}
-	entitlement = strings.TrimSpace(entitlement)
-	if entitlement == "" {
+	if strings.TrimSpace(entitlement) == "" {
 		return false, invalidErr("entitlement is required")
 	}
 	var out billing.EntitlementCheck
@@ -274,8 +273,7 @@ func (c *Client) HasEntitlement(ctx context.Context, customerID billing.Customer
 // ListEntitlementCustomers returns one page of the customers holding
 // entitlement at params.At (zero: now), ordered by customer id.
 func (c *Client) ListEntitlementCustomers(ctx context.Context, entitlement string, params billing.EntitlementCustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerID], error) {
-	entitlement = strings.TrimSpace(entitlement)
-	if entitlement == "" {
+	if strings.TrimSpace(entitlement) == "" {
 		return nil, invalidErr("entitlement is required")
 	}
 	query := pageValues(nil, params.PageRequest)

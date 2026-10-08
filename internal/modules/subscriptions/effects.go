@@ -59,12 +59,12 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.Start, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
 				return nil, fmt.Errorf("end superseded renewal grace %s: %w", sub.ID, err)
 			}
-			for name := range sub.EntitlementsSpecSnapshot {
+			for _, name := range sub.EntitlementsSnapshot {
 				if _, err := ents.PushNewEntitlement(ctx, subscriptionAccess(sub, name, e.Start)); err != nil {
 					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
 				}
 			}
-			if err := pushRenewalGrace(ctx, d, ents, sub, entitlementNames(sub.EntitlementsSpecSnapshot), e.Start, e.End); err != nil {
+			if err := pushRenewalGrace(ctx, d, ents, sub, sub.EntitlementsSnapshot, e.Start, e.End); err != nil {
 				return nil, err
 			}
 
@@ -92,7 +92,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			}
 		case lifecycle.ProbeProvider, lifecycle.ReopenAccess:
 			if sub.CurrentPeriodStartsAt != nil && sub.CurrentPeriodEndsAt != nil {
-				if err := pushRenewalGrace(ctx, d, ents, sub, entitlementNames(sub.EntitlementsSpecSnapshot), *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt); err != nil {
+				if err := pushRenewalGrace(ctx, d, ents, sub, sub.EntitlementsSnapshot, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt); err != nil {
 					return nil, err
 				}
 			}
@@ -204,7 +204,7 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 		return fmt.Errorf("scheduled tier %s: product: %w", sub.ID, err)
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
-	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	sub.EntitlementsSnapshot = models.CloneEntitlements(product.Entitlements)
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
 	sub.Price = price
 	return nil // The caller grants the newly paid period from this snapshot.

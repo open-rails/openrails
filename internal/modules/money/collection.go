@@ -72,7 +72,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	// or#864: an absent currency is refused here, once, before any credential
 	// is resolved. Registry-validated, not merely non-blank.
 	req.Currency = normalizeCurrency(req.Currency)
-	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+	if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
 		return nil, fmt.Errorf("refusing to charge without an established currency: %w", err)
 	}
 	tid, err := merchant.Require(ctx)

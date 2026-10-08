@@ -321,6 +321,9 @@ func decodeCustodianSalePayload(intent gen.BillingProviderIntent) (CustodianSale
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode custodian sale payload: %w", err)
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return p, err
+	}
 	if p.TokenIntentID == "" || p.AmountMicros <= 0 || p.Currency == "" || p.UserID == "" || p.PriceID == uuid.Nil {
 		return p, errors.New("custodian sale payload is incomplete")
 	}

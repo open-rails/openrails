@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -346,7 +347,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		now := purchase.now().UTC()
 		if success {
 			price := &models.Price{ID: p.PriceID, ProductID: p.ProductID, Amount: p.ListAmount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours}
-			product := &models.Product{ID: p.ProductID, EntitlementsSpec: models.CloneEntitlementsSpec(p.Entitlements)}
+			product := &models.Product{ID: p.ProductID, Entitlements: models.CloneEntitlements(p.Entitlements)}
 			eligibility := &EligibilityResult{Status: EligibilityStatus(p.Eligibility), Coverage: &CoverageInfo{}}
 			if p.EntitlementStart.After(p.AcceptedAt) {
 				eligibility.Coverage = &CoverageInfo{HasCoverage: true, EndDate: &p.EntitlementStart}
@@ -355,7 +356,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			if p.E2ERunID != "" {
 				metadata["e2e_run_id"] = p.E2ERunID
 			}
-			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID, p.CreditGrant)
+			result, err := purchase.applyPurchase(ctx, &payments.RegisterPurchaseRequest{UserID: p.UserID, PriceID: p.PriceID, Rail: in.Rail, TransactionID: receipt.TransactionID(), Amount: p.Amount, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.AcceptedAt, Metadata: metadata, AttemptKind: payments.AttemptInitial, TokenType: charge.TokenTypePSPToken}, price, product, eligibility, p.AcceptedAt, p.PaymentID, p.CreditGrant, grants.HistoricalEntitlementHours(p.LegacyEntitlements))
 			if err != nil {
 				return err
 			}

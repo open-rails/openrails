@@ -124,7 +124,7 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.Equal(t, "approved", rows[1].Category)
 	require.Equal(t, *rows[0].Checkout, *rows[1].Checkout)
 
-	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", EntitlementsSpec: map[string]*int{"content:post": nil}})
+	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
 	require.NoError(t, err)
 	post, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)

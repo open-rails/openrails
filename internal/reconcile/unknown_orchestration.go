@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
@@ -352,9 +351,16 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			continue
 		}
 		subID := sub.ID
-		// #684/#671: RemoteTransaction amounts are provider-wire CENTS; the
-		// payments ledger is MICROS. Convert at this boundary, never store raw.
-		amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(t.AmountCents)))
+		// #684/#671: RemoteTransaction amounts are rail minor units; the
+		// payments ledger is native units of the row's currency.
+		amount, err := t.nativeIn(currency)
+		if err != nil {
+			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
+				"transaction_id":  t.TransactionID,
+				"subscription_id": sub.ID,
+			}).Warn("reconcile backfill: amount is not exact in the row's currency; skipping row")
+			continue
+		}
 		params := gen.CreatePaymentIfNotExistsParams{
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,
@@ -362,8 +368,8 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			Channel:        string(models.ChannelRail),
 			Rail:           new(string(sub.Rail)),
 			TransactionID:  t.TransactionID,
-			Amount:         amountMicros,
-			ListAmount:     amountMicros,
+			Amount:         amount,
+			ListAmount:     amount,
 			Currency:       currency,
 			Status:         "completed",
 			SubscriptionID: &subID,
@@ -406,7 +412,7 @@ func chargeAttempt(t TransactionType) bool {
 // recordUnlinkedReversalFinding surfaces a refund or chargeback the mirror
 // could not attach to its original sale. Best-effort, like every finding.
 func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *models.Subscription, t RemoteTransaction) {
-	action := fmt.Sprintf("a %s of %d cents (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.AmountCents, t.TransactionID, billing.SubscriptionID(sub.ID).String())
+	action := fmt.Sprintf("a %s of %s (transaction %s) was reported for subscription %s without its original sale; record it against the sale it reverses", t.Type, t.formatAmount(), t.TransactionID, billing.SubscriptionID(sub.ID).String())
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        sub.MerchantID,
 		FindingType:       string(FindingReversalUnlinked),

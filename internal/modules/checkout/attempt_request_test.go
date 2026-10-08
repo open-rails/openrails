@@ -171,7 +171,7 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 	permanent := &models.Price{}
 	finite := &models.Price{AccessDurationHours: intPtr(24)}
 	recurring := &models.Price{BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720)}
-	product := &models.Product{EntitlementsSpec: map[string]*int{"forever": nil, "timed": intPtr(24)}}
+	product := &models.Product{Entitlements: []string{"forever", "timed"}}
 	for _, tc := range []struct {
 		name  string
 		price *models.Price
@@ -183,7 +183,7 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 		{"permanent", permanent, "forever", billing.OfferPermanent, true},
 		{"finite", finite, "timed", billing.OfferFinite, true},
 		{"recurring", recurring, "timed", billing.OfferRecurring, true},
-		{"timed entitlement is not permanent", permanent, "timed", billing.OfferPermanent, false},
+		{"name does not determine duration", permanent, "timed", billing.OfferPermanent, true},
 		{"finite price is not permanent", finite, "", billing.OfferPermanent, false},
 		{"recurring price is not finite", recurring, "", billing.OfferFinite, false},
 		{"one-off price is not recurring", finite, "", billing.OfferRecurring, false},

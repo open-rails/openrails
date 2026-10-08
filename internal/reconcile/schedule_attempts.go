@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // recordScheduleAttempts records a provider schedule's own charges as rebill
@@ -39,17 +38,16 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 	sort.SliceStable(charges, func(i, j int) bool { return charges[i].OccurredAt.Before(charges[j].OccurredAt) })
 	via := attempts.ObservedFrom(ctx, "pull")
 	for _, t := range charges {
-		currency, amount := money.NormalizeCurrency(t.Currency), int64(moneyutil.CentsToMicros(moneyutil.Cents(t.AmountCents)))
-		if sub.Price != nil {
-			if currency == "" {
-				currency = money.NormalizeCurrency(sub.Price.Currency)
-			}
-			if amount == 0 {
-				amount = sub.Price.Amount
-			}
+		currency := money.NormalizeCurrency(t.Currency)
+		if currency == "" && sub.Price != nil {
+			currency = money.NormalizeCurrency(sub.Price.Currency)
 		}
 		if currency == "" {
 			continue
+		}
+		amount, _ := t.nativeIn(currency)
+		if amount == 0 && sub.Price != nil && money.NormalizeCurrency(sub.Price.Currency) == currency {
+			amount = sub.Price.Amount
 		}
 		answer := t.Answer
 		if answer.Rail == "" {

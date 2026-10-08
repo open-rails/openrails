@@ -214,7 +214,23 @@ func getOriginalTransactionID(body *NMITransactionEventBody) string {
 	return strings.TrimSpace(body.TransactionDetail.TransactionID.Trimmed())
 }
 
-func transactionAmountCents(body *NMITransactionEventBody) (moneyutil.Cents, error) {
+// transactionCurrency is the currency the event names, if any.
+func transactionCurrency(body *NMITransactionEventBody) string {
+	if body == nil {
+		return ""
+	}
+	if currency := body.Currency.Trimmed(); currency != "" {
+		return currency
+	}
+	if body.TransactionDetail != nil {
+		return body.TransactionDetail.Currency.Trimmed()
+	}
+	return ""
+}
+
+// transactionAmount reads the first parseable amount candidate as rail minor
+// units of currency.
+func transactionAmount(body *NMITransactionEventBody, currency string) (moneyutil.Cents, error) {
 	if body == nil {
 		return 0, fmt.Errorf("transaction body is nil")
 	}
@@ -224,7 +240,7 @@ func transactionAmountCents(body *NMITransactionEventBody) (moneyutil.Cents, err
 		if raw == "" {
 			continue
 		}
-		amount, err := moneyutil.ParseDecimalToCents(raw)
+		amount, err := moneyutil.DecimalToRailMinor(currency, raw)
 		if err == nil {
 			return amount, nil
 		}
@@ -370,7 +386,7 @@ type nmiChargebackMatch struct {
 	SubscriptionID       uuid.UUID
 	RailSubscriptionID   string
 	UserID               string
-	AmountCents          int64
+	Amount               int64
 	Currency             string
 	PurchasedAt          time.Time
 	CardLast4            string
@@ -390,15 +406,25 @@ func normalizeNMIChargebackLast4(raw string) string {
 	return value[len(value)-4:]
 }
 
-func parseNMIChargebackAmountCents(raw string) (moneyutil.Cents, error) {
-	amountCents, err := moneyutil.ParseDecimalToCents(raw)
-	if err != nil {
-		return 0, err
+// nmiChargebackReadings is every positive reading of a chargeback amount in a
+// registered fiat currency, as native units. The batch names no currency, so
+// the charge it matches decides: 500.00 is $500 or ¥500, never 50 000 yen.
+func nmiChargebackReadings(raw string) (currencies []string, amounts []int64) {
+	for _, code := range moneyutil.CurrencyCodes() {
+		if moneyutil.RequireFiatCurrency(code) != nil {
+			continue
+		}
+		minor, err := moneyutil.DecimalToRailMinor(code, raw)
+		if err != nil || minor <= 0 {
+			continue
+		}
+		native, err := moneyutil.RailMinorToNative(code, minor)
+		if err != nil {
+			continue
+		}
+		currencies, amounts = append(currencies, code), append(amounts, native)
 	}
-	if amountCents <= 0 {
-		return 0, fmt.Errorf("amount must be positive")
-	}
-	return amountCents, nil
+	return currencies, amounts
 }
 
 func parseNMIChargebackDate(raw string) (time.Time, bool) {
@@ -501,14 +527,9 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 		meta["cc_last4_normalized"] = last4
 	}
 
-	var (
-		amountCents moneyutil.Cents
-		amountErr   error
-	)
-	if amountCents, amountErr = parseNMIChargebackAmountCents(cb.Amount); amountErr == nil {
-		meta["amount_cents"] = amountCents
-	} else {
-		meta["amount_parse_error"] = amountErr.Error()
+	currencies, amounts := nmiChargebackReadings(cb.Amount)
+	if len(amounts) == 0 {
+		meta["amount_parse_error"] = fmt.Sprintf("%q is not a positive amount in any registered currency", cb.Amount)
 	}
 
 	targetTs, dateParsed := parseNMIChargebackDate(cb.Date)
@@ -517,7 +538,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 	} else {
 		meta["chargeback_date_parse_error"] = cb.Date
 	}
-	if amountErr != nil || last4 == "" || !dateParsed {
+	if len(amounts) == 0 || last4 == "" || !dateParsed {
 		meta["reconciliation_status"] = "insufficient_identifiers"
 		return nil, meta, nil
 	}
@@ -531,12 +552,13 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 		return nil, meta, err
 	}
 	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{MerchantID: mid.UUID(), PspID: pspID,
-		Rail:        string(rail),
-		AmountCents: int64(amountCents),
-		Last4:       last4,
-		FromAt:      targetTs.Add(-7 * 24 * time.Hour),
-		ToAt:        targetTs.Add(7 * 24 * time.Hour),
-		TargetAt:    targetTs,
+		Rail:       string(rail),
+		Currencies: currencies,
+		Amounts:    amounts,
+		Last4:      last4,
+		FromAt:     targetTs.Add(-7 * 24 * time.Hour),
+		ToAt:       targetTs.Add(7 * 24 * time.Hour),
+		TargetAt:   targetTs,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -551,7 +573,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 			PaymentTransactionID: r.PaymentTransactionID,
 			RailSubscriptionID:   r.RailSubscriptionID,
 			UserID:               r.UserID,
-			AmountCents:          r.AmountCents,
+			Amount:               r.Amount,
 			Currency:             r.Currency,
 			PurchasedAt:          r.PurchasedAt,
 			CardLast4:            r.CardLast4,
@@ -578,7 +600,7 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 	meta["matched_rail_subscription_id"] = match.RailSubscriptionID
 	meta["matched_user_id"] = match.UserID
 	meta["matched_payment_purchased_at"] = match.PurchasedAt.Format(time.RFC3339)
-	meta["matched_amount_cents"] = match.AmountCents
+	meta["matched_amount"] = moneyutil.FormatAmount(match.Amount, match.Currency)
 	if strings.TrimSpace(match.CardLast4) != "" {
 		meta["matched_card_last4"] = strings.TrimSpace(match.CardLast4)
 	}
@@ -703,14 +725,8 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 						log.WithContext(ctx).WithError(ledgerErr).Error("Failed to lookup NMI chargeback reversal; continuing entitlement revocation")
 					}
 				} else {
-					amountCents := moneyutil.Cents(match.AmountCents)
-					if parsedAmount, parseErr := parseNMIChargebackAmountCents(cb.Amount); parseErr == nil && parsedAmount > 0 {
-						amountCents = parsedAmount
-					}
-					if amountCents > moneyutil.Cents(match.AmountCents) {
-						amountCents = moneyutil.Cents(match.AmountCents)
-					}
-					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, int64(moneyutil.CentsToMicros(moneyutil.Cents(amountCents))), payments.ReversalChargeback); refundErr != nil {
+					// The match is exact: the chargeback is the charge's amount in its currency.
+					if _, refundErr := s.PaymentService.Refund(ctx, match.PaymentID, chargebackTransactionID, match.Amount, payments.ReversalChargeback); refundErr != nil {
 						reconcileErrors++
 						cbMetadata["chargeback_payment_status"] = "failed"
 						cbMetadata["chargeback_payment_error"] = refundErr.Error()
@@ -904,31 +920,6 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	nmiSubID := transactionSubscriptionID(body)
 	originalTxnID := getOriginalTransactionID(body)
 
-	// Parse refund amount exactly in cents (avoid float drift), then derive display float.
-	refundAmountCents, err := transactionAmountCents(body)
-	if err != nil {
-		// #675: never downgrade a refund to a 0-amount no-op — durable alert,
-		// then terminal (redelivery resends the same unparseable bytes).
-		if alertErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
-			Provider:      s.Rail,
-			Operation:     "refund_amount_parse_failed",
-			TransactionID: txnID,
-			Err:           err,
-			Metadata: map[string]any{
-				"original_transaction_id": originalTxnID,
-				"rail_subscription_id":    nmiSubID,
-			},
-		}); alertErr != nil {
-			return fmt.Errorf("record NMI refund amount parse repair alert: %w", alertErr)
-		}
-		return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Invalid refund amount", map[string]interface{}{
-			"transaction_id": txnID,
-		}, err))
-	}
-	if refundAmountCents < 0 {
-		refundAmountCents = -refundAmountCents
-	}
-
 	if _, err := s.normalizedRail(); err != nil {
 		return err
 	}
@@ -949,7 +940,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// sale) — resolve by transaction id and reverse, mirroring Stripe's
 	// one-off path. Previously this ACKed with zero effect.
 	if subscription == nil {
-		return s.handleNMIOneOffRefund(ctx, txnID, originalTxnID, refundAmountCents)
+		return s.handleNMIOneOffRefund(ctx, body, txnID, originalTxnID)
 	}
 
 	// Missing original references are not safe to complete silently because we
@@ -965,7 +956,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 
 	// Persist refund in the payments ledger as a negative payment linked to the original payment.
 	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
-	if s.PaymentService != nil && subscription != nil && txnID != "" && refundAmountCents > 0 {
+	if s.PaymentService != nil && subscription != nil && txnID != "" {
 		rail := models.Rail(s.Rail)
 		existingRefund, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID)
 		switch {
@@ -1005,25 +996,27 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					"original_transaction_id": originalTxnID,
 				}).Warn("Unable to resolve original payment for refund ledger linkage; skipping payment insert")
 				return fmt.Errorf("unable to resolve original payment %q for NMI refund transaction %q", originalTxnID, txnID)
-			} else {
-				if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund); refundErr != nil {
-					log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
-						"refund_transaction_id":   txnID,
-						"original_payment_id":     originalPayment.ID,
-						"original_transaction_id": originalTxnID,
-						"refund_amount_cents":     refundAmountCents,
-					}).Warn("Failed to persist refund payment record")
-					return fmt.Errorf("persist refund payment record: %w", refundErr)
-				} else {
-					refunded = originalPayment
-					log.WithContext(ctx).WithFields(log.Fields{
-						"refund_transaction_id": txnID,
-						"original_payment_id":   originalPayment.ID,
-						"subscription_id":       subscription.ID,
-						"refund_amount_cents":   refundAmountCents,
-					}).Info("Persisted refund payment record")
-				}
 			}
+			refundAmount, err := s.refundAmount(ctx, body, originalPayment)
+			if err != nil {
+				return err
+			}
+			if _, refundErr := s.PaymentService.Refund(ctx, originalPayment.ID, txnID, refundAmount, payments.ReversalRefund); refundErr != nil {
+				log.WithContext(ctx).WithError(refundErr).WithFields(log.Fields{
+					"refund_transaction_id":   txnID,
+					"original_payment_id":     originalPayment.ID,
+					"original_transaction_id": originalTxnID,
+					"refund_amount":           refundAmount,
+				}).Warn("Failed to persist refund payment record")
+				return fmt.Errorf("persist refund payment record: %w", refundErr)
+			}
+			refunded = originalPayment
+			log.WithContext(ctx).WithFields(log.Fields{
+				"refund_transaction_id": txnID,
+				"original_payment_id":   originalPayment.ID,
+				"subscription_id":       subscription.ID,
+				"refund_amount":         refundAmount,
+			}).Info("Persisted refund payment record")
 		}
 	}
 
@@ -1039,9 +1032,8 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
-		"transaction_id":      txnID,
-		"refund_amount_cents": refundAmountCents,
-		"access_revoked":      terminated,
+		"transaction_id": txnID,
+		"access_revoked": terminated,
 	}).Info("NMI refund processed")
 
 	return nil
@@ -1051,7 +1043,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 // (dashboard refunds of one-time purchases) — mirrors the Stripe one-off path:
 // resolve the original payment by transaction id, record the negative payment,
 // and revoke what the payment funded once fully refunded (#675).
-func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, originalTxnID string, refundAmountCents moneyutil.Cents) error {
+func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMITransactionEventBody, txnID, originalTxnID string) error {
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for NMI refund")
 	}
@@ -1084,12 +1076,11 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 			}
 			return fmt.Errorf("resolve original payment for NMI refund: %w", err)
 		}
-		if refundAmountCents <= 0 {
-			return MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Non-positive refund amount", map[string]interface{}{
-				"transaction_id": txnID,
-			}, nil))
+		refundAmount, err := s.refundAmount(ctx, body, original)
+		if err != nil {
+			return err
 		}
-		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, int64(moneyutil.CentsToMicros(moneyutil.Cents(refundAmountCents))), payments.ReversalRefund); err != nil {
+		if _, err := s.PaymentService.Refund(ctx, original.ID, txnID, refundAmount, payments.ReversalRefund); err != nil {
 			return fmt.Errorf("record NMI refund: %w", err)
 		}
 	}
@@ -1099,6 +1090,51 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 	}
 	_, err = s.providerRefundAccess().apply(ctx, rail, original, refundedTotal, "NMI refund processed")
 	return err
+}
+
+// refundAmount reads a refund in the refunded payment's currency. An unreadable
+// amount is a durable alert, never a 0-amount no-op (#675), and terminal:
+// redelivery resends the same bytes.
+func (s *NMIWebhookService) refundAmount(ctx context.Context, body *NMITransactionEventBody, original *models.Payment) (int64, error) {
+	amount, err := nmiRefundAmount(body, original.Currency)
+	if err == nil {
+		return amount, nil
+	}
+	txnID := body.TransactionID.Trimmed()
+	if alertErr := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
+		Provider:      s.Rail,
+		Operation:     "refund_amount_parse_failed",
+		TransactionID: txnID,
+		Err:           err,
+		Metadata: map[string]any{
+			"original_transaction_id": getOriginalTransactionID(body),
+			"rail_subscription_id":    transactionSubscriptionID(body),
+		},
+	}); alertErr != nil {
+		return 0, fmt.Errorf("record NMI refund amount parse repair alert: %w", alertErr)
+	}
+	return 0, MarkWebhookErrorNonRetryable(newNMIBillingError(ErrorTypeNMIValidation, "Invalid refund amount", map[string]interface{}{
+		"transaction_id": txnID,
+	}, err))
+}
+
+// nmiRefundAmount is the refund's positive native amount in currency, the
+// refunded payment's; a currency the event names must agree with it.
+func nmiRefundAmount(body *NMITransactionEventBody, currency string) (int64, error) {
+	if named := transactionCurrency(body); named != "" && moneyutil.NormalizeCurrency(named) != moneyutil.NormalizeCurrency(currency) {
+		return 0, fmt.Errorf("refund is in %s but the refunded payment is in %s", named, currency)
+	}
+	minor, err := transactionAmount(body, currency)
+	if err != nil {
+		return 0, err
+	}
+	if minor < 0 {
+		minor = -minor
+	}
+	if minor == 0 {
+		return 0, errors.New("refund amount is zero")
+	}
+	return moneyutil.RailMinorToNative(currency, minor)
 }
 
 func (s *NMIWebhookService) providerRefundAccess() providerRefundAccess {

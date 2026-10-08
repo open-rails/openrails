@@ -178,13 +178,13 @@ func TestJSONContracts(t *testing.T) {
 			`{"profile":{"display_name":"4111111111111111"}}`,
 		}},
 		{"usage_events.dimensions", []string{`{"tokens":9007199254740993}`}, []string{`{"tokens":1e100}`, `{"tokens":1.5}`, `{"tokens":1} {}`}},
-		{"products.entitlements_spec", []string{`null`, `{"premium":null,"secret_content":24}`}, []string{`{"premium":"1"}`, `{"4111111111111111":1}`}},
+		{"products.entitlements", []string{`[]`, `["premium","secret_content"]`}, []string{`null`, `{"premium":null}`, `["4111111111111111"]`}},
 		{"custodians.settings", []string{`{"public_api_key":"public","account_updater":true,"account_updater_lookahead_days":"30"}`}, []string{`{"secret_api_key":"x"}`, `{"account_updater":"maybe"}`}},
 		{"admission_operations.capture_terms", []string{`null`, `{"metadata":{"opaque":"replay-fact"}}`}, []string{`{"unknown_operation_field":true}`}},
 		{"catalog_meters.group_by", []string{`null`, `{"region":"$.region"}`}, []string{`{"region":1}`}},
 		{"catalog_rate_cards.filter", []string{`null`, `{"region":["us"]}`}, []string{`{"region":"us"}`}},
 		{"no.such_field", nil, []string{`null`, `{}`}},
-		{"payments.entitlements_spec_snapshot", nil, []string{strings.Repeat("[", 40) + strings.Repeat("]", 40)}},
+		{"payments.entitlements_snapshot", nil, []string{strings.Repeat("[", 40) + strings.Repeat("]", 40)}},
 	} {
 		for _, raw := range tc.ok {
 			if err := validateJSON(tc.field, raw); err != nil {

@@ -38,9 +38,9 @@ func TestWireAmountRendersMinorUnitsAtCurrencyScale(t *testing.T) {
 		for _, cents := range []moneyutil.Cents{0, 1, 9, 10, 99, 100, 101, 1999, 100000, 987654321, -1, -250} {
 			wire, err := WireAmount(cents, currency)
 			require.NoError(t, err)
-			back, ok := exactMinorAmount(wire, currency)
-			require.True(t, ok, wire)
-			require.EqualValues(t, cents, back, "%s round trip of %d via %q", currency, cents, wire)
+			back, err := moneyutil.DecimalToRailMinor(currency, wire)
+			require.NoError(t, err, wire)
+			require.Equal(t, cents, back, "%s round trip of %d via %q", currency, cents, wire)
 			if currency != "JPY" {
 				require.Equal(t, centsToDollarString(cents), wire, "enrollment and plan amounts share one rendering")
 			}
@@ -49,38 +49,11 @@ func TestWireAmountRendersMinorUnitsAtCurrencyScale(t *testing.T) {
 }
 
 func TestCentsJSONAmountRoundTrip(t *testing.T) {
-	for cents, wire := range map[int64]string{0: "0.00", 1: "0.01", 99: "0.99", 100: "1.00", 1999: "19.99", 123456: "1234.56", -500: "-5.00"} {
-		require.Equal(t, wire, string(centsJSONAmount(moneyutil.Cents(cents))))
-		got, err := v5AmountToCents(wire)
+	for cents, wire := range map[moneyutil.Cents]string{0: "0.00", 1: "0.01", 99: "0.99", 100: "1.00", 1999: "19.99", 123456: "1234.56", -500: "-5.00"} {
+		require.Equal(t, wire, string(centsJSONAmount(cents)))
+		got, err := moneyutil.DecimalToRailMinor("USD", wire)
 		require.NoError(t, err)
 		require.Equal(t, cents, got)
-	}
-	for in, want := range map[string]int64{"10.9": 1090, "5": 500, ".5": 50, " 7.25 ": 725} {
-		got, err := v5AmountToCents(in)
-		require.NoError(t, err, in)
-		require.Equal(t, want, got, in)
-	}
-	for _, bad := range []string{"", "abc", "1.x"} {
-		_, err := v5AmountToCents(bad)
-		require.Error(t, err, bad)
-	}
-}
-
-func TestExactMinorAmountRefusesInexactOrForeignShapes(t *testing.T) {
-	for _, tc := range []struct {
-		amount, currency string
-		want             int64
-		ok               bool
-	}{
-		{"1.00", "USD", 100, true}, {" 2.50 ", "USD", 250, true}, {"-1.50", "USD", -150, true},
-		{"100.00", "JPY", 100, true}, {"100", "jpy", 100, true}, {"5.0010", "USD", 0, false},
-		{"100.01", "JPY", 0, false}, {"5.001", "USD", 0, false}, {"1e2", "USD", 0, false},
-		{"1.5.0", "USD", 0, false}, {"", "USD", 0, false}, {"1.00", "XYZ", 0, false},
-		{"--1", "USD", 0, false}, {"99999999999999999999", "USD", 0, false},
-	} {
-		got, ok := exactMinorAmount(tc.amount, tc.currency)
-		require.Equal(t, tc.ok, ok, "%q %s", tc.amount, tc.currency)
-		require.Equal(t, tc.want, got, "%q %s", tc.amount, tc.currency)
 	}
 }
 

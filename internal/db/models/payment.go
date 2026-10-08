@@ -91,8 +91,9 @@ type Payment struct {
 	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 
-	CreditGrantSnapshot      *CreditGrantSnapshot `json:"credit_grant_snapshot,omitempty"`
-	EntitlementsSpecSnapshot map[string]*int      `json:"entitlements_spec_snapshot,omitempty"`
+	CreditGrantSnapshot    *CreditGrantSnapshot `json:"credit_grant_snapshot,omitempty"`
+	LegacyEntitlementHours map[string]int       `json:"-"`
+	EntitlementsSnapshot   []string             `json:"entitlements_snapshot"`
 
 	PurchasedAt time.Time `json:"purchased_at"`
 	CreatedAt   time.Time `json:"created_at"`

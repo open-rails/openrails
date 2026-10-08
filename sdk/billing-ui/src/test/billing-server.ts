@@ -114,7 +114,7 @@ export function product(overrides: Partial<Row> = {}): Row {
     key: "plus",
     display_name: "Plus",
     description: "",
-    entitlements_spec: { plus: null },
+    entitlements: ["plus"],
     tier_group: "membership",
     tier_rank: 2,
     archived: false,

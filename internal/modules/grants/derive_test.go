@@ -32,15 +32,15 @@ func TestSubscriptionWindow(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestProductSpecKeys(t *testing.T) {
+func TestEntitlementKeys(t *testing.T) {
 	for raw, want := range map[string][]string{
-		`{"vip": null, "premium": 720}`: {"premium", "vip"},
-		`{}`:                            {},
-		`{"  premium  ": 1, "": 2}`:     {"premium"},
-		`not-json`:                      nil,
-		``:                              nil,
+		`["premium","post:101"]`: {"premium", "post:101"},
+		`[]`:                     {},
+		`["  premium  "]`:        {"  premium  "},
+		`not-json`:               nil,
+		``:                       nil,
 	} {
-		require.Equal(t, want, productSpecKeys([]byte(raw)), raw)
+		require.Equal(t, want, entitlementKeys([]byte(raw)), raw)
 	}
 }
 

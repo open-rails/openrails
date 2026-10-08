@@ -69,8 +69,10 @@ func normalizeRoutingMatch(i int, m models.CheckoutRoutingMatch) (models.Checkou
 		Mode:     strings.ToLower(strings.TrimSpace(m.Mode)),
 		Country:  strings.ToUpper(strings.TrimSpace(m.Country)),
 	}
-	if out.Currency != "" && !isAlpha(out.Currency, 3) {
-		return out, fmt.Errorf("checkout_routing[%d].match.currency must be a 3-letter ISO-4217 code", i)
+	if out.Currency != "" {
+		if err := moneyutil.ValidateCurrency(out.Currency); err != nil {
+			return out, fmt.Errorf("checkout_routing[%d].match.currency: %w", i, err)
+		}
 	}
 	if out.Country != "" && !isAlpha(out.Country, 2) {
 		return out, fmt.Errorf("checkout_routing[%d].match.country must be a 2-letter ISO-3166-1 code", i)

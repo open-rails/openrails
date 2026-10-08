@@ -60,7 +60,7 @@ type Subscription struct {
 	// Scheduled tier change (for downgrades that take effect at end of period)
 	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
 
-	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
+	EntitlementsSnapshot []string `json:"entitlements_snapshot"`
 	// AccessDurationHoursSnapshot is the accepted access duration for this paid phase.
 	// nil has no scheduled expiry; changing price does not change past promises.
 	AccessDurationHoursSnapshot *int `json:"access_duration_hours_snapshot"`

@@ -21,7 +21,7 @@ func TestDurationDowngradePreservesLongerPaidBenefit(t *testing.T) {
 			group, plan := "duration-"+uuid.NewString(), "duration_plan_"+uuid.NewString()[:8]
 			product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{
 				Key: "long-access", DisplayName: "Long paid access", TierGroup: &group, TierRank: 2,
-				EntitlementsSpec: map[string]*int{"content:long-paid": nil},
+				Entitlements: []string{"content:long-paid"},
 			})
 			require.NoError(t, err)
 			price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{

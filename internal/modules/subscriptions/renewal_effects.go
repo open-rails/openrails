@@ -52,13 +52,13 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 			return nil, err
 		}
 	}
-	for name := range sub.EntitlementsSpecSnapshot {
+	for _, name := range sub.EntitlementsSnapshot {
 		if _, err := entitlementsService.PushNewEntitlement(ctx, subscriptionAccess(sub, name, effects.PeriodStart)); err != nil {
 			return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
 		}
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
-		if err := pushRenewalGrace(ctx, d, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodStart, effects.PeriodEnd); err != nil {
+		if err := pushRenewalGrace(ctx, d, entitlementsService, sub, sub.EntitlementsSnapshot, effects.PeriodStart, effects.PeriodEnd); err != nil {
 			return nil, err
 		}
 	}

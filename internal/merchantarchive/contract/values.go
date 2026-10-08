@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,36 @@ import (
 func ValidateValues(p Profile, values []*string) error {
 	if len(values) != len(p.Columns) {
 		return fmt.Errorf("invalid row width for %s", p.Name)
+	}
+	for _, field := range []string{"entitlements", "entitlements_snapshot"} {
+		if raw := value(p, values, field); raw != nil {
+			var names []string
+			if err := json.Unmarshal([]byte(*raw), &names); err != nil {
+				return fmt.Errorf("invalid %s.%s: %w", p.Name, field, err)
+			}
+			if _, err := catalog.NormalizeEntitlements(names); err != nil {
+				return fmt.Errorf("invalid %s.%s: %w", p.Name, field, err)
+			}
+		}
+	}
+	if p.Name == "payments" {
+		if raw := value(p, values, "legacy_entitlement_hours"); raw != nil {
+			var hours map[string]int
+			if err := json.Unmarshal([]byte(*raw), &hours); err != nil {
+				return err
+			}
+			var names []string
+			if raw := value(p, values, "entitlements_snapshot"); raw != nil {
+				if err := json.Unmarshal([]byte(*raw), &names); err != nil {
+					return err
+				}
+			}
+			for name, duration := range hours {
+				if duration <= 0 || duration > catalog.MaxDurationHours || !slices.Contains(names, name) {
+					return fmt.Errorf("invalid historical payment entitlement duration")
+				}
+			}
+		}
 	}
 	if p.Name == "catalog_applications" {
 		var receipt struct {

@@ -153,7 +153,7 @@ func TestNormalizeCheckoutRouting(t *testing.T) {
 		"must name at least one PSP": {{Prefer: nil}},
 		`repeats "mobius"`:           {{Prefer: []string{"mobius", "mobius"}}},
 		"unreachable":                {{Prefer: []string{"mobius"}}, {Match: models.CheckoutRoutingMatch{Currency: "eur"}, Prefer: []string{"ccbill"}}},
-		"ISO-4217":                   match(models.CheckoutRoutingMatch{Currency: "dollars"}),
+		"unknown currency":           match(models.CheckoutRoutingMatch{Currency: "dollars"}),
 		"ISO-3166-1":                 match(models.CheckoutRoutingMatch{Country: "USA"}),
 		"one_off or subscription":    match(models.CheckoutRoutingMatch{Mode: "recurring"}),
 	} {

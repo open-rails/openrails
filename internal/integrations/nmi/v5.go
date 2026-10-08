@@ -49,44 +49,6 @@ func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
 	return json.RawMessage(fmt.Sprintf("%s%d.%02d", neg, cents/100, cents%100))
 }
 
-// v5AmountToCents parses a v5 decimal amount string ("10.99", "-5.00") into
-// cents without float rounding surprises on the happy path.
-func v5AmountToCents(amount string) (int64, error) {
-	trimmed := strings.TrimSpace(amount)
-	if trimmed == "" {
-		return 0, errors.New("empty amount")
-	}
-	neg := strings.HasPrefix(trimmed, "-")
-	trimmed = strings.TrimPrefix(trimmed, "-")
-	whole, frac, _ := strings.Cut(trimmed, ".")
-	if whole == "" {
-		whole = "0"
-	}
-	w, err := strconv.ParseInt(whole, 10, 64)
-	if err != nil {
-		return 0, err
-	}
-	var f int64
-	switch len(frac) {
-	case 0:
-	case 1:
-		f, err = strconv.ParseInt(frac, 10, 64)
-		f *= 10
-	case 2:
-		f, err = strconv.ParseInt(frac, 10, 64)
-	default:
-		f, err = strconv.ParseInt(frac[:2], 10, 64)
-	}
-	if err != nil {
-		return 0, err
-	}
-	cents := w*100 + f
-	if neg {
-		cents = -cents
-	}
-	return cents, nil
-}
-
 // sendV5Request performs one v5 JSON round-trip. Non-GET requests honor the
 // read-only guard exactly like sendDirectRequest. out may be nil (delete
 // endpoints). A non-2xx status decodes the modern error envelope; 404 wraps
@@ -560,7 +522,7 @@ func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string)
 	}
 	out := make([]PaymentAction, 0, len(txn.Actions))
 	for _, a := range txn.Actions {
-		cents, cerr := v5AmountToCents(a.Amount)
+		cents, cerr := moneyutil.DecimalToRailMinor(txn.Currency, a.Amount)
 		if cerr != nil {
 			cents = 0
 		}
@@ -574,7 +536,7 @@ func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string)
 		out = append(out, PaymentAction{
 			TransactionID: id,
 			Type:          strings.ToLower(strings.TrimSpace(a.Type)),
-			AmountCents:   cents,
+			AmountCents:   int64(cents),
 			Success:       a.Success,
 		})
 	}

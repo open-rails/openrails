@@ -81,6 +81,26 @@ func catalogRow(p contract.Profile, values []*string) (map[string]json.RawMessag
 	return row, nil
 }
 func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantID string) ([]*string, error) {
+	if p.Name == "products" {
+		if old, legacy := row["entitlements_spec"]; legacy {
+			if _, mixed := row["entitlements"]; mixed {
+				return nil, fmt.Errorf("catalog product mixes legacy and current entitlements")
+			}
+			names, _, err := contract.LegacyEntitlementNames(string(old))
+			if err != nil {
+				return nil, err
+			}
+			row = maps.Clone(row)
+			delete(row, "entitlements_spec")
+			if names == "null" {
+				names = "[]"
+			}
+			row["entitlements"] = json.RawMessage(names)
+		} else if _, exists := row["entitlements"]; !exists {
+			row = maps.Clone(row)
+			row["entitlements"] = json.RawMessage("[]")
+		}
+	}
 	// Historical snapshots carry auto_renew in place of billing cadence. Read
 	// those exact persisted terms without changing the document or its digest.
 	if raw, legacy := row["auto_renew"]; p.Name == "prices" && legacy {

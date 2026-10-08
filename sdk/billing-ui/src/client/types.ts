@@ -238,8 +238,8 @@ export const productSchema = z.object({
   revision: z.number().int().nonnegative().optional(),
   display_name: z.string(),
   description: z.string(),
-  /** Keyed by the entitlements the product grants. */
-  entitlements_spec: z.record(z.string(), z.number().nullable()).nullish(),
+  /** Opaque entitlement keys granted by the product. */
+  entitlements: z.array(z.string()),
   /** Prepaid balance fulfilled once for each qualifying successful payment. */
   credit_grant: z
     .object({

@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -370,12 +371,8 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 		}
 	}
 
-	if s.EntitlementService != nil && len(product.EntitlementsSpec) > 0 {
-		keys := make([]string, 0, len(product.EntitlementsSpec))
-		for key := range product.EntitlementsSpec {
-			keys = append(keys, key)
-		}
-		indefinite, latestEnd, err := s.EntitlementService.Coverage(ctx, userID, keys, now)
+	if s.EntitlementService != nil && len(product.Entitlements) > 0 {
+		indefinite, latestEnd, err := s.EntitlementService.Coverage(ctx, userID, product.Entitlements, now)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check entitlement coverage: %w", err)
 		}
@@ -474,13 +471,16 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 			return nil, err
 		}
 	}
-	return s.applyPurchase(ctx, req, price, product, eligibility, acceptedAt, uuid.Nil, credit)
+	return s.applyPurchase(ctx, req, price, product, eligibility, acceptedAt, uuid.Nil, credit, nil)
 }
 
 // applyPurchase is the shared financial/access writer. Observed purchases
 // prepare current facts above; durable sales supply their accepted snapshots.
 // Every service on s must share the caller's transaction for durable completion.
-func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest, price *models.Price, product *models.Product, eligibility *EligibilityResult, acceptedAt time.Time, acceptedPaymentID uuid.UUID, credit *models.CreditGrantSnapshot) (*payments.RegisterPurchaseResponse, error) {
+func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest, price *models.Price, product *models.Product, eligibility *EligibilityResult, acceptedAt time.Time, acceptedPaymentID uuid.UUID, credit *models.CreditGrantSnapshot, historicalHours map[string]int) (*payments.RegisterPurchaseResponse, error) {
+	if price.AccessDurationHours != nil || req.SubscriptionID != nil {
+		historicalHours = nil
+	}
 	coverage := eligibility.Coverage
 	if coverage == nil {
 		coverage = &CoverageInfo{}
@@ -515,25 +515,26 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		settledCredit.ExpiresAt = &expires
 	}
 	payment := &models.Payment{
-		ID:                       paymentID,
-		CustomerID:               customerID,
-		PriceID:                  price.ID,
-		SubscriptionID:           req.SubscriptionID,
-		Channel:                  req.Channel,
-		Rail:                     models.Rail(req.Rail),
-		TransactionID:            req.TransactionID,
-		Amount:                   amount,
-		ListAmount:               price.Amount,
-		Currency:                 currency,
-		Status:                   payments.PaymentStatusCompletedValue,
-		PurchasedAt:              purchasedAt,
-		CreatedAt:                now,
-		DiscountCode:             req.DiscountCode,
-		DiscountReason:           req.DiscountReason,
-		DiscountMetadata:         req.DiscountMetadata,
-		Metadata:                 req.Metadata,
-		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
-		CreditGrantSnapshot:      settledCredit,
+		ID:                     paymentID,
+		CustomerID:             customerID,
+		PriceID:                price.ID,
+		SubscriptionID:         req.SubscriptionID,
+		Channel:                req.Channel,
+		Rail:                   models.Rail(req.Rail),
+		TransactionID:          req.TransactionID,
+		Amount:                 amount,
+		ListAmount:             price.Amount,
+		Currency:               currency,
+		Status:                 payments.PaymentStatusCompletedValue,
+		PurchasedAt:            purchasedAt,
+		CreatedAt:              now,
+		DiscountCode:           req.DiscountCode,
+		DiscountReason:         req.DiscountReason,
+		DiscountMetadata:       req.DiscountMetadata,
+		Metadata:               req.Metadata,
+		EntitlementsSnapshot:   models.CloneEntitlements(product.Entitlements),
+		LegacyEntitlementHours: historicalHours,
+		CreditGrantSnapshot:    settledCredit,
 		// or#827: RegisterPurchase records a charge the rail already approved,
 		// keyed on the rail's own transaction id.
 		MoneyMovement: models.MoneyMovementRail,
@@ -585,29 +586,29 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		}
 
 		if acceptedPaymentID != uuid.Nil {
-			observed := existingPayment.EntitlementsSpecSnapshot
+			observed := existingPayment.EntitlementsSnapshot
 			if observed == nil {
-				observed = map[string]*int{}
+				observed = []string{}
 			}
-			accepted := product.EntitlementsSpec
+			accepted := product.Entitlements
 			if accepted == nil {
-				accepted = map[string]*int{}
+				accepted = []string{}
 			}
-			if !reflect.DeepEqual(observed, accepted) || !models.SameCreditGrantPromise(existingPayment.CreditGrantSnapshot, credit) || existingPayment.ListAmount != price.Amount {
+			if !slices.Equal(observed, accepted) || !maps.Equal(existingPayment.LegacyEntitlementHours, historicalHours) || !models.SameCreditGrantPromise(existingPayment.CreditGrantSnapshot, credit) || existingPayment.ListAmount != price.Amount {
 				return nil, errors.New("existing payment contradicts accepted purchase benefits")
 			}
 		}
-		entitlementsSpec := existingPayment.EntitlementsSpecSnapshot
+		entitlementsSpec := existingPayment.EntitlementsSnapshot
 		sourceID := existingPayment.ID
 		if existingPayment.SubscriptionID != nil {
 			sourceID = *existingPayment.SubscriptionID
 		}
 		if acceptedPaymentID != uuid.Nil {
-			if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, entitlementsSpec, price.AccessDurationHours, acceptedAt, coverage, existingPayment.CreditGrantSnapshot == nil); err != nil {
+			if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, existingPayment.ID, entitlementsSpec, price.AccessDurationHours, acceptedAt, coverage, existingPayment.CreditGrantSnapshot == nil, existingPayment.LegacyEntitlementHours); err != nil {
 				return nil, err
 			}
 		} else {
-			if err := s.grantProductEntitlements(ctx, req.UserID, entitlementsSpec, sourceID, coverage, existingPayment.SubscriptionID != nil, price.AccessDurationHours, true, acceptedAt); err != nil {
+			if err := s.grantProductEntitlements(ctx, req.UserID, entitlementsSpec, sourceID, coverage, existingPayment.SubscriptionID != nil, price.AccessDurationHours, true, acceptedAt, existingPayment.LegacyEntitlementHours); err != nil {
 				return nil, fmt.Errorf("failed to repair entitlements for existing payment: %w", err)
 			}
 
@@ -623,7 +624,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 			return nil, err
 		}
 		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
-		for entName := range entitlementsSpec {
+		for _, entName := range entitlementsSpec {
 			grantedEntitlements = append(grantedEntitlements, entName)
 		}
 		log.WithFields(log.Fields{
@@ -641,18 +642,18 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 
 	var grantedEntitlements []string
 	if acceptedPaymentID != uuid.Nil {
-		if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, paymentID, product.EntitlementsSpec, price.AccessDurationHours, acceptedAt, coverage, credit == nil); err != nil {
+		if err := s.applyAcceptedPurchaseAccess(ctx, req.UserID, product.ID, paymentID, product.Entitlements, price.AccessDurationHours, acceptedAt, coverage, credit == nil, historicalHours); err != nil {
 			return nil, err
 		}
-		for name := range product.EntitlementsSpec {
+		for _, name := range product.Entitlements {
 			grantedEntitlements = append(grantedEntitlements, name)
 		}
 	} else {
-		if err := s.grantProductEntitlements(ctx, req.UserID, product.EntitlementsSpec, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", price.AccessDurationHours, false, acceptedAt); err != nil {
+		if err := s.grantProductEntitlements(ctx, req.UserID, product.Entitlements, sourceID, coverage, req.SubscriptionID != nil && req.SubscriptionID.String() != "", price.AccessDurationHours, false, acceptedAt, historicalHours); err != nil {
 			log.WithError(err).WithField("payment_id", sourceID).Error("failed to grant entitlements after payment")
 			return nil, fmt.Errorf("failed to grant entitlements after payment: %w", err)
-		} else if product.EntitlementsSpec != nil {
-			for entName := range product.EntitlementsSpec {
+		} else if product.Entitlements != nil {
+			for _, entName := range product.Entitlements {
 				grantedEntitlements = append(grantedEntitlements, entName)
 			}
 		}
@@ -725,28 +726,26 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 // (the same window that drives product_access ends_at — G3): a finite value sets
 // a finite entitlement ends_at; nil = indefinite. Re-purchase stacks: a new window
 // starts at the existing coverage end.
-func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec map[string]*int, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationHours *int, skipExistingSource bool, acceptedAt time.Time) error {
+func (s *CheckoutPurchaseService) grantProductEntitlements(ctx context.Context, userID string, entitlementsSpec []string, paymentID uuid.UUID, coverage *CoverageInfo, subscription bool, accessDurationHours *int, skipExistingSource bool, acceptedAt time.Time, historicalHours map[string]int) error {
 	if s.EntitlementService == nil || entitlementsSpec == nil {
 		return nil
 	}
 
-	for entitlementName, entDurationHours := range entitlementsSpec {
+	for _, entitlementName := range entitlementsSpec {
 		startAt := acceptedAt
 		if coverage.HasCoverage && coverage.EndDate != nil {
 			startAt = *coverage.EndDate
 		}
 
-		// The price's access window is authoritative (#622) and is in HOURS. When
-		// the price is indefinite, a product's per-entitlement duration (also in
-		// HOURS, a separate pre-existing feature) still scopes that entitlement to a
-		// shorter window. They are applied separately.
+		// New grants use only the price's access duration. Historical overrides
+		// exist solely on previously admitted purchases and their payment rows.
 		var endAt *time.Time
 		switch {
 		case accessDurationHours != nil && *accessDurationHours > 0:
 			end := startAt.Add(time.Duration(*accessDurationHours) * time.Hour)
 			endAt = &end
-		case accessDurationHours == nil && entDurationHours != nil && *entDurationHours > 0:
-			end := startAt.Add(time.Duration(*entDurationHours) * time.Hour)
+		case accessDurationHours == nil && historicalHours[entitlementName] > 0:
+			end := startAt.Add(time.Duration(historicalHours[entitlementName]) * time.Hour)
 			endAt = &end
 		}
 

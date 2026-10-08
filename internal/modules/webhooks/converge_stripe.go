@@ -326,7 +326,7 @@ func (s *StripeConvergeService) markCheckoutAttemptSucceeded(ctx context.Context
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
 	var (
 		updatedSub       *models.Subscription
-		oldSpec, newSpec map[string]*int
+		oldSpec, newSpec []string
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
@@ -364,10 +364,10 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		if price == nil {
 			return nil
 		}
-		oldSpec = models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot)
+		oldSpec = models.CloneEntitlements(sub.EntitlementsSnapshot)
 		if len(oldSpec) == 0 && s.ProductService != nil && sub.ProductID != uuid.Nil {
 			if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
-				oldSpec = product.EntitlementsSpec
+				oldSpec = product.Entitlements
 			}
 		}
 		sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, price.ProductID, nil
@@ -383,8 +383,8 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		}
 		if s.ProductService != nil {
 			if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-				sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-				newSpec = product.EntitlementsSpec
+				sub.EntitlementsSnapshot = models.CloneEntitlements(product.Entitlements)
+				newSpec = product.Entitlements
 			}
 		}
 		if err := subRepo.UpdateAt(ctx, sub, now); err != nil {
@@ -492,7 +492,7 @@ func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.S
 	return price
 }
 
-func (s *StripeConvergeService) revokeDowngradedEntitlements(ctx context.Context, sub *models.Subscription, oldSpec, newSpec map[string]*int) error {
+func (s *StripeConvergeService) revokeDowngradedEntitlements(ctx context.Context, sub *models.Subscription, oldSpec, newSpec []string) error {
 	entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
 	oldEnts := stripeEntitlementSet(oldSpec)
 	newEnts := stripeEntitlementSet(newSpec)

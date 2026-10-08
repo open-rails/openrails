@@ -49,6 +49,9 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction
 // is a loud error. When Stripe is not configured there is no read API to verify
 // against, so the ids are stored as operator-owned.
 func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
+	if err := moneyutil.RequireFiatCurrency(in.Currency); err != nil {
+		return nil, err
+	}
 	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
 		return nil, fmt.Errorf("stripe recurring prices require a whole-day billing interval")
 	}
@@ -167,6 +170,9 @@ func (a *stripeAdapter) stripeServiceFor(ctx context.Context, targetAccountID st
 // Price by immutable local price ID. Equal money terms under different keys
 // remain distinct prices. Existing explicit bindings continue through Attach.
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
+	if err := moneyutil.RequireFiatCurrency(in.Currency); err != nil {
+		return nil, err
+	}
 	if in.BillingIntervalHours != nil && *in.BillingIntervalHours%24 != 0 {
 		return nil, fmt.Errorf("stripe recurring prices require a whole-day billing interval")
 	}
@@ -234,12 +240,8 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	// One-way (OpenRails -> Stripe); OpenRails stays the source of truth.
 	// Best-effort: a feature-sync failure must not fail the price link — catalog
 	// drift surfaces on the next reconcile, like the other Stripe propagations.
-	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.EntitlementsSpec) > 0 {
-		keys := make([]string, 0, len(in.Product.EntitlementsSpec))
-		for k := range in.Product.EntitlementsSpec {
-			keys = append(keys, k)
-		}
-		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys); err != nil {
+	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.Entitlements) > 0 {
+		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, in.Product.Entitlements); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
 				Warn("stripe entitlement-feature sync failed (best-effort); drift surfaces on reconcile")
 		}
@@ -331,6 +333,11 @@ func verifyStripePriceIdentity(remote catalog.StripePrice, productID string, in 
 // Verify performs a live retrieve of the Stripe Price (and its Product) and
 // computes per-field drift vs. the OpenRails snapshot.
 func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]billing.DriftField, bool, error) {
+	if local != nil && local.Currency != "" {
+		if err := moneyutil.RequireFiatCurrency(local.Currency); err != nil {
+			return nil, false, err
+		}
+	}
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil || !a.stripeConfigured(ctx) {
 		return nil, false, fmt.Errorf("stripe is not configured: %w", errProviderNotArmed)
 	}

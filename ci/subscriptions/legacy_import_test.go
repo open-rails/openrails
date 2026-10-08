@@ -31,7 +31,7 @@ func (w *world) bookTier(name string, cents int64, days int) bookTier {
 	tier := bookTier{plan: "lb_" + name + "_" + uuid.NewString()[:8], amount: decimalCents(cents), cents: cents, days: days, ent: "content:" + name + "-" + uuid.NewString()[:6]}
 	w.nmi.AddPlan(nmimock.Plan{ID: tier.plan, Name: "Legacy " + tier.plan, Amount: tier.amount, Days: days})
 	client := w.client[embedded]
-	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "lb-" + name + "-" + uuid.NewString()[:8], DisplayName: name, EntitlementsSpec: map[string]*int{tier.ent: nil}})
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "lb-" + name + "-" + uuid.NewString()[:8], DisplayName: name, Entitlements: []string{tier.ent}})
 	require.NoError(w.t, err)
 	hours := days * 24
 	tier.price, err = client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: cents * 10_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"nmi": {"plan_id": tier.plan}}})

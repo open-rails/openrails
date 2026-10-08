@@ -21,6 +21,9 @@ func requireFixture(t *testing.T, name string, value any) []byte {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	require.NoError(t, err)
+	if *updateWireFixtures {
+		require.NoError(t, os.WriteFile("testdata/wire/"+name, append(raw, '\n'), 0o644))
+	}
 	fixture, err := os.ReadFile("testdata/wire/" + name)
 	require.NoError(t, err)
 	require.Equal(t, strings.TrimSpace(string(fixture)), string(raw), "%s drifted from the Go contract", name)

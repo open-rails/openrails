@@ -15,29 +15,32 @@ import (
 )
 
 func TestExactIntegerMoneyBoundaries(t *testing.T) {
+	// Provider decimals are exact at the currency's own minor unit: zeros past
+	// it are accepted, anything else is refused rather than rounded.
 	for _, tc := range []struct {
-		input string
-		want  moneyutil.Cents
+		currency, input string
+		want            moneyutil.Cents
 	}{
-		{"0.004999999999999999", 0},
-		{"0.005", 1},
-		{"-0.005", -1},
-		{"1.004", 100},
-		{"1.005", 101},
-		{"-1.005", -101},
-		{"90071992547409.93", 9007199254740993},
-		{"92233720368547758.074", math.MaxInt64},
-		{"-92233720368547758.08", math.MinInt64},
-		{"-92233720368547758.075", math.MinInt64},
-		{"-92233720368547758.084", math.MinInt64},
+		{"USD", "1.00", 100},
+		{"USD", "1.0000", 100},
+		{"USD", "-1.05", -105},
+		{"USD", "90071992547409.93", 9007199254740993},
+		{"USD", "92233720368547758.07", math.MaxInt64},
+		{"USD", "-92233720368547758.08", math.MinInt64},
+		{"JPY", "500.00", 500},
+		{"KRW", "1500", 1500},
 	} {
-		got, err := moneyutil.ParseDecimalToCents(tc.input)
+		got, err := moneyutil.DecimalToRailMinor(tc.currency, tc.input)
 		require.NoError(t, err, tc.input)
 		require.Equal(t, tc.want, got, tc.input)
 	}
-	for _, input := range []string{"", "NaN", "Inf", "1.2.3", "92233720368547758.075", "-92233720368547758.085", "9223372036854775808"} {
-		_, err := moneyutil.ParseDecimalToCents(input)
-		require.Error(t, err, input)
+	for _, tc := range []struct{ currency, input string }{
+		{"USD", ""}, {"USD", "NaN"}, {"USD", "Inf"}, {"USD", "1.2.3"}, {"USD", "0.005"}, {"USD", "1.004"},
+		{"USD", "92233720368547758.08"}, {"USD", "-92233720368547758.09"}, {"JPY", "9223372036854775808"},
+		{"JPY", "500.5"}, {"", "1.00"}, {"UNKNOWN", "1.00"},
+	} {
+		_, err := moneyutil.DecimalToRailMinor(tc.currency, tc.input)
+		require.Error(t, err, "%s %q", tc.currency, tc.input)
 	}
 
 	// USD uses six internal decimal places and two provider minor places.

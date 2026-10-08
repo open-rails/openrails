@@ -30,7 +30,7 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	buyer := w.newCustomer()
 	method := buyer.saveCard("nmi", visa)
 	declaration := func(amount int64) *catalog.Application {
-		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: "retained-video", DisplayName: catalog.Value("Video"), EntitlementsSpec: catalog.Value(map[string]*int{"video:101": nil}), Prices: []catalog.ApplyPrice{{Key: "buy", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}}}}
+		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: "retained-video", DisplayName: catalog.Value("Video"), Entitlements: catalog.Value([]string{"video:101"}), Prices: []catalog.ApplyPrice{{Key: "buy", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}}}}
 	}
 	_, err := c.ApplyCatalog(t.Context(), declaration(4000000))
 	require.NoError(t, err)

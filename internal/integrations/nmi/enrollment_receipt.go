@@ -26,11 +26,11 @@ func (e EnrollmentEvidence) ScheduleAmountMinor(currency string) (moneyutil.Cent
 	if amount == "" && e.Subscription.Plan != nil {
 		amount = strings.TrimSpace(e.Subscription.Plan.PlanAmount)
 	}
-	minor, exact := exactMinorAmount(amount, currency)
-	if !exact || minor < 0 {
+	minor, err := moneyutil.DecimalToRailMinor(currency, amount)
+	if err != nil || minor < 0 {
 		return 0, receiptMismatch("schedule has no exact nonnegative amount")
 	}
-	return moneyutil.Cents(minor), nil
+	return minor, nil
 }
 
 // ReadEnrollmentEvidence reads one candidate reference on the armed account.

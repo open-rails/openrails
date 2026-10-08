@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -64,13 +65,9 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 			return err
 		}
 		if terms.AccessDurationHours == nil {
-			keys := make([]string, 0, len(terms.Entitlements))
-			for key, duration := range terms.Entitlements {
-				if duration != nil && *duration > 0 {
-					keys = nil
-					break
-				}
-				keys = append(keys, key)
+			keys := terms.Entitlements
+			if len(grants.HistoricalEntitlementHours(terms.LegacyEntitlements)) > 0 {
+				keys = nil
 			}
 			if len(keys) > 0 {
 				covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, Entitlements: keys, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutAttemptID})

@@ -90,14 +90,14 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if price.MerchantID != op.MerchantID || price.ProductID != p.ProductID {
 		return errors.New("sale catalog identity contradicts its accepted product")
 	}
-	snapshot := map[string]*int{}
-	if len(observed.EntitlementsSpecSnapshot) > 0 {
-		if err := json.Unmarshal(observed.EntitlementsSpecSnapshot, &snapshot); err != nil {
+	snapshot := []string{}
+	if len(observed.EntitlementsSnapshot) > 0 {
+		if err := json.Unmarshal(observed.EntitlementsSnapshot, &snapshot); err != nil {
 			return err
 		}
 	}
 	if snapshot == nil {
-		snapshot = map[string]*int{}
+		snapshot = []string{}
 	}
 	if !reflect.DeepEqual(snapshot, p.Entitlements) {
 		return errors.New("sale payment has another benefit snapshot")
@@ -105,6 +105,13 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	retained, err := models.PaymentFromGen(observed)
 	if err != nil {
 		return err
+	}
+	expectedHours := grants.HistoricalEntitlementHours(p.LegacyEntitlements)
+	if p.AccessDurationHours != nil {
+		expectedHours = nil
+	}
+	if !reflect.DeepEqual(expectedHours, retained.LegacyEntitlementHours) {
+		return errors.New("sale payment has different historical entitlement durations")
 	}
 	if !models.SameCreditGrantPromise(p.CreditGrant, retained.CreditGrantSnapshot) {
 		return errors.New("sale payment has another credit promise")
@@ -123,7 +130,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 			access = append(access, event)
 		}
 	}
-	windows, ownership := grants.PurchaseWindows(p.Entitlements, p.AccessDurationHours, p.AcceptedAt, p.EntitlementStart)
+	windows, ownership := grants.PurchaseWindows(p.Entitlements, p.AccessDurationHours, p.AcceptedAt, p.EntitlementStart, expectedHours)
 	history, err := grants.ValidatePurchaseHistory(op.MerchantID, customer, p.ProductID, paymentID, windows, ownership, access)
 	if err != nil {
 		return err

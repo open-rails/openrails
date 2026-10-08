@@ -866,19 +866,20 @@ type BillingPayment struct {
 	Currency      string
 	Status        string
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
-	SubscriptionID           *uuid.UUID
-	RefundedPaymentID        *uuid.UUID
-	DiscountCode             *string
-	DiscountReason           *string
-	DiscountMetadata         []byte
-	EntitlementsSpecSnapshot []byte
-	Metadata                 []byte
-	PurchasedAt              time.Time
-	CreatedAt                time.Time
-	CardBrand                *string
-	CardLast4                *string
-	MerchantID               uuid.UUID
-	CustomerID               uuid.UUID
+	SubscriptionID    *uuid.UUID
+	RefundedPaymentID *uuid.UUID
+	DiscountCode      *string
+	DiscountReason    *string
+	DiscountMetadata  []byte
+	// Accepted opaque entitlement names; NULL is unknown historical evidence and [] is an explicitly empty promise.
+	EntitlementsSnapshot []byte
+	Metadata             []byte
+	PurchasedAt          time.Time
+	CreatedAt            time.Time
+	CardBrand            *string
+	CardLast4            *string
+	MerchantID           uuid.UUID
+	CustomerID           uuid.UUID
 	// PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).
 	PspID *uuid.UUID
 	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
@@ -899,6 +900,8 @@ type BillingPayment struct {
 	MoneyMovement string
 	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
 	CreditGrantSnapshot []byte
+	// Private historical positive per-feature durations for previously accepted indefinite one-time purchases; absent for new purchases.
+	LegacyEntitlementHours []byte
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1061,11 +1064,12 @@ type BillingPricePspBinding struct {
 
 // Catalog products; retire with archived, never delete. Retention: permanent, never pruned.
 type BillingProduct struct {
-	ID               uuid.UUID
-	Key              string
-	DisplayName      string
-	Description      *string
-	EntitlementsSpec []byte
+	ID          uuid.UUID
+	Key         string
+	DisplayName string
+	Description *string
+	// Opaque entitlement names granted for the purchased access duration; canonical sorted JSON array.
+	Entitlements []byte
 	// Semantic group name for mutually-exclusive products (e.g., "premium"). NULL: in no group (an empty name is stored as NULL). Products in same group require upgrade/downgrade, not parallel ownership.
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
@@ -1380,17 +1384,18 @@ type BillingSubscription struct {
 	EndedAt               *time.Time
 	GraceEndsAt           *time.Time
 	// Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.
-	ScheduledPriceID         *uuid.UUID
-	LastRetryAt              *time.Time
-	RetryAttempts            *int32
-	NextRetryAt              *time.Time
-	CanceledAt               *time.Time
-	CancelType               *string
-	CancelFeedback           *string
-	EntitlementsSpecSnapshot []byte
-	GatewayResponse          []byte
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
+	ScheduledPriceID *uuid.UUID
+	LastRetryAt      *time.Time
+	RetryAttempts    *int32
+	NextRetryAt      *time.Time
+	CanceledAt       *time.Time
+	CancelType       *string
+	CancelFeedback   *string
+	// Accepted opaque entitlement names; NULL is unknown historical evidence and [] is an explicitly empty promise.
+	EntitlementsSnapshot []byte
+	GatewayResponse      []byte
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time

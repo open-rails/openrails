@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -20,7 +21,7 @@ func (s *EntitlementService) CheckMany(ctx context.Context, customerID string, k
 		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
 	}
 	for _, key := range keys {
-		if strings.TrimSpace(key) == "" || len(key) > 256 || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
+		if strings.TrimSpace(key) == "" || len(key) > catalog.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
 			return nil, apperr.Invalidf("invalid entitlement key")
 		}
 	}

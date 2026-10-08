@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
@@ -67,6 +68,9 @@ func (c *Charger) WithSource(src Source) *Charger {
 var _ charge.Charger = (*Charger)(nil)
 
 func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result, error) {
+	if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+	}
 	if c == nil || c.BT == nil {
 		return charge.Result{}, errors.New("nmiproxy charger not initialized")
 	}

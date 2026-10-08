@@ -120,7 +120,7 @@ func TestListReadsAreBatched(t *testing.T) {
 func (w *world) permanent(entitlement string) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "post-" + uuidShort(), DisplayName: "Post", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "post-" + uuidShort(), DisplayName: "Post", Entitlements: []string{entitlement}})
 	require.NoError(w.t, err)
 	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 2_000_000, Currency: "USD"})
 	require.NoError(w.t, err)
@@ -178,8 +178,8 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
 	hours := 48
-	keys := map[string]*int{"content:cov-a": nil, "content:cov-b": nil, "content:cov-c": nil}
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bundle-" + uuidShort(), DisplayName: "Bundle", EntitlementsSpec: keys})
+	keys := []string{"content:cov-a", "content:cov-b", "content:cov-c"}
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bundle-" + uuidShort(), DisplayName: "Bundle", Entitlements: keys})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 5_000_000, Currency: "USD", AccessDurationHours: &hours})
 	require.NoError(t, err)
@@ -213,17 +213,17 @@ func TestListOffersIsOneRequest(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
 	hours := 48
-	create := func(key string, spec map[string]*int, currency string, amount int64, duration *int) *billing.Price {
-		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, EntitlementsSpec: spec})
+	create := func(key string, spec []string, currency string, amount int64, duration *int) *billing.Price {
+		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: spec})
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-" + strings.ToLower(currency), UnitAmount: amount, Currency: currency, AccessDurationHours: duration})
 		require.NoError(t, err)
 		return price
 	}
-	postA := create("post-a-"+uuidShort(), map[string]*int{"post:a": nil}, "USD", 1_000_000, nil)
-	bundleUSD := create("bundle-"+uuidShort(), map[string]*int{"post:a": nil, "post:b": nil}, "USD", 3_000_000, nil)
-	bundleEUR := create("bundle-eur-"+uuidShort(), map[string]*int{"post:a": nil, "post:b": nil}, "EUR", 2_500_000, nil)
-	create("rental-"+uuidShort(), map[string]*int{"post:b": nil}, "USD", 500_000, &hours)
+	postA := create("post-a-"+uuidShort(), []string{"post:a"}, "USD", 1_000_000, nil)
+	bundleUSD := create("bundle-"+uuidShort(), []string{"post:a", "post:b"}, "USD", 3_000_000, nil)
+	bundleEUR := create("bundle-eur-"+uuidShort(), []string{"post:a", "post:b"}, "EUR", 2_500_000, nil)
+	create("rental-"+uuidShort(), []string{"post:b"}, "USD", 500_000, &hours)
 
 	for _, tp := range []topology{embedded, remote} {
 		var offers billing.OfferPages

@@ -396,14 +396,14 @@ export interface ProductRequest {
   description: string
   tier_group?: string
   tier_rank?: number
-  entitlements_spec?: Record<string, number | null>
+  entitlements?: string[]
 }
 
 export const createProduct = (body: ProductRequest) =>
   api<Product>("/merchant/catalog/products", { method: "POST", body })
 
 // updateProduct is a merge patch: omitted fields stay, null clears
-// description, entitlements_spec and tier_group.
+// description and tier_group; entitlements: [] clears the granted keys.
 export const updateProduct = (id: string, body: UpdateProductParams) =>
   api<Product>(`/merchant/catalog/products/${id}`, {
     method: "PATCH",

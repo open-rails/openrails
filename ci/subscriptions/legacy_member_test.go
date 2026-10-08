@@ -145,7 +145,7 @@ func (l *legacy) importAnother(t *testing.T) (billing.SubscriptionID, string, st
 	t.Helper()
 	w, client := l.w, l.w.client[l.tp]
 	ent := "content:legacy-other"
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", EntitlementsSpec: map[string]*int{ent: nil}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "legacy-other-" + uuid.NewString()[:8], DisplayName: "Legacy extra", Entitlements: []string{ent}})
 	require.NoError(t, err)
 	hours := monthHours
 	plan := "legacy_plan_" + uuid.NewString()[:8]

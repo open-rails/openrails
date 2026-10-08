@@ -43,6 +43,7 @@ type LocalSubscription struct {
 	ID                          uuid.UUID
 	CustomerID                  uuid.UUID
 	PriceID                     *uuid.UUID
+	PriceCurrency               string // PriceID's currency; denominates charges a rail reports without one
 	ProductID                   uuid.UUID
 	Status                      string
 	Rail                        string
@@ -65,7 +66,7 @@ type LocalSubscription struct {
 	// next renewal; TierChangePending an unresolved in-place tier change.
 	ScheduledPriceID  *uuid.UUID
 	TierChangePending bool
-	// EntitlementNames are the keys of entitlements_spec_snapshot — the
+	// EntitlementNames are the keys of entitlements_snapshot — the
 	// entitlements this subscription is supposed to grant.
 	EntitlementNames []string
 }
@@ -87,8 +88,8 @@ type LocalPayment struct {
 	Rail              string
 	TransactionID     string
 	AmountCents       int64
-	Status            string
 	Currency          string
+	Status            string
 	InvoiceID         *uuid.UUID
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
@@ -176,6 +177,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ID:                          row.ID,
 			CustomerID:                  row.CustomerID,
 			PriceID:                     row.PriceID,
+			PriceCurrency:               models.DerefStr(row.PriceCurrency),
 			ProductID:                   row.ProductID,
 			Status:                      string(row.Status),
 			Rail:                        row.Rail,
@@ -206,14 +208,12 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		if row.RetryAttempts != nil {
 			s.RetryAttempts = int(*row.RetryAttempts)
 		}
-		if len(row.EntitlementsSpecSnapshot) > 0 {
-			var spec map[string]json.RawMessage
-			if err := json.Unmarshal(row.EntitlementsSpecSnapshot, &spec); err == nil {
-				for name := range spec {
-					s.EntitlementNames = append(s.EntitlementNames, name)
-				}
+		if len(row.EntitlementsSnapshot) > 0 {
+			if err := json.Unmarshal(row.EntitlementsSnapshot, &s.EntitlementNames); err != nil {
+				return nil, fmt.Errorf("decode subscription entitlements: %w", err)
 			}
 		}
+
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -34,16 +35,20 @@ func initialMembershipQuoteFingerprint(terms subscriptions.InitialMembershipTerm
 	if terms.AccessDurationHours == nil || duration%time.Hour != 0 || time.Duration(*terms.AccessDurationHours) != duration/time.Hour {
 		access, _ = json.Marshal(terms.AccessDurationHours)
 	}
+	legacy := terms.LegacyEntitlements
+	terms.LegacyEntitlements = nil
 	terms.SubscriptionID, terms.PaymentID = uuid.Nil, uuid.Nil
 	terms.AcceptedAt, terms.PeriodStart, terms.PeriodEnd = time.Time{}, time.Time{}, time.Time{}
 	type fingerprintTerms struct {
 		subscriptions.InitialMembershipTerms
-		AccessDurationHours json.RawMessage `json:"access_duration_hours,omitempty"`
+		Entitlements        any                               `json:"entitlements"`
+		Replaces            *subscriptions.ReplacedMembership `json:"replaces,omitempty"`
+		AccessDurationHours json.RawMessage                   `json:"access_duration_hours,omitempty"`
 	}
 	raw, _ := json.Marshal(struct {
 		Terms    fingerprintTerms
 		Duration time.Duration
-	}{fingerprintTerms{InitialMembershipTerms: terms, AccessDurationHours: access}, duration})
+	}{fingerprintTerms{InitialMembershipTerms: terms, Entitlements: grants.AcceptedEntitlementValue(terms.Entitlements, legacy), Replaces: terms.Replaces, AccessDurationHours: access}, duration})
 	digest := sha256.Sum256(raw)
 	return fmt.Sprintf("%x", digest)
 }

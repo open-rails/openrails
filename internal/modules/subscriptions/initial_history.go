@@ -3,7 +3,7 @@ package subscriptions
 import (
 	"encoding/json"
 	"errors"
-	"reflect"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,11 +26,11 @@ func ValidateInitialMembershipPayment(t InitialMembershipTerms, p *models.Paymen
 	if p == nil || p.ID != t.PaymentID || p.CustomerID != t.CustomerID || p.PriceID != t.PriceID || p.PspID == nil || *p.PspID != t.PSPID || p.SubscriptionID == nil || *p.SubscriptionID != t.SubscriptionID || p.Rail != rail || p.TransactionID != transaction || p.Amount != t.Amount || p.ListAmount != t.RecurringAmount || p.Currency != t.Currency || !payments.PaymentStatusCompleted(p.Status) || p.MoneyMovement != models.MoneyMovementRail {
 		return errors.New("existing initial payment contradicts accepted enrollment")
 	}
-	snapshot := p.EntitlementsSpecSnapshot
+	snapshot := p.EntitlementsSnapshot
 	if snapshot == nil {
-		snapshot = map[string]*int{}
+		snapshot = []string{}
 	}
-	if !reflect.DeepEqual(snapshot, t.Entitlements) {
+	if !slices.Equal(snapshot, t.Entitlements) {
 		return errors.New("initial payment has another accepted benefit snapshot")
 	}
 	return nil
@@ -56,7 +56,7 @@ func ValidateInitialMembershipHistory(merchant uuid.UUID, t InitialMembershipTer
 			return errors.New("initial membership grant has another benefit kind")
 		}
 		for _, name := range spec.Entitlements {
-			if _, ok := t.Entitlements[name]; !ok || seen[name] {
+			if !slices.Contains(t.Entitlements, name) || seen[name] {
 				return errors.New("initial membership grants contradict accepted benefits")
 			}
 			seen[name] = true

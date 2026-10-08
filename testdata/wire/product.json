@@ -4,9 +4,9 @@
   "key": "pro",
   "display_name": "Pro",
   "description": "",
-  "entitlements_spec": {
-    "pro": null
-  },
+  "entitlements": [
+    "pro"
+  ],
   "tier_group": null,
   "tier_rank": 0,
   "archived": false,

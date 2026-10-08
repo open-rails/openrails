@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/currency"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
 
@@ -74,5 +75,23 @@ func TestRegistryIntegrity(t *testing.T) {
 			continue
 		}
 		require.NotEqual(t, mainnet[symbol].Mint, token.Mint, symbol)
+	}
+}
+
+// Every settlable mainnet token is a recognized currency at its verified
+// on-chain precision, and every recognized crypto currency is settlable.
+func TestCurrencyRegistryMatchesSettlableTokens(t *testing.T) {
+	mainnet := DefaultSupportedTokens()
+	for symbol, token := range mainnet {
+		units, ok := currency.Lookup(symbol)
+		require.True(t, ok, "%s is settlable but not a recognized currency", symbol)
+		require.Equal(t, "crypto", units.Kind, symbol)
+		require.Equal(t, verifiedDecimals[token.Mint], units.Decimals, "%s registry precision differs from its mint", symbol)
+		require.Equal(t, units.Decimals, units.MinorDecimals, symbol)
+	}
+	for _, units := range currency.List() {
+		if units.Kind == "crypto" {
+			require.Contains(t, mainnet, units.Code, "%s is a recognized crypto currency without a settlable mint", units.Code)
+		}
 	}
 }

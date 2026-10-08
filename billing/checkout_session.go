@@ -3,8 +3,8 @@ package billing
 import "time"
 
 // CreateCheckoutSessionParams mints a checkout session: one customer buying
-// one price, handed to that customer's browser. Supply exactly one of PriceID
-// or PriceKey.
+// one price, handed to that customer's browser. Supply PriceID or the pair
+// ProductKey + PriceKey.
 type CreateCheckoutSessionParams struct {
 	Customer   CheckoutCustomerIdentity `json:"customer"`
 	PriceID    PriceID                  `json:"price_id"`

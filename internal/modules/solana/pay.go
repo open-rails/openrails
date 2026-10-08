@@ -184,14 +184,19 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("invalid or unsupported token: %s", tokenSymbol)
 	}
 
+	if err := ValidateQuoteCurrency(price.Currency, tokenSymbol, tokenCfg.Mint); err != nil {
+		return nil, err
+	}
+
 	// Decimals come from the MINT on-chain, never from config (#817).
 	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
 	if err != nil {
 		return nil, err
 	}
 
-	// Calculate token amount from fiat price with FX conversion if needed
-	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider)
+	// Quote and expiry share the owning checkout clock.
+	now := s.now().UTC()
+	quote, err := CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(price.Amount), price.Currency, s.fxProvider, s.priceProvider, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate token quote: %w", err)
 	}
@@ -214,7 +219,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 	// Get token mint
 	tokenMint := tokenCfg.Mint
 
-	now := s.now()
 	expiresAt := now.Add(pendingPaymentTTL)
 
 	if _, err := NewPayLedger(s.db).Register(ctx, ReferencePurchase, *sessionID, reference, expiresAt, now); err != nil {

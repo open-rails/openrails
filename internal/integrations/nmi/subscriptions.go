@@ -115,6 +115,9 @@ type ManualRebillResponse struct {
 // https://docs.nmi.com/reference/subscriptions-management
 // https://docs.nmi.com/reference/transactions-processing
 func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data RecurringPaymentData) (*AddSubscriptionResponse, error) {
+	if err := moneyutil.RequireFiatCurrency(data.Currency); err != nil {
+		return nil, err
+	}
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
@@ -534,9 +537,9 @@ func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, curr
 		return RecurringPlanDetail{}, err
 	}
 
-	minor, valid := exactMinorAmount(plan.PlanAmount, currency)
-	if !valid {
-		return RecurringPlanDetail{Found: true, Name: plan.PlanName}, fmt.Errorf("plan amount is not exactly representable in %s minor units", currency)
+	minor, err := moneyutil.DecimalToRailMinor(currency, plan.PlanAmount)
+	if err != nil {
+		return RecurringPlanDetail{Found: true, Name: plan.PlanName}, fmt.Errorf("nmi plan amount: %w", err)
 	}
 	// day_frequency is "0"/empty for month-based plans; DayFrequency stays 0.
 	dayFreq, _ := strconv.Atoi(strings.TrimSpace(plan.DayFrequency))
@@ -548,7 +551,7 @@ func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, curr
 		}
 		payments = &parsed
 	}
-	return RecurringPlanDetail{Found: true, ID: plan.ID, Name: plan.PlanName, AmountCents: minor, DayFrequency: dayFreq, Payments: payments}, nil
+	return RecurringPlanDetail{Found: true, ID: plan.ID, Name: plan.PlanName, AmountCents: int64(minor), DayFrequency: dayFreq, Payments: payments}, nil
 }
 
 // SearchTransactions stays on the classic Query API (query.php) DELIBERATELY

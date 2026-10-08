@@ -161,7 +161,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 			if !t.OccurredAt.IsZero() {
 				tl.events = append(tl.events, TimelineEvent{
 					At: at, Source: "provider", Kind: "charge_success",
-					Detail: fmt.Sprintf("%s %d %s", t.TransactionID, t.AmountCents, t.Currency),
+					Detail: t.TransactionID + " " + t.formatAmount(),
 				})
 			}
 			continue

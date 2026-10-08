@@ -18,12 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Provider identifies the payment rail a snapshot came from. Values match
@@ -124,11 +124,14 @@ type RemoteSubscription struct {
 	// Paused reports a schedule the provider holds without billing (NMI
 	// paused_subscription).
 	Paused bool `json:"paused,omitempty"`
-	// AmountCents is the recurring charge amount in integer cents of Currency.
-	// Zero when the provider does not denominate in fiat (Solana on-chain
-	// amounts are mint base units and live in Raw instead).
+	// AmountCents is the recurring charge amount in rail minor units of
+	// Currency. Zero when the provider does not denominate in fiat (Solana
+	// on-chain amounts are mint base units and live in Raw instead).
 	AmountCents int64  `json:"amount_cents"`
 	Currency    string `json:"currency,omitempty"`
+	// Amount is the verbatim major-unit decimal of a rail whose schedule read
+	// names no currency (NMI); it is read in the local price's currency.
+	Amount string `json:"amount,omitempty"`
 	// Raw preserves the provider's record for forensics (original XML element,
 	// CSV row, JSON object, or decoded account state).
 	Raw json.RawMessage `json:"raw,omitempty"`
@@ -145,11 +148,17 @@ type RemoteTransaction struct {
 	SubscriptionID string          `json:"subscription_id,omitempty"`
 	Type           TransactionType `json:"type"`
 	Success        bool            `json:"success"`
-	// AmountCents is in integer cents of Currency. Zero for Solana (base
-	// units, preserved in Raw).
-	AmountCents int64     `json:"amount_cents"`
-	Currency    string    `json:"currency,omitempty"`
-	OccurredAt  time.Time `json:"occurred_at"`
+	// AmountCents is in rail minor units of Currency. Zero for Solana (base
+	// units, preserved in Raw) and when the amount is not exact in Currency.
+	// Currency is the provider's verbatim; empty when it reports none (CCBill
+	// DataLink), never defaulted.
+	AmountCents int64  `json:"amount_cents"`
+	Currency    string `json:"currency,omitempty"`
+	// Amount is the provider's verbatim major-unit decimal when it names no
+	// currency: minorIn reads it in the currency the matched local record
+	// denominates the row in (txnCurrency).
+	Amount     string    `json:"amount,omitempty"`
+	OccurredAt time.Time `json:"occurred_at"`
 	// DeclineReason carries the rail's failure/decline text for declined
 	// attempts; it is the raw material for the dunning-forensics report.
 	DeclineReason string `json:"decline_reason,omitempty"`
@@ -265,47 +274,53 @@ func rawJSON(v any) json.RawMessage {
 	return b
 }
 
-// parseAmountCents converts a decimal money string (e.g. "9.99", "23", "-5.00")
-// into integer cents without floating point. Empty strings parse to 0. More
-// than two fraction digits is an error (no silent truncation of money).
-func parseAmountCents(s string) (int64, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, nil
+// setAmount records a provider's major-unit decimal: exact in Currency when
+// the provider names one, verbatim until a matched record names it otherwise.
+func (t *RemoteTransaction) setAmount(amount string) {
+	if strings.TrimSpace(t.Currency) == "" {
+		t.Amount = strings.TrimSpace(amount)
+		return
 	}
-	neg := false
-	switch s[0] {
-	case '-':
-		neg = true
-		s = s[1:]
-	case '+':
-		s = s[1:]
+	if minor, err := moneyutil.DecimalToRailMinor(t.Currency, amount); err == nil {
+		t.AmountCents = int64(minor)
 	}
-	whole, frac, _ := strings.Cut(s, ".")
-	if whole == "" {
-		whole = "0"
+}
+
+// minorIn is the amount in rail minor units of currency, the currency the
+// transaction is recorded in: Currency when the provider named one, else the
+// matched local record's. A verbatim amount not exact there is an error.
+func (t *RemoteTransaction) minorIn(currency string) (moneyutil.Cents, error) {
+	if t.Amount == "" {
+		return moneyutil.Cents(t.AmountCents), nil
 	}
-	switch len(frac) {
-	case 0:
-		frac = "00"
-	case 1:
-		frac += "0"
-	case 2:
-	default:
-		return 0, fmt.Errorf("amount %q has more than two fraction digits", s)
+	return moneyutil.DecimalToRailMinor(currency, t.Amount)
+}
+
+// nativeIn is minorIn in native units of currency.
+func (t *RemoteTransaction) nativeIn(currency string) (int64, error) {
+	minor, err := t.minorIn(currency)
+	if err != nil {
+		return 0, err
 	}
-	var cents int64
-	for _, r := range whole + frac {
-		if r < '0' || r > '9' {
-			return 0, fmt.Errorf("invalid amount %q", s)
-		}
-		if cents > (math.MaxInt64-int64(r-'0'))/10 {
-			return 0, fmt.Errorf("amount %q is out of range", s)
-		}
-		cents = cents*10 + int64(r-'0')
+	return moneyutil.RailMinorToNative(currency, minor)
+}
+
+// positive reports a positive amount. A verbatim decimal's sign needs no
+// currency: it is positive when unsigned with a non-zero digit.
+func (t *RemoteTransaction) positive() bool {
+	if t.Amount != "" {
+		return !strings.HasPrefix(t.Amount, "-") && strings.ContainsAny(t.Amount, "123456789")
 	}
-	if neg {
-		cents = -cents
+	return t.AmountCents > 0
+}
+
+// formatAmount names the amount for findings and timelines.
+func (t *RemoteTransaction) formatAmount() string {
+	if t.Amount != "" {
+		return fmt.Sprintf("%s (no currency reported)", t.Amount)
 	}
-	return cents, nil
+	if native, err := moneyutil.RailMinorToNative(t.Currency, moneyutil.Cents(t.AmountCents)); err == nil {
+		return moneyutil.FormatAmount(native, t.Currency)
+	}
+	return fmt.Sprintf("%d minor units of %q", t.AmountCents, t.Currency)
 }

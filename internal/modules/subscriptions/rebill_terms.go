@@ -79,6 +79,9 @@ func DecodeManualRebillPayload(in gen.BillingProviderIntent) (ManualRebillPayloa
 	if p.OrderReference != ObligationOrderReference(p.Renewal.SubscriptionID, p.Renewal.PeriodStart) {
 		return p, errors.New("rebill order does not name the accepted period")
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Renewal.Currency); err != nil {
+		return p, err
+	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)
 	if err != nil || minor != p.AmountMinor {
 		return p, errors.New("rebill rail amount contradicts accepted price")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -157,7 +158,7 @@ func TestCalculateTokenQuote(t *testing.T) {
 	usdc := priceFeed{"USDC": 1.0}
 
 	t.Run("usd at peg is an exact rescale (#671 micros, not cents)", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "usdc", usdcMainnetMint, 6, 19_990_000, "usd", nil, usdc)
+		q, err := CalculateTokenQuote(ctx, "usdc", usdcMainnetMint, 6, 19_990_000, "usd", nil, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, uint64(19_990_000), q.Units)
 		require.Equal(t, "19.990000", q.Amount)
@@ -167,14 +168,14 @@ func TestCalculateTokenQuote(t *testing.T) {
 
 	t.Run("fx rate is applied as its exact decimal", func(t *testing.T) {
 		mockFX := fx.NewMockProvider(map[string]float64{"eur": 1.08})
-		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "eur", mockFX, usdc)
+		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "eur", mockFX, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, uint64(10_800_000), q.Units, "1.08 must not add a phantom base unit")
 		require.Equal(t, "EUR", q.FXCurrency)
 	})
 
 	t.Run("depeg failsafe charges more tokens", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "usd", nil, priceFeed{"USDC": 0.95})
+		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "usd", nil, priceFeed{"USDC": 0.95}, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, 0.95, q.TokenPriceUSD)
 		require.Equal(t, uint64(10_526_316), q.Units)
@@ -182,7 +183,7 @@ func TestCalculateTokenQuote(t *testing.T) {
 
 	t.Run("sub-tolerance noise and missing feed hold the peg", func(t *testing.T) {
 		for _, feed := range []TokenPriceProvider{priceFeed{"USDC": 0.999}, nil} {
-			q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "usd", nil, feed)
+			q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 10_000_000, "usd", nil, feed, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 			require.NoError(t, err)
 			require.Equal(t, 1.0, q.TokenPriceUSD)
 			require.Equal(t, uint64(10_000_000), q.Units)
@@ -190,22 +191,22 @@ func TestCalculateTokenQuote(t *testing.T) {
 	})
 
 	t.Run("custom symbol on a known USD mint gets parity (#360)", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "MYUSD", usdcMainnetMint, 6, 10_000_000, "usd", nil, nil)
+		q, err := CalculateTokenQuote(ctx, "MYUSD", usdcMainnetMint, 6, 10_000_000, "usd", nil, nil, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, uint64(10_000_000), q.Units)
 	})
 
 	t.Run("volatile token uses the live price", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "SOL", WrappedSOLMint, 9, 15_000_000, "usd", nil, priceFeed{"SOL": 150})
+		q, err := CalculateTokenQuote(ctx, "SOL", WrappedSOLMint, 9, 15_000_000, "usd", nil, priceFeed{"SOL": 150}, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, uint64(100_000_000), q.Units)
 		require.Equal(t, "0.100000000", q.Amount)
-		_, err = CalculateTokenQuote(ctx, "SOL", WrappedSOLMint, 9, 15_000_000, "usd", nil, nil)
+		_, err = CalculateTokenQuote(ctx, "SOL", WrappedSOLMint, 9, 15_000_000, "usd", nil, nil, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.Error(t, err)
 	})
 
 	t.Run("zero amount", func(t *testing.T) {
-		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 0, "usd", nil, nil)
+		q, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 0, "usd", nil, nil, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), q.Units)
 		require.Equal(t, "0.000000", q.Amount)
@@ -215,23 +216,23 @@ func TestCalculateTokenQuote(t *testing.T) {
 		mockFX := fx.NewMockProvider(map[string]float64{"xyz": 1.0})
 		for name, call := range map[string]func() error{
 			"empty currency (#830)": func() error {
-				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "  ", nil, usdc)
+				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "  ", nil, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 				return err
 			},
 			"unregistered currency": func() error {
-				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "xyz", mockFX, usdc)
+				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "xyz", mockFX, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 				return err
 			},
 			"non-usd without fx provider": func() error {
-				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "eur", nil, usdc)
+				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 6, 1, "eur", nil, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 				return err
 			},
 			"missing mint": func() error {
-				_, err := CalculateTokenQuote(ctx, "TEST", "", 6, 1, "usd", nil, priceFeed{"TEST": 1})
+				_, err := CalculateTokenQuote(ctx, "TEST", "", 6, 1, "usd", nil, priceFeed{"TEST": 1}, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 				return err
 			},
 			"missing decimals": func() error {
-				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 0, 1, "usd", nil, usdc)
+				_, err := CalculateTokenQuote(ctx, "USDC", usdcMainnetMint, 0, 1, "usd", nil, usdc, time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC))
 				return err
 			},
 		} {

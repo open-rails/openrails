@@ -2,12 +2,12 @@ package reconcile
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses — read-only
@@ -183,8 +183,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		if s.Plan != nil {
 			sub.PlanID = strings.TrimSpace(s.Plan.ID)
 		}
-		// This resource has no currency. Keep its decimal in Raw and compare
-		// against the uniquely bound local price later; do not guess USD cents.
+		sub.Amount = s.DeclaredAmount()
 		if next, err := parseNMIV5Date(s.NextBillingDate); err == nil {
 			sub.NextBillingAt = &next
 			if next.Before(today) {
@@ -273,6 +272,9 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 // An unreadable money fact cannot disappear while its window is marked read.
 // Non-financial actions and additional fields retain their existing semantics.
 func qualifyNMITransaction(t nmi.QueryTransaction) error {
+	if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
+		return err
+	}
 	if strings.TrimSpace(t.TransactionID) == "" {
 		return fmt.Errorf("nmi transaction has no identity")
 	}
@@ -283,7 +285,7 @@ func qualifyNMITransaction(t nmi.QueryTransaction) error {
 		if strings.TrimSpace(action.Success) != "0" && strings.TrimSpace(action.Success) != "1" {
 			return fmt.Errorf("nmi transaction %s has unreadable outcome", t.TransactionID)
 		}
-		if _, err := nmi.ParseAmountMinor(action.Amount, t.Currency); err != nil {
+		if _, err := moneyutil.DecimalToRailMinor(t.Currency, action.Amount); err != nil {
 			return fmt.Errorf("nmi transaction %s has unreadable amount", t.TransactionID)
 		}
 		if _, ok := action.At(); !ok {
@@ -310,7 +312,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 	for _, a := range t.Actions {
 		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
 		if ok && reversed && txnType == TransactionTypeSale {
-			amount, err := nmi.ParseAmountMinor(a.Amount, t.Currency)
+			amount, err := moneyutil.DecimalToRailMinor(t.Currency, a.Amount)
 			if !voided || voidRecorded || !a.Succeeded() || err != nil || amount <= 0 {
 				continue
 			}
@@ -346,9 +348,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"actions":           t.Actions,
 			}),
 		}
-		if minor, err := nmi.ParseAmountMinor(a.Amount, t.Currency); err == nil {
-			txn.AmountCents = int64(minor)
-		}
+		txn.setAmount(a.Amount)
 		if ts, ok := a.At(); ok {
 			txn.OccurredAt = ts
 		}
@@ -359,34 +359,6 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 	}
 	return out
 }
-
-// nmiScheduleAmount uses the bound catalog currency only for comparison, never
-// to manufacture a transaction's currency or a missing provider payment.
-func nmiScheduleAmount(remote *RemoteSubscription, currency string) (int64, error) {
-	var wire struct {
-		Source       string              `json:"source"`
-		Subscription *nmi.V5Subscription `json:"subscription"`
-	}
-	if err := json.Unmarshal(remote.Raw, &wire); err != nil || wire.Source != "nmi_recurring_v5" {
-		return remote.AmountCents, nil // typed imports already carry rail minor units
-	}
-	if wire.Subscription == nil {
-		return 0, fmt.Errorf("NMI schedule has no amount record")
-	}
-	amount := strings.TrimSpace(wire.Subscription.Amount)
-	if amount == "" && wire.Subscription.Plan != nil {
-		amount = strings.TrimSpace(wire.Subscription.Plan.PlanAmount)
-	}
-	if amount == "" {
-		return 0, nil // optional amount was not reported
-	}
-	minor, err := nmi.ParseAmountMinor(amount, currency)
-	return int64(minor), err
-}
-
-// normalizeNMIAction maps NMI action_type values onto the normalized
-// TransactionType. Returns ok=false for action types that are settlement
-// plumbing rather than charge events.
 func normalizeNMIAction(actionType string) (TransactionType, bool) {
 	switch actionType {
 	case "sale":

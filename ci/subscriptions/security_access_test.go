@@ -52,7 +52,7 @@ func (w *world) callAt(server, token, method, path, key string, body any) (int, 
 func (w *world) finitePass(entitlement string) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", EntitlementsSpec: map[string]*int{entitlement: nil}})
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "pass-" + uuid.NewString()[:8], DisplayName: "Pass", Entitlements: []string{entitlement}})
 	require.NoError(w.t, err)
 	hours := monthHours
 	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD", AccessDurationHours: &hours})
@@ -316,7 +316,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		client := rt
-		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", EntitlementsSpec: map[string]*int{"content:live": nil}})
+		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "live-" + uuid.NewString()[:8], DisplayName: "Live", Entitlements: []string{"content:live"}})
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)

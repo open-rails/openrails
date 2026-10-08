@@ -26,12 +26,10 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 	_, err = PaymentFromGen(gen.BillingPayment{Metadata: []byte(`{`)})
 	require.ErrorContains(t, err, "payments.metadata")
 
-	product, err := ProductFromGen(gen.BillingProduct{TierRank: 3, EntitlementsSpec: []byte(`{"forever":null,"day":24}`)})
+	product, err := ProductFromGen(gen.BillingProduct{TierRank: 3, Entitlements: []byte(`["day","forever"]`)})
 	require.NoError(t, err)
 	require.Equal(t, 3, product.TierRank)
-	require.Nil(t, product.EntitlementsSpec["forever"])
-	require.Contains(t, product.EntitlementsSpec, "forever", "an indefinite entitlement is a nil value, not a missing key")
-	require.Equal(t, 24, *product.EntitlementsSpec["day"])
+	require.Equal(t, []string{"day", "forever"}, product.Entitlements)
 
 	sub, err := SubscriptionFromGen(gen.BillingSubscription{RetryAttempts: ptr(int32(2)), CancelType: ptr("user"), CollectionPolicy: "engine"})
 	require.NoError(t, err)
@@ -44,10 +42,12 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, raw, "a nil map is SQL NULL")
 
-	clone := CloneEntitlementsSpec(product.EntitlementsSpec)
-	*clone["day"] = 1
-	require.Equal(t, 24, *product.EntitlementsSpec["day"], "clone must not alias")
-	require.Nil(t, CloneEntitlementsSpec(map[string]*int{}))
+	clone := CloneEntitlements(product.Entitlements)
+	clone[0] = "changed"
+	require.Equal(t, "day", product.Entitlements[0], "clone must not alias")
+	require.Nil(t, CloneEntitlements(nil))
+	require.Equal(t, []string{}, CloneEntitlements([]string{}), "accepted empty is not unknown")
+
 }
 
 func TestProductAccessGrantIsActiveAt(t *testing.T) {

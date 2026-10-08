@@ -110,6 +110,9 @@ func DecodeSubscriptionCollectionPayload(in gen.BillingProviderIntent) (Subscrip
 	if in.IdempotencyKey != key || p.OrderReference != ObligationOrderReference(p.Renewal.SubscriptionID, p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal key contradicts accepted attempt")
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Renewal.Currency); err != nil {
+		return p, err
+	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)
 	if err != nil || minor != p.AmountMinor {
 		return p, errors.New("engine renewal amount contradicts accepted terms")

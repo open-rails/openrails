@@ -535,7 +535,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if err := receipt.Validate(in); err != nil {
 			return err
 		}
-		payment = &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, EntitlementsSpecSnapshot: p.Entitlements, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
+		payment = &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, EntitlementsSnapshot: p.Entitlements, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
 	}
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := database.NewWithPgxTx(tx)

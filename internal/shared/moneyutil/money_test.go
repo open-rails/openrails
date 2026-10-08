@@ -2,6 +2,7 @@ package moneyutil
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -12,28 +13,64 @@ func withCurrency(t *testing.T, code string, decimals, minor int) {
 	t.Cleanup(func() { delete(currencies, code) })
 }
 
-func TestParseDecimalToCents(t *testing.T) {
+// Provider decimals are read at the currency's own minor unit, exactly:
+// NMI writes 500 yen as "500.00", which is 500 rail units, never 50 000.
+func TestDecimalToRailMinor(t *testing.T) {
+	withCurrency(t, "TST", 6, 3)
 	for _, tt := range []struct {
-		in   string
-		want Cents
-		err  bool
+		currency, in string
+		want         Cents
 	}{
-		{in: "19.99", want: 1999},
-		{in: " 0.005 ", want: 1}, // half rounds away from zero
-		{in: "0.0049", want: 0},
-		{in: "-0.005", want: -1}, // symmetric for negatives
-		{in: "1e2", want: 10_000},
-		{in: "-92233720368547758.08", want: math.MinInt64},
-		{in: "92233720368547758.07", want: math.MaxInt64},
-		{in: "92233720368547758.08", err: true},
-		{in: "-92233720368547758.09", err: true},
-		{in: "", err: true},
-		{in: "12,00", err: true},
-		{in: "NaN", err: true},
+		{"USD", "9.99", 999},
+		{"usd", " 19.99 ", 1999},
+		{"USD", "23", 2300},
+		{"USD", "5.5", 550},
+		{"USD", ".99", 99},
+		{"USD", "9.990000", 999},
+		{"USD", "-5.00", -500},
+		{"USD", "0.00", 0},
+		{"EUR", "1234.56", 123456},
+		{"JPY", "500.00", 500},
+		{"JPY", "500", 500},
+		{"JPY", "-500.00", -500},
+		{"KRW", "1500", 1500},
+		{"TST", "1.234", 1234},
+		{"SOL", "1.5", 1_500_000_000},
+		{"USD", "92233720368547758.07", math.MaxInt64},
+		{"USD", "-92233720368547758.08", math.MinInt64},
+		{"JPY", "9223372036854775807.00", math.MaxInt64},
 	} {
-		got, err := ParseDecimalToCents(tt.in)
-		if (err != nil) != tt.err || got != tt.want {
-			t.Errorf("ParseDecimalToCents(%q) = %d, %v; want %d, err=%v", tt.in, got, err, tt.want, tt.err)
+		got, err := DecimalToRailMinor(tt.currency, tt.in)
+		if err != nil || got != tt.want {
+			t.Errorf("DecimalToRailMinor(%s, %q) = %d, %v; want %d", tt.currency, tt.in, got, err, tt.want)
+		}
+	}
+	for _, tt := range []struct{ currency, in string }{
+		{"JPY", "500.5"},
+		{"KRW", "1500.01"},
+		{"USD", "9.999"},
+		{"USD", "0.005"},
+		{"USD", "5.0010"},
+		{"USD", "--1"},
+		{"USD", ""},
+		{"USD", "   "},
+		{"USD", "-"},
+		{"USD", "."},
+		{"USD", "abc"},
+		{"USD", "+1.00"},
+		{"USD", "- 1"},
+		{"USD", "1.2.3"},
+		{"USD", "12,00"},
+		{"USD", "1e2"},
+		{"USD", "NaN"},
+		{"USD", "92233720368547758.08"},
+		{"USD", "-92233720368547758.09"},
+		{"JPY", "9223372036854775808"},
+		{"", "9.99"},
+		{"XXX", "9.99"},
+	} {
+		if got, err := DecimalToRailMinor(tt.currency, tt.in); err == nil {
+			t.Errorf("DecimalToRailMinor(%s, %q) = %d; want an error", tt.currency, tt.in, got)
 		}
 	}
 }
@@ -93,6 +130,10 @@ func TestRailConversionsRefuseUnknownCurrencyAndOverflow(t *testing.T) {
 		}
 	}
 	for _, code := range CurrencyCodes() {
+		cur, _ := LookupCurrency(code)
+		if cur.NativeShift() <= 0 {
+			continue // Atomic token units require no widening.
+		}
 		for _, minor := range []Cents{math.MaxInt64, math.MinInt64} {
 			if _, err := RailMinorToNative(code, minor); err == nil {
 				t.Errorf("%s: RailMinorToNative(%d) overflowed silently", code, minor)
@@ -112,22 +153,22 @@ func TestRailConversionsRefuseUnknownCurrencyAndOverflow(t *testing.T) {
 }
 
 // CentsToMicros and remaining hardcoded 10^4 conversions are correct only while
-// every registered currency shifts by exactly 4 decimals between the internal
-// and rail scale. Registering another shift must fail here first.
-func TestRegisteredCurrenciesShareNativeShift(t *testing.T) {
+// every registered fiat currency shifts by exactly 4 decimals between the
+// internal and card-rail scale. Token currencies never use these card paths.
+func TestRegisteredFiatCurrenciesShareNativeShift(t *testing.T) {
 	if MicrosPerCent != 10_000 || CentsToMicros(1234) != Micros(12_340_000) {
 		t.Fatal("cents/micros scale changed")
 	}
 	for _, code := range CurrencyCodes() {
 		cur, _ := LookupCurrency(code)
-		if cur.NativeShift() != 4 {
+		if cur.Kind == "fiat" && cur.NativeShift() != 4 {
 			t.Errorf("%s native shift %d != 4: route inbound conversions through RailMinorToNative first", code, cur.NativeShift())
 		}
 	}
 }
 
 func TestFormatting(t *testing.T) {
-	if got := DescribeNativeScales(); got != "EUR 1000000, JPY 10000, USD 1000000" {
+	if got := DescribeNativeScales(); !strings.HasPrefix(got, "AED 1000000, ") || !strings.Contains(got, ", JPY 10000, ") || !strings.Contains(got, ", SOL 1000000000, ") || !strings.HasSuffix(got, ", ZAR 1000000") {
 		t.Errorf("DescribeNativeScales() = %q", got)
 	}
 	withCurrency(t, "TST", 6, 3)

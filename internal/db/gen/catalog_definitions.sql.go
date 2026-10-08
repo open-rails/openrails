@@ -268,7 +268,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 }
 
 const listLiveCatalogProducts = `-- name: ListLiveCatalogProducts :many
-SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements_spec, credit_grant,
+SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements, credit_grant,
        tier_group, tier_rank, archived
 FROM billing.products
 WHERE merchant_id = $1::uuid AND NOT archived
@@ -276,15 +276,15 @@ ORDER BY COALESCE(tier_group, ''), tier_rank, key
 `
 
 type ListLiveCatalogProductsRow struct {
-	ID               uuid.UUID
-	Key              string
-	DisplayName      string
-	Description      string
-	EntitlementsSpec []byte
-	CreditGrant      []byte
-	TierGroup        *string
-	TierRank         int32
-	Archived         bool
+	ID           uuid.UUID
+	Key          string
+	DisplayName  string
+	Description  string
+	Entitlements []byte
+	CreditGrant  []byte
+	TierGroup    *string
+	TierRank     int32
+	Archived     bool
 }
 
 func (q *Queries) ListLiveCatalogProducts(ctx context.Context, merchantID uuid.UUID) ([]ListLiveCatalogProductsRow, error) {
@@ -301,7 +301,7 @@ func (q *Queries) ListLiveCatalogProducts(ctx context.Context, merchantID uuid.U
 			&i.Key,
 			&i.DisplayName,
 			&i.Description,
-			&i.EntitlementsSpec,
+			&i.Entitlements,
 			&i.CreditGrant,
 			&i.TierGroup,
 			&i.TierRank,

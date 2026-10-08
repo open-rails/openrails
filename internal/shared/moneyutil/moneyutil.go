@@ -2,7 +2,6 @@ package moneyutil
 
 import (
 	"fmt"
-	"math/big"
 	"strconv"
 	"strings"
 )
@@ -22,28 +21,6 @@ type Micros int64
 // most card rails (NMI, Stripe) charge in for 2-decimal currencies.
 type Cents int64
 
-// ParseDecimalToCents is the provider-decimal-string -> minor-unit boundary
-// (MONEY-6): exact rational, half-away-from-zero, int64-overflow error.
-func ParseDecimalToCents(value string) (Cents, error) {
-	v, err := parseDecimalScaled(value, CentsPerMajorUnit)
-	return Cents(v), err
-}
-
-func parseDecimalScaled(value string, scale int64) (int64, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return 0, fmt.Errorf("amount is empty")
-	}
-
-	parsed, ok := new(big.Rat).SetString(trimmed)
-	if !ok {
-		return 0, fmt.Errorf("invalid decimal amount %q", trimmed)
-	}
-
-	scaled := new(big.Rat).Mul(parsed, big.NewRat(scale, 1))
-	return roundHalfAwayFromZero(scaled)
-}
-
 // GAP-12 / or#863. Unit changes are typed, so handing cents to a micros
 // parameter (or the reverse) is a compile error rather than a mischarge.
 //
@@ -60,11 +37,9 @@ func parseDecimalScaled(value string, scale int64) (int64, error) {
 // the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —
 // typing it Micros would be a lie.
 
-// CentsToMicros widens a rail minor amount into internal micros. Valid for
-// every registered currency only because every registered currency has the
-// same 10^4 native shift — TestRegisteredCurrenciesShareNativeShift pins that, and
-// FAILS the moment a currency is registered that breaks it. Currency-aware
-// callers should prefer RailMinorToNative.
+// CentsToMicros widens a fiat card-rail minor amount into native units. The
+// registered fiat currencies share this shift; crypto uses native atomic units
+// directly and must go through RailMinorToNative instead.
 func CentsToMicros(cents Cents) Micros {
 	return Micros(int64(cents) * MicrosPerCent)
 }
@@ -99,35 +74,4 @@ func FormatUSD(micros Micros) string {
 		return "-$" + strings.TrimPrefix(amount, "-")
 	}
 	return "$" + amount
-}
-
-func roundHalfAwayFromZero(value *big.Rat) (int64, error) {
-	if value == nil {
-		return 0, fmt.Errorf("value is nil")
-	}
-	if value.Sign() == 0 {
-		return 0, nil
-	}
-
-	sign := value.Sign()
-	num := new(big.Int).Abs(value.Num())
-	den := new(big.Int).Set(value.Denom())
-
-	quotient, remainder := new(big.Int), new(big.Int)
-	quotient.QuoRem(num, den, remainder)
-
-	twiceRemainder := new(big.Int).Lsh(remainder, 1)
-	if twiceRemainder.Cmp(den) >= 0 {
-		quotient.Add(quotient, big.NewInt(1))
-	}
-
-	// Check the signed result: abs(MinInt64) is one larger than MaxInt64,
-	// but it is a valid amount once the negative sign is restored.
-	if sign < 0 {
-		quotient.Neg(quotient)
-	}
-	if !quotient.IsInt64() {
-		return 0, fmt.Errorf("amount is out of int64 range")
-	}
-	return quotient.Int64(), nil
 }

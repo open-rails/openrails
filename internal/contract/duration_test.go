@@ -26,7 +26,7 @@ func TestCatalogDurationAliasesAreDocumented(t *testing.T) {
 	require.NoError(t, json.Unmarshal(files[OpenAPIFile], &doc))
 	price := doc.Components.Schemas["ApplyPrice"]
 	require.NotContains(t, price.Properties, "auto_renew", "renewal choice belongs to the order")
-	require.Len(t, price.AllOf, 3)
+	require.GreaterOrEqual(t, len(price.AllOf), 3)
 	for i, name := range []string{"access_duration", "billing_interval", "trial_duration"} {
 		require.Contains(t, price.Properties, name)
 		require.Contains(t, price.Properties, name+"_hours")

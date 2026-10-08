@@ -20,6 +20,7 @@ import (
 type Inputs struct {
 	Currency                string
 	Run                     string
+	CheckoutProductKey      string
 	CheckoutPriceKey        string
 	CheckoutRail            string
 	CheckoutCustomerID      billing.CustomerID
@@ -149,7 +150,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	checkoutConfig, err := client.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceKey: in.CheckoutPriceKey})
+	checkoutConfig, err := client.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{ProductKey: in.CheckoutProductKey, PriceKey: in.CheckoutPriceKey})
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
@@ -157,6 +158,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	buyer := in.CheckoutCustomerID
 	request := billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+		ProductKey:     in.CheckoutProductKey,
 		PriceKey:       in.CheckoutPriceKey,
 		IdempotencyKey: in.Run + ":checkout",
 		PaymentOptions: billing.CheckoutPaymentOptions{PSP: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID, BillingDetails: &billing.BillingDetails{Name: new("Example Buyer"), Address: &billing.BillingAddress{PostalCode: new("90210"), Country: new("US")}}},

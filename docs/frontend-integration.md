@@ -184,7 +184,7 @@ can live on another host. `@openrails/billing-ui`'s
 `<Checkout source={client.checkoutSource(id)} />` runs all of this.
 
 ```
-POST /v1/me/checkout-sessions        {"price_id" | "price_key", "success_url"?} → 201 {id, url, expires_at}
+POST /v1/me/checkout-sessions        {"price_id" | "product_key"+"price_key", "auto_renew"?, "success_url"?} → 201 {id, url, expires_at}
 GET  /v1/checkout-sessions/{id}      the offer: plan, amounts, options, saved methods, status
 POST /v1/checkout-sessions/{id}/pay  {"option_id", instrument, "billing_details"} → {status, next_action, operation, failure}
 ```

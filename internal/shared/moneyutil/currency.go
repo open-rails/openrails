@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
-	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/currency"
 )
 
 // System currency registry (#472), moved here from internal/modules/money by
@@ -18,24 +19,15 @@ import (
 // a divide-by-10 000 instead of asking the registry. Currency is system-fixed,
 // NOT merchant-scoped: the codebase is the authority (there is no DB CHECK).
 
-// Currency is a system currency code and its minor-unit scale.
-type Currency struct {
-	Code          string
-	Decimals      int    // internal units per major unit = 10^Decimals
-	MinorDecimals int    // ISO-4217/provider minor units per major unit = 10^MinorDecimals (0 for zero-decimal rails like JPY)
-	Kind          string // "fiat"
-}
+// Currency is one registered currency and its native/settlement scale.
+type Currency = currency.Units
 
-// NativeShift is the decimal shift between a currency's internal scale and its
-// rail minor unit: internal = minor * 10^NativeShift.
-func (c Currency) NativeShift() int { return c.Decimals - c.MinorDecimals }
-
-// currencies mirrors the public registry (billing.Currencies), the one owner
+// currencies mirrors the dependency-free currency registry, the one owner
 // of every currency scale.
 var currencies = func() map[string]Currency {
 	out := map[string]Currency{}
-	for _, units := range billing.Currencies() {
-		out[units.Code] = Currency{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals, Kind: "fiat"}
+	for _, units := range currency.List() {
+		out[units.Code] = units
 	}
 	return out
 }()
@@ -165,6 +157,50 @@ func RailMinorToNative(currency string, minor Cents) (int64, error) {
 		return int64(minor) / -div, nil
 	}
 	return multiplyNative(int64(minor), div)
+}
+
+// DecimalToRailMinor is THE provider-decimal -> rail-minor boundary: it reads
+// a provider's major-unit amount ("9.99", "500.00", "-5") as rail minor units
+// of a registered currency, exactly. Zeros past the minor unit are accepted
+// ("500.00" JPY is 500 yen); any other digit there, a blank or unknown
+// currency, a malformed amount or int64 overflow is an error. An optional
+// leading '-' is kept: callers that need a positive amount check it.
+func DecimalToRailMinor(currency, amount string) (Cents, error) {
+	cur, ok := LookupCurrency(currency)
+	if !ok {
+		return 0, fmt.Errorf("money: unknown currency %q", currency)
+	}
+	raw := strings.TrimSpace(amount)
+	digits, sign := strings.CutPrefix(raw, "-")
+	whole, fraction, _ := strings.Cut(digits, ".")
+	if whole+fraction == "" || !allDigits(whole) || !allDigits(fraction) {
+		return 0, fmt.Errorf("money: invalid decimal amount %q", amount)
+	}
+	if len(fraction) > cur.MinorDecimals {
+		if strings.Trim(fraction[cur.MinorDecimals:], "0") != "" {
+			return 0, fmt.Errorf("money: amount %q is not in %s %s", raw, cur.Code, minorUnitName(cur.Code))
+		}
+		fraction = fraction[:cur.MinorDecimals]
+	}
+	fraction += strings.Repeat("0", cur.MinorDecimals-len(fraction))
+	value := whole + fraction
+	if sign {
+		value = "-" + value
+	}
+	minor, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("money: amount %q exceeds int64", raw)
+	}
+	return Cents(minor), nil
+}
+
+func allDigits(s string) bool {
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // minorUnitName names a currency's rail minor unit for error messages: "whole

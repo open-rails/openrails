@@ -150,6 +150,9 @@ func (i stripeCollectionInvoice) settledResult(params StripeInvoiceCollectionPar
 }
 
 func (p StripeInvoiceCollectionParams) validate() error {
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return err
+	}
 	if strings.TrimSpace(p.CustomerID) == "" {
 		return errors.New("stripe customer_id is required")
 	}

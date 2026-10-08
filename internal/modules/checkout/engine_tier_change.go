@@ -63,9 +63,9 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 	if quote.ChargeNow <= 0 {
 		return terms, ErrTierChangeCreditExceedsPrice
 	}
-	benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	benefits := models.CloneEntitlements(product.Entitlements)
 	if benefits == nil {
-		benefits = map[string]*int{}
+		benefits = []string{}
 	}
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(),

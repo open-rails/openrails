@@ -2,7 +2,7 @@
 // ownership/access grants (issue #250). It is DISTINCT from feature entitlements
 // (billing.entitlements): a product access grant answers "does this user own
 // product X?" and powers purchased-library views, while entitlements model
-// feature windows ("premium", "api_access"). A product may carry EntitlementsSpec
+// feature windows ("premium", "api_access"). A product may carry Entitlements
 // and produce a grant.
 package productaccess
 

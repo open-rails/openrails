@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // NMIReader is the merchant's armed NMI client and the PSP it reads.
@@ -247,10 +248,13 @@ func (a *attribution) add(sale nmi.ScheduleSale) error {
 // remoteSale is one sale action of NMI's transaction report as a snapshot
 // transaction of the schedule railSubID.
 func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error) {
+	if err := moneyutil.RequireFiatCurrency(sale.Currency); err != nil {
+		return RemoteTransaction{}, err
+	}
 	if sale.At.IsZero() {
 		return RemoteTransaction{}, errors.New("NMI sale has no readable action time")
 	}
-	amount, err := nmi.ParseAmountMinor(sale.Amount, sale.Currency)
+	amount, err := moneyutil.DecimalToRailMinor(sale.Currency, sale.Amount)
 	if err != nil {
 		return RemoteTransaction{}, err
 	}

@@ -13487,6 +13487,15 @@
               }
             ]
           },
+          "amount": {
+            "type": "string",
+            "description": "A non-negative plain decimal followed by its required registered currency. Uses the currency's native precision exactly, without rounding or currency conversion. Cannot be combined with unit_amount or currency.",
+            "examples": [
+              "9.99 USD",
+              "1 SOL",
+              "10 USDC"
+            ]
+          },
           "access_duration": {
             "oneOf": [
               {
@@ -13545,9 +13554,25 @@
                 "trial_duration_hours"
               ]
             }
+          },
+          {
+            "not": {
+              "required": [
+                "amount",
+                "unit_amount"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "amount",
+                "currency"
+              ]
+            }
           }
         ],
-        "description": "Omitted fields preserve existing terms on updates. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive."
+        "description": "Omitted fields preserve existing terms on updates. amount supplies both unit_amount and currency and cannot be null. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive."
       },
       "ApplyProduct": {
         "type": "object",
@@ -13605,25 +13630,11 @@
               }
             ]
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "oneOf": [
@@ -15905,17 +15916,10 @@
           "description": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "type": "object",
-            "additionalProperties": {
-              "oneOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           },
           "credit_grant": {
@@ -19168,25 +19172,11 @@
           "product_display_name": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "price_id": {
             "type": "string"
@@ -19227,7 +19217,7 @@
           "product_id",
           "product_key",
           "product_display_name",
-          "entitlements_spec",
+          "entitlements",
           "price_id",
           "price_key",
           "unit_amount",
@@ -21008,25 +20998,11 @@
           "description": {
             "type": "string"
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "$ref": "#/components/schemas/CreditGrantSpec"
@@ -21068,7 +21044,7 @@
           "key",
           "display_name",
           "description",
-          "entitlements_spec",
+          "entitlements",
           "tier_group",
           "tier_rank",
           "archived",
@@ -23542,25 +23518,11 @@
               }
             ]
           },
-          "entitlements_spec": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "credit_grant": {
             "oneOf": [

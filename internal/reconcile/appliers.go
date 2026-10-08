@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -225,16 +224,11 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		accessEnd = &end
 	}
 	if accessEnd == nil || accessEnd.After(now) {
-		var spec map[string]json.RawMessage
-		if len(rows[0].EntitlementsSpecSnapshot) > 0 {
-			_ = json.Unmarshal(rows[0].EntitlementsSpecSnapshot, &spec)
+		var names []string
+		if len(rows[0].EntitlementsSnapshot) > 0 {
+			_ = json.Unmarshal(rows[0].EntitlementsSnapshot, &names)
 		}
-		if len(spec) > 0 {
-			names := make([]string, 0, len(spec))
-			for name := range spec {
-				names = append(names, name)
-			}
-			sort.Strings(names)
+		if len(names) > 0 {
 			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
 				SubscriptionID: res.SubscriptionID,
 				CustomerID:     a.CustomerID,

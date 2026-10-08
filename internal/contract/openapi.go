@@ -151,8 +151,12 @@ func (m *model) objectSchema(o *object) *obj {
 			}))
 			aliases = append(aliases, newObj("not", newObj("required", []string{name, name + "_hours"})))
 		}
+		props.set("amount", newObj("type", "string", "description", "A non-negative plain decimal followed by its required registered currency. Uses the currency's native precision exactly, without rounding or currency conversion. Cannot be combined with unit_amount or currency.", "examples", []string{"9.99 USD", "1 SOL", "10 USDC"}))
+		for _, name := range []string{"unit_amount", "currency"} {
+			aliases = append(aliases, newObj("not", newObj("required", []string{"amount", name})))
+		}
 		s.set("allOf", aliases)
-		s.set("description", "Omitted fields preserve existing terms on updates. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive.")
+		s.set("description", "Omitted fields preserve existing terms on updates. amount supplies both unit_amount and currency and cannot be null. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive.")
 	}
 	if len(required) > 0 {
 		s.set("required", required)

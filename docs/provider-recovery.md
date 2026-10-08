@@ -70,6 +70,6 @@ obligation lookups complement bulk catch-up; an uncertain submitted NMI charge
 still requires positive evidence rather than an automatic resend. Entire missed
 subscription billing periods remain outside automatic catch-up.
 
-Migration 0010 extends existing watermark domains without changing the merchant
+Migration 0012 extends existing watermark domains without changing the merchant
 archive format. Local PostgreSQL and provider-simulator tests exercise restore
 and recovery; they do not qualify live provider visibility or a deployed restore.

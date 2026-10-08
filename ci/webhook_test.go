@@ -154,9 +154,9 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
-		Key:              "webhook-product-" + uuid.NewString()[:8],
-		DisplayName:      "Webhook product",
-		EntitlementsSpec: map[string]*int{"content:webhook": nil},
+		Key:          "webhook-product-" + uuid.NewString()[:8],
+		DisplayName:  "Webhook product",
+		Entitlements: []string{"content:webhook"},
 	})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{

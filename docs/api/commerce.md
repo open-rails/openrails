@@ -17,7 +17,7 @@ embedded and remote clients:
 | CreateCheckoutAttempt | POST /v1/merchant/checkout-attempts | merchant:checkout:create |
 | GetCheckoutAttempt | GET /v1/merchant/checkout-attempts/{id} | merchant:customer-settings:read |
 | ConfirmCheckoutAttempt | POST /v1/merchant/checkout-attempts/{id}/confirm | merchant:checkout:create |
-| GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|price_key=… | merchant:customer-settings:read |
+| GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|product_key=…&price_key=… | merchant:customer-settings:read |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
 host assertions made under merchant checkout authority. The permission is
@@ -64,7 +64,7 @@ database share it, so one of them can serve the payment page for all.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/v1/me/checkout-sessions` | customer session | Mint: `{price_key \| price_id, success_url?}` → `201 {id, url, expires_at}` |
+| POST | `/v1/me/checkout-sessions` | customer session | Mint: `{price_id \| product_key + price_key, auto_renew?, success_url?}` → `201 {id, url, expires_at}` |
 | GET | `/v1/checkout-sessions/{id}` | the id | The session document |
 | POST | `/v1/checkout-sessions/{id}/pay` | the id | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
 | GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind a merchant attempt's `solana_pay` link (`flow: transaction_request`) |

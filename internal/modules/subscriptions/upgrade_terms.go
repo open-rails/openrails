@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -20,6 +21,7 @@ const TypeNMIUpgrade = "nmi_upgrade"
 // RecurringAmount; a downgrade charges nothing, moves the amount (NMI bills it
 // from the next renewal) and schedules the local price for that renewal.
 type NMIUpgradePayload struct {
+	LegacyEntitlements map[string]*int `json:"legacy_entitlements,omitzero"`
 	// AccessEndsAt preserves an already accepted pre-split partial-period upgrade.
 	AccessEndsAt              *time.Time              `json:"access_ends_at,omitempty"`
 	AccessDurationHours       *int                    `json:"access_duration_hours"`
@@ -42,7 +44,7 @@ type NMIUpgradePayload struct {
 	Currency                  string                  `json:"currency"`
 	PeriodStart               time.Time               `json:"period_start"`
 	PeriodEnd                 time.Time               `json:"period_end"`
-	Entitlements              map[string]*int         `json:"entitlements"`
+	Entitlements              []string                `json:"entitlements"`
 	// TargetPlanID is the named NMI plan the schedule switches to when it is
 	// on a named plan (NMI applies plan_amount only to custom schedules).
 	// Empty means the schedule's amount is set directly.
@@ -63,6 +65,9 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 		return p, errors.New("legacy accepted upgrade access contradicts its paid period")
 	}
 	if err := validateAccessDuration(p.AccessDurationHours); err != nil {
+		return p, err
+	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
@@ -96,7 +101,16 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {
 	type plain NMIUpgradePayload
 	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	wire := struct {
+		*plain
+		Entitlements json.RawMessage `json:"entitlements"`
+	}{plain: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var err error
+	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
+	if err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

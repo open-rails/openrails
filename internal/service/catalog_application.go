@@ -186,7 +186,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
 				return apperr.Invalidf("new product %q requires display_name", decl.Key)
 			}
-			req := billing.CreateProductParams{Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, EntitlementsSpec: decl.EntitlementsSpec.Value}
+			req := billing.CreateProductParams{Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, Entitlements: decl.Entitlements.Value}
 			if decl.CreditGrant.Set && !decl.CreditGrant.Null {
 				req.CreditGrant = &decl.CreditGrant.Value
 			}
@@ -213,9 +213,13 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 			if decl.Archived.Set {
 				req.Archived = &decl.Archived.Value
 			}
-			if decl.EntitlementsSpec.Set {
+			if decl.Entitlements.Set {
 				req.SetEntitlements = true
-				req.EntitlementsSpec = decl.EntitlementsSpec.Value
+				var err error
+				req.Entitlements, err = catalogwire.NormalizeEntitlements(decl.Entitlements.Value)
+				if err != nil {
+					return err
+				}
 			}
 			if decl.CreditGrant.Set {
 				req.SetCreditGrant = true
@@ -266,7 +270,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 }
 
 func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool {
-	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.EntitlementsSpec, p.EntitlementsSpec)
+	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.Entitlements, p.Entitlements)
 }
 
 func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {

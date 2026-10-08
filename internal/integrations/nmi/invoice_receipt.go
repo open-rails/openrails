@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // ErrNotInvoiceReceipt distinguishes ordinary provider transactions from the
@@ -85,8 +86,8 @@ func (c *NMIClient) FindInvoiceSaleEvidence(ctx context.Context, invoice uuid.UU
 		(candidate.Currency != "" && !strings.EqualFold(sale.Currency, candidate.Currency)) {
 		return InvoiceSaleEvidence{}, false, errors.New("invoice sale does not match exact provider read")
 	}
-	amount, ok := exactMinorAmount(action.Amount, sale.Currency)
-	if !ok || amount <= 0 || int64(sale.Amount) != amount {
+	amount, err := moneyutil.DecimalToRailMinor(sale.Currency, action.Amount)
+	if err != nil || amount <= 0 || sale.Amount != amount {
 		return InvoiceSaleEvidence{}, false, errors.New("invoice sale has no consistent exact positive amount")
 	}
 	paidAt, ok := action.At()

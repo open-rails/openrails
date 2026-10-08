@@ -86,7 +86,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/solana/support.go:stablecoinPriceUSD":              "peg-divergence check on a RATE (math.Abs over a price, never an amount)",
 		"internal/modules/solana/support.go:stablecoinPegTolerance":          "peg tolerance is a fraction of a RATE, not an amount",
 		"internal/modules/solana/support.go:ratFromRate":                     "rate -> exact rational converter; the boundary where float stops",
-		"internal/modules/solana/support.go:fiatMicrosToBaseUnitsAtRate":     "takes RATES as floats, converts both to big.Rat before any amount arithmetic",
+		"internal/modules/solana/support.go:nativeToBaseUnitsAtRate":         "takes RATES as floats, converts both to big.Rat before any amount arithmetic",
 		"internal/modules/solana/support.go:CalculateTokenQuote":             "carries the token price + FX RATE; both amount branches go through big.Rat/big.Int",
 		"internal/modules/solana/support.go:FiatMicrosToStablecoinBaseUnits": "passes the identity FX RATE 1.0 into the exact-rational converter",
 

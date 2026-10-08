@@ -243,7 +243,7 @@ function ProductRow({ product }: { product: Product }) {
       </TableCell>
       <TableCell>
         <span className="flex flex-wrap gap-1">
-          {Object.keys(product.entitlements_spec ?? {}).map((e) => (
+          {product.entitlements.map((e) => (
             <Badge key={e} variant="secondary" className="text-[10px]">
               {e}
             </Badge>
@@ -283,7 +283,7 @@ function productFormValues(product?: Product) {
     description: product?.description ?? "",
     tierGroup: product?.tier_group ?? "",
     tierRank: String(product?.tier_rank ?? 0),
-    entitlements: Object.keys(product?.entitlements_spec ?? {}).join(","),
+    entitlements: (product?.entitlements ?? []).join(","),
   }
 }
 
@@ -295,13 +295,10 @@ function ProductDialog({ product }: { product?: Product }) {
   const form = useForm({
     defaultValues: productFormValues(product),
     onSubmit: async ({ value }) => {
-      const spec: Record<string, number | null> = {}
-      for (const entitlement of value.entitlements
+      const entitlements = value.entitlements
         .split(",")
         .map((item) => item.trim())
-        .filter(Boolean)) {
-        spec[entitlement] = null
-      }
+        .filter(Boolean)
 
       try {
         if (product) {
@@ -312,7 +309,7 @@ function ProductDialog({ product }: { product?: Product }) {
               description: value.description,
               tier_group: value.tierGroup || null,
               tier_rank: Number(value.tierRank) || 0,
-              entitlements_spec: spec,
+              entitlements,
             },
           })
           toast.success("Product updated")
@@ -323,7 +320,7 @@ function ProductDialog({ product }: { product?: Product }) {
             description: value.description,
             tier_group: value.tierGroup || undefined,
             tier_rank: Number(value.tierRank) || 0,
-            entitlements_spec: spec,
+            entitlements,
           })
           toast.success("Product created")
         }
@@ -843,10 +840,9 @@ function PriceDialog({ products }: { products: Product[] }) {
                       id="pr-cur"
                       aria-label="Currency"
                       className="w-24"
-                      // Three-letter currency codes, so the field normalises
-                      // rather than rejecting a lowercase entry on submit.
+                      // Registered currency codes are normalized to uppercase.
                       value={field.state.value}
-                      maxLength={3}
+                      maxLength={Math.max(...supportedCurrencies.map((code) => code.length))}
                       autoCapitalize="characters"
                       spellCheck={false}
                       placeholder="USD"

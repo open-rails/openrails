@@ -93,12 +93,12 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 func TestCatalogProductRevisionTracksMutableFields(t *testing.T) {
 	w := newWorld(t)
 	c := w.client[embedded]
-	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "mutable", DisplayName: "Before", EntitlementsSpec: map[string]*int{"old-benefit": nil}})
+	product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "mutable", DisplayName: "Before", Entitlements: []string{"old-benefit"}})
 	require.NoError(t, err)
 	require.Zero(t, product.Revision)
 	price, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "purchase", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	patch := billing.UpdateProductParams{DisplayName: catalog.Value("After"), EntitlementsSpec: catalog.Value(map[string]*int{"new-benefit": nil})}
+	patch := billing.UpdateProductParams{DisplayName: catalog.Value("After"), Entitlements: catalog.Value([]string{"new-benefit"})}
 	updated, err := c.UpdateProduct(t.Context(), product.ID, patch)
 	require.NoError(t, err)
 	require.Equal(t, product.ID, updated.ID)
@@ -161,7 +161,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	file := func(amount int64) *catalog.Application {
 		price := catalog.ApplyPrice{Key: "purchase", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), BillingIntervalHours: catalog.Null[int](), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
 		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{
-			{Key: "video", DisplayName: catalog.Value("Video"), Archived: catalog.Value(false), EntitlementsSpec: catalog.Value(map[string]*int{"video:one": nil}), Prices: []catalog.ApplyPrice{price}},
+			{Key: "video", DisplayName: catalog.Value("Video"), Archived: catalog.Value(false), Entitlements: catalog.Value([]string{"video:one"}), Prices: []catalog.ApplyPrice{price}},
 			{Key: "other-video", DisplayName: catalog.Value("Other video"), Archived: catalog.Value(false), Prices: []catalog.ApplyPrice{price}},
 		}}
 	}
@@ -202,7 +202,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	}
 	restore := file(1_000_000)
 	restore.Products[0].DisplayName = catalog.Value("Video renamed")
-	restore.Products[0].EntitlementsSpec = catalog.Value(map[string]*int{"video:two": nil})
+	restore.Products[0].Entitlements = catalog.Value([]string{"video:two"})
 	boot(restore)
 	restored, err := c.GetPriceByKey(t.Context(), "video", "purchase")
 	require.NoError(t, err)
@@ -212,7 +212,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ProductID, product.ID)
 	require.Equal(t, "Video renamed", product.DisplayName)
-	require.Equal(t, map[string]*int{"video:two": nil}, product.EntitlementsSpec)
+	require.Equal(t, []string{"video:two"}, product.Entitlements)
 	revision := w.catalogRevision()
 	boot(restore)
 	require.Equal(t, revision, w.catalogRevision(), "the same content does not write again")
@@ -327,7 +327,7 @@ func TestCatalogRepriceStaysWithinProduct(t *testing.T) {
 	hours := monthHours
 	for i := range products {
 		entitlement := fmt.Sprintf("content:scoped-%d", i)
-		product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: fmt.Sprintf("scoped-%d", i), DisplayName: "Scoped", EntitlementsSpec: map[string]*int{entitlement: nil}})
+		product, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: fmt.Sprintf("scoped-%d", i), DisplayName: "Scoped", Entitlements: []string{entitlement}})
 		require.NoError(t, err)
 		products[i] = product
 		prices[i], err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 10_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})

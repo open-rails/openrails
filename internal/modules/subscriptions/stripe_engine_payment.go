@@ -86,7 +86,7 @@ func (p StripeEnginePaymentParams) validate() error {
 	if p.MerchantID == uuid.Nil || p.PSPID == uuid.Nil || p.CustomerID == uuid.Nil || p.OperationID == uuid.Nil || p.Instrument.PSPID != p.PSPID || p.Instrument.Custodian != models.CustodianPSP || p.Instrument.CustodianID != nil || !stripeEngineID(p.Instrument.RailCustomerRef, "cus_") || !stripeEngineID(p.Instrument.RailMethodRef, "pm_") || p.AmountMinor <= 0 || p.AmountMinor > 99999999 {
 		return errors.New("incomplete Stripe engine operation binding")
 	}
-	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
 		return err
 	}
 	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {

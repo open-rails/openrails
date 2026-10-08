@@ -266,10 +266,10 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Provider:   "self",
 			Evidence: map[string]any{
 				"subscription_id": billing.SubscriptionID(s.ID).String(), "customer_id": s.CustomerID.String(),
-				"direction": "grant", "missing_features": json.RawMessage(s.EntitlementsSpec),
+				"direction": "grant", "missing_features": json.RawMessage(s.Entitlements),
 			},
 			Repair: func(ctx context.Context) error {
-				// Row shape matches ListUngrantedSubscriptions; EntitlementsSpec
+				// Row shape matches ListUngrantedSubscriptions; Entitlements
 				// carries ONLY the missing features, so derive-1 fills the gap.
 				return gl.DeriveSubscriptionGrant(ctx, gen.ListUngrantedSubscriptionsRow(s))
 			},

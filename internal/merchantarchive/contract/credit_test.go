@@ -18,6 +18,9 @@ func TestReadPreCreditCatalogRows(t *testing.T) {
 			}
 			p, values := row(t, table, map[string]string{"merchant_id": testMerchant, "id": "10000000-0000-0000-0000-000000000099"})
 			fields := values[:len(values)-1]
+			if table == "payments" {
+				fields = values[:len(values)-2]
+			}
 			if table != "payments" {
 				fields[1] = new("3")
 				if !withRevision {

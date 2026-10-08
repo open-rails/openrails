@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,16 +109,16 @@ type ApplyMeter struct {
 // ApplyProduct declares one product by key, with its prices and rate cards;
 // omitted fields keep their values.
 type ApplyProduct struct {
-	Key              string                 `json:"key"`
-	DisplayName      Field[string]          `json:"display_name,omitzero"`
-	Description      Field[string]          `json:"description,omitzero"`
-	TierGroup        Field[string]          `json:"tier_group,omitzero"`
-	TierRank         Field[int]             `json:"tier_rank,omitzero"`
-	Archived         Field[bool]            `json:"archived,omitzero"`
-	EntitlementsSpec Field[map[string]*int] `json:"entitlements_spec,omitzero"`
-	CreditGrant      Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
-	Prices           []ApplyPrice           `json:"prices,omitempty"`
-	RateCards        Field[[]RateCard]      `json:"rate_cards,omitzero"`
+	Key          string                 `json:"key"`
+	DisplayName  Field[string]          `json:"display_name,omitzero"`
+	Description  Field[string]          `json:"description,omitzero"`
+	TierGroup    Field[string]          `json:"tier_group,omitzero"`
+	TierRank     Field[int]             `json:"tier_rank,omitzero"`
+	Archived     Field[bool]            `json:"archived,omitzero"`
+	Entitlements Field[[]string]        `json:"entitlements,omitzero"`
+	CreditGrant  Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
+	Prices       []ApplyPrice           `json:"prices,omitempty"`
+	RateCards    Field[[]RateCard]      `json:"rate_cards,omitzero"`
 }
 
 // ApplyPrice declares one price by key. Its money terms are its identity: a
@@ -157,6 +158,12 @@ func (a Application) Validate() error {
 		}
 		if p.DisplayName.Null || p.Description.Null || p.TierRank.Null || p.Archived.Null {
 			return fmt.Errorf("product %q: nonnullable field is null", p.Key)
+		}
+		if p.Entitlements.Set && (p.Entitlements.Null || p.Entitlements.Value == nil) {
+			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", p.Key)
+		}
+		if _, err := NormalizeEntitlements(p.Entitlements.Value); err != nil {
+			return fmt.Errorf("product %q: %w", p.Key, err)
 		}
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
 			return fmt.Errorf("product %q: text exceeds catalog limit", p.Key)
@@ -235,6 +242,8 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 	}
 	a.Products = append([]ApplyProduct(nil), a.Products...)
 	for i := range a.Products {
+		a.Products[i].Entitlements.Value = slices.Clone(a.Products[i].Entitlements.Value)
+		slices.Sort(a.Products[i].Entitlements.Value)
 		a.Products[i].Prices = append([]ApplyPrice(nil), a.Products[i].Prices...)
 		for j := range a.Products[i].Prices {
 			p := &a.Products[i].Prices[j]

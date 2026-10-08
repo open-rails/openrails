@@ -166,7 +166,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/http/handlers/admin_payments.go:func adminRefundMetadata \"admin_refund_amount\"":          notHTTPStoredMetadata,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                       notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                              notMoneyPurgeInventory,
-	"internal/modules/checkout/solana_settlement.go:func creditSolanaPurchase \"solana_token_amount\"":   notHTTPStoredMetadata,
 	"internal/modules/checkout/attempt_service.go:func setSolanaQuoteState \"token_price_usd\"":          notHTTPStoredMetadata,
 	"internal/modules/delinquency/service.go:func apply \"amount_floor\"":                                notHTTPStoredPayload,
 	"internal/modules/delinquency/service.go:func apply \"overdue_amount\"":                              notHTTPStoredPayload,
@@ -179,8 +178,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"expected_amount_cents\"":            notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"billed_amount_cents\"":        notHTTPLogContext,
 	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"expected_amount_cents\"":      notHTTPLogContext,
-	"internal/modules/webhooks/nmi.go:func reconcileNMIChargebackEntry \"amount_cents\"":                 notHTTPLogContext,
-	"internal/modules/webhooks/nmi.go:func reconcileNMIChargebackEntry \"matched_amount_cents\"":         notHTTPLogContext,
 	"internal/river/jobs_solana_crank.go:func finalizePull \"solana_token_amount\"":                      notHTTPStoredMetadata,
 }
 

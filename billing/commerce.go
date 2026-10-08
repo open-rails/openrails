@@ -27,7 +27,7 @@ type CheckoutOption struct {
 }
 
 // GetCheckoutConfigParams selects the price whose options GetCheckoutConfig
-// lists: at most one of PriceID or PriceKey.
+// lists: at most one of PriceID or the pair ProductKey + PriceKey.
 type GetCheckoutConfigParams struct {
 	PriceID    PriceID
 	PriceKey   string
@@ -120,7 +120,7 @@ type CheckoutCustomerIdentity struct {
 // session.
 type CreateCheckoutAttemptParams struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
-	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
+	// Supply PriceID or the pair ProductKey + PriceKey. Keys are always opaque, even
 	// when they resemble ids. Accepted retries retain the original offer.
 	PriceID    PriceID `json:"price_id"`
 	PriceKey   string  `json:"price_key"`

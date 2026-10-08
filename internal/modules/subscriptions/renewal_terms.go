@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -22,23 +23,23 @@ import (
 // Preparation reads catalog and scheduled changes before admission; settlement
 // consumes these facts without reinterpreting a subsequently edited catalog.
 type RenewalTerms struct {
-	AccessDurationHours  *int            `json:"access_duration_hours"`
-	PSPID                uuid.UUID       `json:"psp_id"`
-	SubscriptionID       uuid.UUID       `json:"subscription_id"`
-	CustomerID           uuid.UUID       `json:"customer_id"`
-	FromPriceID          uuid.UUID       `json:"from_price_id"`
-	FromProductID        uuid.UUID       `json:"from_product_id"`
-	PriceID              uuid.UUID       `json:"price_id"`
-	ProductID            uuid.UUID       `json:"product_id"`
-	ProductName          string          `json:"product_name"`
-	Amount               int64           `json:"amount,string"`
-	Currency             string          `json:"currency"`
-	PeriodStart          time.Time       `json:"period_start"`
-	PeriodEnd            time.Time       `json:"period_end"`
-	Entitlements         map[string]*int `json:"entitlements"`
-	PreviousEntitlements map[string]*int `json:"previous_entitlements"`
-	RepriceID            *uuid.UUID      `json:"reprice_id,omitempty"`
-	ScheduledPriceID     *uuid.UUID      `json:"scheduled_price_id,omitempty"`
+	LegacyEntitlements  map[string]*int `json:"legacy_entitlements,omitzero"`
+	AccessDurationHours *int            `json:"access_duration_hours"`
+	PSPID               uuid.UUID       `json:"psp_id"`
+	SubscriptionID      uuid.UUID       `json:"subscription_id"`
+	CustomerID          uuid.UUID       `json:"customer_id"`
+	FromPriceID         uuid.UUID       `json:"from_price_id"`
+	FromProductID       uuid.UUID       `json:"from_product_id"`
+	PriceID             uuid.UUID       `json:"price_id"`
+	ProductID           uuid.UUID       `json:"product_id"`
+	ProductName         string          `json:"product_name"`
+	Amount              int64           `json:"amount,string"`
+	Currency            string          `json:"currency"`
+	PeriodStart         time.Time       `json:"period_start"`
+	PeriodEnd           time.Time       `json:"period_end"`
+	Entitlements        []string        `json:"entitlements"`
+	RepriceID           *uuid.UUID      `json:"reprice_id,omitempty"`
+	ScheduledPriceID    *uuid.UUID      `json:"scheduled_price_id,omitempty"`
 }
 
 func (t RenewalTerms) Validate() error {
@@ -75,8 +76,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	terms = RenewalTerms{
 		PSPID: sub.PspID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, FromPriceID: sub.PriceID, FromProductID: sub.ProductID,
 		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot,
-		Entitlements:         models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
-		PreviousEntitlements: models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
+		Entitlements: models.CloneEntitlements(sub.EntitlementsSnapshot),
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		if agreement == nil {
@@ -92,8 +92,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		terms.Amount, terms.Currency, terms.ProductName = agreement.Amount, agreement.Currency, agreement.ProductName
 		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
-		terms.Entitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
-		terms.PreviousEntitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
+		terms.Entitlements = models.CloneEntitlements(agreement.Entitlements)
 	} else if agreement != nil {
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
 	}
@@ -133,7 +132,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	}
 	terms.ProductName = product.DisplayName
 	if terms.ProductID != sub.ProductID || terms.ScheduledPriceID != nil {
-		terms.Entitlements = models.CloneEntitlementsSpec(product.EntitlementsSpec)
+		terms.Entitlements = models.CloneEntitlements(product.Entitlements)
 	}
 	// Empty is a valid accepted benefit snapshot. Do not turn it into the
 	// product's current benefits during settlement.
@@ -183,7 +182,7 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 		sub.ScheduledPriceID = nil
 	}
 	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
-	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(terms.Entitlements)
+	sub.EntitlementsSnapshot = models.CloneEntitlements(terms.Entitlements)
 	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
 	return alreadyAdvanced, nil
 }
@@ -227,7 +226,16 @@ func renewalPaymentCustodian(params *RenewMembershipParams) string {
 func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
 	type plain RenewalTerms
 	var decoded plain
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	wire := struct {
+		*plain
+		Entitlements json.RawMessage `json:"entitlements"`
+	}{plain: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	var err error
+	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
+	if err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

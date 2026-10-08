@@ -19,15 +19,15 @@ func samePurchaseEnd(a, b *time.Time) bool {
 	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
 }
 
-func PurchaseWindows(spec map[string]*int, duration *int, accepted, entitlementStart time.Time) (map[string]PurchaseWindow, PurchaseWindow) {
+func PurchaseWindows(spec []string, duration *int, accepted, entitlementStart time.Time, historicalHours map[string]int) (map[string]PurchaseWindow, PurchaseWindow) {
 	wanted := make(map[string]PurchaseWindow, len(spec))
-	for name, hours := range spec {
+	for _, name := range spec {
 		var end *time.Time
 		if duration != nil && *duration > 0 {
 			v := entitlementStart.Add(time.Duration(*duration) * time.Hour)
 			end = &v
-		} else if duration == nil && hours != nil && *hours > 0 {
-			v := entitlementStart.Add(time.Duration(*hours) * time.Hour)
+		} else if hours := historicalHours[name]; duration == nil && hours > 0 {
+			v := entitlementStart.Add(time.Duration(hours) * time.Hour)
 			end = &v
 		}
 		wanted[name] = PurchaseWindow{Start: entitlementStart, End: end}

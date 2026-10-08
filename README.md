@@ -35,7 +35,7 @@ OpenRails integrates with several payment-processors:
 
 You'll need a Go webserver, and Postgres (v18 or higher).
 
-Here we build an OnlyDemo-style creator site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy individual posts or a bundle, and subscribe to a channel for 30-day or 365-day terms. Each term is a separate product granting the same membership key. See [OnlyDemo](https://github.com/open-rails/onlydemo) for the complete creator application. An independent [prepaid API-balance catalog](#prepaid-api-balance-catalog) appears later.
+Here we build an OnlyDemo-style creator site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy CSS courses individually or as a bundle, and subscribe to a channel for 30-day or 365-day terms. The membership is one product with monthly and yearly prices. See [OnlyDemo](https://github.com/open-rails/onlydemo) for the complete creator application. An independent [prepaid API-balance catalog](#prepaid-api-balance-catalog) appears later.
 
 First install:
 
@@ -49,92 +49,92 @@ Next, declare your catalog as a YAML config file:
 # catalog.yaml
 schema_version: 1 # the file format
 products:
-  - key: post-101
-    display_name: Post 101 — Behind the scenes
-    entitlements_spec: {"post:101": null}
+  - key: course-101
+    display_name: Course 101 — Intro to CSS
+    entitlements: ["course:101"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 4990000 # $4.99; every USD amount is in micros
-        access_duration: null # permanent access to this post
-        billing_interval: null
-      - key: rental-3-days
-        currency: USD
-        unit_amount: 1990000 # $1.99, paid once
+        amount: 4.99 USD
+        access_duration: null # permanent access
+      - key: rent
+        amount: 1.99 USD
         access_duration: 3 days
-        billing_interval: null
 
-  - key: post-102
-    display_name: Post 102 — The full shoot
-    entitlements_spec: {"post:102": null}
+  - key: course-102
+    display_name: Course 102 — Intro to Tailwind
+    entitlements: ["course:102"]
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 6990000 # $6.99, paid once
+        amount: 4.99 USD
         access_duration: null
-        billing_interval: null
+      - key: rent
+        amount: 1.99 USD
+        access_duration: 3 days
 
-  - key: featured-posts-bundle
-    display_name: Featured posts — 101 and 102
-    entitlements_spec: {"post:101": null, "post:102": null} # the same keys as individual sales
+  - key: course-bundle
+    display_name: CSS courses 101 and 102
+    entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 9990000 # $9.99 for both, instead of $11.98 separately
+        amount: 8.99 USD # both courses, instead of 9.98 USD separately
         access_duration: null
-        billing_interval: null
 
-  - key: channel-main-monthly
-    display_name: Main channel — 30-day membership
-    entitlements_spec: {"channel:main:membership": null}
-    tier_group: channel-main # the two term products are mutually exclusive memberships
-    tier_rank: 1
+  - key: channel-main
+    display_name: Main channel membership
+    entitlements: ["channel:main:membership"]
     prices:
-      - key: subscription
-        currency: USD
-        unit_amount: 9990000 # $9.99 every 30 days
+      - key: monthly
+        amount: 9.99 USD
         access_duration: 30 days
         billing_interval: 30 days
-
-  - key: channel-main-yearly
-    display_name: Main channel — 365-day membership
-    entitlements_spec: {"channel:main:membership": null} # same benefit, separate product
-    tier_group: channel-main
-    tier_rank: 1
-    prices:
-      - key: subscription
-        currency: USD
-        unit_amount: 99990000 # $99.99 every 365 days
+      - key: yearly
+        amount: 99.99 USD
         access_duration: 365 days
         billing_interval: 365 days
 ```
 
 Product keys identify commercial offerings; entitlement keys identify the access
-they grant. Buying `post-101` or `featured-posts-bundle` grants `post:101`, so the
+they grant. Buying `course-101` or `course-bundle` grants `course:101`, so the
 host checks the same key for either purchase. A rental grants that key until its
-expiry. Both membership products grant `channel:main:membership`; the host uses
+expiry. Both membership prices grant `channel:main:membership`; the host uses
 that key for membership-included posts. It does not automatically unlock paid
-posts 101 and 102. The shared `tier_group` prevents parallel memberships in the
-same channel.
+courses 101 and 102. The two membership prices belong to the same product.
 
-The short post and channel IDs make this example readable. OnlyDemo derives its
+The short content and channel IDs make this example readable. OnlyDemo derives its
 keys from stable UUIDs, such as `post:<post UUID>`; slugs and titles can change
 without changing what was purchased. OpenRails treats these keys as opaque
-strings. A post can contain several media files; the host decides what access to
-that post includes.
+strings. A course can contain several media files; the host decides what access
+to that content includes.
 
-This executable example uses the current schema: `entitlements_spec` is a map
-of keys, with `null` following the purchased access terms. A product's name or key
-does not implicitly grant a same-named entitlement. Durations accept positive
+`entitlements` is a list of arbitrary, opaque strings. OpenRails does not
+distinguish a content key such as `course:101` from a service key such as `premium`;
+your application decides what each permits. Keys are nonblank strings of at most 256 bytes, with no per-key durations.
+A product name or key does not implicitly grant an entitlement. Use `[]` to grant
+none; omitted fields preserve an existing product's list.
+
+Price amounts always name their currency: `amount: 9.99 USD`, `amount: 199 MXN`,
+`amount: 1 SOL` or `amount: 10 USDC`. A bare `amount: 9.99` is invalid, and the
+code must be one OpenRails recognizes: major fiat currencies (USD, EUR, GBP, MXN,
+JPY, …) and the Solana tokens SOL, USDC, USDT, PYUSD, USD1 and USDG.
+`GET /v1/currencies` lists them all. Conversion uses the currency's registered
+precision exactly, without rounding. A price can use `amount` or the numeric
+`unit_amount` and `currency` fields, never both forms.
+Payment rails still determine which currencies they can charge. One-time Solana
+checkout supports token prices paid in the matching token when the merchant
+accepts it; those amounts need no FX conversion. Paying a token-denominated price
+with a different token is unsupported. New Solana recurring plans remain
+USD-denominated, and card rails accept only fiat currencies their provider supports.
+
+Durations accept positive
 whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
 `access_duration_hours`, `billing_interval_hours` and `trial_duration_hours` are
 also accepted; use only one form of each field.
 
 **Access and ownership.** Use `HasEntitlement` to check whether the customer may
-access a post now. That includes individual purchases, bundles and unexpired
+access content now. That includes individual purchases, bundles and unexpired
 rentals. `ListProductAccess` identifies the product actually acquired and its
 expiry: a bundle purchase records the bundle product, while its entitlement
-grants unlock the constituent posts. Current access alone does not prove a
+grants unlock the constituent courses. Current access alone does not prove a
 permanent purchase. Refunds and revocations can withdraw granted access.
 
 **Billing and access.** `billing_interval` sets the time between payments. A
@@ -164,8 +164,8 @@ POST /billing/v1/me/checkout-sessions
 Content-Type: application/json
 
 {
-  "product_key": "channel-main-monthly",
-  "price_key": "subscription",
+  "product_key": "channel-main",
+  "price_key": "monthly",
   "auto_renew": false
 }
 ```
@@ -177,7 +177,7 @@ Hosts that require manual cancellation simply omit the flag and need no renewal
 toggle in their checkout UI.
 
 Product keys are merchant-wide; price keys belong to their product. For example,
-`channel-main-monthly.subscription` selects the 30-day membership offer.
+`channel-main.monthly` selects the 30-day membership offer.
 OpenRails assigns immutable price revisions automatically, starting at v0.
 Existing subscribers keep their accepted price and benefits until explicitly
 migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
@@ -208,82 +208,79 @@ product and offer:
 # catalog-update.yaml
 schema_version: 1
 products:
-  - key: channel-main-monthly
-    display_name: Main channel Plus — 30-day membership
+  - key: channel-main
+    display_name: Main channel Plus membership
     prices:
-      - key: subscription
-        unit_amount: 12990000 # $12.99; currency, duration and renewal terms are preserved
+      - key: monthly
+        amount: 12.99 USD
 ```
 
-For the initial catalog, this creates `channel-main-monthly.subscription.v1` at
-$12.99 and archives `channel-main-monthly.subscription.v0` at $9.99. The old price
+The `amount` field sets both the amount and currency. Other omitted fields
+preserve their existing values. If no money fields are supplied, both the amount
+and currency are preserved.
+
+For the initial catalog, this creates `channel-main.monthly.v1` at
+$12.99 and archives `channel-main.monthly.v0` at $9.99. The old price
 record is retained unchanged. New subscribers buy v1; existing subscribers keep their exact accepted price and
-entitlements indefinitely. Product descriptions and `entitlements_spec` can also
+entitlements indefinitely. Product descriptions and `entitlements` can also
 be edited in place; changed entitlements apply to new purchases, not retroactively
 to existing grants. Neither a YAML price change nor archival schedules a
 subscription migration.
 
 **Change what a product grants.** Add a named benefit for new memberships on
-both term products. The supplied map replaces the product's entire entitlement
-specification, so retain the original membership key:
+the membership product. The supplied list replaces the product's entire entitlement
+list, so retain the original membership key:
 
 ```yaml
 # add-membership-benefit.yaml
 schema_version: 1
 products:
-  - key: channel-main-monthly
-    entitlements_spec:
-      "channel:main:membership": null
-      "channel:main:downloads": null
-  - key: channel-main-yearly
-    entitlements_spec:
-      "channel:main:membership": null
-      "channel:main:downloads": null
+  - key: channel-main
+    entitlements: ["channel:main:membership", "channel:main:downloads"]
 ```
 
 Your application can check the new downloads key for its download feature. Prices
 are omitted and stay unchanged. Existing subscribers keep their accepted benefit
 snapshot; this file does not grant or remove benefits retroactively. The same
-rule applies to editing a bundle's granted post keys: earlier buyers retain the
+rule applies to editing a bundle's granted keys: earlier buyers retain the
 keys they bought. Moving existing customers to new terms is a separate operation
 from changing the offers available to new customers.
 
 **Retire the monthly offer.** Stop new 30-day memberships while keeping the
-separate yearly product on sale:
+yearly price on sale:
 
 ```yaml
 # retire-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-main-monthly
+  - key: channel-main
     prices:
-      - key: subscription
+      - key: monthly
         archived: true
 ```
 
-The omitted `channel-main-yearly` product stays unchanged. Monthly subscribers
+The omitted `yearly` price under `channel-main` stays unchanged. Monthly subscribers
 keep their accepted price and billing schedule. Archiving an offer does not move
 them to another product, cancel them, revoke access, or delete history.
 
 **Replace a rental offer.** Retire the three-day rental and add a seven-day
-rental under the same post product:
+rental under the same course product:
 
 ```yaml
 # replace-rental.yaml
 schema_version: 1
 products:
-  - key: post-101
+  - key: course-101
     prices:
-      - key: rental-3-days
+      - key: rent
         archived: true
       - key: rental-7-days
-        currency: USD
-        unit_amount: 2990000 # $2.99, paid once
+        amount: 2.99 USD
         access_duration: 7 days
         billing_interval: null
 ```
 
-The permanent `post-101.purchase` offer and the bundle remain available.
+The permanent `course-101.purchase` offer and the bundle remain available.
 Existing three-day rentals retain their original expiry; a new offer never
 extends them automatically. A price cannot move to another product.
 
@@ -293,12 +290,12 @@ extends them automatically. A price cannot move to another product.
 # retire-bundle.yaml
 schema_version: 1
 products:
-  - key: featured-posts-bundle
+  - key: course-bundle
     archived: true
 ```
 
-The bundle stops selling, while existing buyers keep access to both posts. The
-individual post products and the membership products are omitted and stay
+The bundle stops selling, while existing buyers keep access to both courses. The
+individual course products and the membership product are omitted and stay
 unchanged. Archiving one product does not retire other products granting the same
 keys. To make the bundle available again, apply a new batch:
 
@@ -306,7 +303,7 @@ keys. To make the bundle available again, apply a new batch:
 # restore-bundle.yaml
 schema_version: 1
 products:
-  - key: featured-posts-bundle
+  - key: course-bundle
     archived: false
 ```
 
@@ -320,11 +317,10 @@ give the complete financial terms to select the intended historical revision:
 # restore-original-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-main-monthly
+  - key: channel-main
     prices:
-      - key: subscription
-        currency: USD
-        unit_amount: 9990000 # the original $9.99 terms
+      - key: monthly
+        amount: 9.99 USD # the original $9.99 terms
         access_duration: 30 days
         billing_interval: 30 days
         trial_unit_amount: null
@@ -334,7 +330,7 @@ products:
 
 This restores the original monthly price ID and v0; it does not rewrite history
 or create another copy of the same terms. If a different monthly revision is
-currently live, it is archived. The separate yearly product remains available
+currently live, it is archived. The yearly price remains available
 because it is omitted. Complete terms, including explicit null trial fields, avoid ambiguity
 when a key has several archived revisions; a known immutable price `id` can also
 select a particular revision.
@@ -553,16 +549,16 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// The host decides which key grants access to each post. Paid posts stay
-	// separate from membership-included posts; a bundle grants both paid keys.
-	postAccess := map[string]string{
-		"101": "post:101",
-		"102": "post:102",
+	// The host decides which key grants access to each content item. Paid courses
+	// stay separate from membership-included posts; the bundle grants both course keys.
+	contentAccess := map[string]string{
+		"101": "course:101",
+		"102": "course:102",
 		"103": "channel:main:membership",
 	}
-	r.GET("/posts/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
+	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
 		id := c.Param("id")
-		entitlement, exists := postAccess[id]
+		entitlement, exists := contentAccess[id]
 		if !exists {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
@@ -687,12 +683,12 @@ export function App() {
   return (
     <BillingUiProvider appearance={{ theme: "auto" }}>
       <BillingProvider client={billing}>
-        <BuyButton productKey="post-101" priceKey="purchase" label="Buy Post 101 — $4.99" />
-        <BuyButton productKey="post-101" priceKey="rental-3-days" label="Rent Post 101 for 3 days — $1.99" />
-        <BuyButton productKey="post-102" priceKey="purchase" label="Buy Post 102 — $6.99" />
-        <BuyButton productKey="featured-posts-bundle" priceKey="purchase" label="Buy both posts — $9.99" />
-        <BuyButton productKey="channel-main-monthly" priceKey="subscription" label="Join for $9.99 every 30 days" />
-        <BuyButton productKey="channel-main-yearly" priceKey="subscription" label="Join for $99.99 every 365 days" />
+        <BuyButton productKey="course-101" priceKey="purchase" label="Buy Course 101 — $4.99" />
+        <BuyButton productKey="course-101" priceKey="rent" label="Rent Course 101 for 3 days — $1.99" />
+        <BuyButton productKey="course-102" priceKey="purchase" label="Buy Course 102 — $4.99" />
+        <BuyButton productKey="course-bundle" priceKey="purchase" label="Buy both courses — $8.99" />
+        <BuyButton productKey="channel-main" priceKey="monthly" label="Join for $9.99 every 30 days" />
+        <BuyButton productKey="channel-main" priceKey="yearly" label="Join for $99.99 every 365 days" />
         {/* Subscriptions (cancel, resume, change card), saved cards and payment history. */}
         <AccountBilling plansHref="/plans" collectionCurrency="USD" />
       </BillingProvider>
@@ -716,7 +712,7 @@ function BuyButton({ productKey, priceKey, label }: { productKey: string; priceK
           onOpenChange={(open) => !open && setSessionId(undefined)}
           // Card entry happens in the processor's iframe; the selected offer determines what is bought.
           source={billing.checkoutSource(sessionId)}
-          onComplete={() => location.assign("/posts")}
+          onComplete={() => location.assign("/content")}
         />
       )}
     </>
@@ -724,10 +720,10 @@ function BuyButton({ productKey, priceKey, label }: { productKey: string; priceK
 }
 ```
 
-After a bundle checkout, the same `post:101` and `post:102` checks used for
-individual purchases allow both videos. A rental makes its post accessible until
-expiry. Either membership product allows membership-included post 103 through
-`channel:main:membership`; it does not mark posts 101 and 102 as purchased. Failed
+After a bundle checkout, the same `course:101` and `course:102` checks used for
+individual purchases allow both pieces of content. A rental makes its course accessible until
+expiry. Either membership price allows membership-included post 103 through
+`channel:main:membership`; it does not mark courses 101 and 102 as purchased. Failed
 renewals follow the configured dunning policy, and `AccountBilling` lets members
 fix their payment method.
 
@@ -754,8 +750,7 @@ products:
       # expires_after_days defaults to 365, starting when payment succeeds
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 10000000 # pay $10
+        amount: 10 USD
         billing_interval: null
 
   - key: api-credit-100
@@ -766,8 +761,7 @@ products:
       expires_after_days: 365
     prices:
       - key: purchase
-        currency: USD
-        unit_amount: 80000000 # pay $80 for $100 of balance: a bulk discount
+        amount: 80 USD # grants 100 USD of balance: a bulk discount
         billing_interval: null
 
   - key: api-deposit
@@ -778,13 +772,16 @@ products:
       expires_after_days: 365
     prices:
       - key: deposit
-        currency: USD
-        unit_amount: 0 # customer_amount requires an explicit checkout amount; this is not free
+        amount: 0 USD # customer_amount requires an explicit checkout amount; this is not free
         customer_amount:
           min_amount: 1000000 # at least $1
           max_amount: 1000000000 # at most $1,000
         billing_interval: null
 ```
+
+The readable `amount` field above belongs to each price. Credit-grant amounts
+and customer-selected minimums and maximums keep their numeric native units
+(USD micros); they are separate policy fields.
 
 Customers pay ahead of time; metered API usage draws down
 the funded balance. Each top-up uses the existing currency balance and usage ledger.
@@ -853,7 +850,7 @@ Customer side (your users):
 
 ### Checkout catalog references
 
-Use a stable product/price key pair such as `post-123.purchase`. `ApplyCatalog` changes its terms by
+Use a stable product/price key pair such as `course-101.purchase`. `ApplyCatalog` changes its terms by
 creating an immutable price version and retiring its predecessor. Checkout owns
 current availability, amount, permanent ownership eligibility and payment
 idempotency; a host wrapper supplies verified identity and its content policy.

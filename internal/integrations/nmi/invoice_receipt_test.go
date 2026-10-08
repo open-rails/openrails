@@ -12,7 +12,7 @@ import (
 )
 
 func TestInvoiceReceiptRequiresExactPositiveProviderHistory(t *testing.T) {
-	for _, name := range []string{"qualified", "optional_query_fields_absent", "wrong_vault", "wrong_currency", "another_sale", "refund", "inexact_amount", "missing_time", "malformed_invoice", "unbound_history", "missing_exact_read", "v5_refund"} {
+	for _, name := range []string{"qualified", "optional_query_fields_absent", "token_currency", "wrong_vault", "wrong_currency", "another_sale", "refund", "inexact_amount", "missing_time", "malformed_invoice", "unbound_history", "missing_exact_read", "v5_refund"} {
 		t.Run(name, func(t *testing.T) {
 			invoice, order := uuid.New(), uuid.New()
 			description := "invoice " + invoice.String()
@@ -25,6 +25,8 @@ func TestInvoiceReceiptRequiresExactPositiveProviderHistory(t *testing.T) {
 				txn = strings.ReplaceAll(strings.ReplaceAll(txn, "<customer_vault_id>vault</customer_vault_id>", ""), "<currency>USD</currency>", "")
 			case "wrong_vault":
 				txn = strings.ReplaceAll(txn, "<customer_vault_id>vault", "<customer_vault_id>other")
+			case "token_currency":
+				txn = strings.ReplaceAll(txn, "<currency>USD", "<currency>SOL")
 			case "wrong_currency":
 				txn = strings.ReplaceAll(txn, "<currency>USD", "<currency>EUR")
 			case "inexact_amount":
@@ -60,6 +62,9 @@ func TestInvoiceReceiptRequiresExactPositiveProviderHistory(t *testing.T) {
 						return http.StatusNotFound, `{}`
 					}
 					payment := v5Transaction{ID: "txn", Object: "transaction", Currency: "USD", CustomerVaultID: "vault", Response: "1", Actions: []v5TxnAction{{Type: "sale", Amount: "5.00", Success: true}}}
+					if name == "token_currency" {
+						payment.Currency = "SOL"
+					}
 					if name == "v5_refund" {
 						payment.Actions = append(payment.Actions, v5TxnAction{Type: "refund", Amount: "1.00", Success: true})
 					}

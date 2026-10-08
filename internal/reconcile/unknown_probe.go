@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // #665: per-subscription provider probes — the #367 liveness worker's probing
@@ -138,10 +139,13 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]Remot
 		return out, nil
 	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
+		if err := moneyutil.RequireFiatCurrency(probe.SuccessCurrency); err != nil {
+			return nil, err
+		}
 		if probe.SuccessAt.IsZero() {
 			return nil, errors.New("NMI sale has no readable action time")
 		}
-		amount, err := nmi.ParseAmountMinor(probe.SuccessAmount, probe.SuccessCurrency)
+		amount, err := moneyutil.DecimalToRailMinor(probe.SuccessCurrency, probe.SuccessAmount)
 		if err != nil {
 			return nil, err
 		}
@@ -156,10 +160,13 @@ func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]Remot
 		})
 	}
 	if probe.DeclineFound {
+		if err := moneyutil.RequireFiatCurrency(probe.DeclineCurrency); err != nil {
+			return nil, err
+		}
 		if probe.DeclineAt.IsZero() {
 			return nil, errors.New("NMI decline has no readable action time")
 		}
-		amount, err := nmi.ParseAmountMinor(probe.DeclineAmount, probe.DeclineCurrency)
+		amount, err := moneyutil.DecimalToRailMinor(probe.DeclineCurrency, probe.DeclineAmount)
 		if err != nil {
 			return nil, err
 		}
@@ -301,7 +308,6 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	sub := RemoteSubscription{
 		RailSubscriptionID: subj.RailSubscriptionID,
 		RawStatus:          res.RawStatus,
-		Currency:           "USD", // DataLink convention (bulk fetcher parity)
 	}
 	// Provisional SMS vocabulary (ccbill.SubscriptionStatusResult): "2" active
 	// recurring, "1" active non-recurring (no future rebill), "0" inactive.

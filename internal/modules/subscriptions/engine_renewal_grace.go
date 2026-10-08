@@ -86,14 +86,6 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	return nil
 }
 
-func entitlementNames(spec map[string]*int) []string {
-	names := make([]string, 0, len(spec))
-	for name := range spec {
-		names = append(names, name)
-	}
-	return names
-}
-
 // EnsureRenewalGrace materializes the merchant's renewal-hold policy for an
 // existing paid subscription. The caller owns its transaction and row lock;
 // imports use the same path as observed provider renewals.
@@ -104,5 +96,5 @@ func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d
 	if sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod {
 		return s.dunningAccess(ctx, d, s.newLifecycleEntitlementService(d), sub, s.now())
 	}
-	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, entitlementNames(sub.EntitlementsSpecSnapshot), *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
+	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, sub.EntitlementsSnapshot, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
 }
