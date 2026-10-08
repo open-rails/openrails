@@ -239,6 +239,9 @@ func dump(ctx context.Context, conn *pgx.Conn, schema string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Text ORDER BY follows the scratch database locale. Artifacts use byte
+	// order so libc/ICU or Alpine/Debian locale defaults cannot reorder objects.
+	slices.SortFunc(types, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
 	for _, t := range types {
 		out.WriteString("\ntype " + t[0] + " " + t[1] + "\n")
 	}
@@ -341,6 +344,7 @@ func dump(ctx context.Context, conn *pgx.Conn, schema string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	slices.SortFunc(others, func(a, b [2]string) int { return strings.Compare(a[0], b[0]) })
 	for _, o := range others {
 		relations = append(relations, relation{name: o[0], lines: strings.Split(o[1], "\n")})
 	}

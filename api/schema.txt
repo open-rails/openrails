@@ -2808,19 +2808,6 @@ function billing.lock_merchant_configuration_write()
    IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
   END $function$
 
-function billing.monthly_normalized_amount(bigint,integer)
-  CREATE OR REPLACE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer)
-   RETURNS bigint
-   LANGUAGE sql
-   IMMUTABLE PARALLEL SAFE
-  AS $function$
-  SELECT CASE
-      WHEN p_hours IS NULL OR p_hours <= 0 THEN 0
-      WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
-      ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
-  END
-  $function$
-
 function billing.month_partitions(name)
   CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)
    RETURNS TABLE(partition name, range_from timestamp with time zone, range_to timestamp with time zone)
@@ -2835,6 +2822,19 @@ function billing.month_partitions(name)
         JOIN pg_class c ON c.oid = i.inhrelid
        WHERE i.inhparent = to_regclass(quote_ident(p_table))
        ORDER BY 2
+  $function$
+
+function billing.monthly_normalized_amount(bigint,integer)
+  CREATE OR REPLACE FUNCTION billing.monthly_normalized_amount(p_amount bigint, p_hours integer)
+   RETURNS bigint
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT CASE
+      WHEN p_hours IS NULL OR p_hours <= 0 THEN 0
+      WHEN p_hours >= 648 THEN round(p_amount::numeric / greatest(round(p_hours / 730.0), 1))::bigint
+      ELSE round(p_amount::numeric * 730.0 / p_hours)::bigint
+  END
   $function$
 
 function billing.preserve_subscription_collection_policy()
