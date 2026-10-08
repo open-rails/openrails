@@ -551,37 +551,6 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 	})
 }
 
-// ResumeSubscriptionAccess re-opens a resumed auto-renew subscription's latest
-// bounded window (ends_at = NULL), undoing an advance-written cancel closure
-// (#691). Gated on the sub actually projecting standing access again (auto-renew
-// price + non-terminal status), so terminal/bounded subs are a no-op.
-func (s *EntitlementService) ResumeSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("entitlement service not initialized")
-	}
-	mID, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	now := s.now().UTC()
-	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		standing, err := q.SubscriptionProjectsStandingAccess(ctx, gen.SubscriptionProjectsStandingAccessParams{
-			MerchantID: mID.UUID(), ID: subscriptionID,
-		})
-		if err != nil {
-			return err
-		}
-		if !standing {
-			return nil
-		}
-		return q.ResumeEntitlementsBySubscription(ctx, gen.ResumeEntitlementsBySubscriptionParams{
-			MerchantID: mID.UUID(),
-			SourceID:   subscriptionID, Now: now,
-		})
-	})
-}
-
 func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")

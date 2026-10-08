@@ -70,10 +70,6 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 					return nil, fmt.Errorf("end access %s: cancel Solana subscription: %w", sub.ID, err)
 				}
 			}
-		case lifecycle.ReopenAccess:
-			if err := ents.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
-				return nil, fmt.Errorf("reopen access %s: %w", sub.ID, err)
-			}
 		case lifecycle.QueueProviderCancel:
 			if err := s.queueProviderCancel(ctx, d, sub, now); err != nil {
 				return nil, err
@@ -82,13 +78,9 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			if err := s.dunningAccess(ctx, d, ents, sub, now); err != nil {
 				return nil, err
 			}
-		case lifecycle.CloseDunning:
-			// A recovered membership's access is standing again.
-			if sub.Status == models.StatusActive {
-				if err := ents.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
-					return nil, fmt.Errorf("reopen access %s: %w", sub.ID, err)
-				}
-			}
+		case lifecycle.CloseDunning, lifecycle.ReopenAccess:
+			// Paid grants retain their own expiry when billing resumes.
+
 		case lifecycle.Notify:
 			n, err := s.queueNotice(ctx, d, sub, e.Kind, granted, opts)
 			if err != nil {

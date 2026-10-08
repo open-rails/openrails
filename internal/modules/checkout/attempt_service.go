@@ -380,20 +380,22 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 		}
 	}
 	payload, _ := json.Marshal(struct {
-		PriceID     string
-		PriceKey    string `json:",omitempty"`
-		ProductKey  string `json:",omitempty"`
-		Amount      *int64 `json:",omitempty"`
-		Mode        string
-		Payment     CheckoutAttemptPaymentRequest
-		Metadata    map[string]string
-		SuccessURL  string
-		CancelURL   string
-		Entitlement string            `json:",omitempty"`
-		OfferKind   billing.OfferKind `json:",omitempty"`
+		CancelAfterInitial bool `json:",omitempty"`
+		PriceID            string
+		PriceKey           string `json:",omitempty"`
+		ProductKey         string `json:",omitempty"`
+		Amount             *int64 `json:",omitempty"`
+		Mode               string
+		Payment            CheckoutAttemptPaymentRequest
+		Metadata           map[string]string
+		SuccessURL         string
+		CancelURL          string
+		Entitlement        string            `json:",omitempty"`
+		OfferKind          billing.OfferKind `json:",omitempty"`
 	}{
-		PriceID:  strings.TrimSpace(req.PriceID),
-		PriceKey: req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
+		CancelAfterInitial: req.AutoRenew != nil && !*req.AutoRenew,
+		PriceID:            strings.TrimSpace(req.PriceID),
+		PriceKey:           req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
 		Mode:        strings.TrimSpace(req.Mode),
 		Payment:     payment,
 		Metadata:    normalizeMetadata(req.Metadata),
@@ -510,6 +512,9 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	if req.Payment.PSPID != uuid.Nil && req.Payment.PSPID != pspID {
 		return nil, fmt.Errorf("%w: PSP assertion does not match selected account", ErrCheckoutAttemptValidation)
 	}
+	if err := validateOrderRenewal(price, req.AutoRenew, models.Rail(rail)); err != nil {
+		return nil, err
+	}
 	ctx = db.WithPSPID(ctx, pspID)
 	price = priceForCheckoutTarget(price, decision.Target)
 
@@ -542,6 +547,9 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		requestFingerprint = checkoutAttemptRequestFingerprintForRail(req, user, rail)
 	}
 	railState := map[string]any{}
+	if req.AutoRenew != nil {
+		railState["auto_renew"] = *req.AutoRenew
+	}
 	if req.Amount != nil {
 		railState["customer_selected"] = true
 	}
@@ -816,7 +824,7 @@ func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt
 	if benefits == nil {
 		benefits = map[string]*int{}
 	}
-	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour), Entitlements: benefits}
+	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour), Entitlements: benefits}
 	if err := terms.Validate(); err != nil {
 		return err
 	}
@@ -1769,6 +1777,7 @@ func (s *CheckoutAttemptService) initializeCheckoutAttempt(ctx context.Context, 
 		railSelector = strings.TrimSpace(psp)
 	}
 	req := &CheckoutRequest{
+		AutoRenew:         orderAutoRenewInput(session),
 		PriceID:           billing.PriceID(*session.PriceID).String(),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
@@ -1971,7 +1980,7 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 	}
 
 	if terms, err := readInitialMembershipQuote(session); err == nil {
-		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
+		resp.MembershipQuote = &CheckoutAttemptMembershipQuote{AutoRenew: !terms.CancelAfterInitial, ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), AccessDurationHours: terms.AccessDurationHours, Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
 	}
 	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
 	// purchase financially failed. Keep callers polling the accepted attempt

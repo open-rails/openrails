@@ -206,38 +206,8 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		if err != nil {
 			return err
 		}
-		// #691 projection inversion: a grant sourced from an AUTO-RENEW sub in a
-		// non-terminal provider-owned state projects one STANDING open window (ends_at NULL) per
-		// (customer, entitlement, source) instead of per-period windows. The grant
-		// ledger stays per-period/bounded; only the projection is standing. Access
-		// for that legacy cohort ends only by PROOF (cancel closure, terminal dunning, provider-
-		// confirmed death). Engine card access keeps its paid period end even when
-		// renewal workers are unavailable; the policy query makes that distinction.
-		standing := false
-		var standingSubID uuid.UUID
-		if SourceType(g.SourceType) == Subscription {
-			if subID, perr := uuid.Parse(sourceIDOf(g)); perr == nil {
-				standing, err = l.q.SubscriptionProjectsStandingAccess(ctx, gen.SubscriptionProjectsStandingAccessParams{
-					MerchantID: l.merchant, ID: subID,
-				})
-				if err != nil {
-					return fmt.Errorf("grants: standing-access check for %s: %w", sourceIDOf(g), err)
-				}
-				standingSubID = subID
-			}
-		}
+
 		for _, f := range feats {
-			if standing {
-				ok, err := l.q.StandingSubscriptionEntitlementExists(ctx, gen.StandingSubscriptionEntitlementExistsParams{
-					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f, SourceID: standingSubID,
-				})
-				if err != nil {
-					return fmt.Errorf("grants: standing window check %q: %w", f, err)
-				}
-				if ok {
-					continue // one standing window satisfies every per-period grant
-				}
-			}
 			exists, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
 				MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
 			})
@@ -249,9 +219,6 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 			}
 			// Keep this source's full interval even when other sources overlap it.
 			endAt := g.EndsAt
-			if standing {
-				endAt = nil
-			}
 			gid := g.ID
 			// The window keeps its grant's source, so source-keyed readers
 			// (revoke by subscription, grace, purchase) work, and links to its

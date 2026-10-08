@@ -34,6 +34,7 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 }
 
 type CheckoutRequest struct {
+	AutoRenew        *bool `json:"auto_renew,omitempty"`
 	acceptedPurchase *acceptedPurchaseTerms
 	// attempt places a new card's verification in its checkout (#1110).
 	attempt         cardAttempt

@@ -66,7 +66,6 @@ type lifecycleEntitlementService interface {
 	RevokeExistingEntitlement(context.Context, entitlements.RevokeExistingEntitlementParams) error
 	RevokeSourcesForSubscriptionAsOf(context.Context, string, uuid.UUID, time.Time, models.EntitlementRevokeReason, ...models.EntitlementSourceType) error
 	BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error
-	ResumeSubscriptionAccess(context.Context, uuid.UUID) error
 }
 
 func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) lifecycleEntitlementService {
@@ -559,6 +558,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				subscription.Status = models.StatusPending
 				subscription.StartedAt = terms.AcceptedAt
 				subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = nil, nil
+			}
+		}
+		if params.Prepared != nil && params.Prepared.CancelAfterInitial {
+			if _, err := Transition(subscription, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: params.Prepared.AcceptedAt}, params.Prepared.AcceptedAt); err != nil {
+				return nil, nil, err
 			}
 		}
 		if params.InitialPaymentReversal != "" {
@@ -1238,9 +1242,6 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			return fmt.Errorf("resume membership: update subscription: %w", err)
 		}
 		entSvc := s.newLifecycleEntitlementService(txdb)
-		if err := entSvc.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
-			return fmt.Errorf("resume membership: reopen subscription access: %w", err)
-		}
 		if subscription.CurrentPeriodStartsAt != nil && subscription.CurrentPeriodEndsAt != nil {
 			if err := pushEngineRenewalGrace(ctx, txdb, entSvc, subscription, entitlementNames(subscription.EntitlementsSpecSnapshot), *subscription.CurrentPeriodStartsAt, *subscription.CurrentPeriodEndsAt); err != nil {
 				return fmt.Errorf("resume membership: %w", err)
@@ -1312,13 +1313,6 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 		if err := subService.Update(ctx, subscription); err != nil {
 			return fmt.Errorf("failed to update reactivated subscription: %w", err)
-		}
-
-		// #691 resume: re-open the advance-written cancel closure (ends_at back to
-		// NULL) so an auto-renew resume restores STANDING access; the pushes below
-		// then only record the paid-period fact.
-		if err := entitlementService.ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
-			return fmt.Errorf("failed to resume subscription access windows: %w", err)
 		}
 
 		entNames := make([]string, 0)
@@ -1458,7 +1452,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 
 	// Merchant cancellation admits active or collecting engine obligations under
 	// the same row lock as the mutation. A later terminal state stays terminal.
-	if subscription.CollectionPolicy == models.CollectionPolicyEngine && params.CancelType == models.CancelTypeMerchant && subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod {
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && params.CancelType == models.CancelTypeMerchant && subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue && subscription.Status != models.StatusAwaitingMethod && !(params.RevokeAccess && subscription.Status == models.StatusCanceled) {
 		return nil, ErrSubscriptionNotActive
 	}
 

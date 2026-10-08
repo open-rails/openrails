@@ -468,7 +468,7 @@ func (s *StripeConvergeService) mirrorPortalResume(ctx context.Context, txdb *db
 	if err := subscriptions.NewSubscriptionRepo(txdb).UpdateAt(ctx, sub, now); err != nil {
 		return fmt.Errorf("stripe converge: write resume: %w", err)
 	}
-	return entitlements.NewEntitlementService(txdb, s.Clock).ResumeSubscriptionAccess(ctx, sub.ID)
+	return nil
 }
 
 // paidPriceMove returns the new local price when the Stripe price moved and

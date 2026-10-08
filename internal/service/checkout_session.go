@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -400,11 +401,17 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, err
 	}
+	if in.AutoRenew != nil && *in.AutoRenew && !price.IsRecurring() {
+		return checkoutsession.Offer{}, uuid.Nil, apperr.Invalidf("a one-time price cannot renew").WithParam("auto_renew")
+	}
 	plan, err := checkoutsession.NewPlan(product.DisplayName, price.Amount, price.Currency, price.BillingIntervalHours, price.AccessDurationHours)
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("checkout session plan: %w", err)
 	}
-	offer := checkoutsession.Offer{Plan: plan, DueToday: price.Amount, CustomerAmount: in.Amount}
+	if in.AutoRenew != nil {
+		plan.AutoRenew = price.IsRecurring() && *in.AutoRenew
+	}
+	offer := checkoutsession.Offer{AutoRenew: in.AutoRenew, Plan: plan, DueToday: price.Amount, CustomerAmount: in.Amount}
 	if price.TrialUnitAmount != nil {
 		offer.DueToday = *price.TrialUnitAmount
 	}
@@ -421,6 +428,9 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 		in.Advertise(options)
 	}
 	for _, option := range options {
+		if in.AutoRenew != nil && !*in.AutoRenew && price.IsRecurring() && !rails.SellsOnLocalTerms(models.Rail(option.Rail)) {
+			continue
+		}
 		if !checkoutsession.Drivable(option.Driver) || option.PSPID.IsZero() {
 			continue
 		}
@@ -517,6 +527,7 @@ func hostedSavedMethods(ctx context.Context, rt *app.Runtime, session checkoutse
 func hostedEngineRequest(session checkoutsession.Session, customer billing.CheckoutCustomerIdentity, payment billing.CheckoutPaymentOptions) billing.CreateCheckoutAttemptParams {
 	return billing.CreateCheckoutAttemptParams{
 		Customer:       customer,
+		AutoRenew:      session.Offer.AutoRenew,
 		PriceID:        billing.PriceID(session.PriceID),
 		Amount:         session.Offer.CustomerAmount,
 		IdempotencyKey: session.AttemptKey(),

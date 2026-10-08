@@ -52,6 +52,7 @@ type CheckoutAttemptPaymentRequest struct {
 }
 
 type CheckoutAttemptCreateRequest struct {
+	AutoRenew      *bool `json:"auto_renew,omitempty"`
 	PriceID        string
 	PriceKey       string
 	ProductKey     string `json:"product_key,omitempty"`
@@ -113,6 +114,7 @@ type CheckoutAttemptPaymentResponse struct {
 // CheckoutAttemptMembershipQuote is the immutable commercial agreement shown
 // before the customer confirms. It carries no provider or execution authority.
 type CheckoutAttemptMembershipQuote struct {
+	AutoRenew           bool            `json:"auto_renew"`
 	AccessDurationHours *int            `json:"access_duration_hours"`
 	ProductName         string          `json:"product_name"`
 	CycleHours          int64           `json:"cycle_hours"`

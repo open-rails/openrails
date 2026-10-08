@@ -15,6 +15,7 @@ import (
 // before provider submission. A schedule-only pending phase confers no new
 // access; a free phase confers its declared access without recording money.
 type InitialMembershipTerms struct {
+	CancelAfterInitial  bool                    `json:"cancel_after_initial,omitempty"`
 	AccessDurationHours *int                    `json:"access_duration_hours"`
 	CollectionPolicy    models.CollectionPolicy `json:"collection_policy"`
 	SubscriptionID      uuid.UUID               `json:"subscription_id"`
@@ -49,6 +50,9 @@ type ReplacedMembership struct {
 }
 
 func (t InitialMembershipTerms) Validate() error {
+	if t.CancelAfterInitial && t.CollectionPolicy != models.CollectionPolicyEngine {
+		return errors.New("non-renewing order requires engine collection without a provider schedule")
+	}
 	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
 		return err
 	}

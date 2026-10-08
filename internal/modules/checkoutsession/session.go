@@ -65,12 +65,55 @@ type Buyer struct {
 
 // Offer is what the session sells, as minted.
 type Offer struct {
+	AutoRenew           *bool               `json:"auto_renew,omitempty"`
 	MerchantDisplayName string              `json:"merchant_display_name"`
 	Plan                CheckoutSessionPlan `json:"plan"`
 	DueToday            int64               `json:"due_today,string"`
 	CustomerAmount      *int64              `json:"customer_amount,string,omitempty"`
 	Options             []Option            `json:"options"`
 	Buyer               Buyer               `json:"buyer"`
+}
+
+// UnmarshalJSON preserves an already minted offer across the duration split.
+// These legacy names are read only from persisted sessions, never request DTOs.
+func (o *Offer) UnmarshalJSON(data []byte) error {
+	type plain Offer
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var legacy struct {
+		Plan map[string]json.RawMessage `json:"plan"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	if _, present := legacy.Plan["billing_interval_hours"]; !present {
+		var hours *int
+		var recurring bool
+		if raw, ok := legacy.Plan["period_hours"]; ok {
+			if err := json.Unmarshal(raw, &hours); err != nil {
+				return err
+			}
+		}
+		if raw, ok := legacy.Plan["automatically_renews"]; ok {
+			if err := json.Unmarshal(raw, &recurring); err != nil {
+				return err
+			}
+		}
+		decoded.Plan.AccessDurationHours = hours
+		if recurring {
+			decoded.Plan.BillingIntervalHours = hours
+		}
+	}
+	if _, present := legacy.Plan["auto_renew"]; !present {
+		decoded.Plan.AutoRenew = decoded.Plan.BillingIntervalHours != nil
+	}
+	if decoded.AutoRenew != nil {
+		decoded.Plan.AutoRenew = decoded.Plan.BillingIntervalHours != nil && *decoded.AutoRenew
+	}
+	*o = Offer(decoded)
+	return nil
 }
 
 // Session is one stored session. ID is set only on the value Get returns.

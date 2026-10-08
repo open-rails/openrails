@@ -38,7 +38,6 @@ func (r *recordedAccess) RevokeSourcesForSubscriptionAsOf(_ context.Context, _ s
 func (*recordedAccess) BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error {
 	panic("paid access must not be bounded by billing")
 }
-func (*recordedAccess) ResumeSubscriptionAccess(context.Context, uuid.UUID) error { return nil }
 
 func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 	start := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
@@ -104,4 +103,12 @@ func TestAcceptedAccessDurationReplay(t *testing.T) {
 			require.Error(t, ValidateInitialMembershipHistory(merchant, initial, []gen.BillingGrant{row}))
 		})
 	}
+}
+
+func TestExplicitRevokeAfterCanceledBillingPeriod(t *testing.T) {
+	end := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
+	snapshot := lifecycle.Snapshot{Status: lifecycle.Canceled, Owner: lifecycle.Engine, PaidThrough: end, EndedAt: end, CancelKind: lifecycle.CancelUser}
+	_, effects, err := lifecycle.Apply(snapshot, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: end.Add(time.Hour)})
+	require.NoError(t, err)
+	require.Contains(t, effects, lifecycle.EndAccess{At: end.Add(time.Hour), Revoke: true}, "refund still revokes longer or perpetual access after recurrence has ended")
 }
