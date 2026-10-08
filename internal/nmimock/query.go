@@ -120,7 +120,7 @@ func (m *Mock) search(form url.Values) string {
 	now := m.now()
 	var rows []xmlTransaction
 	add := func(t xmlTransaction, at time.Time, schedule string) {
-		if !match("order_id", t.OrderID) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
+		if !match("order_id", t.OrderID) || !match("order_description", t.OrderDescription) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
 			!match("action_type", t.Action.ActionType) || !match("subscription_id", schedule) || !inRange(at) {
 			return
 		}

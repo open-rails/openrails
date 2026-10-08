@@ -332,6 +332,7 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"source":            "nmi_transaction",
 				"condition":         strings.TrimSpace(t.Condition),
 				"order_id":          strings.TrimSpace(t.OrderID),
+				"order_description": strings.TrimSpace(t.OrderDescription),
 				"customerid":        strings.TrimSpace(t.CustomerID),
 				"customer_vault_id": strings.TrimSpace(t.CustomerVaultID),
 				"email":             strings.TrimSpace(t.Email),
