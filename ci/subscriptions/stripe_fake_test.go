@@ -321,7 +321,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 	case p == "/v1/balance":
 		return 200, obj{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && p == "/v1/customers/search":
-		var data []any
+		data := []any{}
 		for _, c := range f.customers {
 			match := true
 			for _, m := range metadataQuery.FindAllStringSubmatch(q.Get("query"), -1) {
@@ -370,7 +370,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 	case r.Method == http.MethodPost && p == "/v1/payment_intents":
 		return f.createIntent(form)
 	case r.Method == http.MethodGet && p == "/v1/payment_intents":
-		var data []any
+		data := []any{}
 		for _, id := range f.order {
 			if pi := f.intents[id]; pi["customer"] == q.Get("customer") && !f.now().Before(f.visibleAt[id]) {
 				data = append(data, pi)
@@ -410,7 +410,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && p == "/v1/refunds":
-		var data []any
+		data := []any{}
 		for _, re := range f.refunds {
 			if (q.Get("charge") == "" || re["charge"] == q.Get("charge")) && (q.Get("payment_intent") == "" || re["payment_intent"] == q.Get("payment_intent")) {
 				data = append(data, re)
@@ -418,7 +418,7 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 200, obj{"object": "list", "data": data, "has_more": false}
 	case r.Method == http.MethodGet && p == "/v1/subscriptions":
-		var data []any
+		data := []any{}
 		for _, s := range f.subs {
 			if q.Get("customer") == "" || s["customer"] == q.Get("customer") {
 				data = append(data, s)
