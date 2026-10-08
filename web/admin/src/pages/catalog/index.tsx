@@ -840,10 +840,9 @@ function PriceDialog({ products }: { products: Product[] }) {
                       id="pr-cur"
                       aria-label="Currency"
                       className="w-24"
-                      // Three-letter currency codes, so the field normalises
-                      // rather than rejecting a lowercase entry on submit.
+                      // Registered currency codes are normalized to uppercase.
                       value={field.state.value}
-                      maxLength={3}
+                      maxLength={Math.max(...supportedCurrencies.map((code) => code.length))}
                       autoCapitalize="characters"
                       spellCheck={false}
                       placeholder="USD"

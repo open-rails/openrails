@@ -126,6 +126,7 @@ export type ApplyPrice = {
   customer_amount?: CustomerAmount | null
   psps?: string[] | null
   psp_links?: Record<string, Record<string, string>> | null
+  amount?: string
   access_duration?: string | null
   billing_interval?: string | null
   trial_duration?: string | null

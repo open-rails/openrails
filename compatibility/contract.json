@@ -1138,7 +1138,7 @@
       "func (c *CustomerAmount) UnmarshalJSON(raw []byte) error {\n\tvar value struct {\n\t\tMinAmount Field[int64] `json:\"min_amount\"`\n\t\tMaxAmount Field[int64] `json:\"max_amount\"`\n\t}\n\td := json.NewDecoder(bytes.NewReader(raw))\n\td.DisallowUnknownFields()\n\tif err := d.Decode(\u0026value); err != nil {\n\t\treturn err\n\t}\n\t*c = CustomerAmount{MinAmount: value.MinAmount.Value, MaxAmount: value.MaxAmount.Value}\n\treturn nil\n}",
       "func (f *Field[T]) UnmarshalJSON(raw []byte) error {\n\t*f = Field[T]{Set: true}\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(\"null\")) {\n\t\tf.Null = true\n\t\treturn nil\n\t}\n\tif value, ok := any(\u0026f.Value).(*int64); ok {\n\t\ttext := string(raw)\n\t\tif len(raw) \u003e 0 \u0026\u0026 raw[0] == '\"' {\n\t\t\tif err := json.Unmarshal(raw, \u0026text); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\tparsed, err := strconv.ParseInt(text, 10, 64)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"money must be an exact int64: %w\", err)\n\t\t}\n\t\t*value = parsed\n\t\treturn nil\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\treturn decoder.Decode(\u0026f.Value)\n}",
       "func (f Field[T]) MarshalJSON() ([]byte, error) {\n\tif err := f.validateField(); err != nil {\n\t\treturn nil, err\n\t}\n\tif !f.Set || f.Null {\n\t\treturn []byte(\"null\"), nil\n\t}\n\n\tif v, ok := any(f.Value).(int64); ok {\n\t\treturn json.Marshal(strconv.FormatInt(v, 10))\n\t}\n\treturn json.Marshal(f.Value)\n}",
-      "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"access_duration\", decoded.AccessDuration, \u0026decoded.AccessDurationHours},\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}"
+      "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAmount          Field[string] `json:\"amount,omitzero\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Amount.Set {\n\t\tif decoded.Amount.Null {\n\t\t\treturn fmt.Errorf(\"amount cannot be null\")\n\t\t}\n\t\tif decoded.UnitAmount.Set || decoded.Currency.Set {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, currency, err := parseAmount(decoded.Amount.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.UnitAmount = Value(amount)\n\t\tdecoded.Currency = Value(currency)\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"access_duration\", decoded.AccessDuration, \u0026decoded.AccessDurationHours},\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}"
     ],
     "cmd/openrails": [
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
@@ -1706,8 +1706,7 @@
       "uuid": "github.com/google/uuid"
     },
     "billing/currencies.go": {
-      "sort": "sort",
-      "strings": "strings"
+      "currency": "github.com/open-rails/openrails/internal/currency"
     },
     "billing/customers.go": {
       "time": "time"
@@ -1854,9 +1853,7 @@
       "json": "encoding/json"
     },
     "catalog/duration.go": {
-      "bytes": "bytes",
       "fmt": "fmt",
-      "json": "encoding/json",
       "strconv": "strconv",
       "strings": "strings",
       "time": "time"
@@ -1866,6 +1863,11 @@
       "slices": "slices",
       "strings": "strings",
       "utf8": "unicode/utf8"
+    },
+    "catalog/price_decode.go": {
+      "bytes": "bytes",
+      "fmt": "fmt",
+      "json": "encoding/json"
     },
     "catalog_application.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3069,6 +3071,7 @@
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "models": "github.com/open-rails/openrails/internal/db/models",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strconv": "strconv",
       "strings": "strings",

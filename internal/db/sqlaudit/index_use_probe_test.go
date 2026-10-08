@@ -23,7 +23,7 @@ var keptUnchosen = map[string]string{
 	"subscriptions_grace_ends_at_idx":                          "dunning past grace across merchants",
 	"subscriptions_next_retry_at_rail_idx":                     "dunning due across merchants",
 	"subscriptions_current_period_ends_at_next_retry_at_idx":   "a merchant's engine renewals due",
-	"products_entitlements_idx":                           "offers by entitlement in a large catalog",
+	"products_entitlements_idx":                                "offers by entitlement in a large catalog",
 	"notifications_event_type_idx":                             "customer notification list's event_type filter",
 	"products_archived_idx":                                    "product list's archived filter",
 	"psps_environment_archived_rail_created_at_id_idx":         "PSP list by environment and archived, in page order",

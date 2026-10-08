@@ -31,7 +31,7 @@ func parseAmount(input string) (int64, string, error) {
 		}
 	}
 	if len(fraction) > units.Decimals {
-		return 0, "", fmt.Errorf("amount is not exactly representable in %s native units (%d decimal places)", units.Code, units.Decimals)
+		return 0, "", fmt.Errorf("amount in %s must have at most %d decimal places", units.Code, units.Decimals)
 	}
 	digits := strings.TrimLeft(whole, "0") + fraction + strings.Repeat("0", units.Decimals-len(fraction))
 	if digits == "" {

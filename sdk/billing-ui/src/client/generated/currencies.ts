@@ -4,5 +4,7 @@
 export const OPENRAILS_CURRENCY_SCALES: Readonly<Record<string, number>> = {
   EUR: 6,
   JPY: 4,
+  SOL: 9,
   USD: 6,
+  USDC: 6,
 }

@@ -17,6 +17,17 @@ import { MAX_INT64 as MAX, MIN_INT64 as MIN, UNSAFE } from "@/test/harness"
 const digits = (value: string) => value.replace(/\D/g, "")
 
 describe("parsing an entered amount at the server's scale", () => {
+  it("uses the registered token precision without rounding", () => {
+    expect(currencyScale("SOL")).toBe(9)
+    expect(currencyScale("USDC")).toBe(6)
+    expect(nativeAmountFromInput("1", "SOL")).toBe("1000000000")
+    expect(nativeAmountFromInput("0.000000001", "SOL")).toBe("1")
+    expect(nativeAmountFromInput("10", "USDC")).toBe("10000000")
+    expect(nativeAmountFromInput("0.0000001", "USDC")).toBeNull()
+    expect(nativeAmountToInput("1", "SOL")).toBe("0.000000001")
+    expect(formatNativeAmount("10000000", "USDC")).toBe("10 USDC")
+  })
+
   it.each([
     ["1.2345", 4, "12345"],
     ["1.23456", 4, null],

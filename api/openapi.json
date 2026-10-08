@@ -13484,6 +13484,15 @@
               }
             ]
           },
+          "amount": {
+            "type": "string",
+            "description": "A non-negative plain decimal followed by its required registered currency. Uses the currency's native precision exactly, without rounding or currency conversion. Cannot be combined with unit_amount or currency.",
+            "examples": [
+              "9.99 USD",
+              "1 SOL",
+              "10 USDC"
+            ]
+          },
           "access_duration": {
             "oneOf": [
               {
@@ -13542,9 +13551,25 @@
                 "trial_duration_hours"
               ]
             }
+          },
+          {
+            "not": {
+              "required": [
+                "amount",
+                "unit_amount"
+              ]
+            }
+          },
+          {
+            "not": {
+              "required": [
+                "amount",
+                "currency"
+              ]
+            }
           }
         ],
-        "description": "Omitted fields preserve existing terms on updates. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive."
+        "description": "Omitted fields preserve existing terms on updates. amount supplies both unit_amount and currency and cannot be null. Null clears a duration. Each readable duration and its numeric hours alias are mutually exclusive."
       },
       "ApplyProduct": {
         "type": "object",
