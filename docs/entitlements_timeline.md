@@ -65,31 +65,32 @@ pass repairs any drift between the two.
 `purchase` (a one-time purchase), `admin` (granted by the merchant; the source is the grant
 itself), and `grace` (see below).
 
-## Standing access — auto-renew subscriptions have no end date
+## Access duration and billing cadence
 
-An auto-renew subscription's entitlement window is **standing**: open-ended, closed only
-by a proven event (a confirmed cancellation, a terminal decline, exhausted dunning — never
-by the clock alone). A lost webhook, a provider billing on its own day boundary, or a dead
-webhook pipe therefore cannot gate a paying user: access simply continues while
-reconciliation converges the subscription against provider truth. `grace` remains in the
-source vocabulary as a pacing marker in convergence; no code appends grace windows for
-provider cohorts. Deliberate cancellation still ends access at the period
-end the user expects.
+A recurring price has a positive `billing_interval_hours`, which schedules its
+next payment. Each payment independently grants `access_duration_hours` from that
+paid phase's start. A finite duration creates a bounded window; null creates a
+window with no scheduled expiry. Overlapping paid windows keep their own immutable
+boundaries. Renewal appends a grant; it does not stretch earlier paid windows.
 
-Engine memberships (OpenRails collects them itself) are the exception: access is the paid
-period plus a bounded renewal allowance (`grace`, min(24h, max(5m, period/10))) that holds access across the
-boundary until the engine's own renewal decides. The renewal supersedes it; a decline or
-cancellation revokes it. A renewal with no outcome past the allowance is held (collection is
-stopped): by default access continues until it is attempted; `access_while_renewal_held: suspend`
-ends access when the allowance lapses.
+Cancellation stops future billing and removes renewal grace, while purchased
+access remains until its own expiry. Refunds and explicit access revocations can
+remove paid access. A future plan change affects the next grant without shortening
+access already purchased on the previous terms.
 
-Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day (`23:59:59Z`) to
-avoid access gaps from ambiguity.
+Engine memberships whose access and billing windows match may receive the
+existing bounded renewal allowance (`grace`, min(24h, max(5m, period/10))). An
+intentionally shorter access window is not extended through the billing gap;
+longer or indefinite paid access is not capped at the billing boundary. Dunning
+and renewal-held policy govern grace separately from paid grants.
+
+Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day
+(`23:59:59Z`).
 
 ## Never infer access from subscription rows
 
-Subscription `status` is provider-lifecycle state, not an access decision: `past_due` and
-`unverified` still project standing access (providers like NMI retry indefinitely and forgive
-gaps; stale data parks as `unverified` rather than losing entitlements to a malfunction).
-Cancellation is last-resort and evidence-driven. All of that doctrine is already folded
-into the timeline — subscriptions *produce* windows; the windows are the answer.
+Subscription `status` describes billing lifecycle, not current access. An active
+subscription can have a deliberately expired short access window; a canceled
+subscription can retain long or indefinite purchased access. Read the entitlement
+timeline for access decisions. Grants produce those windows; the windows are the
+answer.

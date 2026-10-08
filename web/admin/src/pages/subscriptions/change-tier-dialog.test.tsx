@@ -225,9 +225,9 @@ describe("tier change options", () => {
       tierChangeOptionLabel({
         direction: "upgrade",
         product: aProduct("pro", 3),
-        price: aPrice("pro-monthly", "pro", { access_duration_hours: 720 }),
+        price: aPrice("pro-monthly", "pro", { billing_interval_hours: 720, access_duration_hours: 72 }),
       })
-    ).toBe("pro · upgrade · $20.00 every 1 month · pro-monthly")
+    ).toBe("pro · upgrade · $20.00 every 30 days · pro-monthly")
   })
 
   it.each([

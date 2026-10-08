@@ -115,7 +115,7 @@ type ProductSummary struct {
 }
 
 // CancelSubscriptionParams is the merchant's cancel: at period end (access
-// kept to the paid period end) or, with RevokeAccess, immediately. Both stop
+// kept for its purchased duration) or, with RevokeAccess, immediately. Both stop
 // provider billing.
 type CancelSubscriptionParams struct {
 	Reason       string `json:"reason"`

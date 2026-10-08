@@ -72,6 +72,9 @@ Price fields worth knowing:
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
+Trial terms are supported only on rails with native trial settlement; current
+engine-managed checkout refuses trials before charging.
+
 **A one-time purchase** — null `billing_interval_hours` with a finite duration gives timed
 access; null `access_duration_hours` gives indefinite access:
 
@@ -161,10 +164,10 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   renewal appends a new window.
 - Every window derives from a grant and carries its source: `purchase`,
   `subscription`, `admin`, or `grace`.
-- An auto-renew subscription's access is **standing**: it ends on a proven event (a
-  confirmed cancellation, a terminal decline, exhausted dunning), never by the clock
-  alone, so a late webhook never gates a paying user. A deliberate cancel ends access
-  at the period end the user expects.
+- Each payment grants its accepted access duration, independently of the next
+  billing date. Finite windows expire by the clock; null means no scheduled expiry.
+  Normal cancellation stops future billing and preserves purchased windows.
+  Refunds or explicit revocations can remove access.
 - Tier changes go through `POST /v1/me/subscriptions/{id}/change-tier` (target price
   must share the tier group). Stripe and NMI upgrade immediately with proration;
   downgrades are scheduled for period end (`delayed_start`, `effective:

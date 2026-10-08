@@ -13,7 +13,7 @@ function renewsLabel(session: CheckoutSession, m: Translator) {
   const every = session.plan.auto_renew
     ? everyLabel(session.plan.billing_interval_hours, m)
     : null
-  const access = session.plan.access_duration_hours !== session.plan.billing_interval_hours
+  const access = !session.plan.auto_renew || session.plan.access_duration_hours !== session.plan.billing_interval_hours
     ? accessLabel(session.plan.access_duration_hours, m) ?? m.t("interval.permanent")
     : undefined
   return [every ? m.t("checkout.renews", { period: every }) : undefined, access]
