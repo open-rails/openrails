@@ -69,6 +69,10 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	w.watchRebills()
 	require.Len(t, w.openFindings("life.rebill.missed"), 1, "one finding per cycle")
 
+	// The watch proves the missed obligation; normal account observation
+	// must also catch up before the queued recovery may write to NMI.
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.runRenewals() // the due pass may already have run on its own
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
