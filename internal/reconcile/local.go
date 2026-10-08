@@ -42,6 +42,7 @@ type LocalSubscription struct {
 	ID                          uuid.UUID
 	CustomerID                  uuid.UUID
 	PriceID                     *uuid.UUID
+	PriceCurrency               string // PriceID's currency; denominates charges a rail reports without one
 	ProductID                   uuid.UUID
 	Status                      string
 	Rail                        string
@@ -86,6 +87,7 @@ type LocalPayment struct {
 	Rail              string
 	TransactionID     string
 	AmountCents       int64
+	Currency          string
 	Status            string
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
@@ -173,6 +175,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ID:                          row.ID,
 			CustomerID:                  row.CustomerID,
 			PriceID:                     row.PriceID,
+			PriceCurrency:               models.DerefStr(row.PriceCurrency),
 			ProductID:                   row.ProductID,
 			Status:                      string(row.Status),
 			Rail:                        row.Rail,
@@ -289,6 +292,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			CustomerID:        row.CustomerID,
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount / moneyutil.MicrosPerCent,
+			Currency:          row.Currency,
 			Status:            string(row.Status),
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,

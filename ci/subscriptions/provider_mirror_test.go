@@ -169,13 +169,13 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 	})
 }
 
-// dataLinkFake is CCBill DataLink: an ACTIVEMEMBERS roster, empty
-// transaction exports, and the subscription-management (SMS) status and
-// cancel actions.
+// dataLinkFake is CCBill DataLink: an ACTIVEMEMBERS roster, transaction
+// exports, and the subscription-management (SMS) status and cancel actions.
 type dataLinkFake struct {
 	*httptest.Server
 	mu      sync.Mutex
 	members []string
+	exports []string
 	cancels map[string]int
 }
 
@@ -198,6 +198,8 @@ func newDataLinkFake(t *testing.T) *dataLinkFake {
 			_, _ = io.WriteString(rw, "<results>1</results>")
 		case r.Form.Get("transactionTypes") == "ACTIVEMEMBERS":
 			_, _ = io.WriteString(rw, strings.Join(f.members, "\n"))
+		case r.Form.Get("transactionTypes") != "":
+			_, _ = io.WriteString(rw, strings.Join(f.exports, "\n"))
 		}
 	}))
 	t.Cleanup(f.Close)
@@ -216,6 +218,13 @@ func (f *dataLinkFake) list(subscriptionID, rebill, expiry string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.members = []string{fmt.Sprintf(`"ACTIVEMEMBERS","999999","x","%s","2020-01-01","member","member@example.test","1","%s","%s"`, subscriptionID, rebill, expiry)}
+}
+
+// export sets the transaction-export rows, as DataLink writes them.
+func (f *dataLinkFake) export(rows ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.exports = rows
 }
 
 // newDataLinkWorld is a world whose CCBill account has DataLink credentials,
@@ -279,4 +288,27 @@ func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 	require.True(t, sub.CurrentPeriodEndsAt.Equal(endOfDay(next)), "%v", sub.CurrentPeriodEndsAt)
 	require.True(t, m.c.entitled(m.ent))
 	require.Zero(t, w.engineCharges())
+}
+
+// DataLink rows carry no currency: a rebill it reports for a GBP membership is
+// recorded in the subscription's GBP, with the inheritance stated, never USD.
+func TestCCBillDataLinkRebillTakesSubscriptionCurrency(t *testing.T) {
+	t.Parallel()
+	dl := newDataLinkFake(t)
+	w := newDataLinkWorld(t, dl)
+	m := importCCBillIn(t, w, "GBP")
+	rebill := ccbillNumericID()
+	dl.list(m.railSub, ccbillDate(m.paidThrough), "")
+	dl.export(fmt.Sprintf(`"REBILL","999999","0000","%s","%s","%s","9.99"`, m.railSub, ccbillTimestamp(w.clock.Now().Add(-time.Hour)), rebill))
+
+	w.armDestructive()
+	w.pull()
+	var amount int64
+	var currency string
+	var provenance *string
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT amount, currency, metadata->>'currency_provenance' FROM billing.payments WHERE transaction_id = $1`), rebill).
+		Scan(&amount, &currency, &provenance))
+	require.Equal(t, int64(9_990_000), amount)
+	require.Equal(t, "GBP", currency, "DataLink reports no currency; the subscription's price denominates the rebill")
+	require.Equal(t, "inherited_from_subscription_price", str(provenance))
 }

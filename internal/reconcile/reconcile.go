@@ -145,7 +145,8 @@ type RemoteTransaction struct {
 	Type           TransactionType `json:"type"`
 	Success        bool            `json:"success"`
 	// AmountCents is in integer cents of Currency. Zero for Solana (base
-	// units, preserved in Raw).
+	// units, preserved in Raw). Currency is the provider's verbatim; empty
+	// when it reports none (CCBill DataLink), never defaulted.
 	AmountCents int64     `json:"amount_cents"`
 	Currency    string    `json:"currency,omitempty"`
 	OccurredAt  time.Time `json:"occurred_at"`

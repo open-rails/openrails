@@ -385,7 +385,13 @@ func TestCCBillFetcher(t *testing.T) {
 	require.Len(t, snap.Transactions, 4)
 	rebill, refund, chargeback := snap.Transactions[0], snap.Transactions[1], snap.Transactions[2]
 	require.Equal(t, RemoteTransaction{TransactionID: "918273645", SubscriptionID: "0125217202000000017", Type: TransactionTypeSale, Success: true,
-		AmountCents: 2399, Currency: "USD", OccurredAt: time.Date(2026, 6, 1, 4, 5, 6, 0, time.UTC)}, withoutRaw(rebill))
+		AmountCents: 2399, OccurredAt: time.Date(2026, 6, 1, 4, 5, 6, 0, time.UTC)}, withoutRaw(rebill))
+	for _, sub := range snap.Subscriptions {
+		require.Empty(t, sub.Currency, "DataLink reports no currency; it is never defaulted")
+	}
+	for _, txn := range snap.Transactions {
+		require.Empty(t, txn.Currency, "DataLink reports no currency; it is never defaulted")
+	}
 	require.Equal(t, TransactionTypeRefund, refund.Type)
 	require.Equal(t, int64(2399), refund.AmountCents)
 	require.Empty(t, refund.TransactionID, "REFUND rows carry no transaction id")
@@ -420,4 +426,48 @@ func TestCCBillFetcher(t *testing.T) {
 	for _, txn := range narrowed.Transactions {
 		require.Equal(t, "0125217202000000017", txn.SubscriptionID)
 	}
+}
+
+// DataLink reports no currency: the local record a charge or refund matches
+// denominates it, provenance stated. Without one it stays empty, which the
+// writer refuses — never USD.
+func TestCCBillChargesTakeTheLocalRecordCurrency(t *testing.T) {
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	priceID, subID, customerID := uuid.New(), uuid.New(), uuid.New()
+	sub := LocalSubscription{ID: subID, CustomerID: customerID, PriceID: &priceID, PriceCurrency: "GBP", Status: "active", Rail: "ccbill",
+		RailSubscriptionID: "0125217202000000017", StartedAt: now.Add(-24 * time.Hour)}
+	original := LocalPayment{ID: uuid.New(), CustomerID: customerID, Rail: "ccbill", TransactionID: "original", AmountCents: 799, Currency: "EUR",
+		Status: "completed", SubscriptionID: &subID}
+	snap := &RemoteSnapshot{Provider: ProviderCCBill, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{
+		{TransactionID: "rebill", SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true, AmountCents: 799, OccurredAt: now},
+		{TransactionID: "refund", Type: TransactionTypeRefund, Success: true, AmountCents: 799, OccurredAt: now, Raw: []byte(`{"charge":"original"}`)},
+	}}
+	actions := func(local LocalSubscription) (*BackfillPaymentAction, *RecordRefundAction) {
+		var backfill *BackfillPaymentAction
+		var refund *RecordRefundAction
+		for _, f := range diffProvider(ProviderCCBill, snap, &LocalState{Subscriptions: []LocalSubscription{local}}, []LocalPayment{original}, now, diffOptions{}) {
+			if f.Apply != nil && f.Apply.BackfillPayment != nil {
+				backfill = f.Apply.BackfillPayment
+			}
+			if f.Apply != nil && f.Apply.RecordRefund != nil {
+				refund = f.Apply.RecordRefund
+			}
+		}
+		require.NotNil(t, backfill)
+		require.NotNil(t, refund)
+		return backfill, refund
+	}
+
+	backfill, refund := actions(sub)
+	require.Equal(t, "GBP", backfill.Currency, "the rebill is billed in its subscription's price currency")
+	require.Equal(t, "inherited_from_subscription_price", backfill.Metadata["currency_provenance"])
+	require.Equal(t, "EUR", refund.Currency, "a refund returns the money of the payment it refunds")
+	require.Equal(t, "inherited_from_refunded_payment", refund.Metadata["currency_provenance"])
+
+	sub.PriceCurrency = ""
+	backfill, _ = actions(sub)
+	require.Empty(t, backfill.Currency, "no currency anywhere is no currency, not USD")
+	require.NotContains(t, backfill.Metadata, "currency_provenance")
+	_, err := (&PGLocalWriter{}).BackfillPayment(context.Background(), *backfill)
+	require.ErrorContains(t, err, "payment currency required")
 }

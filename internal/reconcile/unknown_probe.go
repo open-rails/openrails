@@ -291,7 +291,6 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	sub := RemoteSubscription{
 		RailSubscriptionID: subj.RailSubscriptionID,
 		RawStatus:          res.RawStatus,
-		Currency:           "USD", // DataLink convention (bulk fetcher parity)
 	}
 	// Provisional SMS vocabulary (ccbill.SubscriptionStatusResult): "2" active
 	// recurring, "1" active non-recurring (no future rebill), "0" inactive.

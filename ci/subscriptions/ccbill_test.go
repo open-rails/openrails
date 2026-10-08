@@ -41,12 +41,18 @@ type ccbillMember struct {
 // ImportBilling, as the legacy migration does, paid through 20 days from now.
 func importCCBill(t *testing.T, w *world) *ccbillMember {
 	t.Helper()
+	return importCCBillIn(t, w, "USD")
+}
+
+// importCCBillIn is importCCBill billed in currency.
+func importCCBillIn(t *testing.T, w *world, currency string) *ccbillMember {
+	t.Helper()
 	l := &legacy{w: w, rail: "ccbill", tp: embedded, ent: "content:ccbill", c: w.newCustomer()}
 	client := w.client[embedded]
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "ccbill-" + uuid.NewString()[:8], DisplayName: "CCBill membership", Entitlements: []string{l.ent}})
 	require.NoError(t, err)
 	hours := monthHours
-	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
+	l.price, err = client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-" + strings.ToLower(currency), UnitAmount: 9_990_000, Currency: currency, BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"ccbill": {"form_name": ccbillFormName, "flex_id": ccbillFlexID, "recurring_billing_option_id": ccbillRBO}}})
 	require.NoError(t, err)
 
@@ -61,7 +67,7 @@ func importCCBill(t *testing.T, w *world) *ccbillMember {
 		AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "ccbill"},
 		Customers:     []billing.DeclaredCustomer{{Customer: customerID}},
 		Subscriptions: []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "ccbill", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end}},
-		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}},
+		Transactions:  []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: m.saleTxn, Success: true, Amount: 9_990_000, Currency: currency, OccurredAt: start}},
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Imported, 1, "%+v", result)

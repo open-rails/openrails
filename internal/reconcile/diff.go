@@ -374,6 +374,17 @@ func remoteTxnEvidence(t *RemoteTransaction) map[string]any {
 	return ev
 }
 
+// txnCurrency is the currency a remote transaction is recorded in: the
+// provider's when it reports one, else the matched local record's (CCBill
+// DataLink reports none). inherited marks the borrow for the row's provenance.
+func txnCurrency(t *RemoteTransaction, local string) (currency string, inherited bool) {
+	if c := moneyutil.NormalizeCurrency(t.Currency); c != "" {
+		return c, false
+	}
+	c := moneyutil.NormalizeCurrency(local)
+	return c, c != ""
+}
+
 // deletionIntent builds the class-3 intent annotation (design decision 5)
 // when a local subscription carries a recorded-but-unexecuted rail
 // delete marker.
@@ -633,11 +644,12 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		}
 	}
 	if t := latestChargeForRemoteSub(snap, r); t != nil {
+		currency, inherited := txnCurrency(t, link.price.Currency)
 		action.Backfill = &BackfillPaymentAction{
 			Rail:          link.railName,
 			TransactionID: t.TransactionID,
 			AmountCents:   t.AmountCents,
-			Currency:      moneyutil.NormalizeCurrency(t.Currency),
+			Currency:      currency,
 			PurchasedAt:   t.OccurredAt,
 			PriceID:       link.price.ID,
 			CustomerID:    subjectID,
@@ -646,6 +658,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 				"reconcile_materialize": true,
 				"provider":              string(provider),
 			},
+		}
+		if inherited {
+			action.Backfill.Metadata["currency_provenance"] = "inherited_from_subscription_price"
 		}
 	}
 
@@ -1121,11 +1136,12 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		f.LocalEvidence["correlated_via"] = how
 		f.RecommendedAction = "enforce backfills the missing billing.payments row (deduped on rail+transaction_id)"
 		subID := sub.ID
+		currency, inherited := txnCurrency(t, sub.PriceCurrency)
 		action := &BackfillPaymentAction{
 			Rail:           sub.Rail,
 			TransactionID:  t.TransactionID,
 			AmountCents:    t.AmountCents,
-			Currency:       moneyutil.NormalizeCurrency(t.Currency),
+			Currency:       currency,
 			PurchasedAt:    t.OccurredAt,
 			PriceID:        *sub.PriceID,
 			SubscriptionID: &subID,
@@ -1135,6 +1151,9 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				"correlated_via":     how,
 				"provider":           string(provider),
 			},
+		}
+		if inherited {
+			action.Metadata["currency_provenance"] = "inherited_from_subscription_price"
 		}
 		// Restore the paid access promise independently of its billing cadence.
 		if sub.IsLive() && len(sub.EntitlementNames) > 0 {
@@ -1333,11 +1352,12 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	f.RecommendedAction = "enforce records the refund locally (negative payment row + original marked refunded). Revoking any entitlement the refunded payment granted is a human decision — review in the admin queue if warranted"
 
 	originalID := original.ID
+	currency, inherited := txnCurrency(t, original.Currency)
 	action := &RecordRefundAction{
 		Rail:              original.Rail,
 		TransactionID:     t.TransactionID,
 		AmountCents:       t.AmountCents,
-		Currency:          moneyutil.NormalizeCurrency(t.Currency),
+		Currency:          currency,
 		PurchasedAt:       t.OccurredAt,
 		RefundedPaymentID: &originalID,
 		SubscriptionID:    original.SubscriptionID,
@@ -1346,6 +1366,9 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 			"reconcile_refund_backfill": true,
 			"provider":                  string(provider),
 		},
+	}
+	if inherited {
+		action.Metadata["currency_provenance"] = "inherited_from_refunded_payment"
 	}
 	if sub := original.SubscriptionID; sub != nil {
 		if s, ok := corr.local.byID[*sub]; ok && s.PriceID != nil {

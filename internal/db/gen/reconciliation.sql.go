@@ -2438,7 +2438,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 }
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, customer_id, rail, transaction_id, amount, status,
+SELECT id, customer_id, rail, transaction_id, amount, currency, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
@@ -2460,6 +2460,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	Rail              *string
 	TransactionID     string
 	Amount            int64
+	Currency          string
 	Status            string
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
@@ -2486,6 +2487,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.Rail,
 			&i.TransactionID,
 			&i.Amount,
+			&i.Currency,
 			&i.Status,
 			&i.SubscriptionID,
 			&i.RefundedPaymentID,
@@ -2588,22 +2590,25 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
-SELECT id, customer_id, price_id, product_id, status, rail,
-       rail_subscription_id, payment_method_id,
-       current_period_starts_at, current_period_ends_at, started_at, ended_at,
-       canceled_at, cancel_type, deletion_scheduled_at, tier_group,
-       last_retry_at, retry_attempts, next_retry_at,
-       entitlements_snapshot, access_duration_hours_snapshot, scheduled_price_id,
+SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
+       subscriptions.status, subscriptions.rail, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
+       subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
+       subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
+       subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
+       subscriptions.retry_attempts, subscriptions.next_retry_at, subscriptions.entitlements_snapshot,
+       subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
+       price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
 FROM billing.subscriptions
-WHERE subscriptions.merchant_id = $1::uuid AND rail = ANY ($2::text[])
-  AND deleted_at IS NULL
-  AND psp_id = $3::uuid
+LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
+WHERE subscriptions.merchant_id = $1::uuid AND subscriptions.rail = ANY ($2::text[])
+  AND subscriptions.deleted_at IS NULL
+  AND subscriptions.psp_id = $3::uuid
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
@@ -2636,6 +2641,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	AccessDurationHoursSnapshot *int32
 	ScheduledPriceID            *uuid.UUID
 	CustomerEmail               *string
+	PriceCurrency               *string
 	TierChangePending           bool
 }
 
@@ -2675,6 +2681,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.AccessDurationHoursSnapshot,
 			&i.ScheduledPriceID,
 			&i.CustomerEmail,
+			&i.PriceCurrency,
 			&i.TierChangePending,
 		); err != nil {
 			return nil, err

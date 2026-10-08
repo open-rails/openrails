@@ -321,25 +321,28 @@ WHERE id = sqlc.arg(id)
 -- ============================================================================
 
 -- name: ReconcileListSubscriptionsByRails :many
-SELECT id, customer_id, price_id, product_id, status, rail,
-       rail_subscription_id, payment_method_id,
-       current_period_starts_at, current_period_ends_at, started_at, ended_at,
-       canceled_at, cancel_type, deletion_scheduled_at, tier_group,
-       last_retry_at, retry_attempts, next_retry_at,
-       entitlements_snapshot, access_duration_hours_snapshot, scheduled_price_id,
+SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
+       subscriptions.status, subscriptions.rail, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
+       subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
+       subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
+       subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
+       subscriptions.retry_attempts, subscriptions.next_retry_at, subscriptions.entitlements_snapshot,
+       subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
+       price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
                  AND ri.intent_type = 'nmi_upgrade'
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
 FROM billing.subscriptions
-WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
-  AND deleted_at IS NULL
-  AND psp_id = sqlc.arg(psp_id)::uuid;
+LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
+WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.rail = ANY (sqlc.arg(rails)::text[])
+  AND subscriptions.deleted_at IS NULL
+  AND subscriptions.psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, customer_id, rail, transaction_id, amount, status,
+SELECT id, customer_id, rail, transaction_id, amount, currency, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
