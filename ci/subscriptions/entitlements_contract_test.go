@@ -130,6 +130,21 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, customer.entitled("premium"), "clearing the live catalog does not revoke an earlier purchase")
 			require.True(t, next.entitled("post:202"))
+
+			empty := w.newCustomer()
+			emptyMethod := empty.saveCard("nmi", visa)
+			request.Customer, request.Entitlement = empty.identity(), ""
+			request.IdempotencyKey = "empty-opaque-purchase-" + uuid.NewString()
+			request.PaymentOptions.PaymentMethodID = pmid(emptyMethod)
+			emptyPurchase, err := client.CreateCheckoutAttempt(t.Context(), request)
+			require.NoError(t, err)
+			require.Equal(t, billing.CheckoutAttemptSucceeded, emptyPurchase.Status)
+			require.NotNil(t, emptyPurchase.PaymentID)
+			var accepted []byte
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT entitlements_snapshot FROM billing.payments WHERE id=$1`), emptyPurchase.PaymentID.UUID()).Scan(&accepted))
+			require.JSONEq(t, `[]`, string(accepted), "an accepted empty list must not become an unknown snapshot")
+			require.False(t, empty.entitled("post:202"))
+			require.False(t, empty.entitled(product.Key), "an empty list must not imply the product key")
 		})
 	}
 }
