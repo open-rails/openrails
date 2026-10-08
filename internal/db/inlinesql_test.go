@@ -17,19 +17,20 @@ import (
 // covers a directory) may still hold SQL string literals, each for the reason
 // given; an entry that no longer holds any fails as stale.
 var inlineSQLAllowed = map[string]string{
-	"internal/db/commit_guard.go":         "transaction isolation control",
-	"internal/db/sqlaudit/":               "auditor introspects pg_catalog",
-	"internal/merchantarchive/archive.go": "profile-driven per-table SQL",
-	"internal/merchantarchive/checks.go":  "pg_catalog and per-table checks",
-	"internal/merchants/delete.go":        "information_schema table probe",
-	"internal/migrate/migrator.go":        "River schema bootstrap, pre-schema",
-	"internal/migrate/owner.go":           "pg_catalog ownership handover, DDL",
-	"internal/modules/metrics/":           "SQL compiled from metric definitions",
-	"internal/river/job_liveness.go":      "River table, runtime schema",
-	"internal/river/job_rescue.go":        "River table, runtime schema",
-	"internal/river/progress.go":          "River table, runtime schema",
-	"internal/schemasnapshot/":            "schema list introspects pg_catalog",
-	"sdk/":                                "e2e harness, separate module",
+	"internal/db/commit_guard.go":                  "transaction isolation control",
+	"internal/db/sqlaudit/":                        "auditor introspects pg_catalog",
+	"internal/merchantarchive/archive.go":          "profile-driven per-table SQL",
+	"internal/merchantarchive/catalog_snapshot.go": "profile-driven catalog snapshot rows and restore prerequisites",
+	"internal/merchantarchive/checks.go":           "pg_catalog and per-table checks",
+	"internal/merchants/delete.go":                 "information_schema table probe",
+	"internal/migrate/migrator.go":                 "River schema bootstrap, pre-schema",
+	"internal/migrate/owner.go":                    "pg_catalog ownership handover, DDL",
+	"internal/modules/metrics/":                    "SQL compiled from metric definitions",
+	"internal/river/job_liveness.go":               "River table, runtime schema",
+	"internal/river/job_rescue.go":                 "River table, runtime schema",
+	"internal/river/progress.go":                   "River table, runtime schema",
+	"internal/schemasnapshot/":                     "schema list introspects pg_catalog",
+	"sdk/":                                         "e2e harness, separate module",
 }
 
 var (

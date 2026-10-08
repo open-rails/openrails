@@ -137,6 +137,14 @@ type BillingCatalogRateCard struct {
 	CustomerID *uuid.UUID
 }
 
+// Local catalog snapshot restore receipts; one completed atomic restore per merchant. Identical artifact retries are no-ops even after later catalog edits. Excluded from exported snapshots. Retention: permanent, never pruned.
+type BillingCatalogRestoreReceipt struct {
+	MerchantID uuid.UUID
+	Digest     string
+	Rows       int64
+	RestoredAt time.Time
+}
+
 // One provider checkout attempt (chk_ id): a sale, a membership enrollment or a card setup on one PSP. A checkout session creates one per payment attempt; merchant automation creates them directly. Retention: attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent.
 type BillingCheckoutAttempt struct {
 	ID             uuid.UUID

@@ -40,9 +40,10 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		args []string
 		want string
 	}{
-		"authkit authority rejects merchants": {newPushAuthBootstrapCmd(), "merchants: []\n", nil, "invalid_bootstrap_manifest"},
-		"merchant config rejects authority":   {newPushMerchantConfigCmd(), "users:\n  - username: operator\n", nil, "users"},
-		"catalog rejects merchants":           {newApplyCatalogCmd(), "schema_version: 1\nmerchants: []\n", []string{"--merchant", "example"}, "merchants"},
+		"authkit authority rejects merchants":  {newPushAuthBootstrapCmd(), "merchants: []\n", nil, "invalid_bootstrap_manifest"},
+		"merchant config rejects authority":    {newPushMerchantConfigCmd(), "users:\n  - username: operator\n", nil, "users"},
+		"catalog rejects merchants":            {newApplyCatalogCmd(), "schema_version: 1\nmerchants: []\n", []string{"--merchant", "example"}, "merchants"},
+		"catalog application rejects snapshot": {newApplyCatalogCmd(), "schema_version: 1\nkind: catalog_snapshot\n", []string{"--merchant", "example"}, "kind"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := execute(tc.cmd, append([]string{"--file", writeTemp(t, "manifest.yaml", tc.body)}, tc.args...)...)
