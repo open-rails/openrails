@@ -91,7 +91,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if payment.CreatedAt.Before(p.AcceptedAt) {
 		return errors.New("engine payment predates its accepted obligation")
 	}
-	accepted := subscriptions.InitialMembershipTerms{PaymentID: payment.ID, SubscriptionID: t.SubscriptionID, CustomerID: t.CustomerID, PSPID: t.PSPID, PriceID: t.PriceID, ProductID: t.ProductID, Amount: t.Amount, RecurringAmount: t.Amount, Currency: t.Currency, Entitlements: t.Entitlements, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd}
+	accepted := subscriptions.InitialMembershipTerms{PaymentID: payment.ID, SubscriptionID: t.SubscriptionID, CustomerID: t.CustomerID, PSPID: t.PSPID, PriceID: t.PriceID, ProductID: t.ProductID, Amount: t.Amount, RecurringAmount: t.Amount, Currency: t.Currency, Entitlements: t.Entitlements, PeriodStart: t.PeriodStart, PeriodEnd: t.PeriodEnd, AccessDurationHours: t.AccessDurationHours}
 	if accepted.Entitlements == nil {
 		accepted.Entitlements = map[string]*int{}
 	}

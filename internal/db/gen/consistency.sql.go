@@ -17,7 +17,7 @@ WITH charges AS (
     SELECT purch.id, purch.customer_id, purch.subscription_id, purch.price_id, purch.amount, purch.purchased_at,
            price.product_id, prod.key AS product_key,
            purch.metadata->>'period_start' AS period_start,
-           LEAST(price.access_duration_hours, COALESCE(price.trial_duration_hours, price.access_duration_hours)) AS cycle_hours
+           LEAST(price.billing_interval_hours, COALESCE(price.trial_duration_hours, price.billing_interval_hours)) AS cycle_hours
     FROM billing.payments purch
     JOIN billing.prices price ON purch.price_id = price.id
     JOIN billing.products prod ON price.product_id = prod.id

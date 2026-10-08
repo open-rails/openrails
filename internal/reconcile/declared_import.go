@@ -249,8 +249,8 @@ func ImportDeclaredSubscriptions(
 		if f.PaidThrough != nil && !f.PaidThrough.IsZero() {
 			end := f.PaidThrough.UTC()
 			start := f.StartedAt.UTC()
-			if price.AccessDurationHours != nil && *price.AccessDurationHours > 0 {
-				if s := end.Add(-time.Duration(*price.AccessDurationHours) * time.Hour); s.After(start) {
+			if price.BillingIntervalHours != nil && *price.BillingIntervalHours > 0 {
+				if s := end.Add(-time.Duration(*price.BillingIntervalHours) * time.Hour); s.After(start) {
 					start = s
 				}
 			}
@@ -429,26 +429,27 @@ func insertDeclaredCanceled(
 	id := uuid.New()
 	priceID := f.PriceID
 	if _, err := q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		CollectionPolicy:         string(f.CollectionPolicy),
-		ID:                       id,
-		MerchantID:               merchantID,
-		CustomerID:               f.Customer,
-		ProductID:                price.ProductID,
-		PriceID:                  &priceID,
-		EntitlementsSpecSnapshot: product.EntitlementsSpec,
-		Status:                   string(models.StatusCanceled),
-		StartedAt:                f.StartedAt.UTC(),
-		EndedAt:                  &endedAt,
-		CurrentPeriodStartsAt:    periodStart,
-		CurrentPeriodEndsAt:      periodEnd,
-		Rail:                     f.Rail,
-		RailSubscriptionID:       f.RailSubscriptionID,
-		CancelFeedback:           &feedback,
-		CancelType:               &cancelType,
-		CanceledAt:               &canceledAt,
-		CreatedAt:                f.StartedAt.UTC(),
-		UpdatedAt:                canceledAt,
-		PspID:                    f.PspID,
+		CollectionPolicy:            string(f.CollectionPolicy),
+		ID:                          id,
+		MerchantID:                  merchantID,
+		CustomerID:                  f.Customer,
+		ProductID:                   price.ProductID,
+		PriceID:                     &priceID,
+		EntitlementsSpecSnapshot:    product.EntitlementsSpec,
+		AccessDurationHoursSnapshot: price.AccessDurationHours,
+		Status:                      string(models.StatusCanceled),
+		StartedAt:                   f.StartedAt.UTC(),
+		EndedAt:                     &endedAt,
+		CurrentPeriodStartsAt:       periodStart,
+		CurrentPeriodEndsAt:         periodEnd,
+		Rail:                        f.Rail,
+		RailSubscriptionID:          f.RailSubscriptionID,
+		CancelFeedback:              &feedback,
+		CancelType:                  &cancelType,
+		CanceledAt:                  &canceledAt,
+		CreatedAt:                   f.StartedAt.UTC(),
+		UpdatedAt:                   canceledAt,
+		PspID:                       f.PspID,
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.

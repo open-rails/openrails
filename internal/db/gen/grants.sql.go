@@ -102,7 +102,11 @@ WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
     WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
-      AND g.ends_at=(i.payload->'renewal'->>'period_end')::timestamptz)
+      AND g.ends_at IS NOT DISTINCT FROM CASE
+          WHEN i.payload->'renewal' ? 'access_duration_hours' THEN
+            (i.payload->'renewal'->>'period_start')::timestamptz +
+            (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour'
+          ELSE (i.payload->'renewal'->>'period_end')::timestamptz END)
 `
 
 // Initial and pre-engine history precedes the first accepted engine period.
@@ -864,7 +868,7 @@ WHERE g.merchant_id = $1::uuid
           AND NOT (g.source_type = 'subscription' AND EXISTS (
             SELECT 1 FROM billing.entitlements e2
             JOIN billing.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
-              AND NOT (s2.collection_policy='engine' AND s2.rail IN ('nmi','stripe'))
+              AND s2.access_duration_hours_snapshot IS NULL
             WHERE e2.merchant_id = g.merchant_id
               AND e2.customer_id = g.customer_id
               AND e2.entitlement = feat
@@ -1319,7 +1323,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- A provider-billed member in the provider's dunning keeps access
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
-       s.started_at, s.ended_at,
+       s.started_at, s.ended_at, s.access_duration_hours_snapshot,
        pd.entitlements_spec
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
@@ -1331,8 +1335,8 @@ WHERE s.merchant_id = $1::uuid
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
-  AND COALESCE(s.current_period_starts_at, s.started_at) < COALESCE(s.current_period_ends_at, s.ended_at)
-  AND COALESCE(s.current_period_ends_at, s.ended_at) >= $3::timestamptz
+  AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= $3::timestamptz)
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
@@ -1348,15 +1352,16 @@ type ListUngrantedSubscriptionsParams struct {
 }
 
 type ListUngrantedSubscriptionsRow struct {
-	ID                    uuid.UUID
-	CustomerID            uuid.UUID
-	ProductID             uuid.UUID
-	Status                string
-	CurrentPeriodStartsAt *time.Time
-	CurrentPeriodEndsAt   *time.Time
-	StartedAt             time.Time
-	EndedAt               *time.Time
-	EntitlementsSpec      []byte
+	ID                          uuid.UUID
+	CustomerID                  uuid.UUID
+	ProductID                   uuid.UUID
+	Status                      string
+	CurrentPeriodStartsAt       *time.Time
+	CurrentPeriodEndsAt         *time.Time
+	StartedAt                   time.Time
+	EndedAt                     *time.Time
+	AccessDurationHoursSnapshot *int32
+	EntitlementsSpec            []byte
 }
 
 // #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
@@ -1392,6 +1397,7 @@ func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngran
 			&i.CurrentPeriodEndsAt,
 			&i.StartedAt,
 			&i.EndedAt,
+			&i.AccessDurationHoursSnapshot,
 			&i.EntitlementsSpec,
 		); err != nil {
 			return nil, err

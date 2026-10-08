@@ -38,26 +38,27 @@ func localRailNames(p Provider) []string {
 // LocalSubscription is the slice of billing.subscriptions the diff engine
 // consumes.
 type LocalSubscription struct {
-	ID                    uuid.UUID
-	CustomerID            uuid.UUID
-	PriceID               *uuid.UUID
-	ProductID             uuid.UUID
-	Status                string
-	Rail                  string
-	RailSubscriptionID    string
-	CustomerEmail         string // the customer's, for identity matching
-	PaymentMethodID       *uuid.UUID
-	CurrentPeriodStartsAt *time.Time
-	CurrentPeriodEndsAt   *time.Time
-	StartedAt             time.Time
-	EndedAt               *time.Time
-	CanceledAt            *time.Time
-	CancelType            string
-	DeletionScheduledAt   *time.Time
-	TierGroup             string
-	LastRetryAt           *time.Time
-	RetryAttempts         int
-	NextRetryAt           *time.Time
+	ID                          uuid.UUID
+	CustomerID                  uuid.UUID
+	PriceID                     *uuid.UUID
+	ProductID                   uuid.UUID
+	Status                      string
+	Rail                        string
+	RailSubscriptionID          string
+	CustomerEmail               string // the customer's, for identity matching
+	PaymentMethodID             *uuid.UUID
+	CurrentPeriodStartsAt       *time.Time
+	CurrentPeriodEndsAt         *time.Time
+	AccessDurationHoursSnapshot *int
+	StartedAt                   time.Time
+	EndedAt                     *time.Time
+	CanceledAt                  *time.Time
+	CancelType                  string
+	DeletionScheduledAt         *time.Time
+	TierGroup                   string
+	LastRetryAt                 *time.Time
+	RetryAttempts               int
+	NextRetryAt                 *time.Time
 	// ScheduledPriceID is a price change the provider already bills from the
 	// next renewal; TierChangePending an unresolved in-place tier change.
 	ScheduledPriceID  *uuid.UUID
@@ -168,24 +169,25 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	}
 	for _, row := range subs {
 		s := LocalSubscription{
-			ID:                    row.ID,
-			CustomerID:            row.CustomerID,
-			PriceID:               row.PriceID,
-			ProductID:             row.ProductID,
-			Status:                string(row.Status),
-			Rail:                  row.Rail,
-			RailSubscriptionID:    models.DerefStr(row.RailSubscriptionID),
-			PaymentMethodID:       row.PaymentMethodID,
-			CurrentPeriodStartsAt: row.CurrentPeriodStartsAt,
-			CurrentPeriodEndsAt:   row.CurrentPeriodEndsAt,
-			StartedAt:             row.StartedAt,
-			EndedAt:               row.EndedAt,
-			CanceledAt:            row.CanceledAt,
-			DeletionScheduledAt:   row.DeletionScheduledAt,
-			LastRetryAt:           row.LastRetryAt,
-			NextRetryAt:           row.NextRetryAt,
-			ScheduledPriceID:      row.ScheduledPriceID,
-			TierChangePending:     row.TierChangePending,
+			ID:                          row.ID,
+			CustomerID:                  row.CustomerID,
+			PriceID:                     row.PriceID,
+			ProductID:                   row.ProductID,
+			Status:                      string(row.Status),
+			Rail:                        row.Rail,
+			RailSubscriptionID:          models.DerefStr(row.RailSubscriptionID),
+			PaymentMethodID:             row.PaymentMethodID,
+			CurrentPeriodStartsAt:       row.CurrentPeriodStartsAt,
+			CurrentPeriodEndsAt:         row.CurrentPeriodEndsAt,
+			AccessDurationHoursSnapshot: models.DerefIntPtr(row.AccessDurationHoursSnapshot),
+			StartedAt:                   row.StartedAt,
+			EndedAt:                     row.EndedAt,
+			CanceledAt:                  row.CanceledAt,
+			DeletionScheduledAt:         row.DeletionScheduledAt,
+			LastRetryAt:                 row.LastRetryAt,
+			NextRetryAt:                 row.NextRetryAt,
+			ScheduledPriceID:            row.ScheduledPriceID,
+			TierChangePending:           row.TierChangePending,
 		}
 		if row.CustomerEmail != nil {
 			s.CustomerEmail = *row.CustomerEmail
@@ -222,11 +224,11 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			Currency:  row.Currency,
 			Archived:  row.Archived,
 		}
-		// Only an auto-renewing price has a recurring cadence to match a remote
+		// Only an recurring price has a recurring cadence to match a remote
 		// provider plan against (#622). The window is in hours; the provider
 		// cadence is whole days (hours/24).
-		if row.AutoRenew && row.AccessDurationHours != nil {
-			days := int(*row.AccessDurationHours) / 24
+		if row.BillingIntervalHours != nil {
+			days := int(*row.BillingIntervalHours) / 24
 			p.BillingCycleDays = &days
 		}
 		mid, err := merchant.Require(ctx)

@@ -292,7 +292,7 @@ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_pur
        OR s.amount > (p.customer_amount->>'max_amount')::bigint))
    OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
    OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
-   OR p.auto_renew);
+   OR p.billing_interval_hours IS NOT NULL);
 
 -- A local expiry or failed HTTP request does not prove a provider cannot charge.
 -- Only a completed purchase or authoritative provider cancellation releases a

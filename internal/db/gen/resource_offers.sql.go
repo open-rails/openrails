@@ -65,22 +65,22 @@ func (q *Queries) CheckResourceEntitlements(ctx context.Context, arg CheckResour
 const listOffersForEntitlements = `-- name: ListOffersForEntitlements :many
 SELECT wanted.entitlement::text AS entitlement, offer.product_id, offer.product_key,
  offer.product_name, offer.entitlements_spec, offer.price_id, offer.price_key,
- offer.unit_amount, offer.currency, offer.access_duration_hours, offer.auto_renew
+ offer.unit_amount, offer.currency, offer.access_duration_hours, offer.billing_interval_hours
 FROM unnest($1::text[], $2::text[], $3::uuid[])
  AS wanted(entitlement, after_currency, after_id)
 CROSS JOIN LATERAL (
  SELECT product.id AS product_id, product.key AS product_key,
   product.display_name AS product_name, product.entitlements_spec,
   price.id AS price_id, price.key AS price_key, price.amount AS unit_amount,
-  price.currency, price.access_duration_hours, price.auto_renew
+  price.currency, price.access_duration_hours, price.billing_interval_hours
  FROM billing.products product
  JOIN billing.prices price ON price.product_id=product.id AND price.merchant_id=product.merchant_id
  WHERE product.merchant_id=$4::uuid
   AND NOT product.archived AND NOT price.archived
   AND product.entitlements_spec ? wanted.entitlement
-  AND (($5::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
-    OR ($5::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
-    OR ($5::text='recurring' AND price.auto_renew))
+  AND (($5::text='permanent' AND price.billing_interval_hours IS NULL AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>wanted.entitlement,'0')='0')
+    OR ($5::text='finite' AND price.billing_interval_hours IS NULL AND price.access_duration_hours IS NOT NULL)
+    OR ($5::text='recurring' AND price.billing_interval_hours IS NOT NULL))
   AND (wanted.after_id='00000000-0000-0000-0000-000000000000'::uuid OR
     (price.currency<>$6::text, price.currency, price.id) >
     (wanted.after_currency<>$6::text, wanted.after_currency, wanted.after_id))
@@ -101,17 +101,17 @@ type ListOffersForEntitlementsParams struct {
 }
 
 type ListOffersForEntitlementsRow struct {
-	Entitlement         string
-	ProductID           uuid.UUID
-	ProductKey          string
-	ProductName         string
-	EntitlementsSpec    []byte
-	PriceID             uuid.UUID
-	PriceKey            string
-	UnitAmount          int64
-	Currency            string
-	AccessDurationHours *int32
-	AutoRenew           bool
+	Entitlement          string
+	ProductID            uuid.UUID
+	ProductKey           string
+	ProductName          string
+	EntitlementsSpec     []byte
+	PriceID              uuid.UUID
+	PriceKey             string
+	UnitAmount           int64
+	Currency             string
+	AccessDurationHours  *int32
+	BillingIntervalHours *int32
 }
 
 // Discovery only: all pricing and benefits are revalidated at admission.
@@ -144,7 +144,7 @@ func (q *Queries) ListOffersForEntitlements(ctx context.Context, arg ListOffersF
 			&i.UnitAmount,
 			&i.Currency,
 			&i.AccessDurationHours,
-			&i.AutoRenew,
+			&i.BillingIntervalHours,
 		); err != nil {
 			return nil, err
 		}

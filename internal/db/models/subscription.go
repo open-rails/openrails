@@ -61,6 +61,9 @@ type Subscription struct {
 	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
 
 	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
+	// AccessDurationHoursSnapshot is the accepted access duration for this paid phase.
+	// nil has no scheduled expiry; changing price does not change past promises.
+	AccessDurationHoursSnapshot *int `json:"access_duration_hours_snapshot"`
 
 	Status                SubscriptionStatus `json:"status"`
 	StartedAt             time.Time          `json:"started_at"`

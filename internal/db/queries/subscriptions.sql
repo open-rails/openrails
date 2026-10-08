@@ -4,7 +4,7 @@
 -- name: CreateSubscription :execrows
 INSERT INTO billing.subscriptions (
     id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
-    entitlements_spec_snapshot, status, started_at,
+    entitlements_spec_snapshot, access_duration_hours_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
     rail_subscription_id, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
@@ -12,7 +12,7 @@ INSERT INTO billing.subscriptions (
     created_at, updated_at, psp_id, collection_policy
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
-    sqlc.narg(entitlements_spec_snapshot),
+    sqlc.narg(entitlements_spec_snapshot), sqlc.narg(access_duration_hours_snapshot)::int,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
@@ -34,6 +34,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
+    access_duration_hours_snapshot = sqlc.narg(access_duration_hours_snapshot)::int,
     status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
@@ -68,6 +69,7 @@ UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
+    access_duration_hours_snapshot = sqlc.narg(access_duration_hours_snapshot)::int,
     status = sqlc.arg(status),
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
@@ -291,8 +293,8 @@ LIMIT 1;
 
 -- #691 projection inversion: does this subscription project STANDING access
 -- (open-ended entitlement window, closed only by proven events)? True for
--- auto-renew prices while the sub is non-terminal; terminal subs and bounded
--- (one-off/rental) prices keep bounded interval windows.
+-- recurring prices with no scheduled access expiry while non-terminal.
+-- Finite access terms stay bounded independently of the billing interval.
 -- name: SubscriptionProjectsStandingAccess :one
 SELECT EXISTS (
     SELECT 1 FROM billing.subscriptions s
@@ -300,8 +302,8 @@ SELECT EXISTS (
     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       AND s.id = sqlc.arg(id)::uuid
       AND s.deleted_at IS NULL
-      AND p.auto_renew
-      AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
+      AND p.billing_interval_hours IS NOT NULL
+      AND s.access_duration_hours_snapshot IS NULL
       AND s.status IN ('pending', 'active', 'past_due', 'awaiting_method', 'unverified')
 ) AS standing;
 

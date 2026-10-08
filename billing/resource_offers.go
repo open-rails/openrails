@@ -29,17 +29,17 @@ type OfferListParams struct {
 // product's and the price's: the price's ID is immutable, its key selects its
 // current version at checkout.
 type Offer struct {
-	Kind                OfferKind       `json:"kind"`
-	ProductID           ProductID       `json:"product_id"`
-	ProductKey          string          `json:"product_key"`
-	ProductDisplayName  string          `json:"product_display_name"`
-	EntitlementsSpec    map[string]*int `json:"entitlements_spec"`
-	PriceID             PriceID         `json:"price_id"`
-	PriceKey            string          `json:"price_key"`
-	UnitAmount          int64           `json:"unit_amount,string"`
-	Currency            string          `json:"currency"`
-	AccessDurationHours *int            `json:"access_duration_hours"`
-	AutoRenew           bool            `json:"auto_renew"`
+	Kind                 OfferKind       `json:"kind"`
+	ProductID            ProductID       `json:"product_id"`
+	ProductKey           string          `json:"product_key"`
+	ProductDisplayName   string          `json:"product_display_name"`
+	EntitlementsSpec     map[string]*int `json:"entitlements_spec"`
+	PriceID              PriceID         `json:"price_id"`
+	PriceKey             string          `json:"price_key"`
+	UnitAmount           int64           `json:"unit_amount,string"`
+	Currency             string          `json:"currency"`
+	AccessDurationHours  *int            `json:"access_duration_hours"`
+	BillingIntervalHours *int            `json:"billing_interval_hours"`
 }
 
 // OfferPages is one page of offers per requested entitlement.

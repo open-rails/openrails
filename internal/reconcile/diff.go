@@ -1136,18 +1136,23 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				"provider":           string(provider),
 			},
 		}
-		// Grant entitlements when the charge's period is still running.
-		if sub.IsLive() && len(sub.EntitlementNames) > 0 && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(now) {
+		// Restore the paid access promise independently of its billing cadence.
+		if sub.IsLive() && len(sub.EntitlementNames) > 0 {
 			start := now
 			if sub.CurrentPeriodStartsAt != nil {
 				start = *sub.CurrentPeriodStartsAt
+			}
+			var accessEnd *time.Time
+			if sub.AccessDurationHoursSnapshot != nil {
+				end := start.Add(time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour)
+				accessEnd = &end
 			}
 			action.Grant = &GrantEntitlementsAction{
 				SubscriptionID: sub.ID,
 				CustomerID:     sub.CustomerID,
 				Entitlements:   sub.EntitlementNames,
 				StartsAt:       start,
-				EndsAt:         sub.CurrentPeriodEndsAt,
+				EndsAt:         accessEnd,
 			}
 			f.RecommendedAction += "; the charge's period is current, so missing subscription entitlements are granted too"
 		}

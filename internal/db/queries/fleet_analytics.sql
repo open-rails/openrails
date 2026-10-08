@@ -57,10 +57,10 @@ ORDER BY 1;
 -- Fleet MRR per currency, using the dashboard mrr normalization.
 -- name: FleetMRRByCurrency :many
 SELECT pr.currency::text AS currency, count(*)::bigint AS subscriptions,
-       COALESCE(sum(billing.monthly_normalized_amount(pr.amount, pr.access_duration_hours)), 0)::bigint AS monthly_amount
+       COALESCE(sum(billing.monthly_normalized_amount(pr.amount, pr.billing_interval_hours)), 0)::bigint AS monthly_amount
 FROM billing.subscriptions s
 JOIN billing.prices pr ON pr.merchant_id = s.merchant_id AND pr.id = s.price_id
-WHERE s.status = 'active' AND s.deleted_at IS NULL AND pr.auto_renew AND pr.access_duration_hours > 0
+WHERE s.status = 'active' AND s.deleted_at IS NULL AND pr.billing_interval_hours IS NOT NULL AND pr.billing_interval_hours > 0
   AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR s.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
 GROUP BY pr.currency
 ORDER BY pr.currency;

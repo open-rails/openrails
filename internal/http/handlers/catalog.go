@@ -12,7 +12,7 @@ import (
 type PublicPriceListQuery struct {
 	ProductID billing.ProductID `form:"product_id"`
 	Currency  string            `form:"currency"`
-	AutoRenew *bool             `form:"auto_renew"`
+	Recurring *bool             `form:"recurring"`
 }
 
 // ListPublicProducts lists the products on sale, each with its current
@@ -59,7 +59,7 @@ func ListPublicPrices(r *httprequest.Request) {
 		return
 	}
 	onSale := false
-	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID, Currency: query.Currency, AutoRenew: query.AutoRenew, Archived: &onSale})
+	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID, Currency: query.Currency, Recurring: query.Recurring, Archived: &onSale})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

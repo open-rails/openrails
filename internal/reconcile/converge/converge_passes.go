@@ -280,7 +280,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// standing access projection remained bounded and has since elapsed. The
 	// transaction fix prevents new instances; this AUTO repair reopens the
 	// latest non-revoked subscription window for existing ones.
-	expiredBounded, err := q.ListActiveAutoRenewSubsWithExpiredBoundedAccess(ctx, gen.ListActiveAutoRenewSubsWithExpiredBoundedAccessParams{
+	expiredBounded, err := q.ListActiveRecurringSubsWithExpiredBoundedAccess(ctx, gen.ListActiveRecurringSubsWithExpiredBoundedAccessParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
@@ -306,7 +306,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Provider:   "self",
 			Evidence: map[string]any{
 				"subscription_id": billing.SubscriptionID(s.ID).String(), "customer_id": s.CustomerID.String(),
-				"direction": "standing", "cause": "active_auto_renew_bounded_access_expired",
+				"direction": "standing", "cause": "active_recurring_bounded_access_expired",
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
@@ -315,17 +315,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// Revoke direction: a terminally-dead sub (canceled/expired/failed —
-	// `unknown` keeps access, #664) still projecting subscription-sourced
-	// STANDING windows or bounded windows past its entitled bound.
-	// #690/#691 paid-through guard:
-	// the bound is GREATEST(paid-through, ended_at) — a user cancel leaves a
-	// PAID RUNWAY window bounded to period end, which is never excess before
-	// the bound. Propagation of a recorded terminal decision, so AUTO and NOT
-	// confirmed-absence gated; repair writes the missed/correct #691 closure
-	// (bounds live windows at the bound, drops scheduled ones past it) so the
-	// runway survives while the overrun is cleaned. A terminal standing window
-	// is unambiguous missed propagation, so it follows the same AUTO repair.
+	// A chargeback closes access; ordinary cancellation keeps purchased grants.
 	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})

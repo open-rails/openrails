@@ -1013,10 +1013,8 @@ type BillingPrice struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-	// Access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.
+	// Access granted by each purchase in hours; NULL means no scheduled expiry, independently of billing cadence.
 	AccessDurationHours *int32
-	// Whether the price recharges and extends the window after access_duration_hours (recurring).
-	AutoRenew bool
 	// Optional first-phase price (micros); 0 = free trial; NULL = no trial.
 	TrialUnitAmount *int64
 	// Optional trial first-phase length in HOURS; NULL = no trial.
@@ -1026,6 +1024,8 @@ type BillingPrice struct {
 	Revision int64
 	// Immutable inclusive customer-selected deposit bounds in currency micros; NULL means fixed amount.
 	CustomerAmount []byte
+	// Recurring billing cadence in hours; NULL means one-time. Recurring subscriptions bill until canceled.
+	BillingIntervalHours *int32
 }
 
 // Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
@@ -1399,6 +1399,8 @@ type BillingSubscription struct {
 	LifecycleRev        int64
 	RowVersion          int64
 	DunningPolicy       []byte
+	// Access duration accepted for the current paid phase in hours; NULL means no scheduled expiry. Retained independently of repricing.
+	AccessDurationHoursSnapshot *int32
 }
 
 // A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle). Retention: permanent, never pruned.

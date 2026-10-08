@@ -1037,80 +1037,6 @@ func (q *Queries) ListActionablePullFindingsForPSP(ctx context.Context, arg List
 	return items, nil
 }
 
-const listActiveAutoRenewSubsWithExpiredBoundedAccess = `-- name: ListActiveAutoRenewSubsWithExpiredBoundedAccess :many
-SELECT DISTINCT s.id, s.customer_id
-FROM billing.subscriptions s
-JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
-WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'active'
-  AND p.auto_renew
-  AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
-  AND EXISTS (
-      SELECT 1 FROM billing.entitlements expired
-      WHERE expired.merchant_id = s.merchant_id
-        AND expired.source_type = 'subscription'
-        AND expired.source_id = s.id
-        AND expired.revoked_at IS NULL
-        AND expired.deleted_at IS NULL
-        AND expired.ends_at IS NOT NULL
-        AND expired.ends_at <= $3::timestamptz
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.entitlements live
-      WHERE live.merchant_id = s.merchant_id
-        AND live.source_type = 'subscription'
-        AND live.source_id = s.id
-        AND live.revoked_at IS NULL
-        AND live.deleted_at IS NULL
-        AND (live.ends_at IS NULL OR live.ends_at > $3::timestamptz)
-  )
-ORDER BY s.id
-LIMIT $4
-`
-
-type ListActiveAutoRenewSubsWithExpiredBoundedAccessParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-	RowLimit   int64
-}
-
-type ListActiveAutoRenewSubsWithExpiredBoundedAccessRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// #955 DERIVE: the historical Stripe-resume split commit. The subscription is
-// active and its auto-renew price promises standing access, but every live
-// subscription window has already ended. Re-opening the latest bounded window
-// is safe: revoked/deleted windows remain recorded decisions and are excluded.
-func (q *Queries) ListActiveAutoRenewSubsWithExpiredBoundedAccess(ctx context.Context, arg ListActiveAutoRenewSubsWithExpiredBoundedAccessParams) ([]ListActiveAutoRenewSubsWithExpiredBoundedAccessRow, error) {
-	rows, err := q.db.Query(ctx, listActiveAutoRenewSubsWithExpiredBoundedAccess,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Now,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListActiveAutoRenewSubsWithExpiredBoundedAccessRow
-	for rows.Next() {
-		var i ListActiveAutoRenewSubsWithExpiredBoundedAccessRow
-		if err := rows.Scan(&i.ID, &i.CustomerID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveMerchantIDs = `-- name: ListActiveMerchantIDs :many
 SELECT id FROM billing.merchants
 WHERE status = 'active' AND deleted_at IS NULL
@@ -1139,9 +1065,83 @@ func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error
 	return items, nil
 }
 
+const listActiveRecurringSubsWithExpiredBoundedAccess = `-- name: ListActiveRecurringSubsWithExpiredBoundedAccess :many
+SELECT DISTINCT s.id, s.customer_id
+FROM billing.subscriptions s
+JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'active'
+  AND p.billing_interval_hours IS NOT NULL
+  AND s.access_duration_hours_snapshot IS NULL
+  AND EXISTS (
+      SELECT 1 FROM billing.entitlements expired
+      WHERE expired.merchant_id = s.merchant_id
+        AND expired.source_type = 'subscription'
+        AND expired.source_id = s.id
+        AND expired.revoked_at IS NULL
+        AND expired.deleted_at IS NULL
+        AND expired.ends_at IS NOT NULL
+        AND expired.ends_at <= $3::timestamptz
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.entitlements live
+      WHERE live.merchant_id = s.merchant_id
+        AND live.source_type = 'subscription'
+        AND live.source_id = s.id
+        AND live.revoked_at IS NULL
+        AND live.deleted_at IS NULL
+        AND (live.ends_at IS NULL OR live.ends_at > $3::timestamptz)
+  )
+ORDER BY s.id
+LIMIT $4
+`
+
+type ListActiveRecurringSubsWithExpiredBoundedAccessParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+	RowLimit   int64
+}
+
+type ListActiveRecurringSubsWithExpiredBoundedAccessRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// #955 DERIVE: the historical Stripe-resume split commit. The subscription is
+// active and its recurring price promises standing access, but every live
+// subscription window has already ended. Re-opening the latest bounded window
+// is safe: revoked/deleted windows remain recorded decisions and are excluded.
+func (q *Queries) ListActiveRecurringSubsWithExpiredBoundedAccess(ctx context.Context, arg ListActiveRecurringSubsWithExpiredBoundedAccessParams) ([]ListActiveRecurringSubsWithExpiredBoundedAccessRow, error) {
+	rows, err := q.db.Query(ctx, listActiveRecurringSubsWithExpiredBoundedAccess,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveRecurringSubsWithExpiredBoundedAccessRow
+	for rows.Next() {
+		var i ListActiveRecurringSubsWithExpiredBoundedAccessRow
+		if err := rows.Scan(&i.ID, &i.CustomerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveSubsMissingEntitlementProjection = `-- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
        missing.spec AS entitlements_spec
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
@@ -1154,7 +1154,8 @@ CROSS JOIN LATERAL (
           AND e.source_type = 'subscription' AND e.source_id = s.id
           AND e.entitlement = feat
           AND e.deleted_at IS NULL
-          AND e.starts_at < s.current_period_ends_at
+          AND (s.access_duration_hours_snapshot IS NULL OR
+               e.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
           AND (e.ends_at IS NULL OR e.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
 
@@ -1164,7 +1165,8 @@ WHERE s.merchant_id = $1::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
-  AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > $3::timestamptz
+  AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > $3::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= $3::timestamptz
   AND EXISTS (
       SELECT 1 FROM billing.grants g
@@ -1182,15 +1184,16 @@ type ListActiveSubsMissingEntitlementProjectionParams struct {
 }
 
 type ListActiveSubsMissingEntitlementProjectionRow struct {
-	ID                    uuid.UUID
-	CustomerID            uuid.UUID
-	ProductID             uuid.UUID
-	Status                string
-	CurrentPeriodStartsAt *time.Time
-	CurrentPeriodEndsAt   *time.Time
-	StartedAt             time.Time
-	EndedAt               *time.Time
-	EntitlementsSpec      []byte
+	ID                          uuid.UUID
+	CustomerID                  uuid.UUID
+	ProductID                   uuid.UUID
+	Status                      string
+	CurrentPeriodStartsAt       *time.Time
+	CurrentPeriodEndsAt         *time.Time
+	StartedAt                   time.Time
+	EndedAt                     *time.Time
+	AccessDurationHoursSnapshot *int32
+	EntitlementsSpec            []byte
 }
 
 // #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
@@ -1222,6 +1225,7 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 			&i.CurrentPeriodEndsAt,
 			&i.StartedAt,
 			&i.EndedAt,
+			&i.AccessDurationHoursSnapshot,
 			&i.EntitlementsSpec,
 		); err != nil {
 			return nil, err
@@ -1235,27 +1239,20 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 }
 
 const listDeadSubsWithLiveEntitlements = `-- name: ListDeadSubsWithLiveEntitlements :many
-SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
+SELECT s.id, s.customer_id, s.status,
+       NULL::timestamptz AS current_period_ends_at, s.canceled_at AS ended_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'canceled'
+  AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
   AND EXISTS (
       SELECT 1 FROM billing.entitlements e
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-        AND (
-            e.ends_at IS NULL
-            OR (
-                e.ends_at > $3::timestamptz
-                AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
-                     OR e.ends_at > GREATEST(s.current_period_ends_at, s.ended_at))
-            )
-        )
+        AND (e.ends_at IS NULL OR (e.ends_at > $3::timestamptz AND e.ends_at > s.canceled_at))
   )
-ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+ORDER BY s.canceled_at, s.id
 LIMIT $4::int
 `
 
@@ -1274,31 +1271,9 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 	EndedAt             *time.Time
 }
 
-// #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
-// the legacy pull engine's PS-9. A terminally-dead sub still projecting a
-// STANDING window or a bounded live window past its entitled bound:
-// propagation of a recorded
-// terminal decision, AUTO (both facts present — NOT the confirmed-absence
-// case). `unknown` is deliberately excluded: access stays intact while
-// provider verification is pending (#664).
-//
-// #690/#691 paid-through guard: the entitled bound is
-// GREATEST(current_period_ends_at, ended_at) — a user cancel leaves a PAID
-// RUNWAY window bounded to period end (BoundSubscriptionAccess), which is NOT
-// excess; only the part of a window extending past the bound is. Repair =
-// BoundSubscriptionAccess(sub, bound) — the missed/correct #691 closure.
-// Both timestamps NULL (imported oddity) => NULL bound, any live window counts
-// and the repair bounds at `now`.
-//
-// Partition (#690, one condition = one finding type):
-//
-//	standing/bounded-overrun window, terminal sub -> HERE (AUTO closure)
-//	sub row missing entirely                     -> derive.entitlement.unjustified (ADMIN)
-//	terminated GRANT with a live window          -> derive.grant_effect.excess (AUTO)
-//
-// customer_id nullable: NULL = merchant-wide sweep.
-// or#837: LONGEST-DEAD first, capped — the overrun that has been granting
-// unentitled access the longest is the one a truncated pass must repair.
+// A chargeback revokes access. Ordinary cancellation only stops billing and
+// leaves all previously purchased access windows intact, including indefinite
+// and longer-than-billing-period terms.
 func (q *Queries) ListDeadSubsWithLiveEntitlements(ctx context.Context, arg ListDeadSubsWithLiveEntitlementsParams) ([]ListDeadSubsWithLiveEntitlementsRow, error) {
 	rows, err := q.db.Query(ctx, listDeadSubsWithLiveEntitlements,
 		arg.MerchantID,
@@ -2597,7 +2572,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithPSPLinks = `-- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
+SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, archived
 FROM billing.prices
 WHERE prices.merchant_id = $1::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = $1::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = $2::uuid)
 `
@@ -2608,13 +2583,13 @@ type ReconcileListPricesWithPSPLinksParams struct {
 }
 
 type ReconcileListPricesWithPSPLinksRow struct {
-	ID                  uuid.UUID
-	ProductID           uuid.UUID
-	Amount              int64
-	Currency            string
-	AccessDurationHours *int32
-	AutoRenew           bool
-	Archived            bool
+	ID                   uuid.UUID
+	ProductID            uuid.UUID
+	Amount               int64
+	Currency             string
+	AccessDurationHours  *int32
+	BillingIntervalHours *int32
+	Archived             bool
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
@@ -2636,7 +2611,7 @@ func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, arg Recon
 			&i.Amount,
 			&i.Currency,
 			&i.AccessDurationHours,
-			&i.AutoRenew,
+			&i.BillingIntervalHours,
 			&i.Archived,
 		); err != nil {
 			return nil, err
@@ -2688,7 +2663,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        canceled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
-       entitlements_spec_snapshot, scheduled_price_id,
+       entitlements_spec_snapshot, access_duration_hours_snapshot, scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
@@ -2708,29 +2683,30 @@ type ReconcileListSubscriptionsByRailsParams struct {
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
-	ID                       uuid.UUID
-	CustomerID               uuid.UUID
-	PriceID                  *uuid.UUID
-	ProductID                uuid.UUID
-	Status                   string
-	Rail                     string
-	RailSubscriptionID       *string
-	PaymentMethodID          *uuid.UUID
-	CurrentPeriodStartsAt    *time.Time
-	CurrentPeriodEndsAt      *time.Time
-	StartedAt                time.Time
-	EndedAt                  *time.Time
-	CanceledAt               *time.Time
-	CancelType               *string
-	DeletionScheduledAt      *time.Time
-	TierGroup                *string
-	LastRetryAt              *time.Time
-	RetryAttempts            *int32
-	NextRetryAt              *time.Time
-	EntitlementsSpecSnapshot []byte
-	ScheduledPriceID         *uuid.UUID
-	CustomerEmail            *string
-	TierChangePending        bool
+	ID                          uuid.UUID
+	CustomerID                  uuid.UUID
+	PriceID                     *uuid.UUID
+	ProductID                   uuid.UUID
+	Status                      string
+	Rail                        string
+	RailSubscriptionID          *string
+	PaymentMethodID             *uuid.UUID
+	CurrentPeriodStartsAt       *time.Time
+	CurrentPeriodEndsAt         *time.Time
+	StartedAt                   time.Time
+	EndedAt                     *time.Time
+	CanceledAt                  *time.Time
+	CancelType                  *string
+	DeletionScheduledAt         *time.Time
+	TierGroup                   *string
+	LastRetryAt                 *time.Time
+	RetryAttempts               *int32
+	NextRetryAt                 *time.Time
+	EntitlementsSpecSnapshot    []byte
+	AccessDurationHoursSnapshot *int32
+	ScheduledPriceID            *uuid.UUID
+	CustomerEmail               *string
+	TierChangePending           bool
 }
 
 // ============================================================================
@@ -2766,6 +2742,7 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.RetryAttempts,
 			&i.NextRetryAt,
 			&i.EntitlementsSpecSnapshot,
+			&i.AccessDurationHoursSnapshot,
 			&i.ScheduledPriceID,
 			&i.CustomerEmail,
 			&i.TierChangePending,
@@ -2803,14 +2780,14 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, customer_id, psp_id, collection_policy
+    entitlements_spec_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
-       p.entitlements_spec, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
+       p.entitlements_spec, pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11

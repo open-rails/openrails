@@ -80,22 +80,18 @@ type Price struct {
 	// a stored price; one non-archived revision may hold each product/key.
 	Key string `json:"key"`
 
-	// AccessDurationHours is the access window (#622) a purchase of this price
-	// grants, in HOURS (supports sub-day windows, e.g. a 12h rental). nil =
-	// indefinite/durable (perpetual ownership); a positive value = a finite window
-	// (rental, one-off, or the billing period when AutoRenew). Drives BOTH
-	// product_access_grants.ends_at and the derived entitlement ends_at.
+	// AccessDurationHours is the access window granted by each purchase, in hours.
+	// nil grants access without scheduled expiry, independently of billing cadence.
 	AccessDurationHours *int `json:"access_duration_hours"`
 
-	// AutoRenew (#622) reports whether the price charges again and extends the
-	// window at the end of AccessDurationHours. A recurring subscription is
-	// AutoRenew=true with a finite AccessDurationHours (the billing period).
-	AutoRenew bool `json:"auto_renew"`
+	// BillingIntervalHours is the recurring billing cadence. nil is a one-time
+	// charge; a positive interval bills again until the subscription is canceled.
+	BillingIntervalHours *int `json:"billing_interval_hours"`
 
 	// Trial pricing (#622): an optional FIRST phase that differs from the recurring
 	// terms above. TrialUnitAmount = first-phase price (0 = free trial),
 	// TrialDurationHours = first-phase length in hours. Both nil = a flat price.
-	// Only valid when AutoRenew.
+	// Only valid with a recurring billing interval.
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
@@ -116,19 +112,21 @@ type Price struct {
 // (shown in the public catalog).
 func (p *Price) IsPurchasable() bool { return !p.Archived }
 
-// IsRecurring reports whether the price auto-renews (a subscription).
-func (p *Price) IsRecurring() bool { return p.AutoRenew }
+// IsRecurring reports whether the price has a recurring billing cadence.
+func (p *Price) IsRecurring() bool {
+	return p != nil && p.BillingIntervalHours != nil && *p.BillingIntervalHours > 0
+}
 
-// RecurringCycleHours returns the billing window in HOURS for an auto-renewing
+// RecurringCycleHours returns the billing interval in hours for a recurring
 // price, or nil for a one-off/durable price. This is the internal canonical
 // cadence — duration is measured in hours everywhere inside OpenRails. Day-based
 // provider cadences (Stripe interval, NMI day-frequency, Solana period) are
 // derived from this (hours/24) ONLY at the provider boundary.
 func (p *Price) RecurringCycleHours() *int {
-	if p == nil || !p.AutoRenew || p.AccessDurationHours == nil {
+	if !p.IsRecurring() {
 		return nil
 	}
-	h := *p.AccessDurationHours
+	h := *p.BillingIntervalHours
 	return &h
 }
 
@@ -364,7 +362,7 @@ func PublicPrice(p billing.Price) billing.Price {
 func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.Revision,
 		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
-		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, AutoRenew: p.AutoRenew,
+		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount,
 		PSPs: make(map[string]billing.PSPLinkState, len(p.PSPLinks)), PendingManualActions: []billing.PendingAction{},
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,

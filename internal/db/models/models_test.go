@@ -110,9 +110,9 @@ func TestPriceCadenceAndPurchasability(t *testing.T) {
 		require.Equal(t, !archived, (&Price{Archived: archived}).IsPurchasable())
 	}
 	require.Nil(t, (&Price{AccessDurationHours: ptr(720)}).RecurringCycleHours(), "a one-off window is not a cycle")
-	require.Nil(t, (&Price{AutoRenew: true}).RecurringCycleDays())
-	require.Equal(t, 1, *(&Price{AutoRenew: true, AccessDurationHours: ptr(36)}).RecurringCycleDays(), "provider day cadence floors")
-	require.Equal(t, 0, *(&Price{AutoRenew: true, AccessDurationHours: ptr(12)}).RecurringCycleDays())
+	require.Nil(t, (&Price{BillingIntervalHours: ptr(0)}).RecurringCycleDays())
+	require.Equal(t, 1, *(&Price{BillingIntervalHours: ptr(36)}).RecurringCycleDays(), "provider day cadence floors")
+	require.Equal(t, 0, *(&Price{BillingIntervalHours: ptr(12)}).RecurringCycleDays())
 
 	_, _, ok := (&Price{TrialUnitAmount: ptr(int64(0))}).GetTrial()
 	require.False(t, ok, "a trial needs both amount and duration")
@@ -123,11 +123,27 @@ func TestPriceCadenceAndPurchasability(t *testing.T) {
 	end := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
 	sub := &Subscription{CurrentPeriodEndsAt: &end, Status: StatusPastDue, CanceledAt: &end}
 	require.Error(t, sub.ActivateWithPrice(&Price{}))
-	require.NoError(t, sub.ActivateWithPrice(&Price{ID: uuid.New(), AutoRenew: true, AccessDurationHours: ptr(720)}))
+	require.NoError(t, sub.ActivateWithPrice(&Price{ID: uuid.New(), BillingIntervalHours: ptr(720), AccessDurationHours: ptr(72)}))
 	require.Equal(t, end, *sub.CurrentPeriodStartsAt, "renewal continues from the prior period end")
 	require.Equal(t, end.Add(720*time.Hour), *sub.CurrentPeriodEndsAt)
 	require.Equal(t, StatusActive, sub.Status)
 	require.Nil(t, sub.CanceledAt)
+}
+
+func TestPriceBillingIntervalIndependentOfAccess(t *testing.T) {
+	for _, access := range []*int{nil, ptr(12), ptr(2160)} {
+		price := &Price{BillingIntervalHours: ptr(720), AccessDurationHours: access}
+		require.True(t, price.IsRecurring())
+		require.Equal(t, 720, *price.RecurringCycleHours())
+		require.Equal(t, 30, *price.RecurringCycleDays())
+		require.Equal(t, access, price.View().AccessDurationHours)
+		require.Equal(t, price.BillingIntervalHours, price.View().BillingIntervalHours)
+	}
+	for _, invalid := range []*int{nil, ptr(0), ptr(-24)} {
+		price := &Price{BillingIntervalHours: invalid, AccessDurationHours: ptr(720)}
+		require.False(t, price.IsRecurring())
+		require.Nil(t, price.RecurringCycleHours())
+	}
 }
 
 func TestMoneyMovement(t *testing.T) {

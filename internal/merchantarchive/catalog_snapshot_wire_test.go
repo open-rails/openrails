@@ -83,7 +83,7 @@ func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T)
 	document.Tables["prices"] = []map[string]json.RawMessage{snapshotWireRow(t, "prices", map[string]string{
 		"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000003",
 		"product_id": "10000000-0000-0000-0000-000000000002", "revision": "7", "key": "purchase",
-		"amount": "9007199254740993", "currency": "USD", "archived": "true", "auto_renew": "false",
+		"amount": "9007199254740993", "currency": "USD", "archived": "true",
 		"created_at": "2026-10-07 12:00:00+00", "updated_at": "2026-10-07 12:00:00+00",
 	})}
 	document.Tables["catalog_rate_cards"] = []map[string]json.RawMessage{snapshotWireRow(t, "catalog_rate_cards", map[string]string{

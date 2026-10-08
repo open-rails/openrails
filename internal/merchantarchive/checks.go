@@ -263,7 +263,7 @@ var referenceChecks = []rowCheck{
 	{"prices", `NOT archived AND EXISTS (SELECT 1 FROM billing.products pr
    WHERE pr.merchant_id=$1 AND pr.id=prices.product_id AND NOT pr.archived AND (
     (prices.customer_amount IS NOT NULL AND (pr.credit_grant IS NULL OR NOT COALESCE((pr.credit_grant->>'from_payment')::boolean,false)))
-    OR (pr.credit_grant IS NOT NULL AND (prices.auto_renew
+    OR (pr.credit_grant IS NOT NULL AND (prices.billing_interval_hours IS NOT NULL
        OR prices.currency IS DISTINCT FROM pr.credit_grant->>'currency'
        OR (prices.customer_amount IS NULL AND prices.amount<=0)))))`},
 

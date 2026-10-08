@@ -326,7 +326,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        current_period_starts_at, current_period_ends_at, started_at, ended_at,
        canceled_at, cancel_type, deletion_scheduled_at, tier_group,
        last_retry_at, retry_attempts, next_retry_at,
-       entitlements_spec_snapshot, scheduled_price_id,
+       entitlements_spec_snapshot, access_duration_hours_snapshot, scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
@@ -368,7 +368,7 @@ WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 -- jsonb carries that id under the provider's key. Archived prices stay
 -- (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
+SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, archived
 FROM billing.prices
 WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
@@ -441,14 +441,14 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, customer_id, psp_id, collection_policy
+    entitlements_spec_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements_spec, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       p.entitlements_spec, pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
@@ -629,10 +629,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY current_period_ends_at;
 
 -- #955 DERIVE: the historical Stripe-resume split commit. The subscription is
--- active and its auto-renew price promises standing access, but every live
+-- active and its recurring price promises standing access, but every live
 -- subscription window has already ended. Re-opening the latest bounded window
 -- is safe: revoked/deleted windows remain recorded decisions and are excluded.
--- name: ListActiveAutoRenewSubsWithExpiredBoundedAccess :many
+-- name: ListActiveRecurringSubsWithExpiredBoundedAccess :many
 SELECT DISTINCT s.id, s.customer_id
 FROM billing.subscriptions s
 JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
@@ -640,8 +640,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND p.auto_renew
-  AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
+  AND p.billing_interval_hours IS NOT NULL
+  AND s.access_duration_hours_snapshot IS NULL
   AND EXISTS (
       SELECT 1 FROM billing.entitlements expired
       WHERE expired.merchant_id = s.merchant_id
@@ -677,7 +677,7 @@ LIMIT sqlc.arg(row_limit);
 -- nullable: NULL = merchant-wide sweep.
 -- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at,
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
        missing.spec AS entitlements_spec
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
@@ -690,7 +690,8 @@ CROSS JOIN LATERAL (
           AND e.source_type = 'subscription' AND e.source_id = s.id
           AND e.entitlement = feat
           AND e.deleted_at IS NULL
-          AND e.starts_at < s.current_period_ends_at
+          AND (s.access_duration_hours_snapshot IS NULL OR
+               e.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
           AND (e.ends_at IS NULL OR e.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
 
@@ -700,7 +701,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
-  AND s.current_period_ends_at IS NOT NULL AND s.current_period_ends_at > sqlc.arg(now)::timestamptz
+  AND (s.access_duration_hours_snapshot IS NULL OR
+       COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
   AND EXISTS (
       SELECT 1 FROM billing.grants g
@@ -710,51 +712,24 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND missing.spec IS NOT NULL
 ORDER BY s.current_period_ends_at;
 
--- #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
--- the legacy pull engine's PS-9. A terminally-dead sub still projecting a
--- STANDING window or a bounded live window past its entitled bound:
--- propagation of a recorded
--- terminal decision, AUTO (both facts present — NOT the confirmed-absence
--- case). `unknown` is deliberately excluded: access stays intact while
--- provider verification is pending (#664).
---
--- #690/#691 paid-through guard: the entitled bound is
--- GREATEST(current_period_ends_at, ended_at) — a user cancel leaves a PAID
--- RUNWAY window bounded to period end (BoundSubscriptionAccess), which is NOT
--- excess; only the part of a window extending past the bound is. Repair =
--- BoundSubscriptionAccess(sub, bound) — the missed/correct #691 closure.
--- Both timestamps NULL (imported oddity) => NULL bound, any live window counts
--- and the repair bounds at `now`.
---
--- Partition (#690, one condition = one finding type):
---   standing/bounded-overrun window, terminal sub -> HERE (AUTO closure)
---   sub row missing entirely                     -> derive.entitlement.unjustified (ADMIN)
---   terminated GRANT with a live window          -> derive.grant_effect.excess (AUTO)
--- customer_id nullable: NULL = merchant-wide sweep.
+-- A chargeback revokes access. Ordinary cancellation only stops billing and
+-- leaves all previously purchased access windows intact, including indefinite
+-- and longer-than-billing-period terms.
 -- name: ListDeadSubsWithLiveEntitlements :many
-SELECT s.id, s.customer_id, s.status, s.current_period_ends_at, s.ended_at
+SELECT s.id, s.customer_id, s.status,
+       NULL::timestamptz AS current_period_ends_at, s.canceled_at AS ended_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'canceled'
+  AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
   AND EXISTS (
       SELECT 1 FROM billing.entitlements e
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-        AND (
-            e.ends_at IS NULL
-            OR (
-                e.ends_at > sqlc.arg(now)::timestamptz
-                AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
-                     OR e.ends_at > GREATEST(s.current_period_ends_at, s.ended_at))
-            )
-        )
+        AND (e.ends_at IS NULL OR (e.ends_at > sqlc.arg(now)::timestamptz AND e.ends_at > s.canceled_at))
   )
--- or#837: LONGEST-DEAD first, capped — the overrun that has been granting
--- unentitled access the longest is the one a truncated pass must repair.
-ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
+ORDER BY s.canceled_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector

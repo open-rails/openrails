@@ -38,7 +38,7 @@ type ProductListQuery struct {
 type PriceListQuery struct {
 	ProductID billing.ProductID `form:"product_id"`
 	Currency  string            `form:"currency"`
-	AutoRenew *bool             `form:"auto_renew"`
+	Recurring *bool             `form:"recurring"`
 	Archived  *bool             `form:"archived"`
 }
 
@@ -219,7 +219,7 @@ func ListPrices(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID,
-		Currency: query.Currency, AutoRenew: query.AutoRenew, Archived: query.Archived})
+		Currency: query.Currency, Recurring: query.Recurring, Archived: query.Archived})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

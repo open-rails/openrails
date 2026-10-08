@@ -69,8 +69,8 @@ type ProductListParams struct {
 }
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
-// AccessDurationHours of one-off access (null: permanent), or one paid period
-// and billing interval when AutoRenew. Dunning access is separate from paid time.
+// AccessDurationHours of access (null: no scheduled expiry). BillingIntervalHours
+// separately sets its recurring cadence (null: one-time charge).
 // A recurring price may start with a trial at TrialUnitAmount. A credit-only
 // product delivers a credit lot instead of product ownership. A price's terms
 // never change; Key names its current version, and selling on other terms
@@ -79,18 +79,18 @@ type ProductListParams struct {
 type Price struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Revision is assigned automatically within this product/key, starting at zero.
-	Revision            int64                   `json:"revision"`
-	ID                  PriceID                 `json:"id"`
-	Key                 string                  `json:"key"`
-	ProductID           ProductID               `json:"product_id"`
-	Archived            bool                    `json:"archived"`
-	UnitAmount          int64                   `json:"unit_amount,string"`
-	Currency            string                  `json:"currency"`
-	AccessDurationHours *int                    `json:"access_duration_hours"`
-	AutoRenew           bool                    `json:"auto_renew"`
-	TrialUnitAmount     *int64                  `json:"trial_unit_amount,string"`
-	TrialDurationHours  *int                    `json:"trial_duration_hours"`
-	PSPs                map[string]PSPLinkState `json:"psps"`
+	Revision             int64                   `json:"revision"`
+	ID                   PriceID                 `json:"id"`
+	Key                  string                  `json:"key"`
+	ProductID            ProductID               `json:"product_id"`
+	Archived             bool                    `json:"archived"`
+	UnitAmount           int64                   `json:"unit_amount,string"`
+	Currency             string                  `json:"currency"`
+	AccessDurationHours  *int                    `json:"access_duration_hours"`
+	BillingIntervalHours *int                    `json:"billing_interval_hours"`
+	TrialUnitAmount      *int64                  `json:"trial_unit_amount,string"`
+	TrialDurationHours   *int                    `json:"trial_duration_hours"`
+	PSPs                 map[string]PSPLinkState `json:"psps"`
 	// PendingManualActions are the steps an operator still has to take
 	// before each PSP whose link is pending_manual_link can sell the price.
 	PendingManualActions []PendingAction `json:"pending_manual_actions"`
@@ -176,13 +176,13 @@ type CreatePriceParams struct {
 	Key            string                  `json:"key,omitempty"`
 	UnitAmount     int64                   `json:"unit_amount,string"`
 	Currency       string                  `json:"currency"`
-	// AccessDurationHours is the one-off access window (nil: permanent), or
-	// the paid period and billing interval when AutoRenew. Grace access does
-	// not extend paid coverage. Credit lot expiry is configured on the product.
+	// AccessDurationHours is the access window (nil: no scheduled expiry),
+	// independently of billing cadence. Credit lot expiry belongs to the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool `json:"auto_renew,omitempty"`
+	// BillingIntervalHours is nil for one-time charges, or positive for recurring billing.
+	BillingIntervalHours *int `json:"billing_interval_hours,omitempty"`
 	// TrialUnitAmount and TrialDurationHours are a first period on other
-	// terms (0 is a free trial); set both or neither, with AutoRenew.
+	// terms (0 is a free trial); set both or neither, with a recurring billing interval.
 	TrialUnitAmount    *int64                       `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours *int                         `json:"trial_duration_hours,omitempty"`
 	PSPs               []string                     `json:"psps,omitempty"`
@@ -215,12 +215,12 @@ type GetPriceParams struct {
 	Verify bool
 }
 
-// PriceListParams filters ListPrices. Nil Archived and AutoRenew list both.
+// PriceListParams filters ListPrices. Nil Archived and Recurring list both.
 type PriceListParams struct {
 	PageRequest
 	ProductID ProductID
 	Currency  string
-	AutoRenew *bool
+	Recurring *bool
 	Archived  *bool
 }
 
