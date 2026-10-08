@@ -54,13 +54,30 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 				_, err = w.client[remote].RecordUsage(t.Context(), billing.RecordUsageParams{CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
-				job, err := w.jobs.Insert(t.Context(), invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+				job, err := w.jobs.Insert(t.Context(), monthlyInvoicePass{FinalizePreviousMonth: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				w.waitJob(job.Job.ID)
 				list, err := w.client[remote].ListInvoices(t.Context(), billing.InvoiceListParams{CustomerID: e.c.cid()})
 				require.NoError(t, err)
-				require.Len(t, list.Items, 1)
-				invoice = list.Items[0].ID
+				for _, candidate := range list.Items {
+					requested := false
+					for _, line := range candidate.LineItems {
+						requested = requested || line.EventType == "pull-invoice" && line.Amount == 50_000_000 && line.Count == 1
+					}
+					if requested {
+						require.True(t, invoice.IsZero(), "one statement contains the requested usage")
+						require.Equal(t, "USD", candidate.Currency)
+						require.Equal(t, int64(50_000_000), candidate.TotalAmount)
+						require.Equal(t, candidate.TotalAmount, candidate.AmountDue)
+						invoice = candidate.ID
+					} else {
+						require.Zero(t, candidate.TotalAmount, "other monthly statements carry no charge")
+						require.Zero(t, candidate.AmountPaid)
+						require.Zero(t, candidate.AmountDue)
+						require.Equal(t, billing.InvoicePaid, candidate.Status)
+					}
+				}
+				require.False(t, invoice.IsZero(), "the requested usage was invoiced")
 				w.refreshProviders()
 				w.settleCollectionScans()
 				status, body := e.c.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "pull-invoice", map[string]string{"payment_method_id": e.method})
