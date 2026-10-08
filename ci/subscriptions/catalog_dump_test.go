@@ -48,7 +48,7 @@ products:
     price:
       model: per_unit
       currency: USD
-      per_unit: {unit_amount: 1000, divide_by: 2, round: up, maximum_amount: 1000000}
+      per_unit: {unit_amount: "1000", divide_by: 2, round: up, maximum_amount: "1000000"}
 - key: api-pack
   display_name: $100 prepaid balance
   credit_grant: {currency: USD, amount: 100000000, expires_after_days: 90}
@@ -88,6 +88,13 @@ products:
 	require.NoError(t, err)
 	_, err = source.client[embedded].ApplyCatalog(t.Context(), original)
 	require.NoError(t, err)
+	pack, err := source.client[embedded].GetProductByKey(t.Context(), "api-pack")
+	require.NoError(t, err)
+	currentPack, err := source.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{
+		ProductID: pack.ID, Key: "buy", Currency: "USD", UnitAmount: 90000000,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, currentPack.Revision)
 
 	dump := func(w *world) ([]byte, *catalog.Application) {
 		t.Helper()
@@ -115,6 +122,8 @@ products:
 	require.Empty(t, products["old-offer"].Prices)
 	require.EqualValues(t, 100000000, *products["api-pack"].CreditGrant.Value.Amount)
 	require.Equal(t, 90, *products["api-pack"].CreditGrant.Value.ExpiresAfterDays)
+	require.Len(t, products["api-pack"].Prices, 1, "the archived revision is not a current offer")
+	require.EqualValues(t, 90000000, products["api-pack"].Prices[0].UnitAmount.Value)
 	require.True(t, products["api-deposit"].CreditGrant.Value.FromPayment)
 	require.Equal(t, 365, *products["api-deposit"].CreditGrant.Value.ExpiresAfterDays)
 	require.EqualValues(t, 1000000000, products["api-deposit"].Prices[0].CustomerAmount.Value.MaxAmount)
@@ -128,6 +137,10 @@ products:
 	require.False(t, receipt.Replayed)
 	restoredRaw, _ := dump(target)
 	require.Equal(t, string(raw), string(restoredRaw), "all exported declarations survive an empty-merchant round trip")
+	restoredPack, err := target.client[embedded].GetPriceByKey(t.Context(), "api-pack", "buy")
+	require.NoError(t, err)
+	require.NotEqual(t, currentPack.ID, restoredPack.ID, "semantic copy uses destination identities")
+	require.EqualValues(t, 0, restoredPack.Revision, "full historical revision numbers require the billing archive")
 
 	// Content-addressed apply is a one-time batch, not a rollback command.
 	product, err := target.client[embedded].GetProductByKey(t.Context(), "premium")
