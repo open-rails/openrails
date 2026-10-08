@@ -3220,6 +3220,7 @@
     "internal/modules/checkout/nmi_upgrade_intent.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "decline": "github.com/open-rails/openrails/internal/decline",
@@ -3234,10 +3235,13 @@
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "nmidirect": "github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect",
       "paymentattempts": "github.com/open-rails/openrails/internal/modules/attempts",
+      "payments": "github.com/open-rails/openrails/internal/modules/payments",
+      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "strconv": "strconv",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
+      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
