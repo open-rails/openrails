@@ -17,6 +17,7 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
+	e.refreshBeforePeriodEnd()
 	e.setDecline(visa.Last4, "processing_error", "")
 	e.toPeriodEnd()
 	for i, gap := range []time.Duration{5 * time.Minute, 30 * time.Minute} {
@@ -26,7 +27,7 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 		require.Equal(t, billing.SubscriptionPastDue, sub.Status, "transient retry %d", i+1)
 		require.NotNil(t, sub.NextRetryAt)
 		require.Equal(t, gap, sub.NextRetryAt.Sub(at).Round(time.Minute), "transient retry %d", i+1)
-		w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+		w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 	}
 	first := w.clock.Now()
 	w.runRenewals()
@@ -36,7 +37,7 @@ func TestEngineTransientDeclineLadder(t *testing.T) {
 	require.Equal(t, 3, e.providerAttempts()-1, "three renewal attempts so far")
 
 	e.setDecline(visa.Last4, "", "")
-	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+	w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	require.Len(t, e.providerLedger(), 2, "one renewal charge")

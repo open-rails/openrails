@@ -56,8 +56,9 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			w.armDestructive()
 			l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
 			w.converge()
+			w.advanceHealthyTo(l.periodEnd().Add(-time.Minute))
 			w.nmi.SetDecline(visa.Last4, tc.code)
-			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+			w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 			first := l.periodEnd() // NMI declines on its schedule date
 			require.Equal(t, http.StatusOK, w.deliver("nmi", l.providerRenewal(false)))
 			w.settle()
@@ -65,7 +66,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			require.Equal(t, tc.status, string(sub.Status))
 			if !tc.retry {
 				require.Nil(t, sub.NextRetryAt)
-				w.advance(3 * day)
+				w.advanceHealthyTo(w.clock.Now().Add(3 * day))
 				w.runRenewals()
 				require.Zero(t, len(w.nmi.Attempts()), "no OpenRails charge against this card")
 				if tc.status == "canceled" {
@@ -76,7 +77,7 @@ func TestNMIScheduleDeclinePolicy(t *testing.T) {
 			}
 			require.NotNil(t, sub.NextRetryAt)
 			require.WithinDuration(t, first.Add(2*day), *sub.NextRetryAt, time.Minute)
-			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+			w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 			w.runRenewals()
 			require.Len(t, w.nmi.Attempts(), 1, "OpenRails retries the declined period")
 			sub = w.subscription(embedded, l.sub)

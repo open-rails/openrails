@@ -28,6 +28,7 @@ func TestMerchantDunningPolicy(t *testing.T) {
 	require.Equal(t, policy, got.Settings.DunningPolicy)
 
 	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
 	first := w.clock.Now()
@@ -39,7 +40,7 @@ func TestMerchantDunningPolicy(t *testing.T) {
 			break
 		}
 		offsets = append(offsets, sub.NextRetryAt.Sub(first).Round(time.Hour))
-		w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+		w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 		w.runRenewals()
 	}
 	require.Equal(t, []time.Duration{24 * time.Hour, 48 * time.Hour}, offsets)
@@ -59,6 +60,7 @@ func TestDunningAccessPolicy(t *testing.T) {
 			policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 120, 216, 312}}}, AccessDuringDunning: access}
 			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
 			e := enroll(t, w, "stripe", embedded)
+			e.refreshBeforePeriodEnd()
 			e.setDecline(visa.Last4, "insufficient_funds", "202")
 			e.toPeriodEnd()
 			w.runRenewals()
@@ -68,7 +70,7 @@ func TestDunningAccessPolicy(t *testing.T) {
 			require.Equal(t, access == billing.DunningAccessKeep, e.c.entitled(e.ent), "access during dunning follows the policy")
 
 			e.setDecline(visa.Last4, "", "")
-			w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+			w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 			w.runRenewals()
 			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 			require.True(t, e.c.entitled(e.ent), "the recovered renewal restores access")
@@ -88,7 +90,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessSuspend}}))
 			l := importLegacy(t, w, rail, embedded)
 			w.converge()
-			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+			w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 			require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(false)))
 			w.settle()
 			require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
@@ -100,7 +102,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 				// NMI never retries: OpenRails dunning's first retry recovers it.
 				next := w.subscription(embedded, l.sub).NextRetryAt
 				require.NotNil(t, next)
-				w.advance(next.Sub(w.clock.Now()) + time.Second)
+				w.advanceHealthyTo(next.Add(time.Second))
 				w.runRenewals()
 			}
 			w.settle()
@@ -118,6 +120,7 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	opened := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: opened}))
 	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
 	first := w.clock.Now()
@@ -128,7 +131,7 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 
 	edited := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{36, 60}}}}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: edited}))
-	w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+	w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 	w.runRenewals()
 	sub = w.subscription(embedded, e.sub)
 	require.NotNil(t, sub.NextRetryAt)
