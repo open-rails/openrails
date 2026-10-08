@@ -43,7 +43,7 @@ func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 		"scoped_charger":  func(r ChargeRequest) (PreparedCharge, error) { return scoped.Prepare(ctx, r) },
 	}
 	for name, prepare := range paths {
-		for _, currency := range []string{"", "   ", "XXX", "usdd", "EURO"} {
+		for _, currency := range []string{"", "   ", "XXX", "usdd", "EURO", "SOL", "USDC"} {
 			_, err := prepare(request(currency))
 			require.ErrorContains(t, err, "established currency", "%s currency %q", name, currency)
 		}

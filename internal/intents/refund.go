@@ -96,6 +96,9 @@ func DecodeRefundPayload(intent gen.BillingProviderIntent) (RefundPayload, error
 	if _, ok := moneyutil.LookupCurrency(p.Currency); !ok || p.Currency == "" || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) {
 		return p, errors.New("refund payload requires its canonical payment currency")
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 
@@ -343,6 +346,10 @@ func (h *NMIRefundHandler) CheckRelevance(ctx context.Context, intent gen.Billin
 }
 
 func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
+	p, err := DecodeRefundPayload(intent)
+	if err != nil {
+		return Terminal(err.Error())
+	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil {
 		return Parked("nmi rail not armable (fail closed): " + err.Error())
@@ -352,10 +359,6 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.BillingProvid
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
-	}
-	p, err := DecodeRefundPayload(intent)
-	if err != nil {
-		return Terminal(err.Error())
 	}
 
 	if intent.Attempts > 1 {

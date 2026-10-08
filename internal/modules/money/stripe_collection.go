@@ -36,7 +36,7 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Billin
 	if paymentMethodID == "" || strings.HasPrefix(paymentMethodID, "stripe:") {
 		return nil, fmt.Errorf("stripe payment method missing reusable payment_method id")
 	}
-	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+	if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
 		return nil, fmt.Errorf("stripe collection: refusing to charge without an established currency: %w", err)
 	}
 	customerID := req.ProviderCustomerRef

@@ -9,7 +9,7 @@ import (
 type PayResult struct {
 	URL            string
 	Reference      string
-	Amount         int64 // micros
+	Amount         int64 // native units of Currency
 	Currency       string
 	TokenAmount    string
 	TokenUnits     uint64
@@ -26,7 +26,7 @@ type PayResult struct {
 
 type TransactionBuildResponse struct {
 	TransactionBase64 string
-	Amount            int64 // micros
+	Amount            int64 // native price units
 	TokenAmount       uint64
 	TokenSymbol       string
 	ExpiresAt         time.Time
@@ -44,7 +44,7 @@ type PaymentTransactionBuildRequest struct {
 	TokenAmount uint64
 	TokenMint   string
 	Recipient   string
-	Amount      int64 // micros
+	Amount      int64 // native units of Currency
 	Currency    string
 	// SessionID is the checkout attempt — the #713 memo local-id stamped on the
 	// built transaction (the one field the chain cannot derive). Required.

@@ -74,6 +74,9 @@ func DecodeInvoiceCollectionPayload(intent gen.BillingProviderIntent) (InvoiceCo
 	if p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) {
 		return p, errors.New("collection currency must be canonical")
 	}
+	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
+		return p, err
+	}
 	minor, err := moneyutil.NativeToRailMinor(p.Currency, p.Amount)
 	if err != nil || minor != p.AmountMinor {
 		return p, errors.New("collection rail amount does not match frozen due")
