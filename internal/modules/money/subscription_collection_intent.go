@@ -313,6 +313,11 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 				return intents.Ambiguous(err.Error())
 			}
 			found, exists, err := service.ReadEngineRenewal(ctx, params)
+			if found.PaymentIntentID != "" {
+				if retainErr := intents.NewStore(h.DB).RetainCollectionCandidate(ctx, in, intents.CollectionCandidate{TransactionID: found.PaymentIntentID}); retainErr != nil {
+					return intents.Ambiguous("retain existing Stripe renewal: " + retainErr.Error())
+				}
+			}
 			if err != nil {
 				return h.unresolved(ctx, in, p, "existing renewal observation is inconclusive: "+err.Error())
 			}
@@ -423,19 +428,24 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
+	if retained.ReversalKind() != "" {
+		// A confirmed charge is a financial fact even while readonly or stale
+		// coverage holds its cancellation. Commit the idempotent payment first;
+		// this same retained operation keeps verifying the lifecycle separately.
+		params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge has a provider reversal"}
+		if err := h.lifecycle(h.DB).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
+			return intents.Ambiguous("record reversed charge: " + err.Error())
+		}
+	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: retained.TransactionID()}, h.now()); err != nil {
 			return err
 		}
-		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
 		if reversal := retained.ReversalKind(); reversal != "" {
-			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a canceled subscription"}
-			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
-				return err
-			}
 			if sub.Status != models.StatusCanceled {
 				kind := models.CancelTypeMerchant
 				if reversal == "dispute" {

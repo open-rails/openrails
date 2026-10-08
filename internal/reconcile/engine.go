@@ -46,6 +46,11 @@ type Engine struct {
 	// unavailable history source is NEVER a run error.
 	History HistoryEventSource
 
+	// RecoverInvoicePayment qualifies an observed NMI invoice receipt through
+	// its canonical financial writer before the generic subscription diff.
+	// Nil leaves missing invoice receipts as visible findings.
+	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
+
 	// Notifier bridges persisted findings into the #736 operator notification
 	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
 	// alerting service wired). Best-effort: a notify failure is logged, never
@@ -470,12 +475,47 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
+	recoveryErrors := map[string]error{}
+	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverInvoicePayment != nil {
+		known := make(map[string]bool, len(localPayments))
+		for _, payment := range localPayments {
+			known[payment.TransactionID] = true
+		}
+		recovered := false
+		for _, transaction := range snap.Transactions {
+			var raw struct {
+				OrderDescription string `json:"order_description"`
+			}
+			if json.Unmarshal(transaction.Raw, &raw) != nil || known[transaction.TransactionID] || transaction.Type != TransactionTypeSale || !transaction.Success || !strings.HasPrefix(raw.OrderDescription, "invoice") {
+				continue
+			}
+			if err := e.RecoverInvoicePayment(ctx, binding.ID, transaction.TransactionID); err != nil {
+				recoveryErrors[transaction.TransactionID] = err
+			} else {
+				recovered = true
+			}
+		}
+		if recovered {
+			localPayments, err = e.Local.PaymentsByTransactionIDs(ctx, provider, binding.ID, txnIDs)
+			if err != nil {
+				return rep, nil, nil, nil, fmt.Errorf("reload recovered invoice payments: %w", err)
+			}
+		}
+	}
 
 	now := e.now()
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
 	})
+	for i := range findings {
+		finding := &findings[i]
+		if err := recoveryErrors[finding.SubjectKey]; err != nil && finding.Type == FindingChargeMissingLocal {
+			finding.Apply = nil
+			finding.Status, finding.RequiresAdmin = FindingStatusRequiresReview, true
+			finding.RecommendedAction = "invoice receipt remains unresolved: " + err.Error()
+		}
+	}
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	bindApplyActions(findings, binding.ID)
 
@@ -647,7 +687,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 
 	// Auto-resolve: state-roster findings absent from this completed run
 	// vanished on their own (design decision 1)...
-	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, stateRosterFindingTypes)
+	resolvable := []FindingType{FindingPaymentMethodMismatch}
+	if snap.Coverage.SubscriptionsExhaustive {
+		resolvable = stateRosterFindingTypes
+	}
+	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
 	}
@@ -669,7 +713,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue
 		}
 		switch rec.Type {
-		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub:
+		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
 		default:
 			continue
 		}

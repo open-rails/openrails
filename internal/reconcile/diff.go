@@ -216,7 +216,7 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 	}
 	// 1. Direct rail subscription id (CCBill, Solana).
 	if t.SubscriptionID != "" {
-		if s, ok := c.local.byPSID[t.SubscriptionID]; ok {
+		if s, ok := c.local.byPSID[t.SubscriptionID]; ok && s.CollectionPolicy != models.CollectionPolicyEngine {
 			return s, "rail_subscription_id", false
 		}
 	}
@@ -226,7 +226,7 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 	// 2. NMI order_id breadcrumb (`rebill-<subID>-<unix>` or the local
 	// subscription uuid set at signup).
 	if id, ok := parseRebillOrderID(bc.OrderID); ok {
-		if s, ok := c.local.byID[id]; ok {
+		if s, ok := c.local.byID[id]; ok && s.CollectionPolicy != models.CollectionPolicyEngine {
 			return s, "order_id", false
 		}
 	}
@@ -243,6 +243,9 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 			// a charge on it.
 			var subs []*LocalSubscription
 			for _, s := range c.local.bySubject[pm.CustomerID] {
+				if s.CollectionPolicy == models.CollectionPolicyEngine {
+					continue
+				}
 				if s.PaymentMethodID != nil {
 					if billed := c.local.pmByID[*s.PaymentMethodID]; billed != nil && billed.RailCustomerRef == railCustomerRef {
 						subs = append(subs, s)
@@ -261,7 +264,7 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 		// subscription roster -> local).
 		var candidates []*LocalSubscription
 		for _, r := range c.remote.subsByCust[railCustomerRef] {
-			if s, ok := c.local.byPSID[r.RailSubscriptionID]; ok {
+			if s, ok := c.local.byPSID[r.RailSubscriptionID]; ok && s.CollectionPolicy != models.CollectionPolicyEngine {
 				candidates = append(candidates, s)
 			}
 		}
@@ -275,7 +278,12 @@ func (c *correlator) subForTxn(provider Provider, t *RemoteTransaction) (sub *Lo
 
 	// 5. Email fallback; unique match only.
 	if email := strings.ToLower(strings.TrimSpace(bc.Email)); email != "" {
-		subs := c.local.byEmail[email]
+		var subs []*LocalSubscription
+		for _, sub := range c.local.byEmail[email] {
+			if sub.CollectionPolicy != models.CollectionPolicyEngine {
+				subs = append(subs, sub)
+			}
+		}
 		if s, ok := uniqueSub(subs); ok {
 			return s, "email", false
 		}

@@ -326,15 +326,18 @@ func (f *fakeLedger) CheckRecovery(context.Context, gen.BillingProviderIntent, t
 func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
 	for _, test := range []struct {
 		name     string
+		kind     string
 		mode     ModeView
 		evidence []byte
 	}{
-		{"restored renewal without local fence", modeFull, nil},
-		{"old retryable submitted operation", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
-		{"readonly submitted operation", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"restored renewal without local fence", "subscription_collection", modeFull, nil},
+		{"old retryable submitted operation", "subscription_collection", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"readonly submitted operation", "subscription_collection", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"restored invoice without local fence", "invoice_collection", modeFull, nil},
+		{"readonly invoice without local fence", "invoice_collection", modeReadonly, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			intent := testIntent("subscription_collection", OriginSystem, 1)
+			intent := testIntent(test.kind, OriginSystem, 1)
 			intent.Status = StatusFailedRetryable
 			intent.ResultEvidence = test.evidence
 			store := &fakeLedger{row: intent, due: []gen.BillingProviderIntent{intent}, recoveryErr: errors.New("provider recovery required")}

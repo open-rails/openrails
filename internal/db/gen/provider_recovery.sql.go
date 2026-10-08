@@ -95,6 +95,7 @@ SELECT EXISTS (
     WHERE i.merchant_id=$1::uuid AND i.collection_intent_id IS NULL
       AND i.status IN ('draft','open','past_due','uncollectible')
       AND i.period_starts_at < $3::timestamptz
+      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=$2::uuid AND p.rail IN ('nmi','stripe'))
 )::boolean
 `
 
@@ -130,6 +131,7 @@ SELECT COALESCE(min(at), $1::timestamptz)::timestamptz AS oldest_at FROM (
   SELECT i.period_starts_at FROM billing.invoices i
     WHERE i.merchant_id=$2::uuid AND i.collection_intent_id IS NULL
       AND i.status IN ('draft','open','past_due','uncollectible')
+      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=$3::uuid AND p.rail IN ('nmi','stripe'))
 ) facts
 `
 

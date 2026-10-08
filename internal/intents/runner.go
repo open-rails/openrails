@@ -722,7 +722,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 // the write gate remains closed, without issuing another provider mutation.
 func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string) {
 	submitted, malformed := hasSubmissionEvidence(in)
-	if in.IntentType == "subscription_collection" || submitted || malformed != nil {
+	if in.IntentType == "subscription_collection" || in.IntentType == "invoice_collection" || submitted || malformed != nil {
 		writeCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, nil); err != nil {

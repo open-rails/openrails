@@ -318,8 +318,8 @@ WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
     WHERE f.merchant_id = $1::uuid
       AND f.psp_id = $2::uuid
-      AND f.status IN ('reconcile_required', 'requires_review')
-      AND f.last_seen_run <> $3
+      AND f.status IN ('reconcile_required', 'requires_review', 'ignored')
+      AND f.last_seen_run IS DISTINCT FROM $3
       AND f.finding_type = ANY ($4::text[])
     LIMIT $5::int
 )
@@ -982,7 +982,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 const listActionablePullFindingsForPSP = `-- name: ListActionablePullFindingsForPSP :many
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
-  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review')
+  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review', 'ignored')
 ORDER BY finding_type, subject_key
 `
 
@@ -2259,7 +2259,7 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE reconciliation_findings.merchant_id = $1::uuid AND id = $2 AND status IN ('reconcile_required', 'requires_review')
+WHERE reconciliation_findings.merchant_id = $1::uuid AND id = $2 AND status IN ('reconcile_required', 'requires_review', 'ignored')
 `
 
 type MarkReconciliationFindingVanishedParams struct {
@@ -2382,14 +2382,15 @@ const reconcileListInvoicePaymentsByTransactionIDs = `-- name: ReconcileListInvo
 SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
 FROM billing.invoice_payments
 WHERE merchant_id = $1::uuid
-  AND psp_id = $2::uuid AND rail = 'nmi' AND status = 'settled'
+  AND psp_id = $2::uuid AND rail = $3::text AND status = 'settled'
   AND rail_payment_id IS NOT NULL
-  AND rail_payment_id = ANY($3::text[])
+  AND rail_payment_id = ANY($4::text[])
 `
 
 type ReconcileListInvoicePaymentsByTransactionIDsParams struct {
 	MerchantID     uuid.UUID
 	PspID          uuid.UUID
+	Rail           string
 	TransactionIds []string
 }
 
@@ -2405,7 +2406,12 @@ type ReconcileListInvoicePaymentsByTransactionIDsRow struct {
 // Canonical invoice receipts live outside billing.payments. Recognize settled
 // NMI charges by their exact accepted PSP and transaction, never by a vault.
 func (q *Queries) ReconcileListInvoicePaymentsByTransactionIDs(ctx context.Context, arg ReconcileListInvoicePaymentsByTransactionIDsParams) ([]ReconcileListInvoicePaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListInvoicePaymentsByTransactionIDs, arg.MerchantID, arg.PspID, arg.TransactionIds)
+	rows, err := q.db.Query(ctx, reconcileListInvoicePaymentsByTransactionIDs,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Rail,
+		arg.TransactionIds,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2491,7 +2497,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 }
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
-SELECT id, customer_id, rail, transaction_id, amount, status,
+SELECT id, customer_id, rail, transaction_id, amount, currency, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
@@ -2513,6 +2519,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	Rail              *string
 	TransactionID     string
 	Amount            int64
+	Currency          string
 	Status            string
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
@@ -2539,6 +2546,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.Rail,
 			&i.TransactionID,
 			&i.Amount,
+			&i.Currency,
 			&i.Status,
 			&i.SubscriptionID,
 			&i.RefundedPaymentID,

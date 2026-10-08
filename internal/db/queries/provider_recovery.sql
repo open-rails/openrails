@@ -28,6 +28,7 @@ SELECT COALESCE(min(at), sqlc.arg(fallback)::timestamptz)::timestamptz AS oldest
   SELECT i.period_starts_at FROM billing.invoices i
     WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.collection_intent_id IS NULL
       AND i.status IN ('draft','open','past_due','uncollectible')
+      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=sqlc.arg(psp_id)::uuid AND p.rail IN ('nmi','stripe'))
 ) facts;
 
 -- name: PSPRecoveryBookAge :one
@@ -58,6 +59,7 @@ SELECT EXISTS (
     WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.collection_intent_id IS NULL
       AND i.status IN ('draft','open','past_due','uncollectible')
       AND i.period_starts_at < sqlc.arg(before)::timestamptz
+      AND EXISTS (SELECT 1 FROM billing.psps p WHERE p.merchant_id=i.merchant_id AND p.id=sqlc.arg(psp_id)::uuid AND p.rail IN ('nmi','stripe'))
 )::boolean;
 
 -- name: GetPSPCompletedRefreshWatermark :one

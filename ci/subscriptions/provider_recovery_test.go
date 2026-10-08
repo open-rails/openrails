@@ -173,6 +173,11 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		var fenced int
 		require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE subscription_id=$1 AND intent_type='subscription_collection' AND result_evidence ? 'submitted_at'`), subUUID(member.sub)).Scan(&fenced))
 		require.Zero(t, fenced, "restored receipt recovery never fabricates submission")
+		// Ignoring an alert is not financial resolution. Once a later pull
+		// actually sees this now-recorded receipt, it must close the finding
+		// from that proof instead of leaving the account held forever.
+		_, err = target.pool.Exec(t.Context(), target.q(`INSERT INTO billing.reconciliation_findings(merchant_id,psp_id,rail,finding_type,subject_key,severity,status,resolved_at,resolution,operator_notes,recommended_action,evidence) VALUES($1,$2,'nmi','pull.charge.missing',$3,'high','ignored',now(),'ignored','notification muted during outage','qualify receipt','{}') ON CONFLICT(merchant_id,psp_id,finding_type,subject_key) DO UPDATE SET status='ignored',resolved_at=now(),resolution='ignored',operator_notes=EXCLUDED.operator_notes`), mid.UUID(), target.psp["nmi"].UUID(), target.nmi.LastSale().TransactionID)
+		require.NoError(t, err)
 	} else {
 		require.True(t, end.Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
 	}
@@ -190,6 +195,12 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		return providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()) == nil
 	}, 60*time.Second, 50*time.Millisecond, "catch-up completes after the provider is reachable")
 	require.True(t, end.Add(monthHours*time.Hour).Equal(*target.subscription(embedded, member.sub).CurrentPeriodEndsAt))
+	if alreadyPaid {
+		var status, notes string
+		require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT status,operator_notes FROM billing.reconciliation_findings WHERE merchant_id=$1 AND psp_id=$2 AND finding_type='pull.charge.missing' AND subject_key=$3`), mid.UUID(), target.psp["nmi"].UUID(), target.nmi.LastSale().TransactionID).Scan(&status, &notes))
+		require.Equal(t, "fixed", status)
+		require.Equal(t, "notification muted during outage", notes)
+	}
 	require.Empty(t, target.nmi.Unexpected())
 }
 
@@ -230,4 +241,153 @@ func TestRecoveryGateRequiresCompletedAccountCoverage(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, check(), providerrecovery.ErrPending, "new unresolved financial evidence overrides even recent complete coverage")
 	require.Len(t, w.nmi.Ledger(""), 1)
+}
+
+func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
+	for _, mode := range []string{config.ProviderWriteModeReadOnly, config.ProviderWriteModeFull} {
+		t.Run(string(mode), func(t *testing.T) {
+			source := prepareWorld(t, 12)
+			source.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
+			source.start()
+			customer := source.newCustomer()
+			method := customer.saveCard("nmi", visa)
+			invoice := observedInvoice(t, source, customer, 50_000_000)
+			mid := source.client[embedded].MerchantID()
+			source.settle()
+			source.stop()
+			sourceDB, err := db.NewWithPGXPool(source.pool, source.schema)
+			require.NoError(t, err)
+			var archive bytes.Buffer
+			require.NoError(t, merchantarchive.Export(t.Context(), sourceDB, mid, &archive))
+			source.start()
+			source.pull()
+			status, body := customer.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "after-backup", map[string]string{"payment_method_id": method})
+			require.Equal(t, http.StatusOK, status, body)
+			source.settle()
+			require.Len(t, source.nmi.Ledger(""), 1)
+			source.stop()
+			target := handoffTarget(t, source)
+			target.declare = source.declare
+			target.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = mode }
+			targetDB, err := db.NewWithPGXPool(target.pool, target.schema)
+			require.NoError(t, err)
+			directory, err := merchants.NewDirectoryService(targetDB.DataPool())
+			require.NoError(t, err)
+			_, _, err = directory.RegisterForRestore(t.Context(), mid, target.slug)
+			require.NoError(t, err)
+			_, err = merchantarchive.Restore(t.Context(), targetDB, mid, bytes.NewReader(archive.Bytes()))
+			require.NoError(t, err)
+			target.advance(5 * 24 * time.Hour)
+			require.ErrorIs(t, providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), source.psp["nmi"].UUID(), target.clock.Now()), providerrecovery.ErrPending, "old unpaid invoice alone is an established book")
+			target.start()
+			require.Eventually(t, func() bool {
+				paid, err := target.client[embedded].GetInvoice(t.Context(), invoice)
+				return err == nil && paid.Status == billing.InvoicePaid && paid.AmountDue == 0
+			}, 60*time.Second, 50*time.Millisecond, "normal startup refresh allocates the verified receipt without inventing an operation")
+			require.Eventually(t, func() bool {
+				return providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), target.psp["nmi"].UUID(), target.clock.Now()) == nil
+			}, 60*time.Second, 50*time.Millisecond, "positive invoice recovery completes financial catch-up")
+			var operations, allocations int
+			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='invoice_collection'`)).Scan(&operations))
+			require.Zero(t, operations)
+			require.NoError(t, target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.ledger_transfers WHERE operation='invoice_payment' AND invoice_id=$1`), invoice.UUID()).Scan(&allocations))
+			require.Equal(t, 1, allocations)
+			require.Len(t, target.nmi.Attempts(), 1)
+			require.Len(t, target.nmi.Ledger(""), 1)
+			require.Empty(t, target.nmi.Unexpected())
+		})
+	}
+}
+
+func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
+	a, b, _ := copiedStripeBook(t)
+	a.w.stripe.setClock(a.w.clock.Now)
+	end := a.periodEnd()
+	a.toPeriodEnd()
+	a.w.pull()
+	a.w.runRenewals()
+	require.Len(t, a.providerLedger(), 2)
+	payment := a.providerLedger()[1].ID
+	provider := a.w.stripe
+	a.w.stop()
+	provider.mu.Lock()
+	provider.chargesDown = true
+	provider.intents[payment]["status"] = "processing"
+	provider.mu.Unlock()
+	t.Cleanup(func() { provider.mu.Lock(); provider.intents[payment]["status"] = "succeeded"; provider.mu.Unlock() })
+	b.w.stop()
+	b.w.advance(end.Add(time.Second).Sub(b.w.clock.Now()))
+	b.w.start()
+	b.w.runRenewals()
+	require.Eventually(t, func() bool {
+		var candidate string
+		err := b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT result_evidence->'collection_candidate'->>'transaction_id' FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&candidate)
+		return err == nil && candidate == payment
+	}, 30*time.Second, 30*time.Millisecond, "an observed processing payment is retained before later reads")
+	b.w.stop()
+	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+	b.w.start()
+	provider.mu.Lock()
+	provider.chargesDown = false
+	provider.visibleAt[payment] = provider.now().Add(48 * time.Hour)
+	provider.intents[payment]["status"] = "succeeded"
+	provider.mu.Unlock()
+	b.w.until(func() bool { return b.periodEnd().After(end) }, "direct read of retained candidate recovers while customer listing omits it")
+	require.Equal(t, 2, b.providerAttempts())
+	var submitted int
+	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='subscription_collection' AND result_evidence ? 'submitted_at'`)).Scan(&submitted))
+	require.Zero(t, submitted)
+}
+
+func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
+	a, b, _ := copiedStripeBook(t)
+	a.w.stripe.setClock(a.w.clock.Now)
+	end := a.periodEnd()
+	a.toPeriodEnd()
+	a.w.pull()
+	a.w.runRenewals()
+	require.Len(t, a.providerLedger(), 2)
+	transaction := a.providerLedger()[1].Charge
+	var renewal billing.PaymentID
+	for _, payment := range completed(a.w.payments(embedded, a.c.id)) {
+		if payment.TransactionID == transaction {
+			renewal = payment.ID
+		}
+	}
+	require.NotEqual(t, billing.PaymentID{}, renewal)
+	_, err := a.w.client[embedded].RefundPayment(t.Context(), renewal, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "reversed-before-restore"})
+	require.NoError(t, err)
+	a.w.settle()
+	a.w.stop()
+	a.w.stripe.mu.Lock()
+	a.w.stripe.chargesDown = true
+	a.w.stripe.mu.Unlock()
+	b.w.stop()
+	b.w.advance(end.Add(time.Hour).Sub(b.w.clock.Now()))
+	b.w.start()
+	b.w.runRenewals()
+	b.w.until(func() bool {
+		var count int
+		err := b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND transaction_id=$2`), b.sub.UUID(), transaction).Scan(&count)
+		return err == nil && count == 1
+	}, "confirmed money commits even though readonly holds cancellation")
+	b.w.stop()
+	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
+	b.w.start()
+	b.w.wake()
+	require.NotEqual(t, billing.SubscriptionCanceled, b.w.subscription(embedded, b.sub).Status)
+	var status string
+	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT status FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&status))
+	require.Equal(t, "unknown_needs_verify", status, "original operation retains the pending lifecycle work")
+	a.w.stripe.mu.Lock()
+	a.w.stripe.chargesDown = false
+	a.w.stripe.mu.Unlock()
+	b.w.pull()
+	b.w.stop()
+	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeFull }
+	b.w.start()
+	b.w.until(func() bool { return b.w.subscription(embedded, b.sub).Status == billing.SubscriptionCanceled }, "same retained operation finishes cancellation after policy allows it")
+	require.Equal(t, 2, b.providerAttempts())
+	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT status FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&status))
+	require.Equal(t, "succeeded", status)
 }

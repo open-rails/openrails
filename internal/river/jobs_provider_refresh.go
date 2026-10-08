@@ -290,6 +290,8 @@ type ProviderRefreshWorker struct {
 	// Verifier reads the unverified NMI rows (#1094); nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
+	// Positive invoice recovery does not authorize provider or lifecycle writes.
+	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
 
 	Window     time.Duration
 	SafetyLag  time.Duration
@@ -361,11 +363,11 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		// Lane failures stay best-effort (watermarks resume them next tick).
 		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
 	}
-	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors+stats.CCBillErrors > 0 {
-		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d", stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors)
-	}
 	if stats.More {
 		return river.JobSnooze(time.Second)
+	}
+	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors+stats.CCBillErrors > 0 {
+		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d", stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors)
 	}
 	return nil
 }
@@ -399,7 +401,9 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			armed := accountBuilder.Build(tctx, billing.MerchantID(mid))
 			fetcher, ok := armed.Fetchers[provider]
 			if !ok || armed.Coverage[provider].Binding.ID != account.ID {
-				stats.ProviderErrors++
+				if providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) != nil {
+					stats.ProviderErrors++
+				}
 				continue
 			}
 			accountOverwrite := overwrite && providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) == nil
@@ -590,6 +594,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	}
 
 	engine := reconcile.NewEngine(w.DB, w.Config, fetchers, w.DeferDelete)
+	engine.RecoverInvoicePayment = w.RecoverInvoicePayment
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // #787: nil-check, see runConvergence
@@ -681,6 +686,9 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
 	watermark, err := w.DB.Gen(ctx).GetPSPAppliedRefreshWatermark(ctx, gen.GetPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
 	if err == nil {
+		if watermark.After(w.now().Add(w.safetyLag())) {
+			return time.Time{}, fmt.Errorf("account %s has future-dated applied progress", psp)
+		}
 		return watermark.UTC(), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {

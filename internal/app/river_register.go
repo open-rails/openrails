@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -12,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -81,6 +84,24 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		NMIClients:    r.NMIClients,
 		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},
 		Verifier:      r.Verifier,
+		RecoverInvoicePayment: func(ctx context.Context, psp uuid.UUID, transaction string) error {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			receipt, err := money.ReadObservedNMIInvoiceReceipt(ctx, r.CollectionResolver, mid.UUID(), psp, transaction)
+			if err != nil {
+				return err
+			}
+			_, err = r.MoneyService.RecoverObservedInvoicePayment(ctx, receipt)
+			var owned *money.InvoiceRecoveryOperationOwned
+			if errors.As(err, &owned) {
+				if wakeErr := intents.NewStore(r.DB).WakeOperation(ctx, owned.OperationID, clock.Now()); wakeErr != nil {
+					return wakeErr
+				}
+			}
+			return err
+		},
 	}); err != nil {
 		return fmt.Errorf("add provider refresh worker: %w", err)
 	}

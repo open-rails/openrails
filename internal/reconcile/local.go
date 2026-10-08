@@ -295,6 +295,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			CustomerID:        row.CustomerID,
 			TransactionID:     row.TransactionID,
 			AmountCents:       row.Amount / moneyutil.MicrosPerCent,
+			Currency:          row.Currency,
 			Status:            string(row.Status),
 			SubscriptionID:    row.SubscriptionID,
 			RefundedPaymentID: row.RefundedPaymentID,
@@ -305,8 +306,8 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 		}
 		out = append(out, p)
 	}
-	if provider == ProviderNMI {
-		invoices, err := l.DB.Gen(ctx).ReconcileListInvoicePaymentsByTransactionIDs(ctx, gen.ReconcileListInvoicePaymentsByTransactionIDsParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID, TransactionIds: transactionIDs})
+	if provider == ProviderNMI || provider == ProviderStripe {
+		invoices, err := l.DB.Gen(ctx).ReconcileListInvoicePaymentsByTransactionIDs(ctx, gen.ReconcileListInvoicePaymentsByTransactionIDsParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID, Rail: string(provider), TransactionIds: transactionIDs})
 		if err != nil {
 			return nil, err
 		}
@@ -318,7 +319,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 			if _, exists := payments[row.RailPaymentID]; exists {
 				return nil, fmt.Errorf("provider transaction %s is allocated to both invoice and payment records", row.RailPaymentID)
 			}
-			out = append(out, LocalPayment{ID: row.ID, CustomerID: row.CustomerID, Rail: "nmi", TransactionID: row.RailPaymentID, AmountCents: row.Amount / moneyutil.MicrosPerCent, Currency: row.Currency, Status: "settled", InvoiceID: &row.InvoiceID})
+			out = append(out, LocalPayment{ID: row.ID, CustomerID: row.CustomerID, Rail: string(provider), TransactionID: row.RailPaymentID, AmountCents: row.Amount / moneyutil.MicrosPerCent, Currency: row.Currency, Status: "settled", InvoiceID: &row.InvoiceID})
 		}
 	}
 	return out, nil
