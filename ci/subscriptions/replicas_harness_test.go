@@ -85,12 +85,15 @@ func newFleet(t *testing.T, n int, skews ...time.Duration) *fleet {
 // newScheduledFleet keeps River's own schedule, for scenarios about it.
 func newScheduledFleet(t *testing.T, n int) *fleet { return startFleet(t, n, true, nil) }
 
-func startFleet(t *testing.T, n int, scheduled bool, skews []time.Duration) *fleet {
+func startFleet(t *testing.T, n int, scheduled bool, skews []time.Duration, configure ...func(*world)) *fleet {
 	t.Helper()
 	fleetSlots <- struct{}{}
 	t.Cleanup(func() { <-fleetSlots })
 	deadline(t, fleetDeadline)
 	f := &fleet{t: t, base: prepareWorld(t, 4), dead: map[*world]bool{}, scheduled: scheduled}
+	for _, configureWorld := range configure {
+		configureWorld(f.base)
+	}
 	for i := range n {
 		var skew time.Duration
 		if i < len(skews) {
@@ -104,7 +107,7 @@ func startFleet(t *testing.T, n int, scheduled bool, skews []time.Duration) *fle
 func (f *fleet) spawn(i int, skew time.Duration) *world {
 	b := f.base
 	name := string(rune('a' + i))
-	r := &world{t: f.t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth, cfg: b.cfg,
+	r := &world{t: f.t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth, cfg: b.cfg, declare: b.declare,
 		clock:   clockwork.NewFakeClockAt(b.clock.Now().Add(skew)),
 		replica: &replicaEnv{f: f, name: name, queue: "replica_" + name}}
 	r.start()
@@ -422,6 +425,10 @@ func (f *fleet) revive(r *world) {
 // restart is a rolling deploy's graceful replacement of one process.
 func (f *fleet) restart(r *world) {
 	f.t.Helper()
+	ctx, cancel := context.WithTimeout(f.t.Context(), 30*time.Second)
+	defer cancel()
+	require.NoError(f.t, r.jobs.Stop(ctx), "a rolling deploy drains in-flight requests before replacing its worker")
+	r.jobs = nil
 	r.stop()
 	r.start()
 }

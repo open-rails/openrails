@@ -79,6 +79,12 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 		logger.Debug("money service not configured; skipping invoice worker")
 		return nil
 	}
+	if job.Args.Collect && config.IsLimitedMode(w.Config) {
+		// Keep the durable period slot pending. Completing a disabled monthly
+		// scan would suppress collection for the rest of its thirty-day bucket,
+		// even after a restart with writes enabled.
+		return river.JobSnooze(time.Minute)
+	}
 	// #673: every money path below (settings, finalize, collect) requires a
 	// merchant in context; fan out per merchant.
 	return forEachActiveMerchant(ctx, w.DB, logger, func(ctx context.Context) error {
@@ -125,10 +131,6 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 			return err
 		} else if n > 0 {
 			logger.WithField("invoices", n).Info("invoices marked past_due")
-		}
-		if w.Config != nil && config.IsLimitedMode(w.Config) {
-			logger.Warn("limited mode: skipping invoice collection charges (#345)")
-			return nil
 		}
 		if w.Intents == nil {
 			logger.Debug("invoice collection runner not configured; skipping collection")

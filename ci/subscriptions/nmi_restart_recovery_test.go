@@ -30,9 +30,9 @@ import (
 const restartWorkerEnv = "OPENRAILS_NMI_RESTART_WORKER"
 
 type restartWorkerConfig struct {
-	DSN, Schema, Slug, Gateway, Ready, ID string
-	Now                                   time.Time
-	PSPs                                  map[string]openrails.PSPConfig
+	DSN, Schema, Slug, Gateway, Ready, ID, Mode string
+	Now                                         time.Time
+	PSPs                                        map[string]openrails.PSPConfig
 }
 
 // TestNMIRecoveryWorkerProcess is a real independent host process. It mounts the
@@ -52,7 +52,7 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	require.NoError(t, err)
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Schema: input.Schema, River: openrails.RiverHostOwned,
-		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		TestMode: openrails.Sandbox, ProviderWriteMode: input.Mode,
 		DB: &openrails.DBConfig{URL: input.DSN}, HTTP: &openrails.HTTPConfig{},
 		Merchant: openrails.MerchantDeclaration{Slug: input.Slug, DisplayName: input.Slug, PSPs: input.PSPs},
 	}, openrails.Deps{Postgres: pool, Clock: clockwork.NewFakeClockAt(input.Now), NMITransport: restartNMITransport{gateway: gateway}})
@@ -80,10 +80,10 @@ type restartWorkerProcess struct {
 	once    sync.Once
 }
 
-func startRestartWorker(t *testing.T, w *world, gateway string) *restartWorkerProcess {
+func startRestartWorker(t *testing.T, w *world, gateway, mode string) *restartWorkerProcess {
 	t.Helper()
 	dir := t.TempDir()
-	input := restartWorkerConfig{DSN: w.dsn, Schema: w.schema, Slug: w.slug, Gateway: gateway, Ready: filepath.Join(dir, "ready"), ID: "restart-" + uuid.NewString(), Now: w.clock.Now(), PSPs: w.psps}
+	input := restartWorkerConfig{DSN: w.dsn, Schema: w.schema, Slug: w.slug, Gateway: gateway, Ready: filepath.Join(dir, "ready"), ID: "restart-" + uuid.NewString(), Now: w.clock.Now(), PSPs: w.psps, Mode: mode}
 	raw, err := json.Marshal(input)
 	require.NoError(t, err)
 	logPath := filepath.Join(dir, "worker.log")
@@ -167,7 +167,7 @@ func TestNMIFiveDayRestartRecovery(t *testing.T) {
 						close(gate.release)
 					}
 				})
-				worker := startRestartWorker(t, w, gateway.URL)
+				worker := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 				select {
 				case <-gate.arrived:
 				case <-time.After(30 * time.Second):
@@ -193,8 +193,8 @@ func TestNMIFiveDayRestartRecovery(t *testing.T) {
 			if stage == "not_admitted" {
 				require.Equal(t, 0, restartCollectionCount(t, w, e, ""))
 			}
-			first := startRestartWorker(t, w, gateway.URL)
-			second := startRestartWorker(t, w, gateway.URL)
+			first := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			second := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			require.Eventually(t, func() bool { return restartCollectionCount(t, w, e, "succeeded") == 1 }, 90*time.Second, 50*time.Millisecond, "normal startup/due/rescue jobs finish the obligation without manual retry")
 			require.Len(t, w.nmi.Ledger(""), 2, "one initial payment and exactly one renewal")
 			require.Len(t, w.nmi.Attempts(), 2, "recovery does not submit an additional charge")
@@ -224,4 +224,83 @@ func restartCollectionCount(t *testing.T, w *world, e *engineCase, status string
 	var count int
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE subscription_id=$1 AND intent_type='subscription_collection' AND ($2='' OR status=$2)`), subUUID(e.sub), status).Scan(&count))
 	return count
+}
+
+// Monthly-floor collection must survive restarts without waiting for a new
+// thirty-day in-memory timer, and must still run at most once per River period.
+func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
+	for _, mode := range []string{openrails.ProviderWritesFull, openrails.ProviderWritesReadOnly} {
+		t.Run(mode, func(t *testing.T) {
+			f := startFleet(t, 1, false, nil, func(w *world) {
+				w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
+			})
+			w := f.any()
+			c := w.newCustomer()
+			method := c.saveCard("nmi", visa)
+			initial := newNMIInvoice(f, c)
+			answer := payNMIInvoice(t.Context(), w, c, initial, method, "invoice-startup-agreement")
+			require.NoError(t, answer.err)
+			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status)
+			f.settle()
+			requireInvoicePaidOnce(f, initial, 1, 1, nmiInvoiceAmount, 0)
+			c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"currency": "USD", "payment_method_id": method})
+			smallInvoice := func() billing.InvoiceID {
+				id := newNMIInvoice(f, c)
+				_, err := w.client[remote].CreateInvoicePayment(t.Context(), id, billing.CreateInvoicePaymentParams{Amount: 90_000_000, Reference: "partial-" + id.String()})
+				require.NoError(t, err)
+				return id
+			}
+			invoice := smallInvoice() // $10: below the $50 hourly threshold, above the $1 monthly floor.
+			w.stop()
+			gateway := httptest.NewServer(w.nmi)
+			t.Cleanup(gateway.Close)
+			if mode == openrails.ProviderWritesReadOnly {
+				observer := startRestartWorker(t, w, gateway.URL, mode)
+				require.Eventually(t, func() bool {
+					var pending int
+					err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='scheduled'`)).Scan(&pending)
+					return err == nil && pending == 1
+				}, 30*time.Second, 50*time.Millisecond, "a disabled collection pass stays pending instead of consuming its monthly slot")
+				observer.kill(t)
+				require.Len(t, w.nmi.Attempts(), 1)
+			}
+			f.advance(5 * day)
+			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_job SET scheduled_at=scheduled_at-interval '5 days' WHERE state IN ('scheduled','retryable')`))
+			require.NoError(t, err)
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '5 days'`))
+			require.NoError(t, err)
+			first := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			second := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			require.Eventually(t, func() bool {
+				var status string
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), invoice.UUID()).Scan(&status)
+				return err == nil && status == "paid"
+			}, 30*time.Second, 50*time.Millisecond, "ordinary startup recovers monthly-floor invoice collection")
+			first.kill(t)
+			second.kill(t)
+			w.start()
+			requireInvoicePaidOnce(f, invoice, 2, 2, 10_000_000, 1)
+			next := smallInvoice()
+			w.stop()
+			var before int64
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(max(id),0) FROM billing.river_job`)).Scan(&before))
+			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
+			require.NoError(t, err)
+			third := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			require.Eventually(t, func() bool {
+				var passes int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.dunning' AND id>$1 AND state='completed'`), before).Scan(&passes)
+				return err == nil && passes > 0
+			}, 30*time.Second, 50*time.Millisecond, "the next process's startup scheduler has run")
+			third.kill(t)
+			var monthly int
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true'`)).Scan(&monthly))
+			require.Equal(t, 1, monthly, "restarting cannot schedule another monthly-floor pass in the same durable bucket")
+			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
+			w.start()
+			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
+			require.NoError(t, err)
+			require.Equal(t, int64(10_000_000), unpaid.AmountDue)
+		})
+	}
 }

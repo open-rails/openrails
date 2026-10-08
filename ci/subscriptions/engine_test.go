@@ -310,8 +310,9 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Equal(t, attempts, e.providerAttempts(), "nothing retries after the policy's last attempt")
 
 				// The customer always has a way back with a working card: a
-				// canceled membership re-enrolls, a stopped one takes a new card
-				// and recovers at the next due pass.
+				// canceled membership re-enrolls; a stopped one recovers only
+				// within its original renewal period. A fully missed period
+				// needs an explicit cancellation and new enrollment.
 				if tc.final == "canceled" {
 					fresh := e.c.saveCard(rail, mastercard)
 					again := e.c.subscribeAgain(e.tp, rail, e.price, e.ent, fresh)
@@ -320,9 +321,19 @@ func TestEngineDeclinePolicy(t *testing.T) {
 					e.replaceCard(mastercard)
 					w.runRenewals()
 					sub := w.subscription(e.tp, e.sub)
-					require.Equal(t, billing.SubscriptionActive, sub.Status)
-					require.True(t, sub.CurrentPeriodEndsAt.After(w.clock.Now()))
-					require.Len(t, e.providerLedger(), 2, "the recovery charge lands on the new card")
+					if tc.final != "awaiting_method" {
+						require.Equal(t, billing.SubscriptionPastDue, sub.Status)
+						require.Equal(t, attempts, e.providerAttempts(), "a new card does not authorize charging a wholly missed period")
+						require.Len(t, w.openFindings("life.due_pass.refused"), 1)
+						_, err := w.client[e.tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "restart an expired billing period", RevokeAccess: true})
+						require.NoError(t, err)
+						fresh := e.c.subscribeAgain(e.tp, rail, e.price, e.ent, e.method)
+						require.NotEqual(t, e.sub, fresh)
+					} else {
+						require.Equal(t, billing.SubscriptionActive, sub.Status)
+						require.True(t, sub.CurrentPeriodEndsAt.After(w.clock.Now()))
+					}
+					require.Len(t, e.providerLedger(), 2, "the explicit recovery charge lands on the new card")
 					require.Equal(t, mastercard.Last4, e.lastChargedCard())
 				}
 				require.True(t, e.c.entitled(e.ent))

@@ -314,7 +314,10 @@ func TestReplicasStalledHeartbeatLeavesOthersLease(t *testing.T) {
 	require.True(t, theirs.Equal(until), "the other executor's lease is untouched: %s != %s", until, theirs)
 	close(resume)
 
-	f.until(func() bool { return f.periodEnd(e).After(end) }, "the renewal completes")
+	f.until(func() bool {
+		f.passes() // the live fence owner retained a definite non-dispatch proof
+		return f.periodEnd(e).After(end)
+	}, "the next due pass completes the renewal")
 	f.advance(time.Hour)
 	f.wake()
 	f.passes()
