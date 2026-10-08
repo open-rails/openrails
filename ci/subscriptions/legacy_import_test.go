@@ -9,10 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -131,9 +129,7 @@ func (refreshMerchant) Kind() string { return "openrails.provider_refresh_mercha
 // transaction windows and the unknown-cohort probe) and waits for it.
 func (w *world) pull() {
 	w.t.Helper()
-	res, err := w.jobs.Insert(w.t.Context(), refreshMerchant{MerchantID: w.client[embedded].MerchantID().UUID()}, &river.InsertOpts{Queue: openrails.QueueBilling})
-	require.NoError(w.t, err)
-	w.waitJob(res.Job.ID)
+	w.refreshProviders()
 }
 
 // localCharges is the transaction ids of a customer's recorded captures.

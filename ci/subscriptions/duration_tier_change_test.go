@@ -34,6 +34,7 @@ func TestDurationDowngradePreservesLongerPaidBenefit(t *testing.T) {
 			lower := w.tierPrice(group, 1, 499, monthHours, true)
 			member := w.legacyOnTier(tp, old, 1999, monthHours, 10*day)
 			boundary := member.periodEnd()
+			w.refreshProviders()
 			done, err := w.client[tp].ChangeTier(t.Context(), member.sub, billing.ChangeTierParams{PriceID: lower.ID, IdempotencyKey: uuid.NewString()})
 			require.NoError(t, err)
 			w.settle()

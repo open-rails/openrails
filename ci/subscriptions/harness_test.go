@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/sqlschema"
 )
 
@@ -438,6 +439,34 @@ func (w *world) runRenewals() {
 	}
 }
 
+// refreshProviders runs the normal observation worker after a healthy fixture
+// advances its business clock. It is explicit: outage and ambiguity scenarios
+// must not silently gain a provider refresh whenever they advance time.
+func (w *world) refreshProviders() {
+	w.t.Helper()
+	id, _, err := riverjobs.EnqueueMerchantRefresh(w.t.Context(), w.jobs, w.client[embedded].MerchantID().UUID(), openrails.QueueBilling)
+	require.NoError(w.t, err)
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		job, err := w.jobs.JobGet(w.t.Context(), id)
+		require.NoError(w.t, err)
+		if job.State == rivertype.JobStateCompleted {
+			w.settle()
+			return
+		}
+		if job.State == rivertype.JobStateRetryable || job.State == rivertype.JobStateDiscarded || time.Now().After(deadline) {
+			w.t.Fatalf("provider refresh did not complete: state=%s errors=%v", job.State, job.Errors)
+		}
+		// Bounded catch-up snoozes the same ordinary job between windows.
+		// Match settle's due-job promotion without advancing business time.
+		if job.State == rivertype.JobStateScheduled && !job.ScheduledAt.After(time.Now()) {
+			_, err := w.jobs.JobRetry(w.t.Context(), id)
+			require.NoError(w.t, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge"}
 
 // settle waits until no operation or convergence work is runnable. Jobs the
@@ -533,6 +562,20 @@ func (w *world) wake() {
 		require.NoError(w.t, err)
 	}
 	w.settle()
+}
+
+// advanceHealthyTo models ordinary observation immediately before a planned
+// billing action. Fault scenarios instead refreshBeforePeriodEnd, install their
+// fault, then use raw advance/toPeriodEnd. Raw advance never implies refresh.
+func (w *world) advanceHealthyTo(at time.Time) {
+	w.t.Helper()
+	if d := at.Add(-time.Minute).Sub(w.clock.Now()); d > 0 {
+		w.advance(d)
+	}
+	w.refreshProviders()
+	if d := at.Sub(w.clock.Now()); d > 0 {
+		w.advance(d)
+	}
 }
 
 // inSchema relocates authored SQL to a world's schema.
