@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	stdlog "log"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -82,6 +83,19 @@ func (w *world) intentStatuses(intentType string) []string {
 	out, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(w.t, err)
 	return out
+}
+
+// refusalText is a refusal as the client reads it, less its request id: a
+// random UUID that spells a card prefix such as "4111" by chance.
+func refusalText(body map[string]any) string {
+	out := maps.Clone(body)
+	if e, ok := body["error"].(map[string]any); ok {
+		e = maps.Clone(e)
+		delete(e, "request_id")
+		out["error"] = e
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
 }
 
 func errorOf(body map[string]any) (code, message string) {
@@ -162,8 +176,7 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	code, message = errorOf(body)
 	require.Equal(t, []string{"unknown_field", "unknown field card_number"}, []string{code, message})
-	raw, _ := json.Marshal(body)
-	require.NotContains(t, string(raw), "4111")
+	require.NotContains(t, refusalText(body), "4111")
 
 	require.Len(t, w.nmi.Calls(), writes, "no refused card reached the gateway")
 	require.Empty(t, w.cardVaults("add_customer"))
@@ -188,8 +201,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 	} {
 		status, out := c.call(http.MethodPost, "/payment-methods", "", body)
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", name, out)
-		raw, _ := json.Marshal(out)
-		require.NotContains(t, string(raw), "4111", "%s: a refusal never echoes the card", name)
+		require.NotContains(t, refusalText(out), "4111", "%s: a refusal never echoes the card", name)
 	}
 	status, out := w.relayPay(c, price.ID, map[string]any{"card": entryCard(entryVisa), "payment_token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
