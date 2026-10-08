@@ -77,7 +77,7 @@ func (m *Mock) sale(form url.Values) string {
 		m.duplicate--
 		return rejected("Duplicate transaction REFID:3187654321")
 	}
-	if m.duplicateOf(*charged, form.Get("amount")) || m.withinDupSeconds(*charged, form) {
+	if !m.unsupportedDuplicateCheck && (m.duplicateOf(*charged, form.Get("amount")) || m.withinDupSeconds(*charged, form)) {
 		return rejected("Duplicate transaction REFID:3187654322")
 	}
 	amount, currency, scheduleID := form.Get("amount"), strings.ToUpper(form.Get("currency")), ""

@@ -61,6 +61,14 @@ func (m *Mock) SetDuplicateWindow(d time.Duration) {
 	m.opts.DuplicateWindow = d
 }
 
+// UnsupportedDuplicateChecking models a processor which does not support
+// NMI's duplicate checking, including the per-request dup_seconds field.
+func (m *Mock) UnsupportedDuplicateChecking(unsupported bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unsupportedDuplicateCheck = unsupported
+}
+
 // QueryUnavailable makes the Query API transaction report answer 503.
 func (m *Mock) QueryUnavailable(down bool) {
 	m.mu.Lock()

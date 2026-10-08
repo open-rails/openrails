@@ -57,16 +57,17 @@ type Mock struct {
 	odd         []string
 	recent      []recentCharge
 
-	refusedSaves int
-	declineValid int
-	duplicate    int
-	lose, lost   int
-	drop         int
-	failUpdates  int
-	hide         int
-	queryDown    bool
-	failures     []*failure
-	intercepts   []*intercept
+	refusedSaves              int
+	declineValid              int
+	duplicate                 int
+	lose, lost                int
+	drop                      int
+	failUpdates               int
+	hide                      int
+	queryDown                 bool
+	unsupportedDuplicateCheck bool
+	failures                  []*failure
+	intercepts                []*intercept
 }
 
 // New starts a Mock on a loopback listener; see URL and Close.
