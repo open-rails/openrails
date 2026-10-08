@@ -14,6 +14,10 @@ type CreateCheckoutSessionParams struct {
 	// for customer_amount prices; forbidden for fixed prices. The accepted
 	// amount is retained on retries and cannot change within a session.
 	Amount *int64 `json:"amount,string,omitempty"`
+	// AutoRenew controls this order. Omitted means true for recurring prices;
+	// false buys the initial term without scheduling another charge. The choice
+	// is fixed when the session is minted and preserved on payment retries.
+	AutoRenew *bool `json:"auto_renew,omitempty"`
 	// SuccessURL is where a redirect step returns the buyer; its origin must
 	// be one of Config.ReturnOrigins.
 	SuccessURL string `json:"success_url"`

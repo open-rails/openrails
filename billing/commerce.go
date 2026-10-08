@@ -129,6 +129,10 @@ type CreateCheckoutAttemptParams struct {
 	// for customer_amount prices; forbidden for fixed prices. The accepted
 	// amount is retained on retries and cannot change within a session.
 	Amount *int64 `json:"amount,string,omitempty"`
+	// AutoRenew controls this order, independently of the price's recurring
+	// cadence. Omitted means true for recurring prices; false buys the initial
+	// term without scheduling another charge. Accepted retries retain the choice.
+	AutoRenew *bool `json:"auto_renew,omitempty"`
 	// Entitlement optionally binds admission to the opaque resource the host
 	// showed. OpenRails verifies the selected product grants this key.
 	Entitlement    string                 `json:"entitlement"`
