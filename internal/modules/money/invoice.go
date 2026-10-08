@@ -511,30 +511,30 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if e != nil {
 			return e
 		}
-		if invoiceRow.Status != "open" && invoiceRow.Status != "past_due" {
-			return fmt.Errorf("invoice is not payable")
+		sourceID := railPaymentID
+		manualPayCoord := ledger.Coord{Operation: ledger.OpManualInvoicePay, Source: "manual_invoice_payment", SourceID: sourceID}
+		// An accepted remittance is checked before paid status, a reduced due
+		// amount, or a later collection can prevent a harmless receipt replay.
+		if prior, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: normalizeCurrency(invoiceRow.Currency),
+			TransferType: "owed_payment", Operation: string(manualPayCoord.Operation),
+			Source: manualPayCoord.Source, SourceID: manualPayCoord.SourceID,
+		}); derr == nil {
+			if prior.Amount != amount || prior.InvoiceID == nil || *prior.InvoiceID != id {
+				return ErrInvoicePaymentReferenceUsed
+			}
+			inv, e = invoiceFromGen(invoiceRow)
+			return e
+		} else if !errors.Is(derr, pgx.ErrNoRows) {
+			return derr
 		}
-		if invoiceRow.CollectionIntentID != nil {
-			return ErrInvoiceRetryInProgress
+		if invoiceRow.Status != "open" && invoiceRow.Status != "past_due" || invoiceRow.CollectionIntentID != nil {
+			return ErrInvoiceActionNotAllowed
 		}
 		if amount > invoiceRow.AmountDue {
 			return ErrInvoicePaymentExceedsDue
 		}
 		now := s.now()
-		sourceID := railPaymentID
-		manualPayCoord := ledger.Coord{Operation: ledger.OpManualInvoicePay, Source: "manual_invoice_payment", SourceID: sourceID}
-		// Reference dedup: a prior owed-payment transfer with this reference means
-		// the manual payment was already applied (the single-entry uniqueness this
-		// replaced lived on money_transactions).
-		if _, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: normalizeCurrency(invoiceRow.Currency),
-			TransferType: "owed_payment", Operation: string(manualPayCoord.Operation),
-			Source: manualPayCoord.Source, SourceID: manualPayCoord.SourceID,
-		}); derr == nil {
-			return fmt.Errorf("%w: %s", ErrInvoicePaymentReferenceUsed, sourceID)
-		} else if !errors.Is(derr, pgx.ErrNoRows) {
-			return derr
-		}
 		n, e := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
 			MerchantID: tid.UUID(),
 			CustomerID: payer.UUID(),
@@ -554,6 +554,12 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		tr, e := ml.PayOwed(ctx, payer.UUID(), normalizeCurrency(invoiceRow.Currency), amount, manualPayCoord, &id)
 		if e != nil {
 			return e
+		}
+		// Another invoice can have raced the reference lookup under its own row
+		// lock. The ledger's unique coordinate is authoritative; a mismatched
+		// receipt rolls back this invoice snapshot as well as any local work.
+		if tr.Amount != amount || tr.InvoiceID == nil || *tr.InvoiceID != id {
+			return ErrInvoicePaymentReferenceUsed
 		}
 		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID:               uuidutil.NewV7(),

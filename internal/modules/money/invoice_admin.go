@@ -115,13 +115,21 @@ type InvoiceAdminMutation struct {
 	Reference string
 }
 
-// ApplyInvoiceAdminMutation locks state before delegating to existing ledger-aware
-// operations. Collection itself uses RetryInvoiceCollectionIdempotent separately,
-// so no provider operation runs inside this local transaction.
+// ApplyInvoiceAdminMutation keeps administrative changes local and transaction-locked.
+// Remittances use their receipt-aware recorder. Collection runs separately, so
+// no provider operation runs inside a local transaction.
 func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer identity.CustomerID, id uuid.UUID, in InvoiceAdminMutation) (*models.Invoice, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if in.Action == billing.InvoiceActionRecordPayment {
+		if in.Amount <= 0 || strings.TrimSpace(in.Reference) == "" {
+			return nil, ErrInvoicePaymentInvalid
+		}
+		// The recorder locks the invoice and checks the accepted receipt before
+		// current-state eligibility: a paid invoice must still answer its replay.
+		return s.RecordOutOfBandInvoicePayment(ctx, payer, id, in.Amount, in.Reference)
 	}
 	var out *models.Invoice
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -149,11 +157,6 @@ func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer iden
 			out, e = local.VoidInvoice(ctx, payer, id)
 		case billing.InvoiceActionUncollectible:
 			out, e = local.MarkInvoiceUncollectible(ctx, payer, id)
-		case billing.InvoiceActionRecordPayment:
-			if in.Amount <= 0 || strings.TrimSpace(in.Reference) == "" {
-				return ErrInvoicePaymentInvalid
-			}
-			out, e = local.RecordOutOfBandInvoicePayment(ctx, payer, id, in.Amount, in.Reference)
 		default:
 			return ErrInvoiceActionNotAllowed
 		}
