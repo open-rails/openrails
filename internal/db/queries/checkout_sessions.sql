@@ -51,3 +51,14 @@ USING (
 WHERE s.merchant_id = expired.merchant_id
   AND s.id_hash = expired.id_hash
   AND s.purge_at <= sqlc.arg(now)::timestamptz;
+
+-- Credential directory: resolve only a complete opaque capability hash before
+-- any merchant connection is pinned. Two rows reveal ambiguity, never a choice.
+-- name: ResolveCheckoutSessionMerchant :many
+SELECT s.merchant_id
+FROM billing.checkout_sessions s
+JOIN billing.merchants m ON m.id = s.merchant_id
+WHERE s.id_hash = sqlc.arg(id_hash)::bytea
+  AND s.purge_at > sqlc.arg(now)::timestamptz
+  AND m.deleted_at IS NULL AND m.status = 'active'
+LIMIT 2;

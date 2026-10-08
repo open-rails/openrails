@@ -57,6 +57,8 @@ const (
 	AuthPublic Tier = "public"
 	// AuthOptional: a user credential is read when present.
 	AuthOptional Tier = "optional"
+	// AuthCheckoutSession: resolve the opaque ocs_ capability to its stored merchant.
+	AuthCheckoutSession Tier = "checkout_session"
 	// AuthSessionID: the id in the path is the credential.
 	AuthSessionID Tier = "session_id"
 	// AuthUser: any signed-in user.

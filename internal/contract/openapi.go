@@ -203,7 +203,7 @@ func (m *model) operation(r routes.Route) *obj {
 	responses.set("default", newObj("$ref", "#/components/responses/Error"))
 	op.set("responses", responses)
 	switch r.Auth {
-	case routes.AuthPublic, routes.AuthSessionID, routes.AuthProvider:
+	case routes.AuthPublic, routes.AuthCheckoutSession, routes.AuthSessionID, routes.AuthProvider:
 		op.set("security", []any{})
 	case routes.AuthOptional:
 		op.set("security", []any{newObj(), newObj("bearer", []string{})})

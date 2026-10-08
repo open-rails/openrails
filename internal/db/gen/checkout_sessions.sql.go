@@ -188,3 +188,40 @@ func (q *Queries) GetCheckoutSession(ctx context.Context, arg GetCheckoutSession
 	)
 	return i, err
 }
+
+const resolveCheckoutSessionMerchant = `-- name: ResolveCheckoutSessionMerchant :many
+SELECT s.merchant_id
+FROM billing.checkout_sessions s
+JOIN billing.merchants m ON m.id = s.merchant_id
+WHERE s.id_hash = $1::bytea
+  AND s.purge_at > $2::timestamptz
+  AND m.deleted_at IS NULL AND m.status = 'active'
+LIMIT 2
+`
+
+type ResolveCheckoutSessionMerchantParams struct {
+	IDHash []byte
+	Now    time.Time
+}
+
+// Credential directory: resolve only a complete opaque capability hash before
+// any merchant connection is pinned. Two rows reveal ambiguity, never a choice.
+func (q *Queries) ResolveCheckoutSessionMerchant(ctx context.Context, arg ResolveCheckoutSessionMerchantParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, resolveCheckoutSessionMerchant, arg.IDHash, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

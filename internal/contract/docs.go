@@ -43,7 +43,7 @@ func (m *model) routesMD() []byte {
 	fmt.Fprintf(&b, "Every route of the HTTP API (%d), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). ", len(m.routes))
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
-	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
+	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
 	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
 	for _, g := range groupTitles {
 		var list []routes.Route

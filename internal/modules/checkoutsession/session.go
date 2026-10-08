@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -172,6 +173,23 @@ func (s *Store) Create(ctx context.Context, id string, session Session, now time
 		}
 		return err
 	})
+}
+
+// Merchant resolves a native capability before opening its merchant connection.
+// Only a full opaque ID can select a book; no buyer or offer data leaves this
+// directory lookup. Ambiguous, revoked and past-retention capabilities fail closed.
+func (s *Store) Merchant(ctx context.Context, id string, now time.Time) (billing.MerchantID, error) {
+	if !ValidID(id) {
+		return billing.MerchantID{}, ErrNotFound
+	}
+	rows, err := s.db.GenDirectory().ResolveCheckoutSessionMerchant(ctx, gen.ResolveCheckoutSessionMerchantParams{IDHash: IDHash(id), Now: now})
+	if err != nil {
+		return billing.MerchantID{}, err
+	}
+	if len(rows) != 1 {
+		return billing.MerchantID{}, ErrNotFound
+	}
+	return billing.MerchantID(rows[0]), nil
 }
 
 // Get returns the session for id, ErrNotFound when it does not exist or its
