@@ -44,6 +44,7 @@ export interface Crumb {
 }
 
 export function SiteHeader({ trail }: { trail: Crumb[] }) {
+  const { activeMerchant } = useAuth()
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
@@ -78,7 +79,7 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
-        <NotificationBell />
+        {activeMerchant && <NotificationBell />}
         <UserMenu />
       </div>
     </header>
@@ -86,8 +87,11 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
 }
 
 function UserMenu() {
-  const { me, logout } = useAuth()
-  const signOut = useMutation({ mutationKey: ["auth", "logout"], mutationFn: logout })
+  const { me, activeMerchant, logout } = useAuth()
+  const signOut = useMutation({
+    mutationKey: ["auth", "logout"],
+    mutationFn: logout,
+  })
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   const hostItems = userMenuItems(
@@ -138,10 +142,12 @@ function UserMenu() {
         {hostItems.map((item) => (
           <HostMenuItem key={item.path} item={item} />
         ))}
-        <DropdownMenuItem onClick={() => navigate("/settings")}>
-          <HugeiconsIcon icon={Settings01Icon} />
-          Settings
-        </DropdownMenuItem>
+        {activeMerchant && (
+          <DropdownMenuItem onClick={() => navigate("/settings")}>
+            <HugeiconsIcon icon={Settings01Icon} />
+            Merchant settings
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => setTheme(dark ? "light" : "dark")}>
           {dark ? (
             <HugeiconsIcon icon={Sun01Icon} />
