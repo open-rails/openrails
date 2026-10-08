@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails/sdk/billing-ui/e2e/server
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
