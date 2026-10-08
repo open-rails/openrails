@@ -126,7 +126,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Before | After |
 |---|---|
 | `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(`, `client.EnsureProduct(`, `client.GetProduct(`, `client.GetProductByKey(`, `client.UpdateProduct(`, `client.ListProducts(` |
-| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.GetPriceByKey(`, `client.UpdatePrice(` (a merge patch: `key`, `archived`, `psp_links`), `client.ListPrices(`, `client.ListPriceKeyHistory(` |
+| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.GetPriceByKey(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(`, `client.ListPriceKeyHistory(` |
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`, `client.GetCatalogRevision(` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
 | `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(`, `client.GetMeter(`, `client.ListMeters(`, `client.SetMeterRateCard(`, `client.DeleteMeterRateCard(`, and `client.ListRateOverrides(`, `client.SetRateOverride(`, `client.DeleteRateOverride(` for a customer's negotiated price |
@@ -423,3 +423,27 @@ fallback; trusted in-process Client operations retain their normal boundary.
 Merchant billing archives use the single current format, v1, and preserve arbitrary
 application metadata. Regenerate artifacts from discarded draft formats; see
 [merchant portability](merchant-portability.md#archive-format-and-metadata).
+
+### Catalog batches and product-local price keys
+
+Catalog documents carry `schema_version` and their changes. Remove `application_id`,
+`expected_revision`, and `catalog_version`: the server remembers the canonical
+content hash per merchant. Replays remain no-ops after later edits. A new hash
+applies atomically; hashes do not determine which unseen batch is newer.
+`AllowCatalogUpdates` controls HTTP catalog-write route exposure only; authorized
+in-process client calls always work. `Config.Catalog` is optional startup shorthand,
+not a catalog ownership mode.
+
+`GetPriceByKey(ctx, productKey, priceKey)` and
+`ListPriceKeyHistory(ctx, productKey, priceKey, page)` now scope the key to its
+product. The HTTP paths are `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}`
+and its `/history` child. Checkout and repricing requests using `price_key` also
+supply `product_key`; requests using immutable price IDs keep their current shape.
+
+A price exposes an automatically assigned `revision`, starting at zero within
+its product/key. `UpdatePrice` no longer accepts `key`: create a new offer and
+archive the old one. Price terms and parent are immutable; product and price
+rows cannot be deleted. Existing UUIDs and purchase references survive the
+additive migrations. Reusing historical financial terms preserves their original
+revision, while price-key history records the new activation. A product's
+`revision` advances on actual edits without retaining full product versions.

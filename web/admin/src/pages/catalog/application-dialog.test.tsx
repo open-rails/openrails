@@ -11,7 +11,7 @@ let revision: number
 let writesAllowed: boolean
 const receipt = (replayed = false) =>
   Response.json({
-    application_id: "applied",
+    application_id: "sha256:applied-batch",
     base_revision: 7,
     applied_revision: 8,
     replayed,
@@ -45,11 +45,11 @@ const applications = () =>
 const reads = () => requests.filter((r) => r.path.endsWith("/revision"))
 async function applyDraft() {
   await click("Apply catalog")
-  await click("Review application")
-  await click("Apply reviewed application")
+  await click("Review batch")
+  await click("Apply reviewed batch")
 }
-describe("catalog application identity", () => {
-  it("retries the unchanged ID, revision and document after an uncertain response", async () => {
+describe("catalog batch retries", () => {
+  it("retries the unchanged document after an uncertain response without caller metadata", async () => {
     response = () =>
       Response.json(
         { error: { message: "Connection outcome unknown" } },
@@ -60,7 +60,7 @@ describe("catalog application identity", () => {
     expect(editor().disabled).toBe(true)
     revision = 11
     response = () => receipt(true)
-    await click("Retry exact application")
+    await click("Retry exact batch")
     expect(applications()).toHaveLength(2)
     expect(applications()[0].body).toEqual(applications()[1].body)
     expect(applications()[0].headers.get("Content-Type")).toBe(
@@ -69,32 +69,30 @@ describe("catalog application identity", () => {
     expect(editor().value).toBe(original)
     expect(reads()).toHaveLength(1)
     expect(document.body.textContent).toContain("No changes were repeated")
-    await click("New application")
+    expect(document.body.textContent).toContain(
+      "later catalog edits were preserved"
+    )
+    await click("New batch")
     const next = JSON.parse(editor().value)
-    expect(next.expected_revision).toBe(11)
-    expect(next.application_id).not.toBe(JSON.parse(original).application_id)
+    expect(next).toEqual({ schema_version: 1, prune: false, products: [] })
+    expect(next).toEqual(JSON.parse(original))
     expect(reads()).toHaveLength(2)
   })
-  it("keeps a conflict's original precondition until explicit review and editing", async () => {
+  it("allows editing a refused batch without fetching a catalog revision", async () => {
     response = () =>
       Response.json(
-        { error: { code: "resource_conflict", message: "revision changed" } },
-        { status: 409 }
+        { error: { code: "invalid_request", message: "invalid price amount" } },
+        { status: 422 }
       )
     await applyDraft()
     const original = editor().value
-    revision = 9
     expect(reads()).toHaveLength(1)
-    expect(document.body.textContent).toContain(
-      "expected revision have not changed"
-    )
-    await click("Review current revision")
-    expect(editor().value).toBe(original)
-    expect(document.body.textContent).toContain("Current revision: 9")
-    await click("Edit application")
+    expect(document.body.textContent).toContain("Batch refused")
+    await click("Edit batch")
     expect(editor().disabled).toBe(false)
     expect(editor().value).toBe(original)
     expect(applications()).toHaveLength(1)
+    expect(reads()).toHaveLength(1)
     expect(document.body.textContent).not.toContain("Review complete")
   })
   it("does not prepare a mutation when the runtime capability is disabled", async () => {
@@ -106,9 +104,9 @@ describe("catalog application identity", () => {
   })
   it("does not apply a draft to a newly selected merchant", async () => {
     await click("Apply catalog")
-    await click("Review application")
+    await click("Review batch")
     selectMerchant("merchant-two")
-    await click("Apply reviewed application")
+    await click("Apply reviewed batch")
     expect(applications()).toHaveLength(0)
     expect(document.body.textContent).toContain("another selected merchant")
   })

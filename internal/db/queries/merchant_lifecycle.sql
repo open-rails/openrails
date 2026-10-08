@@ -3,18 +3,6 @@
 -- generated replacement for the bun-era fmt.Sprintf(`openrails.%s`)
 -- identifier interpolation (#334's 'unsafe SQL' kill target).
 
--- name: CountMerchantRowsProducts :one
-SELECT count(*) FROM billing.products WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsProducts :exec
-DELETE FROM billing.products WHERE merchant_id = $1;
-
--- name: CountMerchantRowsPrices :one
-SELECT count(*) FROM billing.prices WHERE merchant_id = $1;
-
--- name: PurgeMerchantRowsPrices :exec
-DELETE FROM billing.prices WHERE merchant_id = $1;
-
 -- name: CountMerchantRowsCatalogDriftEvents :one
 SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
 

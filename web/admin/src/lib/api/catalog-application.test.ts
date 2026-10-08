@@ -4,12 +4,10 @@ import { selectMerchant, server } from "@/test/harness"
 
 afterEach(() => vi.unstubAllGlobals())
 
-it("sends exact YAML with durable identity and int64 money unchanged", async () => {
+it("sends the exact YAML batch with int64 money unchanged", async () => {
   await server()
   selectMerchant("merchant-one")
   const raw = `schema_version: 1
-application_id: authored-revision-7
-expected_revision: 7
 products:
   - key: premium
     prices:

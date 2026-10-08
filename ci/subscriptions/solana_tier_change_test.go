@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -46,10 +47,8 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		{"plus", "membership", 1, 60_000_000},
 		{"lite", "membership", 3, 3_000_000},
 	}
-	revision, err := w.client[embedded].GetCatalogRevision(t.Context())
-	require.NoError(t, err)
 	var doc strings.Builder
-	fmt.Fprintf(&doc, "schema_version: 1\napplication_id: gf-tier-%s\nexpected_revision: %d\nproducts:\n", sfx, revision.Revision)
+	doc.WriteString("schema_version: 1\nproducts:\n")
 	for i, p := range plans {
 		id := 5001 + i
 		pda, err := fake.Plan(merchantKey.PublicKey(), uint64(id), solanafake.DevnetDUSDMint, uint64(p.amount), monthHours)
@@ -77,11 +76,11 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	require.NoError(t, err)
 	_, err = w.client[embedded].ApplyCatalog(t.Context(), params)
 	require.NoError(t, err)
-	price := func(key string) string { return priceID(t, w, key+"-"+sfx+"-monthly") }
+	price := func(key string) string { return priceID(t, w, key+"-"+sfx, key+"-"+sfx+"-monthly") }
 
 	b := &solanaBuyer{customer: w.newCustomer(), wallet: solanago.NewWallet().PrivateKey}
 	fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
-	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options("basic-" + sfx + "-monthly")["solana"], price: price("basic"), key: "basic-" + sfx}
+	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options(billing.GetCheckoutConfigParams{ProductKey: "basic-" + sfx, PriceKey: "basic-" + sfx + "-monthly"})["solana"], price: price("basic"), key: "basic-" + sfx}
 	c := shop.checkout(t, b, b.wallet.PublicKey())
 	status, out := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
 	require.Equal(t, http.StatusOK, status, "%v", out)

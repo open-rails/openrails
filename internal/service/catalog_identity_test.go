@@ -25,7 +25,7 @@ type priceTerms struct {
 }
 
 func (p priceTerms) id() uuid.UUID {
-	return priceDeterministicID(p.product, p.amount, p.currency, p.access, p.renew, p.trialAmt, p.trialDur)
+	return priceDeterministicID(p.product, "monthly", p.amount, p.currency, p.access, p.renew, p.trialAmt, p.trialDur)
 }
 
 // #662: the price id is a pure function of the immutable financial tuple
@@ -54,38 +54,36 @@ func TestPriceDeterministicID(t *testing.T) {
 	require.Equal(t, with(func(p *priceTerms) { p.trialAmt, p.trialDur = nil, nil }).id(), reseeded.id(), "equal NULL tuples re-seed stably")
 }
 
-// Wipe-resync invariant: content keys derive from product key + money terms,
-// never row UUIDs, so a reseeded catalog re-attaches to existing provider
-// objects, while a different amount is a different (new) price.
-func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
-	now := time.Now().UTC()
-	snapshot := func(amount int64) catalog.DriftSnapshot {
-		productID := uuid.New()
-		return catalog.BuildDriftSnapshot([]*models.Product{{ID: productID, Key: "pro"}},
-			[]*models.Price{{ID: uuid.New(), ProductID: productID, Amount: amount, Currency: "usd", AccessDurationHours: intPtr(365 * 24), AutoRenew: true}}, uuid.Nil)
+// Provider identity follows the retained immutable local ID, not money alone.
+// Existing objects remain bound even when they carry older financial markers.
+func TestProviderPriceIdentity(t *testing.T) {
+	productID := uuid.New()
+	base := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, nil, nil)
+	sibling := priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), true, nil, nil)
+	trial := priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, int64Ptr(0), intPtr(24))
+	for _, other := range []uuid.UUID{sibling, trial} {
+		require.NotEqual(t, internalStripeLookupKey(base), internalStripeLookupKey(other))
+		require.NotEqual(t, nmiDeterministicPlanID(base), nmiDeterministicPlanID(other))
+		require.NotEqual(t, solanaPlanID(base, "mint"), solanaPlanID(other, "mint"))
 	}
-	require.Equal(t, "openrails.pro.usd.10000000.365", internalStripeLookupKey("pro", "USD", 10_000_000, intPtr(365)))
-	remote := []catalog.StripePrice{{ID: "price_live", UnitAmount: 1000, Currency: "usd", Active: true, LookupKey: internalStripeLookupKey("pro", "usd", 10_000_000, intPtr(365))}}
-	for range 2 { // before and after a wipe: fresh UUIDs, identical terms
-		require.Empty(t, catalog.ComputeStripeDrift(nil, remote, snapshot(10_000_000), now))
-	}
-
-	repriced := catalog.ComputeStripeDrift(nil, remote, snapshot(29_000_000), now)
-	require.Len(t, repriced, 1)
-	require.Equal(t, models.CatalogDriftOrphanInStripe, repriced[0].Kind, "a new amount is a new price, not amount drift")
+	require.Equal(t, internalStripeLookupKey(base), internalStripeLookupKey(base))
+	product := &models.Product{ID: productID, Key: "pro"}
+	legacy := &models.Price{ID: uuid.New(), ProductID: productID, Key: "monthly", Amount: 10_000_000, Currency: "USD",
+		PSPLinks: map[string]map[string]string{"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_legacy"}}}
+	remote := []catalog.StripePrice{{ID: "price_legacy", UnitAmount: 1000, Currency: "usd", Active: true, LookupKey: "openrails.pro.usd.10000000.onetime"}}
+	require.Empty(t, catalog.ComputeStripeDrift(nil, remote, catalog.BuildDriftSnapshot([]*models.Product{product}, []*models.Price{legacy}, uuid.Nil), time.Now()))
 }
 
-// NMI plans are content-addressed; extras archiving relies on recognizing the
-// exact shape nmiDeterministicPlanID mints.
 func TestNMIPlanIDShape(t *testing.T) {
-	minted := nmiDeterministicPlanID("premium", "USD", 23_000_000, intPtr(30))
-	require.Equal(t, nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(30)), minted)
-	require.NotEqual(t, minted, nmiDeterministicPlanID("premium", "usd", 23_000_000, intPtr(365)))
+	id := uuid.New()
+	minted := nmiDeterministicPlanID(id)
+	require.Equal(t, nmiDeterministicPlanID(id), minted)
+	require.NotEqual(t, minted, nmiDeterministicPlanID(uuid.New()))
 	require.True(t, isContentAddressedNMIPlanID(minted), minted)
 	for id, want := range map[string]bool{
 		"premium-usd-23000000-30": true, "pro-eur-999-365": true, "vip-gold-usd-999-onetime": true, "a-b-c-usd-1-7": true,
 		"legacy-vip-plan": false, "premium-usd-23x0-30": false, "premium-us-2300-30": false, "premium-USD-2300-30": false,
-		"-usd-2300-30": false, "usd-2300-30": false, "": false,
+		"-usd-2300-30": false, "usd-2300-30": false, "": false, "or-not-a-uuid": false,
 	} {
 		require.Equal(t, want, isContentAddressedNMIPlanID(id), id)
 	}

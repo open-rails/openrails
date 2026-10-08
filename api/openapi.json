@@ -765,6 +765,13 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "product_key",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1084,7 +1091,6 @@
         "x-openrails-permission": "merchant:catalog:update",
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
-          "catalog_application_conflict",
           "catalog_revision_conflict",
           "price_not_sellable",
           "product_not_found",
@@ -2244,14 +2250,14 @@
         ]
       }
     },
-    "/v1/merchant/catalog/products/by-key/{key}": {
+    "/v1/merchant/catalog/products/by-key/{product_key}": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
           {
-            "name": "key",
+            "name": "product_key",
             "in": "path",
             "required": true,
             "schema": {
@@ -2297,7 +2303,7 @@
         ],
         "parameters": [
           {
-            "name": "key",
+            "name": "product_key",
             "in": "path",
             "required": true,
             "schema": {
@@ -2621,12 +2627,20 @@
         ]
       }
     },
-    "/v1/merchant/catalog/prices/by-key/{key}": {
+    "/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
+          {
+            "name": "product_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "key",
             "in": "path",
@@ -2671,12 +2685,20 @@
         ]
       }
     },
-    "/v1/merchant/catalog/prices/by-key/{key}/history": {
+    "/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}/history": {
       "get": {
         "tags": [
           "merchant"
         ],
         "parameters": [
+          {
+            "name": "product_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "key",
             "in": "path",
@@ -3419,6 +3441,13 @@
           },
           {
             "name": "price_key",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "product_key",
             "in": "query",
             "schema": {
               "type": "string"
@@ -13221,12 +13250,6 @@
           "schema_version": {
             "type": "integer"
           },
-          "application_id": {
-            "type": "string"
-          },
-          "expected_revision": {
-            "type": "integer"
-          },
           "prune": {
             "type": "boolean"
           },
@@ -15387,6 +15410,9 @@
           "price_key": {
             "type": "string"
           },
+          "product_key": {
+            "type": "string"
+          },
           "entitlement": {
             "type": "string"
           },
@@ -15432,6 +15458,9 @@
             "type": "string"
           },
           "price_key": {
+            "type": "string"
+          },
+          "product_key": {
             "type": "string"
           },
           "success_url": {
@@ -15621,7 +15650,13 @@
           "source_price": {
             "type": "string"
           },
+          "source_product_key": {
+            "type": "string"
+          },
           "target_price": {
+            "type": "string"
+          },
+          "target_product_key": {
             "type": "string"
           },
           "effective_at": {
@@ -15780,6 +15815,9 @@
       "CreateRepriceBatchParams": {
         "type": "object",
         "properties": {
+          "product_key": {
+            "type": "string"
+          },
           "price_key": {
             "type": "string"
           },
@@ -15792,6 +15830,7 @@
           }
         },
         "required": [
+          "product_key",
           "price_key",
           "effective_at",
           "acknowledge_short_notice"
@@ -18725,6 +18764,9 @@
           "price_key": {
             "type": "string"
           },
+          "product_key": {
+            "type": "string"
+          },
           "success_url": {
             "type": "string"
           }
@@ -20581,6 +20623,9 @@
       "PreviewRepriceBatchParams": {
         "type": "object",
         "properties": {
+          "product_key": {
+            "type": "string"
+          },
           "price_key": {
             "type": "string"
           }
@@ -20589,6 +20634,9 @@
       "Price": {
         "type": "object",
         "properties": {
+          "revision": {
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -20671,6 +20719,7 @@
           }
         },
         "required": [
+          "revision",
           "id",
           "key",
           "product_id",
@@ -20690,6 +20739,9 @@
       "PriceChangeDraft": {
         "type": "object",
         "properties": {
+          "product_key": {
+            "type": "string"
+          },
           "price_key": {
             "type": "string"
           },
@@ -20725,6 +20777,7 @@
           }
         },
         "required": [
+          "product_key",
           "price_key",
           "current_amount",
           "new_amount",
@@ -20758,6 +20811,9 @@
       "Product": {
         "type": "object",
         "properties": {
+          "revision": {
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -20822,6 +20878,7 @@
           }
         },
         "required": [
+          "revision",
           "id",
           "key",
           "display_name",
@@ -21934,6 +21991,9 @@
       "RepriceBatchPreview": {
         "type": "object",
         "properties": {
+          "product_key": {
+            "type": "string"
+          },
           "price_key": {
             "type": "string"
           },
@@ -21945,6 +22005,7 @@
           }
         },
         "required": [
+          "product_key",
           "price_key",
           "to_price_id",
           "matched"
@@ -23252,16 +23313,6 @@
       "UpdatePriceParams": {
         "type": "object",
         "properties": {
-          "key": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "archived": {
             "oneOf": [
               {
@@ -23827,7 +23878,6 @@
   },
   "x-openrails-error-sets": {
     "catalog_write": [
-      "catalog_declared",
       "catalog_updates_disabled"
     ],
     "request": [
@@ -24077,16 +24127,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "Card data is accepted only over HTTPS."
-    },
-    "catalog_application_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The application id already committed with different content."
-    },
-    "catalog_declared": {
-      "status": 405,
-      "type": "invalid_request_error",
-      "meaning": "The catalog is declared by the host; change the declaration and restart."
     },
     "catalog_revision_conflict": {
       "status": 409,

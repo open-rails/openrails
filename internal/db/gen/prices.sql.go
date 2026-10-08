@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const createPrice = `-- name: CreatePrice :execrows
+const createPrice = `-- name: CreatePrice :one
 
 INSERT INTO billing.prices (
     id, merchant_id, product_id, archived, amount, currency,
@@ -30,6 +30,7 @@ INSERT INTO billing.prices (
 FROM billing.products catalog_product
 WHERE catalog_product.merchant_id=$2::uuid
   AND catalog_product.id=$3::uuid
+RETURNING prices.id, prices.product_id, prices.amount, prices.currency, prices.archived, prices.created_at, prices.updated_at, prices.merchant_id, prices.access_duration_hours, prices.auto_renew, prices.trial_unit_amount, prices.trial_duration_hours, prices.key, prices.revision
 `
 
 type CreatePriceParams struct {
@@ -49,8 +50,8 @@ type CreatePriceParams struct {
 }
 
 // billing.prices.
-func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, createPrice,
+func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (BillingPrice, error) {
+	row := q.db.QueryRow(ctx, createPrice,
 		arg.ID,
 		arg.MerchantID,
 		arg.ProductID,
@@ -65,24 +66,6 @@ func (q *Queries) CreatePrice(ctx context.Context, arg CreatePriceParams) (int64
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const getCurrentPriceByKey = `-- name: GetCurrentPriceByKey :one
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices
-WHERE merchant_id = $1::uuid AND key = $2::text AND NOT archived
-`
-
-type GetCurrentPriceByKeyParams struct {
-	MerchantID uuid.UUID
-	Key        string
-}
-
-func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceByKeyParams) (BillingPrice, error) {
-	row := q.db.QueryRow(ctx, getCurrentPriceByKey, arg.MerchantID, arg.Key)
 	var i BillingPrice
 	err := row.Scan(
 		&i.ID,
@@ -98,12 +81,81 @@ func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceB
 		&i.TrialUnitAmount,
 		&i.TrialDurationHours,
 		&i.Key,
+		&i.Revision,
+	)
+	return i, err
+}
+
+const getCurrentPriceByKey = `-- name: GetCurrentPriceByKey :one
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices
+WHERE merchant_id = $1::uuid AND product_id = $2::uuid AND key = $3::text AND NOT archived
+`
+
+type GetCurrentPriceByKeyParams struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	Key        string
+}
+
+func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceByKeyParams) (BillingPrice, error) {
+	row := q.db.QueryRow(ctx, getCurrentPriceByKey, arg.MerchantID, arg.ProductID, arg.Key)
+	var i BillingPrice
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Amount,
+		&i.Currency,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.AccessDurationHours,
+		&i.AutoRenew,
+		&i.TrialUnitAmount,
+		&i.TrialDurationHours,
+		&i.Key,
+		&i.Revision,
+	)
+	return i, err
+}
+
+const getCurrentPriceByProductKey = `-- name: GetCurrentPriceByProductKey :one
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision FROM billing.prices price
+JOIN billing.products product ON product.merchant_id = price.merchant_id AND product.id = price.product_id
+WHERE price.merchant_id = $1::uuid AND product.key = $2::text
+  AND price.key = $3::text AND NOT price.archived
+`
+
+type GetCurrentPriceByProductKeyParams struct {
+	MerchantID uuid.UUID
+	ProductKey string
+	Key        string
+}
+
+func (q *Queries) GetCurrentPriceByProductKey(ctx context.Context, arg GetCurrentPriceByProductKeyParams) (BillingPrice, error) {
+	row := q.db.QueryRow(ctx, getCurrentPriceByProductKey, arg.MerchantID, arg.ProductKey, arg.Key)
+	var i BillingPrice
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Amount,
+		&i.Currency,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.AccessDurationHours,
+		&i.AutoRenew,
+		&i.TrialUnitAmount,
+		&i.TrialDurationHours,
+		&i.Key,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getPriceByID = `-- name: GetPriceByID :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key FROM billing.prices price
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision FROM billing.prices price
 WHERE price.merchant_id=$1::uuid AND price.id=$2::uuid
 `
 
@@ -129,12 +181,13 @@ func (q *Queries) GetPriceByID(ctx context.Context, arg GetPriceByIDParams) (Bil
 		&i.TrialUnitAmount,
 		&i.TrialDurationHours,
 		&i.Key,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getPriceByNMIPlan = `-- name: GetPriceByNMIPlan :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key FROM billing.prices price
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision FROM billing.prices price
 JOIN billing.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
 JOIN billing.psps psp ON psp.merchant_id = binding.merchant_id AND psp.id = binding.psp_id
 WHERE binding.merchant_id = $1::uuid AND binding.psp_id = $2::uuid
@@ -170,12 +223,67 @@ func (q *Queries) GetPriceByNMIPlan(ctx context.Context, arg GetPriceByNMIPlanPa
 		&i.TrialUnitAmount,
 		&i.TrialDurationHours,
 		&i.Key,
+		&i.Revision,
+	)
+	return i, err
+}
+
+const getPriceByTerms = `-- name: GetPriceByTerms :one
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices
+WHERE merchant_id=$1::uuid AND product_id=$2::uuid AND key=$3::text
+  AND amount=$4::bigint AND currency=$5::text
+  AND access_duration_hours IS NOT DISTINCT FROM $6::int
+  AND auto_renew=$7::boolean
+  AND trial_unit_amount IS NOT DISTINCT FROM $8::bigint
+  AND trial_duration_hours IS NOT DISTINCT FROM $9::int
+`
+
+type GetPriceByTermsParams struct {
+	MerchantID          uuid.UUID
+	ProductID           uuid.UUID
+	Key                 string
+	Amount              int64
+	Currency            string
+	AccessDurationHours *int32
+	AutoRenew           bool
+	TrialUnitAmount     *int64
+	TrialDurationHours  *int32
+}
+
+func (q *Queries) GetPriceByTerms(ctx context.Context, arg GetPriceByTermsParams) (BillingPrice, error) {
+	row := q.db.QueryRow(ctx, getPriceByTerms,
+		arg.MerchantID,
+		arg.ProductID,
+		arg.Key,
+		arg.Amount,
+		arg.Currency,
+		arg.AccessDurationHours,
+		arg.AutoRenew,
+		arg.TrialUnitAmount,
+		arg.TrialDurationHours,
+	)
+	var i BillingPrice
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Amount,
+		&i.Currency,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.AccessDurationHours,
+		&i.AutoRenew,
+		&i.TrialUnitAmount,
+		&i.TrialDurationHours,
+		&i.Key,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getPriceWithProductByCCBillPriceID = `-- name: GetPriceWithProductByCCBillPriceID :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
 JOIN billing.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
@@ -225,6 +333,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, arg Ge
 			&i.BillingPrice.TrialUnitAmount,
 			&i.BillingPrice.TrialDurationHours,
 			&i.BillingPrice.Key,
+			&i.BillingPrice.Revision,
 			&i.BillingProduct.ID,
 			&i.BillingProduct.Key,
 			&i.BillingProduct.DisplayName,
@@ -236,6 +345,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, arg Ge
 			&i.BillingProduct.CreatedAt,
 			&i.BillingProduct.UpdatedAt,
 			&i.BillingProduct.MerchantID,
+			&i.BillingProduct.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -248,7 +358,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, arg Ge
 }
 
 const getPriceWithProductByStripePriceID = `-- name: GetPriceWithProductByStripePriceID :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
 JOIN billing.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
@@ -285,6 +395,7 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, arg Ge
 		&i.BillingPrice.TrialUnitAmount,
 		&i.BillingPrice.TrialDurationHours,
 		&i.BillingPrice.Key,
+		&i.BillingPrice.Revision,
 		&i.BillingProduct.ID,
 		&i.BillingProduct.Key,
 		&i.BillingProduct.DisplayName,
@@ -296,12 +407,13 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, arg Ge
 		&i.BillingProduct.CreatedAt,
 		&i.BillingProduct.UpdatedAt,
 		&i.BillingProduct.MerchantID,
+		&i.BillingProduct.Revision,
 	)
 	return i, err
 }
 
 const listActivePricesByProductOrdered = `-- name: ListActivePricesByProductOrdered :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices price
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices price
 WHERE price.merchant_id = $2::uuid AND price.product_id = $1 AND NOT price.archived
 ORDER BY price.amount ASC
 `
@@ -334,6 +446,7 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, arg List
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -346,7 +459,7 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, arg List
 }
 
 const listAllActivePricesWithProduct = `-- name: ListAllActivePricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND NOT price.archived
@@ -381,6 +494,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID
 			&i.BillingPrice.TrialUnitAmount,
 			&i.BillingPrice.TrialDurationHours,
 			&i.BillingPrice.Key,
+			&i.BillingPrice.Revision,
 			&i.BillingProduct.ID,
 			&i.BillingProduct.Key,
 			&i.BillingProduct.DisplayName,
@@ -392,6 +506,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID
 			&i.BillingProduct.CreatedAt,
 			&i.BillingProduct.UpdatedAt,
 			&i.BillingProduct.MerchantID,
+			&i.BillingProduct.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -404,7 +519,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID
 }
 
 const listAllPricesWithProduct = `-- name: ListAllPricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 
@@ -440,6 +555,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context, merchantID uuid.
 			&i.BillingPrice.TrialUnitAmount,
 			&i.BillingPrice.TrialDurationHours,
 			&i.BillingPrice.Key,
+			&i.BillingPrice.Revision,
 			&i.BillingProduct.ID,
 			&i.BillingProduct.Key,
 			&i.BillingProduct.DisplayName,
@@ -451,6 +567,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context, merchantID uuid.
 			&i.BillingProduct.CreatedAt,
 			&i.BillingProduct.UpdatedAt,
 			&i.BillingProduct.MerchantID,
+			&i.BillingProduct.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -463,7 +580,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context, merchantID uuid.
 }
 
 const listCurrentPricesByProducts = `-- name: ListCurrentPricesByProducts :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key FROM billing.prices price
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision FROM billing.prices price
 JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND price.product_id = ANY($2::uuid[])
   AND NOT price.archived
@@ -498,6 +615,7 @@ func (q *Queries) ListCurrentPricesByProducts(ctx context.Context, arg ListCurre
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -510,19 +628,20 @@ func (q *Queries) ListCurrentPricesByProducts(ctx context.Context, arg ListCurre
 }
 
 const listPriceChainByKey = `-- name: ListPriceChainByKey :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices
-WHERE merchant_id = $1::uuid AND key = $2::text
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices
+WHERE merchant_id = $1::uuid AND product_id = $2::uuid AND key = $3::text
 ORDER BY created_at ASC
 `
 
 type ListPriceChainByKeyParams struct {
 	MerchantID uuid.UUID
+	ProductID  uuid.UUID
 	Key        string
 }
 
 // All rows (archived + current) ever pointed at by this key — the version chain.
 func (q *Queries) ListPriceChainByKey(ctx context.Context, arg ListPriceChainByKeyParams) ([]BillingPrice, error) {
-	rows, err := q.db.Query(ctx, listPriceChainByKey, arg.MerchantID, arg.Key)
+	rows, err := q.db.Query(ctx, listPriceChainByKey, arg.MerchantID, arg.ProductID, arg.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -544,6 +663,7 @@ func (q *Queries) ListPriceChainByKey(ctx context.Context, arg ListPriceChainByK
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -556,7 +676,7 @@ func (q *Queries) ListPriceChainByKey(ctx context.Context, arg ListPriceChainByK
 }
 
 const listPricesByIDs = `-- name: ListPricesByIDs :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices WHERE prices.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices WHERE prices.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
 type ListPricesByIDsParams struct {
@@ -587,6 +707,7 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, arg ListPricesByIDsParams
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -599,7 +720,7 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, arg ListPricesByIDsParams
 }
 
 const listPricesByProduct = `-- name: ListPricesByProduct :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices price
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices price
 WHERE price.merchant_id = $2::uuid AND price.product_id = $1
 `
 
@@ -634,6 +755,7 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProdu
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -646,7 +768,7 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProdu
 }
 
 const listPricesFiltered = `-- name: ListPricesFiltered :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid
@@ -708,6 +830,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 			&i.BillingPrice.TrialUnitAmount,
 			&i.BillingPrice.TrialDurationHours,
 			&i.BillingPrice.Key,
+			&i.BillingPrice.Revision,
 			&i.BillingProduct.ID,
 			&i.BillingProduct.Key,
 			&i.BillingProduct.DisplayName,
@@ -719,6 +842,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 			&i.BillingProduct.CreatedAt,
 			&i.BillingProduct.UpdatedAt,
 			&i.BillingProduct.MerchantID,
+			&i.BillingProduct.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -731,7 +855,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 }
 
 const listPricesWithProductByIDs = `-- name: ListPricesWithProductByIDs :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND price.id = ANY($2::uuid[])
@@ -770,6 +894,7 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPrices
 			&i.BillingPrice.TrialUnitAmount,
 			&i.BillingPrice.TrialDurationHours,
 			&i.BillingPrice.Key,
+			&i.BillingPrice.Revision,
 			&i.BillingProduct.ID,
 			&i.BillingProduct.Key,
 			&i.BillingProduct.DisplayName,
@@ -781,6 +906,7 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPrices
 			&i.BillingProduct.CreatedAt,
 			&i.BillingProduct.UpdatedAt,
 			&i.BillingProduct.MerchantID,
+			&i.BillingProduct.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -793,19 +919,20 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPrices
 }
 
 const listPriorVersionsByKey = `-- name: ListPriorVersionsByKey :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM billing.prices
-WHERE merchant_id = $1::uuid AND key = $2::text AND archived
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, revision FROM billing.prices
+WHERE merchant_id = $1::uuid AND product_id = $2::uuid AND key = $3::text AND archived
 ORDER BY created_at ASC
 `
 
 type ListPriorVersionsByKeyParams struct {
 	MerchantID uuid.UUID
+	ProductID  uuid.UUID
 	Key        string
 }
 
 // The archived members of a key's chain — #773's "all prior versions of key K".
 func (q *Queries) ListPriorVersionsByKey(ctx context.Context, arg ListPriorVersionsByKeyParams) ([]BillingPrice, error) {
-	rows, err := q.db.Query(ctx, listPriorVersionsByKey, arg.MerchantID, arg.Key)
+	rows, err := q.db.Query(ctx, listPriorVersionsByKey, arg.MerchantID, arg.ProductID, arg.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -827,6 +954,7 @@ func (q *Queries) ListPriorVersionsByKey(ctx context.Context, arg ListPriorVersi
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.Key,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -836,26 +964,6 @@ func (q *Queries) ListPriorVersionsByKey(ctx context.Context, arg ListPriorVersi
 		return nil, err
 	}
 	return items, nil
-}
-
-const updatePriceKey = `-- name: UpdatePriceKey :execrows
-UPDATE billing.prices AS price SET
-    key=$1::text, updated_at=now()
-WHERE price.merchant_id=$2::uuid AND price.id=$3::uuid
-`
-
-type UpdatePriceKeyParams struct {
-	Key        string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) UpdatePriceKey(ctx context.Context, arg UpdatePriceKeyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePriceKey, arg.Key, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const updatePriceStatus = `-- name: UpdatePriceStatus :execrows

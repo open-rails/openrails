@@ -120,7 +120,7 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_key"] != "")
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_url"] != "", "a server PSP's page loads no gateway script")
 			}
-			option := w.options(price.Key)["nmi"]
+			option := w.options(billing.GetCheckoutConfigParams{PriceID: price.ID})["nmi"]
 			require.Equal(t, tc.driver, option.Driver)
 			require.Equal(t, tc.tokenizerKeyed, len(option.PublicConfig) > 0)
 		})

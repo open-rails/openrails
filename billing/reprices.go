@@ -121,6 +121,7 @@ type RepriceBatch struct {
 
 // RepriceBatchListParams filters the merchant's batches, newest first.
 type RepriceBatchListParams struct {
+	ProductKey string `json:"product_key"`
 	PageRequest
 	PriceKey string
 }
@@ -128,6 +129,7 @@ type RepriceBatchListParams struct {
 // CreateRepriceBatchParams moves every active subscription on a prior
 // version of PriceKey to the key's current price at EffectiveAt.
 type CreateRepriceBatchParams struct {
+	ProductKey  string    `json:"product_key"`
 	PriceKey    string    `json:"price_key"`
 	EffectiveAt time.Time `json:"effective_at"`
 	// AcknowledgeShortNotice permits a price increase inside the merchant's
@@ -138,15 +140,17 @@ type CreateRepriceBatchParams struct {
 // PreviewRepriceBatchParams counts the subscribers a batch for PriceKey would
 // move, before the new price version exists.
 type PreviewRepriceBatchParams struct {
-	PriceKey string `json:"price_key"`
+	ProductKey string `json:"product_key"`
+	PriceKey   string `json:"price_key"`
 }
 
 // RepriceBatchPreview is what a batch for PriceKey would move: every active
 // subscriber on any version of the key.
 type RepriceBatchPreview struct {
-	PriceKey  string  `json:"price_key"`
-	ToPriceID PriceID `json:"to_price_id"`
-	Matched   int     `json:"matched"`
+	ProductKey string  `json:"product_key"`
+	PriceKey   string  `json:"price_key"`
+	ToPriceID  PriceID `json:"to_price_id"`
+	Matched    int     `json:"matched"`
 }
 
 // RepriceOutcome is one subscription's result within a reprice batch.
@@ -184,8 +188,10 @@ type RepriceBatchCancel struct {
 // product at each subscription's first renewal on or after EffectiveAt.
 // Prices are addressed by ID or key.
 type CreatePlanMigrationParams struct {
-	SourcePrice string `json:"source_price"`
-	TargetPrice string `json:"target_price"`
+	SourcePrice      string `json:"source_price"`
+	SourceProductKey string `json:"source_product_key,omitempty"`
+	TargetPrice      string `json:"target_price"`
+	TargetProductKey string `json:"target_product_key,omitempty"`
 	// EffectiveAt and NoticeDays are mutually exclusive; both empty means now.
 	EffectiveAt time.Time `json:"effective_at,omitzero"`
 	NoticeDays  int       `json:"notice_days,omitempty"`

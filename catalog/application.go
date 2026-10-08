@@ -18,9 +18,6 @@ const (
 	// MaxApplicationBytes and MaxApplicationItems bound one document.
 	MaxApplicationBytes = 1 << 20
 	MaxApplicationItems = 2000
-	// DeclarativeIDPrefix marks the derived identity of a declarative
-	// application; explicit application IDs cannot use it.
-	DeclarativeIDPrefix = "sha256:"
 )
 
 // Field distinguishes an omitted update from a value or an explicit null.
@@ -89,17 +86,13 @@ func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 	return decoder.Decode(&f.Value)
 }
 
-// Application is one merchant-authorized batch. With ApplicationID and
-// ExpectedRevision it is guarded: it replays by ID and applies only at that
-// revision. Without both it is declarative: its content digest is its identity
-// and it converges the catalog to the declared state at any revision.
+// Application is one atomic merchant catalog batch. Its canonical content hash
+// is its permanent replay identity; omitted records and fields are preserved.
 type Application struct {
-	SchemaVersion    int            `json:"schema_version"`
-	ApplicationID    string         `json:"application_id,omitempty"`
-	ExpectedRevision *int64         `json:"expected_revision,omitempty"`
-	Prune            bool           `json:"prune,omitempty"`
-	Products         []ApplyProduct `json:"products,omitempty"`
-	Meters           []ApplyMeter   `json:"meters,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	Prune         bool           `json:"prune,omitempty"`
+	Products      []ApplyProduct `json:"products,omitempty"`
+	Meters        []ApplyMeter   `json:"meters,omitempty"`
 }
 
 // ApplyMeter declares one meter by key; omitted fields keep their values.
@@ -150,20 +143,10 @@ func (a Application) Validate() error {
 	if a.SchemaVersion != ApplicationSchemaVersion {
 		return fmt.Errorf("unsupported catalog application schema_version %d", a.SchemaVersion)
 	}
-	switch {
-	case a.Declarative():
-	case a.ApplicationID == "" || a.ExpectedRevision == nil:
-		return fmt.Errorf("application_id and expected_revision go together: supply both to guard against concurrent edits, or neither to apply the document declaratively")
-	case len(a.ApplicationID) > 128 || strings.TrimSpace(a.ApplicationID) != a.ApplicationID:
-		return fmt.Errorf("application_id must be a nonempty identifier of at most 128 bytes")
-	case strings.HasPrefix(a.ApplicationID, DeclarativeIDPrefix):
-		return fmt.Errorf("application_id prefix %q is reserved for declarative applications", DeclarativeIDPrefix)
-	case *a.ExpectedRevision < 0:
-		return fmt.Errorf("expected_revision must be nonnegative")
-	}
-	products, prices, meters := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	products, meters := map[string]bool{}, map[string]bool{}
 	count := len(a.Products) + len(a.Meters)
 	for _, p := range a.Products {
+		prices := map[string]bool{}
 		if err := validateApplicationFields(p); err != nil {
 			return fmt.Errorf("product %q: %w", p.Key, err)
 		}
@@ -215,9 +198,6 @@ func (a Application) Validate() error {
 	}
 	return nil
 }
-
-// Declarative reports an application without ID or revision precondition.
-func (a Application) Declarative() bool { return a.ApplicationID == "" && a.ExpectedRevision == nil }
 
 // Check every presence-aware field before hashing or executing a direct Go
 // request. The operator and JSON paths must interpret identical values.

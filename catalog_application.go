@@ -8,11 +8,9 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// ApplyCatalog applies a catalog document. A declarative document (no
-// application ID or expected revision) converges the catalog to its contents
-// and replays while nothing has changed since. A guarded one replays by ID and
-// applies only at its expected revision. While Config.Catalog declares the
-// catalog it is refused (billing.ErrCatalogDeclared).
+// ApplyCatalog applies one partial merchant catalog batch atomically. The server
+// remembers its canonical content hash permanently: retries return the original
+// receipt even after later catalog changes. Config.Catalog uses the same behavior.
 func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
 	if document == nil {
 		return nil, invalidErr("catalog document is required")

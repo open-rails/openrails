@@ -73,7 +73,7 @@ func EnsureProduct(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	key := r.Param("key")
+	key := r.Param("product_key")
 	if params.Key != "" && params.Key != key {
 		r.ErrorCode(billing.CodeInvalidParam, "product key in path and body must match")
 		return
@@ -138,7 +138,7 @@ func GetProductByKey(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.GetProductByKey(r.Request.Context(), r.Param("key"))
+	out, err := svc.GetProductByKey(r.Request.Context(), r.Param("product_key"))
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -261,7 +261,7 @@ func GetPriceByKey(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.GetPriceByKey(r.Request.Context(), r.Param("key"))
+	out, err := svc.GetPriceByKey(r.Request.Context(), r.Param("product_key"), r.Param("key"))
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -280,7 +280,7 @@ func ListPriceKeyHistory(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListPriceKeyHistory(r.Request.Context(), r.Param("key"), page)
+	out, err := svc.ListPriceKeyHistory(r.Request.Context(), r.Param("product_key"), r.Param("key"), page)
 	if err != nil {
 		writeCatalogError(r, err)
 		return

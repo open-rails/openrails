@@ -11,6 +11,7 @@ import (
 // Product represents a product offering (e.g., Premium Membership)
 // This represents our product catalog concept
 type Product struct {
+	Revision    int64     `json:"revision"`
 	ID          uuid.UUID `json:"id"`
 	MerchantID  uuid.UUID `json:"merchant_id"`
 	Key         string    `json:"key"`
@@ -59,6 +60,7 @@ func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
+	Revision   int64     `json:"revision"`
 	ID         uuid.UUID `json:"id"`
 	MerchantID uuid.UUID `json:"merchant_id"`
 	ProductID  uuid.UUID `json:"product_id"`
@@ -70,11 +72,8 @@ type Price struct {
 	Amount   int64  `json:"amount"`
 	Currency string `json:"currency"`
 
-	// Key (#774) is a durable, per-merchant-unique handle naming this price's
-	// substance-version chain — a movable pointer, unlike ID (which stays the
-	// #662 immutable substance UUID). At most one non-archived row per
-	// (merchant_id, key); archived predecessors keep their key as a
-	// back-reference to the chain they belonged to.
+	// Key identifies this product's price revision chain. It never changes on
+	// a stored price; one non-archived revision may hold each product/key.
 	Key string `json:"key"`
 
 	// AccessDurationHours is the access window (#622) a purchase of this price
@@ -327,7 +326,7 @@ func (p *Product) Summary() *billing.ProductSummary {
 
 // View is the product as the API shows it, without its prices.
 func (p *Product) View() billing.Product {
-	return billing.Product{
+	return billing.Product{Revision: p.Revision,
 		ID: billing.ProductID(p.ID), Key: p.Key,
 		DisplayName: p.DisplayName, Description: p.Description, EntitlementsSpec: p.EntitlementsSpec,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
@@ -359,7 +358,7 @@ func PublicPrice(p billing.Price) billing.Price {
 // View is the price as the API shows it, linked to every PSP in its links.
 // Sync status is unknown until a verifying read fills it.
 func (p *Price) View() billing.Price {
-	out := billing.Price{
+	out := billing.Price{Revision: p.Revision,
 		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
 		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, AutoRenew: p.AutoRenew,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours,

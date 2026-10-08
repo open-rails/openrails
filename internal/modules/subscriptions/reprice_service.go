@@ -141,21 +141,21 @@ func (s *RepriceService) scheduledConflict(ctx context.Context, subscriptionID u
 // abort the whole batch.
 func (s *RepriceService) CreateBatch(ctx context.Context, req billing.CreateRepriceBatchParams) (*billing.RepriceBatchResult, error) {
 	key := strings.TrimSpace(req.PriceKey)
-	if key == "" {
-		return nil, apperr.Invalidf("reprice_all_prior_versions: price_key required")
+	if key == "" || strings.TrimSpace(req.ProductKey) == "" {
+		return nil, apperr.Invalidf("reprice_all_prior_versions: product_key and price_key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	toPrice, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
+	toPrice, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), req.ProductKey, key)
 	if err != nil {
 		if db.IsNotFound(err) {
 			return nil, fmt.Errorf("%w: price key %q has no current price", ErrRepricePriceKeyNotFound, key)
 		}
 		return nil, fmt.Errorf("reprice_all_prior_versions: load current price for key %q: %w", key, err)
 	}
-	priorVersions, err := s.prices.ListPriorVersionsByKey(ctx, tid.UUID(), key)
+	priorVersions, err := s.prices.ListPriorVersionsByKey(ctx, tid.UUID(), toPrice.ProductID, key)
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions: list prior versions: %w", err)
 	}
@@ -257,28 +257,28 @@ func (s *RepriceService) CreateBatch(ctx context.Context, req billing.CreateRepr
 // key's ARCHIVED prior versions once the new one is current), this counts the
 // key's WHOLE chain (current + archived): every active subscriber on it today
 // is a "prior version" candidate the instant the pending edit lands.
-func (s *RepriceService) PreviewBatch(ctx context.Context, priceKey string) (*billing.RepriceBatchPreview, error) {
+func (s *RepriceService) PreviewBatch(ctx context.Context, productKey, priceKey string) (*billing.RepriceBatchPreview, error) {
 	key := strings.TrimSpace(priceKey)
-	if key == "" {
-		return nil, apperr.Invalidf("reprice_all_prior_versions preview: price_key required")
+	if key == "" || strings.TrimSpace(productKey) == "" {
+		return nil, apperr.Invalidf("reprice_all_prior_versions preview: product_key and price_key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	toPrice, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
+	toPrice, err := s.prices.GetCurrentByProductKey(ctx, tid.UUID(), productKey, key)
 	if err != nil {
 		if db.IsNotFound(err) {
 			return nil, fmt.Errorf("%w: price key %q has no current price", ErrRepricePriceKeyNotFound, key)
 		}
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: load current price for key %q: %w", key, err)
 	}
-	chain, err := s.prices.ListChainByKey(ctx, tid.UUID(), key)
+	chain, err := s.prices.ListChainByKey(ctx, tid.UUID(), toPrice.ProductID, key)
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: list version chain: %w", err)
 	}
 	if len(chain) == 0 {
-		return &billing.RepriceBatchPreview{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID)}, nil
+		return &billing.RepriceBatchPreview{ProductKey: productKey, PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID)}, nil
 	}
 	chainIDs := make([]uuid.UUID, 0, len(chain))
 	for _, p := range chain {
@@ -288,7 +288,7 @@ func (s *RepriceService) PreviewBatch(ctx context.Context, priceKey string) (*bi
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: count affected subscriptions: %w", err)
 	}
-	return &billing.RepriceBatchPreview{PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs)}, nil
+	return &billing.RepriceBatchPreview{ProductKey: productKey, PriceKey: key, ToPriceID: billing.PriceID(toPrice.ID), Matched: len(subs)}, nil
 }
 
 // GetBatch reads one batch with its reprices counted by status.
@@ -298,6 +298,9 @@ func (s *RepriceService) GetBatch(ctx context.Context, id billing.RepriceBatchID
 
 // ListBatches is one page of the merchant's batches, newest first.
 func (s *RepriceService) ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error) {
+	if params.PriceKey != "" && strings.TrimSpace(params.ProductKey) == "" {
+		return billing.ListPage[billing.RepriceBatch]{}, apperr.Invalidf("product_key is required with price_key")
+	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.RepriceBatch]{}, err
@@ -310,7 +313,7 @@ func (s *RepriceService) ListBatches(ctx context.Context, params billing.Reprice
 	if k := strings.TrimSpace(params.PriceKey); k != "" {
 		key = &k
 	}
-	rows, err := s.repo.ListBatches(ctx, key, pagination.Fetch(limit), afterAt, afterID)
+	rows, err := s.repo.ListBatches(ctx, params.ProductKey, key, pagination.Fetch(limit), afterAt, afterID)
 	if err != nil {
 		return billing.ListPage[billing.RepriceBatch]{}, err
 	}

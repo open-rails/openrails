@@ -31,9 +31,9 @@ func classify(extras []CatalogExtra) map[string]extraClass {
 // Objects the local catalog links by id or matches by content key are not
 // extras; the rest are OWNED only when they carry an OpenRails marker.
 func TestCatalogExtrasClassifyOwnership(t *testing.T) {
-	productID := uuid.New()
+	productID, priceID := uuid.New(), uuid.New()
 	snap := catalog.BuildDriftSnapshot([]*models.Product{{ID: productID, Key: "premium"}}, []*models.Price{{
-		ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(30 * 24), AutoRenew: true,
+		ID: priceID, ProductID: productID, Amount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(30 * 24), AutoRenew: true,
 		PSPLinks: map[string]map[string]string{
 			"stripe":           {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_local", models.RailKeyStripeProductID: "prod_local"},
 			"stripe_secondary": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_local_2", models.RailKeyStripeProductID: "prod_local_2"},
@@ -50,7 +50,7 @@ func TestCatalogExtrasClassifyOwnership(t *testing.T) {
 			{ID: "prod_foreign", Active: true},
 		},
 		[]catalog.StripePrice{
-			{ID: "price_matched", Active: true, LookupKey: "openrails.premium.usd.23000000.30"},
+			{ID: "price_matched", Active: true, LookupKey: internalStripeLookupKey(priceID)},
 			{ID: "price_local", Active: true},
 			{ID: "price_local_2", Active: true},
 			{ID: "price_ours_extra", Active: true, Metadata: map[string]string{catalog.StripeMetadataOpenRailsPriceKey: "retired.usd.9000000.30"}},
@@ -177,7 +177,7 @@ func planAccount(status uint8) []byte {
 func TestComputeSolanaSunsetExtras(t *testing.T) {
 	productID := uuid.New()
 	price := func(pda string, archived bool) *models.Price {
-		return &models.Price{ID: uuid.New(), ProductID: productID, Amount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(30 * 24), AutoRenew: true, Archived: archived,
+		return &models.Price{ID: uuid.New(), ProductID: productID, Key: "monthly", Amount: 23_000_000, Currency: "USD", AccessDurationHours: intPtr(30 * 24), AutoRenew: true, Archived: archived,
 			PSPLinks: map[string]map[string]string{"solana": {models.RailKeyRail: "solana", "plan_pda": pda}}}
 	}
 	pda := func() string { return solanago.NewWallet().PublicKey().String() }
@@ -190,5 +190,5 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	extras, scanned, notes := computeSolanaSunsetExtras(t.Context(), reader, snap)
 	require.Empty(t, notes)
 	require.Equal(t, 3, scanned)
-	require.Equal(t, []CatalogExtra{{Provider: "solana", ObjectType: "plan", ExternalID: activeArchived, Label: "premium.usd.23000000.30", Owned: true, Active: true}}, extras)
+	require.Equal(t, []CatalogExtra{{Provider: "solana", ObjectType: "plan", ExternalID: activeArchived, Label: "premium.monthly.v0", Owned: true, Active: true}}, extras)
 }

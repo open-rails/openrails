@@ -22,17 +22,19 @@ func (q *Queries) AdvanceCatalogRevision(ctx context.Context, merchantID uuid.UU
 	return catalog_revision, err
 }
 
-const getCatalogApplication = `-- name: GetCatalogApplication :one
-SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications WHERE merchant_id=$1::uuid AND application_id=$2::text
+const getCatalogApplicationByHash = `-- name: GetCatalogApplicationByHash :one
+SELECT merchant_id, application_id, schema_version, request_sha256, base_revision, applied_revision, result, applied_at FROM billing.catalog_applications
+WHERE merchant_id=$1::uuid AND request_sha256=$2::bytea
+ORDER BY applied_revision DESC LIMIT 1
 `
 
-type GetCatalogApplicationParams struct {
+type GetCatalogApplicationByHashParams struct {
 	MerchantID    uuid.UUID
-	ApplicationID string
+	RequestSha256 []byte
 }
 
-func (q *Queries) GetCatalogApplication(ctx context.Context, arg GetCatalogApplicationParams) (BillingCatalogApplication, error) {
-	row := q.db.QueryRow(ctx, getCatalogApplication, arg.MerchantID, arg.ApplicationID)
+func (q *Queries) GetCatalogApplicationByHash(ctx context.Context, arg GetCatalogApplicationByHashParams) (BillingCatalogApplication, error) {
+	row := q.db.QueryRow(ctx, getCatalogApplicationByHash, arg.MerchantID, arg.RequestSha256)
 	var i BillingCatalogApplication
 	err := row.Scan(
 		&i.MerchantID,

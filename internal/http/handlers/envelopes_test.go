@@ -129,8 +129,8 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"metering", billingservice.ErrDefaultRateCardRequired, want{409, "default_rate_card_required", ""}},
 		{"metering", billingservice.ErrRateCardHasOverrides, want{409, "rate_card_has_overrides", ""}},
 		{"metering", billingservice.ErrRateCardCurrencyMismatch, want{409, "rate_card_currency_mismatch", ""}},
-		{"metering", catalogpolicy.ErrDeclared, want{405, "catalog_declared", ""}},
-		{"catalog", catalogpolicy.ErrDeclared, want{405, "catalog_declared", ""}},
+		{"metering", catalogpolicy.ErrUpdatesDisabled, want{403, "catalog_updates_disabled", ""}},
+		{"catalog", catalogpolicy.ErrUpdatesDisabled, want{403, "catalog_updates_disabled", ""}},
 	}
 	reworded := func(err error) error {
 		var refusal *apperr.Error

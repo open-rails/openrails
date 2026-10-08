@@ -35,6 +35,45 @@ it("scopes cached server state before a merchant is selected", () => {
   expect(queryKeys.dashboard()).toEqual(["merchant", "unselected", "dashboard"])
 })
 
+it("keeps same-named price histories and reprice batches separate by product", async () => {
+  selectMerchant("merchant-a")
+  const requests = await server({
+    "/merchant/catalog/products/by-key/premium/prices/by-key/monthly/history": { data: [{ price_id: "premium_price" }] },
+    "/merchant/catalog/products/by-key/basic/prices/by-key/monthly/history": { data: [{ price_id: "basic_price" }] },
+    "/merchant/reprice-batches": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
+  })
+  const queries = client({ staleTime: Infinity })
+  try {
+    const premiumHistory = await queries.fetchQuery(adminQueries.priceHistory("premium", "monthly"))
+    const basicHistory = await queries.fetchQuery(adminQueries.priceHistory("basic", "monthly"))
+    const premiumBatches = await queries.fetchQuery(adminQueries.repriceBatches("premium", "monthly"))
+    const basicBatches = await queries.fetchQuery(adminQueries.repriceBatches("basic", "monthly"))
+
+    expect(premiumHistory.data).toEqual([{ price_id: "premium_price" }])
+    expect(basicHistory.data).toEqual([{ price_id: "basic_price" }])
+    expect(premiumBatches.data).toEqual([{ id: "premium" }])
+    expect(basicBatches.data).toEqual([{ id: "basic" }])
+    expect(calls(requests)).toEqual([
+      "GET /merchant/catalog/products/by-key/premium/prices/by-key/monthly/history",
+      "GET /merchant/catalog/products/by-key/basic/prices/by-key/monthly/history",
+      "GET /merchant/reprice-batches",
+      "GET /merchant/reprice-batches",
+    ])
+    expect(new URLSearchParams(requests[2].query).get("price_key")).toBe("monthly")
+    expect(new URLSearchParams(requests[3].query).get("price_key")).toBe("monthly")
+  } finally {
+    queries.clear()
+  }
+})
+
+it("waits for both product and price before loading price history or batches", () => {
+  for (const query of [adminQueries.priceHistory, adminQueries.repriceBatches]) {
+    expect(query(undefined, "monthly").enabled).toBe(false)
+    expect(query("premium", undefined).enabled).toBe(false)
+    expect(query("premium", "monthly").enabled).toBe(true)
+  }
+})
+
 it("retries transient failures at most twice and never a client error", () => {
   const transient = new ApiError(503, null, "unavailable")
   expect([0, 1, 2].map((attempt) => shouldRetry(attempt, transient))).toEqual([true, true, false])

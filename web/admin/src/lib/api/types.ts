@@ -214,6 +214,7 @@ export interface RepriceBatchResult {
 // RepriceBatchPreview is the wizard's affected-count dry run, called before
 // the price edit lands.
 export interface RepriceBatchPreview {
+  product_key: string
   price_key: string
   to_price_id: string
   matched: number

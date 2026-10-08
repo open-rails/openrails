@@ -10,30 +10,14 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// catalogMutation fences every service authoring operation in merchant-first
-// lock order. Nested writes share one local transaction and cannot commit early.
-// A declared catalog refuses them.
-func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (T, error) {
-	return lockedCatalogWrite(ctx, s, true, fn)
-}
-
-// payerTermsMutation is catalogMutation for a payer's negotiated rates, which
-// a declared catalog does not govern.
-func payerTermsMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (T, error) {
-	return lockedCatalogWrite(ctx, s, false, fn)
-}
-
-func lockedCatalogWrite[T any](ctx context.Context, s *Service, declarable bool, fn func(context.Context, *Service) (T, error)) (out T, err error) {
+// catalogMutation serializes catalog changes per merchant. Nested writes share
+// one local transaction and cannot commit early.
+func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Context, *Service) (T, error)) (out T, err error) {
 	if s == nil || s.rt == nil {
 		return out, fmt.Errorf("catalog service not initialized")
 	}
 	if err = catalogpolicy.Check(ctx, s.rt.Config); err != nil {
 		return out, err
-	}
-	if declarable {
-		if err = catalogpolicy.CheckDeclared(ctx, s.rt.Config); err != nil {
-			return out, err
-		}
 	}
 	if s.catalogWriteLocked {
 		return fn(ctx, s)
@@ -92,7 +76,7 @@ func (s *Service) checkCatalogWritePolicy(ctx context.Context) error {
 	if err := catalogpolicy.Check(ctx, s.rt.Config); err != nil {
 		return err
 	}
-	return catalogpolicy.CheckDeclared(ctx, s.rt.Config)
+	return nil
 }
 
 // CatalogRevision is a read-only merchant revision lookup. A paginated caller

@@ -68,7 +68,7 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 	}
 	var err error
 	if in.Payer != nil {
-		_, err = payerTermsMutation(ctx, s, write)
+		_, err = catalogMutation(ctx, s, write)
 	} else {
 		_, err = catalogMutation(ctx, s, write)
 	}
@@ -145,7 +145,7 @@ func (s *Service) GetPayerRateCard(ctx context.Context, payer identity.CustomerI
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter.
 func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
-	_, err := payerTermsMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
 		return struct{}{}, scoped.deletePayerRateCard(ctx, payer, meterKey)
 	})
 	return err

@@ -54,6 +54,7 @@ type CheckoutAttemptPaymentRequest struct {
 type CheckoutAttemptCreateRequest struct {
 	PriceID        string
 	PriceKey       string
+	ProductKey     string `json:"product_key,omitempty"`
 	Entitlement    string
 	OfferKind      billing.OfferKind
 	Mode           string

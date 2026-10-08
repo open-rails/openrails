@@ -504,9 +504,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		existingPendingSub.CurrentPeriodStartsAt = &periodStartsAt
 		existingPendingSub.CurrentPeriodEndsAt = &periodEndsAt
-		if len(existingPendingSub.EntitlementsSpecSnapshot) == 0 {
-			existingPendingSub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-		}
+		// The pending membership already accepted its benefits. An empty
+		// snapshot is not permission to adopt today's product declaration.
 		existingPendingSub.StartedAt = periodStartsAt
 		existingPendingSub.CanceledAt = nil
 		existingPendingSub.CancelType = nil
@@ -605,22 +604,18 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	if entitlementService != nil && params.InitialPaymentReversal == "" {
 		entNames := make([]string, 0, 4)
 		entitlementsSpec := subscription.EntitlementsSpecSnapshot
-		if len(entitlementsSpec) == 0 {
-			entitlementsSpec = product.EntitlementsSpec
-		}
 		if len(entitlementsSpec) > 0 {
 			for name := range entitlementsSpec {
 				entNames = append(entNames, name)
 			}
 		} else {
-			// #651: never fabricate a "premium" entitlement nobody declared. Grant
-			// what the product specifies (here: nothing) and warn so an empty spec
-			// surfaces as misconfiguration instead of silent access.
+			// An empty accepted snapshot grants no access, even if the product
+			// now declares benefits.
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"product_id":      price.ProductID,
 				"user_id":         subscription.CustomerID.String(),
-			}).Warn("subscription product declares no entitlements; granting none (was fabricating \"premium\")")
+			}).Debug("subscription accepted no entitlements; granting none")
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -1040,15 +1035,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				if err != nil {
 					return fmt.Errorf("failed to get price: %w", err)
 				}
-				if len(subscription.EntitlementsSpecSnapshot) == 0 {
-					product, err := productService.GetByID(ctx, price.ProductID)
-					if err != nil {
-						return fmt.Errorf("failed to get product for renewal snapshot: %w", err)
-					}
-					if len(subscription.EntitlementsSpecSnapshot) == 0 {
-						subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-					}
-				}
 			}
 
 		}
@@ -1273,7 +1259,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 }
 
 // ReactivateMembership reactivates a previously canceled subscription and restores
-// its paid entitlement windows for the current product tier.
+// its paid entitlement windows from the accepted subscription benefits.
 func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context, params *ReactivateMembershipParams) (*models.Subscription, error) {
 	if params == nil {
 		return nil, fmt.Errorf("reactivation params are required")
@@ -1315,21 +1301,6 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 			return err
 		}
 
-		price, err := priceService.GetByID(ctx, subscription.PriceID)
-		if err != nil {
-			return fmt.Errorf("failed to load subscription price: %w", err)
-		}
-
-		if len(subscription.EntitlementsSpecSnapshot) == 0 {
-			product, err := productService.GetByID(ctx, price.ProductID)
-			if err != nil {
-				return fmt.Errorf("failed to load subscription product: %w", err)
-			}
-			if len(subscription.EntitlementsSpecSnapshot) == 0 {
-				subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-			}
-		}
-
 		periodStartsAt := now
 		periodEndsAt := params.CurrentPeriodEndsAt.UTC()
 
@@ -1361,12 +1332,11 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 				entNames = append(entNames, name)
 			}
 		} else {
-			// #651: don't fabricate a "premium" entitlement on reactivation; restore
-			// only what the subscription snapshot declares (here: nothing) and warn.
+			// Restore only the accepted snapshot, including an empty one.
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID.String(),
-			}).Warn("reactivated subscription declares no entitlements; restoring none (was fabricating \"premium\")")
+			}).Debug("reactivated subscription accepted no entitlements; restoring none")
 		}
 
 		notBefore := periodStartsAt.UTC()

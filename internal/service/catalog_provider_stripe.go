@@ -160,25 +160,9 @@ func (a *stripeAdapter) stripeServiceFor(ctx context.Context, targetAccountID st
 	}, true
 }
 
-// AutoCreate implements the find-or-create flow for Stripe. Identity is
-// CONTENT-based (catalog product keys), so it is wipe-safe — re-syncing after a DB
-// rebuild finds the same Stripe objects rather than duplicating them. The
-// discovery chain (in order):
-//
-//  1. If a Stripe Product already exists for this OpenRails product (via
-//     metadata search on the content key openrails_product_key=<product_key>),
-//     reuse it.
-//  2. Otherwise create a new Stripe Product carrying openrails_product_key
-//     (+ informational openrails_product_id) and an idempotency key derived
-//     from the product key.
-//  3. With the Product in hand, find-or-create the Stripe Price under the
-//     deterministic content lookup_key
-//     ("openrails.<product_key>.<currency>.<unit_amount>.<cycle>"). If a price
-//     with the same lookup_key already exists, attach to it. Otherwise mint a
-//     new one carrying openrails_price_key (+ informational openrails_price_id)
-//     and the lookup_key.
-//
-// Returns the canonical ids to persist on rails["stripe"].
+// AutoCreate finds or creates a Stripe Product by product key and a Stripe
+// Price by immutable local price ID. Equal money terms under different keys
+// remain distinct prices. Existing explicit bindings continue through Attach.
 func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
 	stripeSvc, ok := a.stripeServiceFor(ctx, in.TargetAccountID)
 	if !ok {
@@ -188,7 +172,13 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 
 	productKey := strings.TrimSpace(in.ProductKey)
-	priceContentKey := openRailsPriceContentKey(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
+	priceKey := in.PriceID.String()
+	if in.PriceID == uuid.Nil {
+		return nil, fmt.Errorf("stripe auto-create requires a local price ID")
+	}
+	if strings.TrimSpace(in.LookupKey) == "" {
+		in.LookupKey = internalStripeLookupKey(in.PriceID)
+	}
 	benefitFingerprint := productBenefitFingerprint(in.Product)
 
 	// Step 1: discover an existing Stripe Product for this OpenRails product,
@@ -206,6 +196,9 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 	// Step 2: create the Stripe Product if discovery did not find one.
 	if stripeProductID == "" {
+		if in.RemoteWritesDisabled {
+			return nil, errRemoteWritesDisabled
+		}
 		name := ""
 		desc := ""
 		if in.Product != nil {
@@ -246,19 +239,26 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		}
 	}
 
-	// Step 3: find-or-create the Stripe Price under the content lookup_key.
+	// Step 3: find or create exactly this immutable local price.
 	stripePriceID := ""
-	if lookup := strings.TrimSpace(in.LookupKey); lookup != "" {
-		if existing, err := stripeSvc.ListPricesByLookupKey(ctx, lookup); err == nil {
-			for _, p := range existing {
-				if strings.TrimSpace(p.ID) != "" {
-					stripePriceID = p.ID
-					break
-				}
-			}
+	existing, err := stripeSvc.ListPricesByLookupKey(ctx, in.LookupKey)
+	if err != nil {
+		return nil, fmt.Errorf("lookup Stripe price %q: %w", in.LookupKey, err)
+	}
+	if len(existing) > 1 {
+		return nil, fmt.Errorf("Stripe lookup key %q identifies multiple prices", in.LookupKey)
+	}
+	if len(existing) == 1 {
+		remote := existing[0]
+		if err := verifyStripePriceIdentity(remote, stripeProductID, in); err != nil {
+			return nil, err
 		}
+		stripePriceID = remote.ID
 	}
 	if stripePriceID == "" {
+		if in.RemoteWritesDisabled {
+			return nil, errRemoteWritesDisabled
+		}
 		unitAmountCents, err := moneyutil.NativeToRailMinorExact(in.Currency, in.UnitAmount)
 		if err != nil {
 			return nil, err
@@ -269,13 +269,13 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 			Currency:         in.Currency,
 			BillingCycleDays: in.BillingCycleDays,
 			LookupKey:        in.LookupKey,
-			IdempotencyKey:   "openrails-price-" + priceContentKey,
+			IdempotencyKey:   "openrails-price-" + priceKey,
 			Metadata: map[string]string{
-				catalog.StripeMetadataOpenRailsPriceKey:           priceContentKey,
+				catalog.StripeMetadataOpenRailsPriceKey:           priceKey,
 				catalog.StripeMetadataOpenRailsProductKey:         productKey,
 				catalog.StripeMetadataOpenRailsRecoveryVersion:    openRailsRecoveryVersion,
 				catalog.StripeMetadataOpenRailsBenefitFingerprint: benefitFingerprint,
-				// Informational only — not used for matching.
+				// Retained local identity, also used during exact discovery.
 				catalog.StripeMetadataOpenRailsPriceID:   in.PriceID.String(),
 				catalog.StripeMetadataOpenRailsProductID: in.ProductID.String(),
 			},
@@ -294,6 +294,32 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		ids[providerLookupKey] = lookup
 	}
 	return ids, nil
+}
+
+// verifyStripePriceIdentity prevents a changed or reassigned lookup key from
+// attaching another local price's remote object, even when money terms match.
+func verifyStripePriceIdentity(remote catalog.StripePrice, productID string, in autoCreateContext) error {
+	amount, err := moneyutil.RailMinorToNative(remote.Currency, moneyutil.Cents(remote.UnitAmount))
+	if err != nil {
+		return err
+	}
+	if remote.ID == "" || remote.Product != productID || amount != in.UnitAmount || !strings.EqualFold(remote.Currency, in.Currency) {
+		return fmt.Errorf("Stripe lookup key %q does not match the local price product and money terms", in.LookupKey)
+	}
+	if identity := strings.TrimSpace(remote.Metadata[catalog.StripeMetadataOpenRailsPriceID]); identity != "" && identity != in.PriceID.String() {
+		return fmt.Errorf("Stripe lookup key %q belongs to another local price", in.LookupKey)
+	}
+	if in.BillingCycleDays == nil {
+		if remote.Recurring != nil {
+			return fmt.Errorf("Stripe lookup key %q is recurring, but the local price is one-time", in.LookupKey)
+		}
+	} else {
+		unit, count := catalog.StripeIntervalForDays(*in.BillingCycleDays)
+		if remote.Recurring == nil || remote.Recurring.Interval != unit || remote.Recurring.Count != count {
+			return fmt.Errorf("Stripe lookup key %q has different recurring terms", in.LookupKey)
+		}
+	}
+	return nil
 }
 
 // Verify performs a live retrieve of the Stripe Price (and its Product) and

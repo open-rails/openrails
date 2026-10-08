@@ -79,6 +79,8 @@ export const pspLinkStateSchema = z.object({
 export const priceSchema = z.object({
   id: z.string(),
   key: z.string(),
+  /** Revision within this product/key pair; absent on older servers. */
+  revision: z.number().int().nonnegative().optional(),
   product_id: z.string(),
   archived: z.boolean(),
   unit_amount: amount,
@@ -97,6 +99,7 @@ export type Price = z.infer<typeof priceSchema>
 export const subscriptionProductSchema = z.object({
   id: z.string(),
   key: z.string().nullish(),
+  revision: z.number().int().nonnegative().optional(),
   display_name: z.string().nullish(),
   description: z.string().nullish(),
   tier_group: z.string().nullish(),
@@ -226,6 +229,8 @@ export type PaymentMethod = z.infer<typeof paymentMethodSchema>
 export const productSchema = z.object({
   id: z.string(),
   key: z.string(),
+  /** Current mutation counter; absent on older servers. */
+  revision: z.number().int().nonnegative().optional(),
   display_name: z.string(),
   description: z.string(),
   /** Keyed by the entitlements the product grants. */

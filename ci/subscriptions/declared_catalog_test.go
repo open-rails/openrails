@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -71,120 +70,68 @@ func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) 
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 }
 
-func requireCatalogDeclared(t *testing.T, err error) {
-	t.Helper()
-	require.ErrorIs(t, err, billing.ErrCatalogDeclared)
-	var status *billing.StatusError
-	require.True(t, errors.As(err, &status), "%v", err)
-	require.Equal(t, http.StatusMethodNotAllowed, status.Status)
-}
-
-// A host's catalog.yaml is configuration (#1126): New applies it before it
-// returns, a reboot replays or converges it, and nothing else writes it.
+// A startup batch does not own the catalog: client edits remain available when
+// HTTP writes are disabled, and rebooting the same file never undoes those edits.
 func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "declared-" + uuid.NewString()[:8]
 	title, amount := "Gold", int64(9_990_000)
-	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
-	w.booted = func(c *openrails.Client) {
-		price, err := c.GetPriceByKey(t.Context(), key+"-monthly")
-		require.NoError(t, err, "applied before New returned")
-		require.EqualValues(t, amount, price.UnitAmount)
+	w.cfg = func(cfg *config.Config) {
+		cfg.Catalog = declaredFile(t, key, title, amount)
+		cfg.AllowCatalogUpdates = false
 	}
 	w.start()
-
-	// The first customer buys it at once.
-	price, err := w.client[embedded].GetPriceByKey(t.Context(), key+"-monthly")
+	original, err := w.client[embedded].GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.NoError(t, err)
 	buyer := w.newCustomer()
-	buyer.subscribe(embedded, "nmi", price.ID.String(), key, buyer.saveCard("nmi", visa))
+	buyer.subscribe(embedded, "nmi", original.ID.String(), key, buyer.saveCard("nmi", visa))
 	require.True(t, buyer.entitled(key))
-
-	// Nothing else writes the declared catalog, in process or over HTTP, and
-	// a refused price never reaches a provider.
 	product, err := w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
+	_, err = w.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Edited in code")})
+	require.NoError(t, err)
+	status := w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, nil)
+	require.Equal(t, http.StatusMethodNotAllowed, status, "HTTP writes are absent while reads remain available")
 	revision := w.catalogRevision()
-	stripeWrites := len(w.stripe.mutations("/v1/"))
-	console, hours := "Console title", monthHours
-	for _, tp := range []topology{embedded, remote} {
-		c := w.client[tp]
-		_, err = c.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value(console)})
-		requireCatalogDeclared(t, err)
-		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-yearly", UnitAmount: 99_000_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
-		requireCatalogDeclared(t, err)
-		_, err = c.ApplyCatalog(t.Context(), declaredFile(t, key, "Edited at runtime", amount))
-		requireCatalogDeclared(t, err)
-		_, err = c.SetMeter(t.Context(), key+"-other", billing.SetMeterParams{EventType: key + ".other", Aggregation: catalog.AggregationCount})
-		requireCatalogDeclared(t, err)
-		state, err := c.GetCatalogRevision(t.Context())
-		require.NoError(t, err)
-		require.False(t, state.WritesAllowed, tp)
-	}
-	require.Equal(t, revision, w.catalogRevision(), "refusals change nothing")
-	require.Len(t, w.stripe.mutations("/v1/"), stripeWrites)
-
-	// A payer's negotiated rate is not the catalog's: it stays writable, and
-	// the next boot's application keeps it.
-	overrides := "/v1/merchant/customers/" + buyer.id + "/rate-overrides"
-	status, reply := w.staffJSON(http.MethodPut, overrides+"/"+key+"-events",
-		map[string]any{"price": map[string]any{"model": "per_unit", "currency": "usd", "per_unit": map[string]any{"unit_amount": "500"}}})
-	require.Equal(t, http.StatusOK, status, "%v", reply)
 	w.restart()
-	status, kept := w.staff(http.MethodGet, overrides)
-	require.Equal(t, http.StatusOK, status, kept)
-	require.Contains(t, kept, `"meter_key":"`+key+`-events"`)
-
-	// Unchanged, the next boot replays.
-	revision = w.catalogRevision()
-	w.restart()
-	require.Equal(t, revision, w.catalogRevision())
-
-	// Edited, it converges; the member keeps the price they bought.
-	title, amount = "Platinum", 12_000_000
-	w.restart()
-	require.Equal(t, revision+1, w.catalogRevision())
+	require.Equal(t, revision, w.catalogRevision(), "reboot replays the batch despite a later programmatic edit")
 	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
 	require.NoError(t, err)
-	require.Equal(t, "Platinum", product.DisplayName)
-	repriced, err := w.client[embedded].GetPriceByKey(t.Context(), key+"-monthly")
+	require.Equal(t, "Edited in code", product.DisplayName)
+
+	// Different content is a new partial batch; existing subscribers stay pinned.
+	title, amount = "Platinum", 12_000_000
+	w.restart()
+	current, err := w.client[embedded].GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.NoError(t, err)
-	require.NotEqual(t, price.ID, repriced.ID)
+	require.NotEqual(t, original.ID, current.ID)
 	require.True(t, buyer.entitled(key))
+	replay, err := w.client[embedded].ApplyCatalog(t.Context(), declaredFile(t, key, "Gold", 9_990_000))
+	require.NoError(t, err)
+	require.True(t, replay.Replayed, "the original file cannot undo the newer batch")
+	currentAgain, err := w.client[embedded].GetPriceByKey(t.Context(), key, key+"-monthly")
+	require.NoError(t, err)
+	require.Equal(t, current.ID, currentAgain.ID)
 
-	// A catalog the engine refuses fails New with the reason and changes nothing.
+	// Concurrent startup instances of the same new batch commit only once.
 	w.stop()
-	refused := declaredFile(t, key, "Platinum", 12_000_000)
-	refused.Products[0].Prices[0].PSPs = catalog.Value([]string{"nowhere"})
-	_, err = w.bootDeclared(t.Context(), refused)
-	require.ErrorContains(t, err, "Config.Catalog")
-	require.ErrorContains(t, err, `"nowhere"`)
-	require.Equal(t, revision+1, w.catalogRevision())
-
-	// Replicas booting together converge on one application.
+	revision = w.catalogRevision()
 	start := make(chan struct{})
 	clients, errs := make([]*openrails.Client, 2), make([]error, 2)
 	var wg sync.WaitGroup
 	for i := range clients {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
-			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "Concurrent", 12_000_000))
-		}()
+			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "Concurrent", amount))
+		})
 	}
 	close(start)
 	wg.Wait()
 	for i, c := range clients {
 		require.NoError(t, errs[i])
-		t.Cleanup(func() { _ = c.Close(context.Background()) })
+		require.NoError(t, c.Close(t.Context()))
 	}
-	require.Equal(t, revision+2, w.catalogRevision(), "one application, one replay")
-	for _, c := range clients {
-		product, err = c.GetProductByKey(t.Context(), key)
-		require.NoError(t, err)
-		require.Equal(t, "Concurrent", product.DisplayName)
-	}
+	require.Equal(t, revision+1, w.catalogRevision())
 }
 
 // A provider reference New cannot confirm does not hold New: the application
@@ -219,13 +166,13 @@ products:
 	_, err = riverkit.New(t.Context(), w.pool, &river.Config{Schema: w.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 1}}}, client.RiverJobs())
 	require.NoError(t, err)
 	require.ErrorContains(t, client.Ready(t.Context()), "declared catalog not applied yet")
-	_, err = client.GetPriceByKey(t.Context(), key+"-monthly")
+	_, err = client.GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	require.Equal(t, revision, w.catalogRevision())
 
 	w.stripe.priceReadsUnavailable(false)
 	require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond)
-	price, err := client.GetPriceByKey(t.Context(), key+"-monthly")
+	price, err := client.GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.NoError(t, err)
 	require.Equal(t, "price_legacy_"+key, price.PSPs["stripe"].IDs["price_id"])
 	require.Equal(t, revision+1, w.catalogRevision())

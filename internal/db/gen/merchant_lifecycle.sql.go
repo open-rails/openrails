@@ -12,9 +12,14 @@ import (
 )
 
 const countMerchantRowsCatalogDriftEvents = `-- name: CountMerchantRowsCatalogDriftEvents :one
+
 SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
+// Tenant lifecycle (#225): per-table purge/count queries for tenant
+// export + gated delete. One static query per tenant-owned table — the
+// generated replacement for the bun-era fmt.Sprintf(`openrails.%s`)
+// identifier interpolation (#334's 'unsafe SQL' kill target).
 func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsCatalogDriftEvents, merchantID)
 	var count int64
@@ -127,33 +132,6 @@ SELECT count(*) FROM billing.payments WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsPayments, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantRowsPrices = `-- name: CountMerchantRowsPrices :one
-SELECT count(*) FROM billing.prices WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsPrices(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsPrices, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countMerchantRowsProducts = `-- name: CountMerchantRowsProducts :one
-
-SELECT count(*) FROM billing.products WHERE merchant_id = $1
-`
-
-// Tenant lifecycle (#225): per-table purge/count queries for tenant
-// export + gated delete. One static query per tenant-owned table — the
-// generated replacement for the bun-era fmt.Sprintf(`openrails.%s`)
-// identifier interpolation (#334's 'unsafe SQL' kill target).
-func (q *Queries) CountMerchantRowsProducts(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsProducts, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -321,24 +299,6 @@ DELETE FROM billing.payments WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsPayments, merchantID)
-	return err
-}
-
-const purgeMerchantRowsPrices = `-- name: PurgeMerchantRowsPrices :exec
-DELETE FROM billing.prices WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsPrices(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsPrices, merchantID)
-	return err
-}
-
-const purgeMerchantRowsProducts = `-- name: PurgeMerchantRowsProducts :exec
-DELETE FROM billing.products WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsProducts(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsProducts, merchantID)
 	return err
 }
 

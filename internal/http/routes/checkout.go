@@ -40,7 +40,7 @@ var checkoutRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/checkout-attempts/{id}/confirm", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCheckoutCreate,
 		Request: billing.ConfirmCheckoutAttemptParams{}, Responses: []Reply{{200, billing.CheckoutAttempt{}}, {202, billing.CheckoutAttempt{}}}, Errors: codes("authentication_required", "checkout_attempt_expired", "insufficient_funds", "invalid_param", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceConfirmCheckoutAttempt)},
 	{Method: GET, Path: "/v1/merchant/checkout-config", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Query: params(text("price_id"), text("price_key")), Responses: []Reply{{200, merchants.PublicCheckoutConfig{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceGetCheckoutConfig)},
+		Query: params(text("price_id"), text("product_key"), text("price_key")), Responses: []Reply{{200, merchants.PublicCheckoutConfig{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceGetCheckoutConfig)},
 
 	// Captcha discovery: whether this caller must solve one, and the script
 	// that does. The assembly builds both from its captcha configuration.

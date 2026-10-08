@@ -136,6 +136,7 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	require.NoError(t, err)
 	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
+		ProductKey:     product.Key,
 		PriceKey:       price.Key,
 		Entitlement:    "content:sol",
 		OfferKind:      kind,
@@ -165,6 +166,7 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
+		ProductKey:     product.Key,
 		PriceKey:       price.Key,
 		Entitlement:    "content:post",
 		OfferKind:      billing.OfferPermanent,

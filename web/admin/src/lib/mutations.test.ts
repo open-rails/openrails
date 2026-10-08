@@ -29,14 +29,14 @@ const customerTree = ["customer", "customer.rates"]
 const catalogTree = ["catalog", "drift", "meter", "meters"]
 const subTree = ["subscription", "subscriptions"]
 const meterTree = ["meter", "meters"]
-const price = { product_id: "prod_1", key: "pro-monthly", unit_amount: "20000000", currency: "usd", auto_renew: true }
+const price = { product_id: "prod_1", key: "monthly", unit_amount: "20000000", currency: "usd", auto_renew: true }
 const ratePrice = { model: "per_unit" as const, currency: "USD", per_unit: { unit_amount: "1000000", divide_by: 1 } }
 const rateCard = { product_id: "prod_1", filter: {}, price: ratePrice }
 const meter = { event_type: "token.used", value_property: "tokens", aggregation: "sum" as const, unit: "tokens", group_by: {} }
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
 const offChannel = { price_id: "price_1", transaction_id: "external-1" }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
-const application = { schema_version: 1, application_id: "catalog-test", expected_revision: 0, products: [] }
+const application = { schema_version: 1, products: [] }
 const effectiveAt = "2026-09-05T00:00:00.000Z"
 
 const cases: Case[] = [
@@ -69,8 +69,8 @@ const cases: Case[] = [
     "POST /merchant/customers/cus_1/payments/off-channel", [...customerTree, "payment", "payments"], offChannel],
   ["asks the catalog copilot without invalidating the catalog", (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
     "POST /merchant/catalog/ask", []],
-  ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), "pro-monthly"),
-    ["GET /merchant/catalog/prices/by-key/pro-monthly", "GET /merchant/catalog/products/prod_1"], []],
+  ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), { productKey: "pro", priceKey: "monthly" }),
+    ["GET /merchant/catalog/products/by-key/pro/prices/by-key/monthly", "GET /merchant/catalog/products/prod_1"], []],
   ["applies a catalog application", (c, g) => g(M.applyCatalog(c), JSON.stringify(application)),
     "POST /merchant/catalog/applications", catalogTree, application],
   ["refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
@@ -83,8 +83,8 @@ const cases: Case[] = [
     "POST /merchant/catalog/prices", catalogTree, price],
   ["restores a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true }),
     "PATCH /merchant/catalog/prices/price_1", catalogTree, { archived: false }],
-  ["previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), "pro-monthly"),
-    "POST /merchant/reprice-batches/preview", [], { price_key: "pro-monthly" }],
+  ["previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), { productKey: "pro", priceKey: "monthly" }),
+    "POST /merchant/reprice-batches/preview", [], { product_key: "pro", price_key: "monthly" }],
   ["cancels a reprice batch", (c, g) => g(M.cancelRepriceBatch(c), "rpb_1"),
     "POST /merchant/reprice-batches/rpb_1/cancel", catalogTree],
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
@@ -113,7 +113,7 @@ let requests: Recorded[]
 let routes: Record<string, Reply>
 beforeEach(async () => {
   routes = {
-    "/merchant/catalog/prices/by-key/pro-monthly": { id: "price_1", product_id: "prod_1" },
+    "/merchant/catalog/products/by-key/pro/prices/by-key/monthly": { id: "price_1", product_id: "prod_1" },
     "POST /merchant/notifications/note_2/read": () => new Response(null, { status: 503 }),
   }
   requests = await server(routes)
@@ -251,7 +251,7 @@ it("tells a new off-channel payment from one already recorded", async () => {
 })
 
 describe("price change", () => {
-  const change = { price, migration: { priceKey: "pro-monthly", effectiveAt } }
+  const change = { price, migration: { productKey: "pro", priceKey: "monthly", effectiveAt } }
   const refreshed = catalogTree.map((name) => `merchant-a:${name}`)
 
   it("creates the replacement price before scheduling its migration", async () => {
@@ -262,7 +262,7 @@ describe("price change", () => {
       "POST /merchant/catalog/prices",
       "POST /merchant/reprice-batches",
     ])
-    expect(requests[1].body).toEqual({ price_key: "pro-monthly", effective_at: effectiveAt })
+    expect(requests[1].body).toEqual({ product_key: "pro", price_key: "monthly", effective_at: effectiveAt })
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)
   })
 

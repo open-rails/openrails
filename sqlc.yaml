@@ -4,6 +4,8 @@ sql:
     queries: "internal/db/queries"
     schema:
       - "internal/migrate/postgres/0001_schema.up.sql"
+      - "internal/migrate/postgres/0002_catalog_batch_hash.up.sql"
+      - "internal/migrate/postgres/0003_product_price_keys.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

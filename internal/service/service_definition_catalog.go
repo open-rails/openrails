@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -285,7 +286,7 @@ const priceNaturalKeyNull = "\x00null"
 // fields → priceNaturalKeyNull). Equal terms therefore always hash equal, so a
 // derived id can never violate the constraint; a reprice changes a frozen field
 // and correctly hashes to a new id while the archived old row keeps its own.
-func priceDeterministicID(productID uuid.UUID, amount int64, currency string, accessDurationHours *int, autoRenew bool, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
+func priceDeterministicID(productID uuid.UUID, key string, amount int64, currency string, accessDurationHours *int, autoRenew bool, trialUnitAmount *int64, trialDurationHours *int) uuid.UUID {
 	accessDur := priceNaturalKeyNull
 	if accessDurationHours != nil {
 		accessDur = strconv.Itoa(*accessDurationHours)
@@ -300,7 +301,7 @@ func priceDeterministicID(productID uuid.UUID, amount int64, currency string, ac
 	}
 	return uuidutil.DeterministicID(
 		uuidutil.DeterministicNamespace,
-		productID.String(),
+		productID.String(), key,
 		strconv.FormatInt(amount, 10),
 		strings.ToLower(currency),
 		accessDur,
@@ -359,7 +360,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	}
 	defer release()
 
-	products, _, err := s.requireCatalogServices()
+	products, prices, err := s.requireCatalogServices()
 	if err != nil {
 		return nil, err
 	}
@@ -389,12 +390,19 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	// exactly the prices_product_amount_window_key columns. A reprice hashes
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
-	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	key, _ := resolvePriceKey(product, req)
+	priceID := priceDeterministicID(req.ProductID.UUID(), key, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	existing, err := prices.FindByTerms(ctx, req, key)
+	if err == nil {
+		priceID = existing.ID
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
 
 	var rails map[string]map[string]string
 	var providerStates map[string]billing.PSPLinkState
 	var pending []billing.PendingAction
-	if prepared, ok := s.catalogPreparedLinks[req.Key]; s.localCatalogOnly && ok {
+	if prepared, ok := s.catalogPreparedLinks[[2]string{product.Key, req.Key}]; s.localCatalogOnly && ok {
 		rails = cloneRails(prepared)
 	} else {
 		rails, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
@@ -419,7 +427,7 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		if err != nil {
 			return nil, err
 		}
-		if prepared, ok := scoped.catalogPreparedLinks[req.Key]; scoped.localCatalogOnly && ok {
+		if prepared, ok := scoped.catalogPreparedLinks[[2]string{product.Key, req.Key}]; scoped.localCatalogOnly && ok {
 			prices, err := scoped.requirePriceService()
 			if err != nil {
 				return nil, err
@@ -469,7 +477,6 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 // they are. PSPLinks merges into the price's links; an empty link unlinks
 // its PSP. SkipRailSync keeps the change local.
 type UpdatePriceRequest struct {
-	Key          *string
 	Archived     *bool
 	PSPLinks     map[string]map[string]string
 	SkipRailSync bool
@@ -478,11 +485,8 @@ type UpdatePriceRequest struct {
 // pricePatch reads a merge patch: a PSP link set to null is unlinked.
 func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 	var req UpdatePriceRequest
-	if p.Key.Null || p.Archived.Null {
-		return req, apperr.Invalidf("key and archived cannot be null")
-	}
-	if p.Key.Set {
-		req.Key = &p.Key.Value
+	if p.Archived.Null {
+		return req, apperr.Invalidf("archived cannot be null")
 	}
 	if p.Archived.Set {
 		req.Archived = &p.Archived.Value
@@ -646,11 +650,6 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 				return nil, priceLookup(err)
 			}
 		}
-		if req.Key != nil {
-			if _, err := scoped.setPriceKey(ctx, id, *req.Key); err != nil {
-				return nil, err
-			}
-		}
 		if req.Archived != nil {
 			// This method propagates once, after its complete local commit and
 			// only when SkipRailSync permits it; nested lifecycle work is local.
@@ -738,4 +737,12 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 	}
 
 	return nil
+}
+
+// samePriceTerms compares stored terms instead of assuming how an imported ID
+// was minted. Financial identity includes the product-local key.
+func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
+	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
+		p.AutoRenew == req.AutoRenew && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
+		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours)
 }

@@ -316,9 +316,9 @@ func TestStripeArchiveVerifyThenExecute(t *testing.T) {
 
 // The archive applies only while the object is still an extra (catalog.ExtrasIndex).
 func TestStripeArchiveSupersededOnceObjectJoinsCatalog(t *testing.T) {
-	psp, productID, cycle := uuid.New(), uuid.New(), 720
+	psp, productID, priceID, cycle := uuid.New(), uuid.New(), uuid.New(), 720
 	price := func(links map[string]map[string]string) *models.Price {
-		return &models.Price{ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true, PSPLinks: links}
+		return &models.Price{ID: priceID, ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true, PSPLinks: links}
 	}
 	product := &models.Product{ID: productID, Key: "retired"}
 	linked := map[string]map[string]string{"stripe": {models.RailKeyPSPID: psp.String(), models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"}}
@@ -328,7 +328,7 @@ func TestStripeArchiveSupersededOnceObjectJoinsCatalog(t *testing.T) {
 	}{
 		{"product content key", TypeStripeArchiveProduct, "prod_x", "retired", stubCatalog([]*models.Product{product}, nil)},
 		{"price linked by id", TypeStripeArchivePrice, "price_x", "retired.usd.900.30", stubCatalog(nil, []*models.Price{price(linked)})},
-		{"price content key", TypeStripeArchivePrice, "price_x", "retired.usd.900.30", stubCatalog([]*models.Product{product}, []*models.Price{price(nil)})},
+		{"local price identity", TypeStripeArchivePrice, "price_x", priceID.String(), stubCatalog([]*models.Product{product}, []*models.Price{price(nil)})},
 	} {
 		intent := archiveIntent(t, tc.typ, psp, tc.object, tc.marker)
 		rel, err := archiveHandler(tc.typ, nil, stubCatalog(nil, nil)).CheckRelevance(context.Background(), intent)

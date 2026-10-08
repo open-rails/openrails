@@ -29,7 +29,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		now := time.Now().UTC()
 
 		// #774: resolve the price key (explicit or auto-default) and repoint it.
-		// A key names AT MOST one non-archived row per merchant
+		// A key names AT MOST one non-archived row per product
 		// (prices_key_key) — so whatever OTHER row currently holds
 		// this key must be archived FIRST (never after), or the create/reactivate
 		// below would transiently double-hold the key and violate that index.
@@ -49,7 +49,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		}
 		var displacedID uuid.UUID
 		if !req.Archived {
-			displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), key)
+			displaced, dErr := prices.GetCurrentByKey(ctx, tid.UUID(), product.ID, key)
 			if dErr != nil && !errors.Is(dErr, pgx.ErrNoRows) {
 				return fmt.Errorf("resolve current holder of price key %q: %w", key, dErr)
 			}
@@ -83,13 +83,8 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 					return fmt.Errorf("reactivate price %s: %w", priceID, err)
 				}
 			}
-			if existing.Key != key {
-				if err := prices.SetKey(ctx, priceID, key); err != nil {
-					return fmt.Errorf("relabel price %s to key %q: %w", priceID, key, err)
-				}
-			}
+
 			existing.Archived = req.Archived
-			existing.Key = key
 			price = existing
 		} else {
 			price = &models.Price{

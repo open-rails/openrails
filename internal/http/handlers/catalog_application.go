@@ -58,6 +58,6 @@ func GetCatalogRevision(r *httprequest.Request) {
 		return
 	}
 	ctx, cfg := r.Request.Context(), r.State.Config
-	allowed := catalogpolicy.Check(ctx, cfg) == nil && catalogpolicy.CheckDeclared(ctx, cfg) == nil
+	allowed := catalogpolicy.Check(ctx, cfg) == nil
 	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
 }

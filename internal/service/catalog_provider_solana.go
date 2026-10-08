@@ -74,20 +74,11 @@ func (a *solanaAdapter) planService() (*recurring.PlanService, bool) {
 	return a.svc.rt.SolanaPlanService, true
 }
 
-// solanaPlanID derives the deterministic on-chain plan id from the price CONTENT
-// key (product key + immutable money terms) plus the token mint, hashed to a
-// uint64 (first 8 bytes, big-endian). Content-addressing — NOT the per-DB price
-// UUID — makes re-apply idempotent AND stable across a FRESH OpenRails DB: a
-// rebuilt catalog derives the same plan PDA, so find-or-attach re-attaches to the
-// existing on-chain plan rather than publishing a duplicate. Cosmetic edits
-// (display_name/description/providers) do not change it.
-func solanaPlanID(productKey, currency string, unitAmount int64, accessDurationHours *int, mint string) uint64 {
-	hourPart := "one-time"
-	if accessDurationHours != nil {
-		hourPart = "h" + strconv.Itoa(*accessDurationHours)
-	}
-	key := openRailsPriceContentKey(productKey, currency, unitAmount, nil) + "." + hourPart + ":" + strings.TrimSpace(mint)
-	sum := sha256.Sum256([]byte(key))
+// solanaPlanID addresses an immutable local price and the chosen token mint.
+// Existing bindings retain their stored plan PDA even when their ID predates
+// this scheme; only new publications use the current local identity.
+func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
+	sum := sha256.Sum256([]byte(priceID.String() + ":" + strings.TrimSpace(mint)))
 	return binary.BigEndian.Uint64(sum[:8])
 }
 
@@ -159,7 +150,10 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	if err != nil {
 		return nil, err
 	}
-	planID := solanaPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.AccessDurationHours, mint)
+	if in.PriceID == uuid.Nil {
+		return nil, fmt.Errorf("solana auto-create requires a local price ID")
+	}
+	planID := solanaPlanID(in.PriceID, mint)
 	periodHours := uint64(*in.AccessDurationHours)
 
 	if in.RemoteWritesDisabled {

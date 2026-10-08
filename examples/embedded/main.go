@@ -1,6 +1,6 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
-// members-only video site where users sign in with AuthKit, buy a monthly
-// "premium" plan and only premium members can watch. newBilling and run are
+// video site where users sign in with AuthKit and buy a monthly premium plan
+// or an individual video. newBilling and run are
 // the README's code; newAuth is a development AuthKit.
 //
 // Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
@@ -59,8 +59,8 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		return nil, err
 	}
 
-	// What you sell. OpenRails applies it in New: an unchanged file is a no-op, an edited one
-	// is applied, and the catalog is read-only to everything else until you edit the file.
+	// What you sell. Each distinct catalog batch is applied once, even across restarts.
+	// Later programmatic edits remain available and are not undone by a replay.
 	raw, err := os.ReadFile("catalog.yaml")
 	if err != nil {
 		return nil, err
@@ -78,8 +78,9 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
-		Catalog: declared,
+		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
 		HTTP: &openrails.HTTPConfig{
+			Merchant: true,                        // authenticated merchant routes; catalog HTTP writes stay disabled
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
 				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
@@ -95,10 +96,18 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 
 	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
 	// who is calling, and each user is their own paying customer.
-	return openrails.New(ctx, cfg, openrails.Deps{
+	client, err := openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,   // required: the same pool your app uses
 		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
 	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.ApplyCatalog(ctx, declared); err != nil {
+		_ = client.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return client, nil
 }
 
 func main() {
@@ -155,7 +164,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Our own route: only premium members can watch.
+	// Premium members can watch any video; a one-off buyer can watch the video they bought.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
@@ -169,8 +178,15 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "premium_required"})
-			return
+			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			if err != nil {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			if !owned {
+				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
+				return
+			}
 		}
 		c.File("videos/" + c.Param("id") + ".mp4")
 	})

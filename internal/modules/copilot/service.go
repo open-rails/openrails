@@ -30,9 +30,9 @@ type ProductReader interface {
 // existing method set.
 type PriceReader interface {
 	GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error)
-	GetCurrentByKey(ctx context.Context, merchantID uuid.UUID, key string) (*models.Price, error)
-	ListChainByKey(ctx context.Context, merchantID uuid.UUID, key string) ([]*models.Price, error)
-	ListKeyMovements(ctx context.Context, merchantID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error)
+	GetCurrentByProductKey(ctx context.Context, merchantID uuid.UUID, productKey, key string) (*models.Price, error)
+	ListChainByKey(ctx context.Context, merchantID, productID uuid.UUID, key string) ([]*models.Price, error)
+	ListKeyMovements(ctx context.Context, merchantID, productID uuid.UUID, key string, page billing.PageRequest) (billing.ListPage[*models.PriceKeyMovement], error)
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Price, error)
 }
 
@@ -45,7 +45,7 @@ type SubscriptionCounter interface {
 // affected-count previews and pending-migration lookups. It never reaches the
 // mutating methods.
 type RepricePreviewer interface {
-	PreviewBatch(ctx context.Context, priceKey string) (*billing.RepriceBatchPreview, error)
+	PreviewBatch(ctx context.Context, productKey, priceKey string) (*billing.RepriceBatchPreview, error)
 	ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error)
 }
 

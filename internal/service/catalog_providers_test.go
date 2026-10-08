@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/stretchr/testify/require"
 )
@@ -74,9 +75,9 @@ func nmiPlanJSON(id, amount, days string) string {
 	return fmt.Sprintf(`{"object":"plan","id":%q,"plan_name":"Remote Name","plan_amount":%q,"day_frequency":%q}`, id, amount, days)
 }
 
-func TestNMIAdapterAutoCreateIsContentAddressed(t *testing.T) {
-	planID := nmiDeterministicPlanID("pro", "usd", 9_990_000, intPtr(30))
+func TestNMIAdapterAutoCreatePreservesPriceIdentity(t *testing.T) {
 	in := autoCreateContext{PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)}
+	planID := nmiDeterministicPlanID(in.PriceID)
 
 	srv, creates := fakeNMIPlans(t, nil)
 	ids, err := newMobiusAdapterWithServer(srv.URL).AutoCreate(nmiCatalogCtx(), in)
@@ -86,13 +87,19 @@ func TestNMIAdapterAutoCreateIsContentAddressed(t *testing.T) {
 	require.Equal(t, "9.99", (*creates)[0].PlanAmount.String())
 	require.Equal(t, 30, (*creates)[0].DayFrequency)
 
-	// A rebuilt DB (fresh price UUID) re-attaches to the same plan, never duplicates.
+	// Replaying the retained local price re-attaches to its existing plan.
 	srv, creates = fakeNMIPlans(t, map[string]string{planID: nmiPlanJSON(planID, "9.99", "")})
-	in.PriceID = uuid.New()
 	ids, err = newMobiusAdapterWithServer(srv.URL).AutoCreate(nmiCatalogCtx(), in)
 	require.NoError(t, err)
 	require.Equal(t, planID, ids[models.RailKeyPlanID])
 	require.Empty(t, *creates)
+
+	// Another key with equal financial terms owns a separate plan.
+	in.PriceID = uuid.New()
+	ids, err = newMobiusAdapterWithServer(srv.URL).AutoCreate(nmiCatalogCtx(), in)
+	require.NoError(t, err)
+	require.NotEqual(t, planID, ids[models.RailKeyPlanID])
+	require.Len(t, *creates, 1)
 
 	// Unarmed NMI defers to a manual link rather than failing the price.
 	_, err = (&nmiAdapter{svc: &Service{rt: &app.Runtime{}}}).AutoCreate(nmiCatalogCtx(), in)
@@ -233,6 +240,8 @@ func TestStripeAdapterAutoCreateWireAmount(t *testing.T) {
 				fmt.Fprint(w, `{"data":[]}`)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/products":
 				fmt.Fprint(w, `{"id":"prod_wirepin"}`)
+			case r.Method == http.MethodGet && r.URL.Path == "/v1/prices":
+				fmt.Fprint(w, `{"data":[]}`)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/prices":
 				require.NoError(t, r.ParseForm())
 				priceForms = append(priceForms, r.PostForm)
@@ -356,4 +365,84 @@ func TestResolveProviders(t *testing.T) {
 			require.NoError(t, err, psp)
 		}
 	})
+}
+
+// The provider must distinguish two local keys with identical charges, and a
+// new trial version, while retrying each exact price without another creation.
+func TestStripeAdapterDistinctLocalPricesAndReplay(t *testing.T) {
+	productID := uuid.New()
+	ids := []uuid.UUID{
+		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, nil, nil),
+		priceDeterministicID(productID, "special", 10_000_000, "USD", intPtr(720), true, nil, nil),
+		priceDeterministicID(productID, "monthly", 10_000_000, "USD", intPtr(720), true, int64Ptr(0), intPtr(24)),
+	}
+	prices := map[string]catalog.StripePrice{}
+	created := map[string]string{}
+	failLookup := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/products/search":
+			fmt.Fprint(w, `{"data":[{"id":"prod_same"}]}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/prices":
+			if failLookup {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprint(w, `{"error":{"message":"read unavailable"}}`)
+				return
+			}
+			data := []catalog.StripePrice{}
+			if price, found := prices[r.URL.Query().Get("lookup_keys[]")]; found {
+				data = append(data, price)
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"data": data}))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/prices":
+			require.NoError(t, r.ParseForm())
+			lookup := r.Form.Get("lookup_key")
+			idempotency := r.Header.Get("Idempotency-Key")
+			priceID, replayed := created[idempotency]
+			if !replayed {
+				priceID = fmt.Sprintf("price_%d", len(created)+1)
+				created[idempotency] = priceID
+			}
+			prices[lookup] = catalog.StripePrice{
+				ID: priceID, Product: "prod_same", Currency: "usd", UnitAmount: 1000,
+				LookupKey: lookup, Recurring: &struct {
+					Interval string `json:"interval"`
+					Count    int    `json:"interval_count"`
+				}{Interval: "month", Count: 1},
+				Metadata: map[string]string{catalog.StripeMetadataOpenRailsPriceID: r.Form.Get("metadata[openrails_price_id]")},
+			}
+			require.Equal(t, "openrails-price-"+r.Form.Get("metadata[openrails_price_id]"), idempotency)
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"id": priceID}))
+		default:
+			t.Errorf("unexpected Stripe request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	adapter := newStripeAdapterWithServer(srv.URL)
+	input := func(id uuid.UUID) autoCreateContext {
+		return autoCreateContext{PriceID: id, ProductID: productID, ProductKey: "premium", Currency: "USD", UnitAmount: 10_000_000, BillingCycleDays: intPtr(30)}
+	}
+	remoteIDs := map[string]bool{}
+	for _, id := range ids {
+		first, err := adapter.AutoCreate(t.Context(), input(id))
+		require.NoError(t, err)
+		second, err := adapter.AutoCreate(t.Context(), input(id))
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+		remoteIDs[first[models.RailKeyStripePriceID]] = true
+	}
+	require.Len(t, remoteIDs, 3)
+	require.Len(t, created, 3)
+
+	// A provider-side lookup reassignment must not attach the sibling's object.
+	lookup := internalStripeLookupKey(ids[0])
+	wrong := prices[lookup]
+	wrong.Metadata = map[string]string{catalog.StripeMetadataOpenRailsPriceID: ids[1].String()}
+	prices[lookup] = wrong
+	_, err := adapter.AutoCreate(t.Context(), input(ids[0]))
+	require.ErrorContains(t, err, "another local price")
+	failLookup = true
+	_, err = adapter.AutoCreate(t.Context(), input(uuid.New()))
+	require.ErrorContains(t, err, "read unavailable")
+	require.Len(t, created, 3, "a failed discovery read must not create another object")
 }

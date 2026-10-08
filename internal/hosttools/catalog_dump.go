@@ -22,11 +22,10 @@ import (
 )
 
 type CatalogDumpOptions struct {
-	Config        *config.Config
-	PGXPool       *pgxpool.Pool
-	Merchant      string
-	ApplicationID string
-	Out           io.Writer
+	Config   *config.Config
+	PGXPool  *pgxpool.Pool
+	Merchant string
+	Out      io.Writer
 }
 
 func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
@@ -59,17 +58,12 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 		if err != nil {
 			return err
 		}
-		revision, err := snapshot.Gen(ctx).GetCatalogRevisionForShare(ctx, mid.UUID())
+		_, err = snapshot.Gen(ctx).GetCatalogRevisionForShare(ctx, mid.UUID())
 		if err != nil {
 			return err
 		}
 		manifest, err = dumpCatalogManifest(ctx, snapshot)
 		if err == nil {
-			manifest.ExpectedRevision = &revision
-			manifest.ApplicationID = opts.ApplicationID
-			if manifest.ApplicationID == "" {
-				manifest.ApplicationID = uuid.NewString()
-			}
 			err = manifest.Validate()
 		}
 		return err

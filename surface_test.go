@@ -75,10 +75,10 @@ var embeddedMethods = map[string]string{
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
 	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
-	"CreateCheckoutAttempt": {billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro", IdempotencyKey: "k"}},
-	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, PriceKey: "pro"}},
+	"CreateCheckoutAttempt": {billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly", IdempotencyKey: "k"}},
+	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
-	"GetCheckoutConfig":     {billing.GetCheckoutConfigParams{PriceKey: "pro"}},
+	"GetCheckoutConfig":     {billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"ListOffers":            {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},

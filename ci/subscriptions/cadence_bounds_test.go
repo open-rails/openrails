@@ -154,22 +154,22 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 	})
 }
 
-// A membership whose price has lost its cadence is never dunned on a guessed
-// month: the due pass refuses to rebill it, raises an operator finding and
-// schedules, charges and ends nothing.
+// A legacy membership associated with a price that has no cadence is never
+// dunned on a guessed month: the due pass refuses to rebill it, raises an
+// operator finding and schedules, charges and ends nothing.
 func TestUnknownCadenceFailsClosed(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
 	l := importLegacy(t, w, "nmi", embedded)
 	w.converge()
-	priceID := l.price.ID
 	schema := pgx.Identifier{w.schema}.Sanitize()
-	_, err := w.pool.Exec(t.Context(), `UPDATE `+schema+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE id = $1`, uuid.UUID(priceID))
+	noCycle, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: l.price.ProductID, Key: "legacy-no-cadence", UnitAmount: l.price.UnitAmount, Currency: l.price.Currency})
 	require.NoError(t, err)
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
-	// Mid-dunning when the cadence went missing: a retry is due now.
-	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now())
+	// Historical data can reference a one-off price even though a membership
+	// requires a cadence. Preserve that invalid association, not mutable prices.
+	_, err = w.pool.Exec(t.Context(), `UPDATE `+schema+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, price_id = $3, status = 'past_due', retry_attempts = 1, next_retry_at = $2 WHERE id = $1`, uuid.UUID(l.sub), w.clock.Now(), noCycle.ID.UUID())
 	require.NoError(t, err)
 	charges := l.engineCharges()
 	w.runRenewals()

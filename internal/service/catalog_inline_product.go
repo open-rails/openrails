@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -67,24 +66,23 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req billing.Create
 		if err := lockCatalogKey(ctx, tx, mid, "price-key", key); err != nil {
 			return err
 		}
-		current, err := prices.GetCurrentByKey(ctx, mid.UUID(), key)
+		current, err := prices.GetCurrentByKey(ctx, mid.UUID(), model.ID, key)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if err := defaultKeyCadenceConflict(defaulted, current, req, key); err != nil {
 			return err
 		}
-		expected := priceDeterministicID(product.ID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
-		if current != nil && (current.ProductID != product.ID.UUID() || current.ID != expected) {
+		terms := req
+		terms.Key = key
+		if current != nil && !samePriceTerms(current.View(), terms) {
 			return ErrCatalogConflict
 		}
-		// Same financial substance under a second key must not relabel an existing
-		// offer: callers retain immutable references for their own revision checks.
-		existing, err := prices.GetByID(ctx, expected)
+		existing, err := prices.FindByTerms(ctx, req, key)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if existing != nil && existing.ID != uuid.Nil && (existing.Key != key || existing.Archived != req.Archived) {
+		if existing != nil && existing.Archived != req.Archived {
 			return ErrCatalogConflict
 		}
 		out, err = scoped.CreatePrice(ctx, req)

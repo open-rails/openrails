@@ -8,6 +8,7 @@ import {
 } from "./client"
 import type {
   Allowance,
+  CatalogApplicationReceipt,
   CatalogDrift,
   CatalogDriftRefresh,
   CreateOffChannelPaymentParams,
@@ -495,19 +496,25 @@ export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
     signal,
   })
 
-export const getPriceByKey = (key: string) =>
-  api<Price>(`/merchant/catalog/prices/by-key/${encodeURIComponent(key)}`)
+export const getPriceByKey = (productKey: string, key: string) =>
+  api<Price>(
+    `/merchant/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}`
+  )
 
-// updatePrice moves a price to another key, archives or restores it, or
-// changes its PSP links (a PSP set to null is unlinked).
+// updatePrice archives or restores a price, or changes its PSP links
+// (a PSP set to null is unlinked).
 export const updatePrice = (id: string, body: UpdatePriceParams) =>
   api<Price>(`/merchant/catalog/prices/${id}`, { method: "PATCH", body })
 
 // getPriceKeyHistory returns a price key's history, most recent first: when
 // the key moved to which price.
-export const getPriceKeyHistory = (key: string, signal?: AbortSignal) =>
+export const getPriceKeyHistory = (
+  productKey: string,
+  key: string,
+  signal?: AbortSignal
+) =>
   api<ListPage<PriceKeyMovement>>(
-    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`,
+    `/merchant/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}/history`,
     { query: { limit: PAGE_MAX }, signal }
   )
 
@@ -515,28 +522,33 @@ export const getPriceKeyHistory = (key: string, signal?: AbortSignal) =>
 
 // previewRepriceBatch is the wizard's Step 2 affected-count dry run, called
 // BEFORE the price edit lands; it never writes.
-export const previewRepriceBatch = (priceKey: string) =>
+export const previewRepriceBatch = (productKey: string, priceKey: string) =>
   api<RepriceBatchPreview>("/merchant/reprice-batches/preview", {
     method: "POST",
-    body: { price_key: priceKey },
+    body: { product_key: productKey, price_key: priceKey },
   })
 
 // createRepriceBatch schedules every active subscription on a prior version
 // of priceKey to move to its current price at effectiveAt.
-export const createRepriceBatch = (priceKey: string, effectiveAt: string) =>
+export const createRepriceBatch = (
+  productKey: string,
+  priceKey: string,
+  effectiveAt: string
+) =>
   api<RepriceBatchResult>("/merchant/reprice-batches", {
     method: "POST",
-    body: { price_key: priceKey, effective_at: effectiveAt },
+    body: { product_key: productKey, price_key: priceKey, effective_at: effectiveAt },
   })
 
 // listRepriceBatches lists a price key's batches, newest first.
 export const listRepriceBatches = (
+  productKey: string,
   priceKey: string,
   limit = 20,
   signal?: AbortSignal
 ) =>
   api<CursorEnvelope<RepriceBatch>>("/merchant/reprice-batches", {
-    query: { price_key: priceKey, limit },
+    query: { product_key: productKey, price_key: priceKey, limit },
     signal,
   })
 
@@ -567,14 +579,7 @@ export const cancelReprice = (id: string) =>
     method: "POST",
   })
 
-export interface CatalogApplicationReceipt {
-  application_id: string
-  base_revision: number
-  applied_revision: number
-  replayed: boolean
-  products_changed: number
-  prices_changed: number
-}
+export type { CatalogApplicationReceipt } from "./generated/wire"
 
 export const getCatalogRevision = () =>
   api<{ revision: number; writes_allowed: boolean }>(
@@ -582,7 +587,8 @@ export const getCatalogRevision = () =>
   )
 
 // JSON is valid YAML too. Keep the reviewed document byte-for-byte unchanged
-// instead of parsing/re-encoding money or application identity in the browser.
+// instead of parsing/re-encoding money in the browser. The server deduplicates
+// batches by their canonical content.
 export const applyCatalog = (document: string) =>
   api<CatalogApplicationReceipt>("/merchant/catalog/applications", {
     method: "POST",

@@ -351,7 +351,7 @@ func (s *Service) hostedLookup(ctx context.Context, request billing.CreateChecko
 
 // hostedOptionCurrent refuses an option whose PSP no longer sells the price.
 func (s *Service) hostedOptionCurrent(ctx context.Context, session checkoutsession.Session, bound checkoutsession.Option) error {
-	options, err := s.ListCheckoutOptions(ctx, billing.PriceID(session.PriceID), "")
+	options, err := s.ListCheckoutOptions(ctx, billing.PriceID(session.PriceID), "", "")
 	if err != nil {
 		return err
 	}
@@ -374,11 +374,14 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 	if in.PriceID.IsZero() == (strings.TrimSpace(priceKey) == "") {
 		return checkoutsession.Offer{}, uuid.Nil, apperr.Invalidf("exactly one of price_id or price_key is required")
 	}
+	if (strings.TrimSpace(in.ProductKey) != "") != (strings.TrimSpace(priceKey) != "") {
+		return checkoutsession.Offer{}, uuid.Nil, apperr.Invalidf("product_key and price_key must be supplied together")
+	}
 	var price *models.Price
 	if !in.PriceID.IsZero() {
 		price, err = rt.PriceService.GetByID(ctx, in.PriceID.UUID())
 	} else {
-		price, err = rt.PriceService.GetCurrentByKey(ctx, mid.UUID(), priceKey)
+		price, err = rt.PriceService.GetCurrentByProductKey(ctx, mid.UUID(), in.ProductKey, priceKey)
 	}
 	if db.IsNotFound(err) || (err == nil && (price == nil || price.MerchantID != mid.UUID() || !price.IsPurchasable())) {
 		return checkoutsession.Offer{}, uuid.Nil, errHostedOfferUnavailable
@@ -406,7 +409,7 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("read merchant name: %w", err)
 	}
 	offer.MerchantDisplayName = strings.TrimSpace(directory.DisplayName)
-	options, err := s.ListCheckoutOptions(ctx, billing.PriceID(price.ID), "")
+	options, err := s.ListCheckoutOptions(ctx, billing.PriceID(price.ID), "", "")
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, err
 	}

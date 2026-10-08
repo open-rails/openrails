@@ -992,7 +992,7 @@ type BillingPaymentMethodUpdate struct {
 	CreatedAt       time.Time
 }
 
-// Pricing tiers for products with rail-specific identifiers
+// Immutable financial price versions; retire with archived, never delete. Retention: permanent, never pruned.
 type BillingPrice struct {
 	ID        uuid.UUID
 	ProductID uuid.UUID
@@ -1011,8 +1011,9 @@ type BillingPrice struct {
 	TrialUnitAmount *int64
 	// Optional trial first-phase length in HOURS; NULL = no trial.
 	TrialDurationHours *int32
-	// Durable per-merchant-unique handle for this price's substance-version chain. Immutable identity-wise (the row's id is still the substance UUID) but the LABEL can be relabeled in place (a key rename). At most one non-archived row per (merchant_id, key) — see prices_key_key. Archived rows keep their key as a back-reference to the chain.
-	Key string
+	// Product-local handle for an immutable price version chain. One live row per (merchant_id, product_id, key); archived versions retain their key and product.
+	Key      string
+	Revision int64
 }
 
 // Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
@@ -1039,7 +1040,7 @@ type BillingPricePspBinding struct {
 	Configuration            []byte
 }
 
-// Product definitions that can be purchased or subscribed to
+// Catalog products; retire with archived, never delete. Retention: permanent, never pruned.
 type BillingProduct struct {
 	ID               uuid.UUID
 	Key              string
@@ -1054,6 +1055,7 @@ type BillingProduct struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
+	Revision   int64
 }
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.

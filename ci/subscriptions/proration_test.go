@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -171,8 +170,9 @@ func TestUpgradeProrationRefusals(t *testing.T) {
 	// A price without a cycle (the schema forbids one on an auto-renewing
 	// price) cannot open a period: refused, never defaulted to 720h.
 	noCycle := w.tierPrice(group, 3, 5000, 720, false)
-	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.prices SET auto_renew = false, access_duration_hours = NULL WHERE key = $1`, noCycle.Key)
+	oneOff, err := w.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: noCycle.ProductID, Key: noCycle.Key, UnitAmount: noCycle.UnitAmount, Currency: noCycle.Currency})
 	require.NoError(t, err)
+	noCycle.Price = oneOff
 
 	for _, tc := range []struct {
 		target tier

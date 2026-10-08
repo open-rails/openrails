@@ -66,13 +66,13 @@ func (r *RepriceRepo) GetBatch(ctx context.Context, id uuid.UUID) (billing.Repri
 }
 
 // ListBatches is one page of the merchant's batches, newest first.
-func (r *RepriceRepo) ListBatches(ctx context.Context, priceKey *string, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]billing.RepriceBatch, error) {
+func (r *RepriceRepo) ListBatches(ctx context.Context, productKey string, priceKey *string, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]billing.RepriceBatch, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rows, err := r.db.Gen(ctx).ListRepriceBatchesPage(ctx, gen.ListRepriceBatchesPageParams{
-		MerchantID: tid.UUID(), PriceKey: priceKey, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		MerchantID: tid.UUID(), PriceKey: priceKey, ProductKey: productKey, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
 	if err != nil {
 		return nil, err

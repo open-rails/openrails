@@ -547,9 +547,6 @@ function PricesTab() {
       errorAction: "Load prices",
     })
   )
-  const productName = (id: string) =>
-    products?.data.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
-
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
@@ -582,7 +579,7 @@ function PricesTab() {
                 <PriceRow
                   key={price.id}
                   price={price}
-                  productName={productName(price.product_id)}
+                  product={products?.data.find((p) => p.id === price.product_id)}
                 />
               ))}
               {!data?.data?.length && (
@@ -610,11 +607,12 @@ function PricesTab() {
 
 function PriceRow({
   price,
-  productName,
+  product,
 }: {
   price: Price
-  productName: string
+  product?: Product
 }) {
+  const productName = product?.display_name ?? shortId(price.product_id, 13)
   const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const setPriceActive = useMutation(adminMutations.setPriceActive(queryClient))
@@ -676,7 +674,11 @@ function PriceRow({
         {writesAllowed && (
           <div className="flex justify-end gap-2">
             {writesAllowed && (
-              <PriceChangeWizard price={price} productName={productName} />
+              <PriceChangeWizard
+                price={price}
+                productName={productName}
+                productKey={product?.key}
+              />
             )}
             <Button
               variant="outline"

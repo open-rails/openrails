@@ -51,8 +51,8 @@ func CreateRepriceBatch(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if strings.TrimSpace(req.PriceKey) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "price_key required").WithParam("price_key"))
+	if strings.TrimSpace(req.PriceKey) == "" || strings.TrimSpace(req.ProductKey) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "product_key and price_key required").WithParam("price_key"))
 		return
 	}
 	if req.EffectiveAt.IsZero() {
@@ -77,14 +77,14 @@ func PreviewRepriceBatch(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if strings.TrimSpace(req.PriceKey) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "price_key required").WithParam("price_key"))
+	if strings.TrimSpace(req.PriceKey) == "" || strings.TrimSpace(req.ProductKey) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "product_key and price_key required").WithParam("price_key"))
 		return
 	}
 	if !repriceServiceReady(r) {
 		return
 	}
-	out, err := r.State.RepriceService.PreviewBatch(r.Request.Context(), req.PriceKey)
+	out, err := r.State.RepriceService.PreviewBatch(r.Request.Context(), req.ProductKey, req.PriceKey)
 	if err != nil {
 		writeRepriceError(r, err)
 		return
@@ -94,7 +94,8 @@ func PreviewRepriceBatch(r *httprequest.Request) {
 
 // RepriceBatchQuery filters GET /reprice-batches.
 type RepriceBatchQuery struct {
-	PriceKey string `form:"price_key"`
+	PriceKey   string `form:"price_key"`
+	ProductKey string `form:"product_key"`
 }
 
 // ListRepriceBatches is one page of the merchant's batches, newest first.
@@ -107,7 +108,7 @@ func ListRepriceBatches(r *httprequest.Request) {
 	if !ok || !repriceServiceReady(r) {
 		return
 	}
-	out, err := r.State.RepriceService.ListBatches(r.Request.Context(), billing.RepriceBatchListParams{PageRequest: page, PriceKey: query.PriceKey})
+	out, err := r.State.RepriceService.ListBatches(r.Request.Context(), billing.RepriceBatchListParams{PageRequest: page, PriceKey: query.PriceKey, ProductKey: query.ProductKey})
 	if err != nil {
 		writeRepriceError(r, err)
 		return

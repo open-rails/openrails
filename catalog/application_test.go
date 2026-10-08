@@ -7,12 +7,8 @@ import (
 	"testing"
 )
 
-func rev(n int64) *int64 { return &n }
-
 func TestApplicationYAMLAndJSONShareOneIdentity(t *testing.T) {
 	a, err := ParseApplicationYAML([]byte(`schema_version: 1
-application_id: deployment-a
-expected_revision: 0
 products:
   - key: membership
     display_name: Membership
@@ -67,40 +63,43 @@ products:
 }
 
 func TestApplicationRejectsAmbiguousInput(t *testing.T) {
-	base := "schema_version: 1\napplication_id: operation\nexpected_revision: 0\n"
+	base := "schema_version: 1\n"
 	for name, suffix := range map[string]string{
-		"duplicate field":      "prune: true\nprune: false\n",
-		"unknown field":        "merchant_admin: true\n",
-		"multiple documents":   "---\nproducts: []\n",
-		"alias":                "products: &items []\nmeters: *items\n",
-		"tag":                  "products: !!seq []\n",
-		"duplicate product":    "products: [{key: a}, {key: a}]\n",
-		"fractional money":     "products: [{key: a, prices: [{key: p, unit_amount: 1.1}]}]\n",
-		"overflow money":       "products: [{key: a, prices: [{key: p, unit_amount: '9223372036854775808'}]}]\n",
-		"unknown nested field": "products: [{key: a, display_nmae: nope}]\n",
+		"duplicate field":         "prune: true\nprune: false\n",
+		"unknown field":           "merchant_admin: true\n",
+		"removed application id":  "application_id: operation\n",
+		"removed revision":        "expected_revision: 0\n",
+		"removed catalog version": "catalog_version: 1\n",
+		"multiple documents":      "---\nproducts: []\n",
+		"alias":                   "products: &items []\nmeters: *items\n",
+		"tag":                     "products: !!seq []\n",
+		"duplicate product":       "products: [{key: a}, {key: a}]\n",
+		"fractional money":        "products: [{key: a, prices: [{key: p, unit_amount: 1.1}]}]\n",
+		"overflow money":          "products: [{key: a, prices: [{key: p, unit_amount: '9223372036854775808'}]}]\n",
+		"unknown nested field":    "products: [{key: a, display_nmae: nope}]\n",
 	} {
 		if _, err := ParseApplicationYAML([]byte(base + suffix)); err == nil {
 			t.Errorf("%s: YAML accepted", name)
 		}
 	}
-	head := `{"schema_version":1,"application_id":"op","expected_revision":0`
+	head := `{"schema_version":1`
 	for name, raw := range map[string]string{
-		"duplicate field":      head + `,"prune":true,"prune":false}`,
-		"case alias":           head + `,"prune":false,"Prune":true}`,
-		"nested case alias":    head + `,"products":[{"key":"p","Archived":true}]}`,
-		"duplicate map key":    head + `,"products":[{"key":"a","entitlements_spec":{"premium":1,"premium":2}}]}`,
-		"trailing document":    head + `} {}`,
-		"excessive depth":      strings.Repeat("[", 34) + strings.Repeat("]", 34),
-		"empty":                ``,
-		"null money element":   head + `,"products":[{"key":"a","prices":[{"key":"p","unit_amount":null}]}]}`,
-		"negative money":       head + `,"products":[{"key":"a","prices":[{"key":"p","unit_amount":"-1"}]}]}`,
-		"schema version 2":     `{"schema_version":2,"application_id":"op","expected_revision":0}`,
-		"missing revision":     `{"schema_version":1,"application_id":"op"}`,
-		"missing id":           `{"schema_version":1,"expected_revision":0}`,
-		"reserved id":          `{"schema_version":1,"application_id":"sha256:op","expected_revision":0}`,
-		"missing schema":       `{"products":[]}`,
-		"oversized document":   head + `,"catalog_id":"` + strings.Repeat("x", MaxApplicationBytes) + `"}`,
-		"duplicate price keys": head + `,"products":[{"key":"a","prices":[{"key":"p"}]},{"key":"b","prices":[{"key":"p"}]}]}`,
+		"duplicate field":         head + `,"prune":true,"prune":false}`,
+		"case alias":              head + `,"prune":false,"Prune":true}`,
+		"nested case alias":       head + `,"products":[{"key":"p","Archived":true}]}`,
+		"duplicate map key":       head + `,"products":[{"key":"a","entitlements_spec":{"premium":1,"premium":2}}]}`,
+		"trailing document":       head + `} {}`,
+		"excessive depth":         strings.Repeat("[", 34) + strings.Repeat("]", 34),
+		"empty":                   ``,
+		"null money element":      head + `,"products":[{"key":"a","prices":[{"key":"p","unit_amount":null}]}]}`,
+		"negative money":          head + `,"products":[{"key":"a","prices":[{"key":"p","unit_amount":"-1"}]}]}`,
+		"schema version 2":        `{"schema_version":2}`,
+		"removed application id":  `{"schema_version":1,"application_id":"op"}`,
+		"removed revision":        `{"schema_version":1,"expected_revision":0}`,
+		"removed catalog version": `{"schema_version":1,"catalog_version":1}`,
+		"missing schema":          `{"products":[]}`,
+		"oversized document":      head + `,"catalog_id":"` + strings.Repeat("x", MaxApplicationBytes) + `"}`,
+		"duplicate price keys":    head + `,"products":[{"key":"a","prices":[{"key":"p"},{"key":"p"}]}]}`,
 	} {
 		if _, err := ParseApplicationJSON([]byte(raw)); err == nil {
 			t.Errorf("%s: JSON accepted", name)
@@ -110,7 +109,7 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 
 func TestApplicationValidateBounds(t *testing.T) {
 	ok := func() Application {
-		return Application{SchemaVersion: 1, ApplicationID: "op", ExpectedRevision: rev(0)}
+		return Application{SchemaVersion: 1}
 	}
 	if err := ok().Validate(); err != nil {
 		t.Fatalf("minimal application: %v", err)
@@ -120,15 +119,9 @@ func TestApplicationValidateBounds(t *testing.T) {
 		manyMeters.Meters = append(manyMeters.Meters, ApplyMeter{Key: fmt.Sprintf("m%d", i)})
 	}
 	for name, mutate := range map[string]func(*Application){
-		"negative revision":     func(a *Application) { a.ExpectedRevision = rev(-1) },
-		"id without revision":   func(a *Application) { a.ExpectedRevision = nil },
-		"revision without id":   func(a *Application) { a.ApplicationID = "" },
-		"reserved id prefix":    func(a *Application) { a.ApplicationID = DeclarativeIDPrefix + "op" },
-		"padded application id": func(a *Application) { a.ApplicationID = " op" },
-		"long application id":   func(a *Application) { a.ApplicationID = strings.Repeat("a", 129) },
-		"empty product key":     func(a *Application) { a.Products = []ApplyProduct{{}} },
-		"padded meter key":      func(a *Application) { a.Meters = []ApplyMeter{{Key: "m "}} },
-		"null display name":     func(a *Application) { a.Products = []ApplyProduct{{Key: "p", DisplayName: Null[string]()}} },
+		"empty product key": func(a *Application) { a.Products = []ApplyProduct{{}} },
+		"padded meter key":  func(a *Application) { a.Meters = []ApplyMeter{{Key: "m "}} },
+		"null display name": func(a *Application) { a.Products = []ApplyProduct{{Key: "p", DisplayName: Null[string]()}} },
 		"null currency": func(a *Application) {
 			a.Products = []ApplyProduct{{Key: "p", Prices: []ApplyPrice{{Key: "x", Currency: Null[string]()}}}}
 		},
@@ -171,19 +164,16 @@ func TestApplicationValidateBounds(t *testing.T) {
 
 // Without identity fields the document itself is the application: its JSON
 // omits them, and its digest is its content alone.
-func TestDeclarativeApplication(t *testing.T) {
+func TestApplicationIdentityComesFromContent(t *testing.T) {
 	a, err := ParseApplicationYAML([]byte("schema_version: 1\nproducts: [{key: a, display_name: A}]\n"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !a.Declarative() {
-		t.Fatal("an application without identity fields is declarative")
 	}
 	raw, err := json.Marshal(a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "application_id") || strings.Contains(string(raw), "expected_revision") {
+	if strings.Contains(string(raw), "application_id") || strings.Contains(string(raw), "expected_revision") || strings.Contains(string(raw), "catalog_version") {
 		t.Fatalf("declarative wire form carries identity fields: %s", raw)
 	}
 	same, err := ParseApplicationJSON(raw)
@@ -193,15 +183,10 @@ func TestDeclarativeApplication(t *testing.T) {
 	if digest(t, *a) != digest(t, *same) {
 		t.Fatal("YAML and JSON forms of one document disagree")
 	}
-	guarded := *a
-	guarded.ApplicationID, guarded.ExpectedRevision = "op", rev(0)
-	if guarded.Declarative() || digest(t, guarded) == digest(t, *a) {
-		t.Fatal("identity fields select the guarded form")
-	}
 }
 
 func TestApplicationDigestIgnoresDeclarationOrder(t *testing.T) {
-	a := Application{SchemaVersion: 1, ApplicationID: "op", ExpectedRevision: rev(0),
+	a := Application{SchemaVersion: 1,
 		Products: []ApplyProduct{{Key: "b"}, {Key: "a", Prices: []ApplyPrice{{Key: "z", PSPs: Value([]string{"stripe", "mobius"})}, {Key: "x"}}}},
 		Meters:   []ApplyMeter{{Key: "m2"}, {Key: "m1"}},
 	}
@@ -221,9 +206,9 @@ func TestApplicationDigestIgnoresDeclarationOrder(t *testing.T) {
 		t.Fatal("prune is part of identity")
 	}
 	b.Prune = false
-	b.ExpectedRevision = rev(1)
+	b.Products[0].DisplayName = Value("Changed")
 	if digest(t, b) == ha {
-		t.Fatal("expected_revision is part of identity")
+		t.Fatal("changed product content must change identity")
 	}
 }
 

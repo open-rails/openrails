@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,12 +27,13 @@ func TestCatalogWritesDeniedUnlessEnabledOrOperator(t *testing.T) {
 	require.ErrorIs(t, Check(context.WithValue(ctx, lookalike("operator"), true), nil), ErrUpdatesDisabled, "only the private key grants authority")
 }
 
-func TestDeclaredCatalogRefusesEveryoneButTheBootApplication(t *testing.T) {
+func TestStartupCatalogDoesNotMakeTheCatalogReadOnly(t *testing.T) {
 	ctx := context.Background()
-	require.NoError(t, CheckDeclared(ctx, nil))
-	require.NoError(t, CheckDeclared(ctx, &config.Config{AllowCatalogUpdates: true}))
-	declared := &config.Config{AllowCatalogUpdates: true, Catalog: &catalog.Application{SchemaVersion: 1}}
-	require.ErrorIs(t, CheckDeclared(ctx, declared), ErrDeclared, "updates enabled do not reopen a declared catalog")
-	require.ErrorIs(t, CheckDeclared(ctx, declared), billing.ErrCatalogDeclared, "hosts match the public sentinel")
-	require.NoError(t, CheckDeclared(OperatorContext(ctx), declared))
+	cfg := &config.Config{Catalog: &catalog.Application{SchemaVersion: 1}}
+	host := requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{Subject: "host"})
+	require.NoError(t, Check(host, cfg), "programmatic host writes remain available")
+	require.NoError(t, Check(OperatorContext(ctx), cfg))
+	require.ErrorIs(t, Check(ctx, cfg), ErrUpdatesDisabled, "startup YAML does not enable HTTP writes")
+	cfg.AllowCatalogUpdates = true
+	require.NoError(t, Check(ctx, cfg), "the HTTP flag allows updates alongside startup YAML")
 }

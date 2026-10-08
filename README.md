@@ -35,7 +35,7 @@ OpenRails integrates with several payment-processors:
 
 You'll need a Go webserver, and Postgres (v18 or higher).
 
-Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan with a card, and only premium members can watch.
+Here we build a members-only video site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy a monthly "premium" plan or an individual video with a card, and watch what they have access to.
 
 First install:
 
@@ -47,18 +47,205 @@ Next, declare your catalog as a YAML config file:
 
 ```yaml
 # catalog.yaml
-schema_version: 1 # the file format, not your catalog's version
+schema_version: 1 # the file format
 products:
   - key: premium
     display_name: Premium
     entitlements_spec: {premium: null} # owning this product grants the "premium" entitlement
     prices:
-      - key: premium-monthly
+      - key: monthly
         currency: USD
         unit_amount: 9990000 # $9.99; every amount is micros (millionths of a dollar)
         access_duration_hours: 720 # 30 days of access per payment
         auto_renew: true # rebill every 30 days until canceled
+
+  - key: video-101
+    display_name: Video 101
+    entitlements_spec: {"video:101": null}
+    prices:
+      - key: purchase
+        currency: USD
+        unit_amount: 4990000 # $4.99, paid once
+        access_duration_hours: null # permanent access to this video
+        auto_renew: false
 ```
+
+Product keys are merchant-wide; price keys belong to their product. `premium.monthly`
+therefore identifies this subscription offer. OpenRails assigns immutable price
+revisions automatically (`premium.monthly.v0`, then `v1` when its terms change).
+Existing subscribers keep their accepted price and benefits until explicitly
+migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
+A video buyer's permanent access is checked with the `video:101` entitlement.
+
+**Prepaid API credits** are a spendable balance. After your trusted payment flow
+confirms a payment specifically for credit funding, grant its paid amount once:
+
+```go
+func grantPurchasedAPICredits(ctx context.Context, bill *openrails.Client, paid billing.PaymentSettledEvent) error {
+    _, err := bill.CreateCreditGrant(ctx, paid.CustomerID, billing.CreateCreditGrantParams{
+        Currency: paid.Currency,
+        Amount:   paid.Amount,             // e.g. 10000000 = $10 of USD credit
+        Source:   "purchase",
+        SourceID: paid.PaymentID.String(), // retries cannot grant twice
+    })
+    return err
+}
+```
+
+Only invoke this for a verified credit-funding payment, never for the Premium
+subscription or video payment. A host-event consumer acknowledges the event after
+the grant succeeds. `CreateCreditGrant` records credit; it does not collect payment.
+Native repeat-buyable credit packs and recurring credit benefits declared on a
+product are [covered by the credit-benefit design](https://github.com/open-rails/tracker/blob/master/openrails/1132.md),
+but are not implemented yet, so the YAML above includes only the supported products.
+
+### Evolving the catalog
+
+All the changes below are YAML applications. Apply each file through the same
+`catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
+or through `openrails apply-catalog --merchant myvideos --file FILE.yaml`.
+There are no caller-managed application IDs or version numbers. These examples
+build on the initial `catalog.yaml` above.
+
+| YAML change | What happens |
+|---|---|
+| Edit fields under an existing product key | Update that product in place; its revision counter advances. |
+| Change financial terms under an existing product/price key | Create a new immutable price revision and archive the previous live revision. |
+| Add a different price key under a product | Create a separate offer; the other prices stay unchanged. |
+| Set `archived: true` on a price | Stop new sales at that price; the product and its other prices stay available. |
+| Set `archived: true` on a product | Stop new sales of the product through all its prices. Their individual archive flags stay unchanged. |
+| Omit a product, price, or field | Preserve its stored state. Omission never means deletion. |
+
+**Change a product and raise its price.** Keep the keys to identify the same
+product and offer:
+
+```yaml
+# catalog-update.yaml
+schema_version: 1
+products:
+  - key: premium
+    display_name: Premium Plus # mutate the existing product
+    prices:
+      - key: monthly
+        unit_amount: 12990000 # $12.99; currency, duration and renewal terms are preserved
+```
+
+For the initial catalog, this creates `premium.monthly.v1` at $12.99 and archives
+`premium.monthly.v0` at $9.99. The old price record is retained unchanged. New
+subscribers buy v1; existing subscribers keep their exact accepted price and
+entitlements indefinitely. Product descriptions and `entitlements_spec` can also
+be edited in place; changed entitlements apply to new purchases, not retroactively
+to existing grants. Neither a YAML price change nor archival schedules a
+subscription migration.
+
+**Retire one price and add another.** This stops new monthly signups and adds an
+annual offer on the same product:
+
+```yaml
+# replace-monthly-with-yearly.yaml
+schema_version: 1
+products:
+  - key: premium
+    prices:
+      - key: monthly
+        archived: true
+      - key: yearly
+        currency: USD
+        unit_amount: 99990000 # $99.99
+        access_duration_hours: 8760 # 365 days
+        auto_renew: true
+```
+
+`premium.yearly` is a new price key, starting at v0. It does not replace the
+price ID held by monthly subscribers: their billing continues at their accepted
+monthly terms. Archival prevents new sales; it does not cancel subscriptions,
+revoke paid access, or delete history. A price cannot move to another product.
+
+**Retire an entire product.** There is no need to repeat its prices:
+
+```yaml
+# retire-video.yaml
+schema_version: 1
+products:
+  - key: video-101
+    archived: true
+```
+
+The video stops selling, while existing buyers retain their permanent access.
+`premium` is omitted and stays unchanged. To make the video available again,
+apply a new batch:
+
+```yaml
+# restore-video.yaml
+schema_version: 1
+products:
+  - key: video-101
+    archived: false
+```
+
+Restoring a product makes its unarchived prices available again. It does not
+restore any prices that were individually archived.
+
+**Restore an earlier price.** After both monthly revisions have been archived,
+give the complete financial terms to select the intended historical revision:
+
+```yaml
+# restore-original-monthly.yaml
+schema_version: 1
+products:
+  - key: premium
+    prices:
+      - key: monthly
+        currency: USD
+        unit_amount: 9990000 # the original $9.99 terms
+        access_duration_hours: 720
+        auto_renew: true
+        trial_unit_amount: null
+        trial_duration_hours: null
+        archived: false
+```
+
+This restores the original monthly price ID and v0; it does not rewrite history
+or create another copy of the same terms. If a different monthly revision is
+currently live, it is archived. The yearly offer remains available because it is
+omitted. Complete terms, including explicit null trial fields, avoid ambiguity
+when a key has several archived revisions; a known immutable price `id` can also
+select a particular revision.
+
+**Replay is not rollback.** Each successful application's canonical content hash
+is remembered per merchant. Reapplying any of these files changes nothing, even
+after later edits. Reapplying the initial `catalog.yaml` therefore does not undo
+the price increase or restore an archived video. The same rule applies to already
+used archive and restore files. Comments, formatting, and product/price ordering
+do not make a new application. A new document is a new atomic batch; different,
+previously unseen documents have no ordering guarantee, so apply intended changes
+in order.
+
+All these examples preserve omitted entries. `prune: true` is an explicit
+bulk-archive option for omitted products and prices; it never deletes them.
+Changing existing subscribers' accepted prices requires an explicit scheduled
+reprice operation. Changing their accepted benefits uses the
+[planned agreement-change workflow](https://github.com/open-rails/tracker/blob/master/openrails/1132.md).
+Those subscriber migrations are separate from the YAML offer changes above.
+
+### Turning catalog HTTP writes on and off
+
+Set these options **before constructing the client**:
+
+```go
+cfg.HTTP = &openrails.HTTPConfig{Merchant: true} // authenticated merchant API
+cfg.AllowCatalogUpdates = false                // omit its catalog-write routes
+// Set AllowCatalogUpdates to true and restart to enable catalog HTTP editing.
+```
+
+| `AllowCatalogUpdates` | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
+|---|---|---|
+| `false` | Unavailable | Available |
+| `true` | Available to authorized callers | Available |
+
+Catalog reads remain available on the merchant API. Turning HTTP writes off does
+not make the database read-only or prevent later client edits. The startup example
+below turns them off and applies the YAML through the client on every boot.
 
 Now let's build the billing client:
 
@@ -92,8 +279,8 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		return nil, err
 	}
 
-	// What you sell. OpenRails applies it in New: an unchanged file is a no-op, an edited one
-	// is applied, and the catalog is read-only to everything else until you edit the file.
+	// What you sell. Each distinct catalog batch is applied once, even across restarts.
+	// Later programmatic edits remain available and are not undone by a replay.
 	raw, err := os.ReadFile("catalog.yaml")
 	if err != nil {
 		return nil, err
@@ -111,8 +298,9 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 			Slug: "myvideos", // you, the seller
 			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
 		},
-		Catalog: declared,
+		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
 		HTTP: &openrails.HTTPConfig{
+			Merchant: true,                        // authenticated merchant routes; catalog HTTP writes stay disabled
 			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
 			CustomerRoutes: []openrails.CustomerRoutesConfig{
 				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
@@ -128,10 +316,18 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 
 	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
 	// who is calling, and each user is their own paying customer.
-	return openrails.New(ctx, cfg, openrails.Deps{
+	client, err := openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,   // required: the same pool your app uses
 		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
 	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.ApplyCatalog(ctx, declared); err != nil {
+		_ = client.Close(context.WithoutCancel(ctx))
+		return nil, err
+	}
+	return client, nil
 }
 ```
 
@@ -186,7 +382,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Our own route: only premium members can watch.
+	// Premium members can watch any video; a one-off buyer can watch the video they bought.
 	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		claims, _ := auth.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID)
@@ -200,8 +396,15 @@ func run(ctx context.Context) error {
 			return
 		}
 		if !premium {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "premium_required"})
-			return
+			owned, err := bill.HasEntitlement(c, customer, "video:"+c.Param("id"), time.Now())
+			if err != nil {
+				c.AbortWithStatus(http.StatusServiceUnavailable)
+				return
+			}
+			if !owned {
+				c.JSON(http.StatusPaymentRequired, gin.H{"error": "purchase_required"})
+				return
+			}
 		}
 		c.File("videos/" + c.Param("id") + ".mp4")
 	})
@@ -320,7 +523,7 @@ function UpgradeButton() {
   const [sessionId, setSessionId] = useState<string>()
   async function upgrade() {
     // POST /billing/v1/me/checkout-sessions: OpenRails prices it from the catalog, for the signed-in user.
-    const session = await billing.createCheckoutSession({ priceKey: "premium-monthly" })
+    const session = await billing.createCheckoutSession({ productKey: "premium", priceKey: "monthly" })
     setSessionId(session.id)
   }
   return (
@@ -362,20 +565,20 @@ Customer side (your users):
 
 ### Checkout catalog references
 
-Use a stable offer key such as `post-123-usd`. `ApplyCatalog` reprices it by
+Use a stable product/price key pair such as `post-123.purchase`. `ApplyCatalog` changes its terms by
 creating an immutable price version and retiring its predecessor. Checkout owns
 current availability, amount, permanent ownership eligibility and payment
 idempotency; a host wrapper supplies verified identity and its content policy.
 
 | Operation | Reference contract |
 | --- | --- |
-| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey` |
-| `CreateCheckoutAttempt` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
+| `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
+| `CreateCheckoutAttempt` | Either `PriceID` or the pair `ProductKey` + `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
 | `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `GetCheckoutConfig` | `GetCheckoutConfigParams`: a `PriceID` or `PriceKey` lists the options that can sell it |
+| `GetCheckoutConfig` | `GetCheckoutConfigParams`: `PriceID` or `ProductKey` + `PriceKey` lists the options that can sell it |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
 | Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |

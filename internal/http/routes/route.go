@@ -371,7 +371,7 @@ func ErrorSet(name string) []string {
 	case "request":
 		return requestShapeErrors
 	case "catalog_write":
-		return []string{"catalog_declared", "catalog_updates_disabled"}
+		return []string{"catalog_updates_disabled"}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))

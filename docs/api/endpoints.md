@@ -206,12 +206,14 @@ it; the public routes show the status only.
 
 Reads need `merchant:catalog:read`. Writes need `merchant:catalog:update` and
 `allow_catalog_updates: true`: without it the write routes are not mounted (the
-in-process Client is not gated). While `Config.Catalog` declares the catalog,
-writes answer `405 catalog_declared`.
+in-process Client is not gated). `Config.Catalog` is an optional startup batch
+and does not restrict later edits. JSON/YAML batches are deduplicated permanently
+by content hash, even after intervening edits.
 
 A price's terms never change: the same key with other terms makes a new version
-and archives the old one. `PATCH` on a price moves a key, archives or restores,
-and merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
+and archives the old one. Price keys are product-local and immutable; each has
+automatic revisions starting at zero. `PATCH` archives or restores a price and
+merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/merchant/catalog/drift` lists the open drift
 findings, each with the `psp_id` that was compared.
 

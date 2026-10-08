@@ -32,7 +32,7 @@ func (s *Service) PreviewPSPRouting(ctx context.Context, in billing.PreviewPSPRo
 	var mode models.CheckoutAttemptMode
 	if err := rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var runErr error
-		decision, mode, runErr = checkoutAttempts.DryRunRouting(scopedCtx, in.PriceID.String(), "", in.Country, in.PSP)
+		decision, mode, runErr = checkoutAttempts.DryRunRouting(scopedCtx, in.PriceID.String(), "", "", in.Country, in.PSP)
 		return runErr
 	}); err != nil {
 		return nil, apperr.Invalidf("preview PSP routing: %v", err)
