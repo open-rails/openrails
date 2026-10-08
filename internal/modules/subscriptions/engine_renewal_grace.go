@@ -101,5 +101,8 @@ func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d
 	if sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil {
 		return nil
 	}
+	if sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod {
+		return s.dunningAccess(ctx, d, s.newLifecycleEntitlementService(d), sub, s.now())
+	}
 	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, entitlementNames(sub.EntitlementsSpecSnapshot), *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
 }

@@ -156,6 +156,12 @@ func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
 	longerProvider := &recordedAccess{}
 	require.NoError(t, pushRenewalGrace(t.Context(), nil, longerProvider, sub, []string{"premium"}, start, start.Add(48*time.Hour)))
 	require.Equal(t, paidEnd, *longerProvider.grants[0].NotBefore, "a longer provider billing period leaves no gap after matched paid access ends")
+	suspended := &recordedAccess{}
+	svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(paidEnd), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return suspended }}
+	sub.DunningPolicy = []byte(`{"access_during_dunning":"suspend","access_while_renewal_held":"keep"}`)
+	require.NoError(t, svc.EnsureRenewalGrace(t.Context(), nil, sub))
+	require.Empty(t, suspended.grants, "importing past-due billing honors its dunning policy, independently of held-renewal policy")
+	require.Equal(t, []models.EntitlementSourceType{models.EntitlementSourceGrace}, suspended.revoked)
 	sub.AccessDurationHoursSnapshot = new(1)
 	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
 	require.Len(t, r.grants, 1, "deliberately short access never receives recurring grace")
