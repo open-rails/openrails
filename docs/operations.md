@@ -181,12 +181,14 @@ binding in metadata. Before submission, OpenRails lists the customer's provider
 payments and checks that metadata, then reads any matching payment by ID. An
 existing matching payment is recovered; conflicting terms or another executable
 or paid attempt require reconciliation. This uses customer listing rather than
-Stripe's eventually consistent Search API. NMI uses the persistent obligation
-order reference and checks for a qualified existing payment even before the
+Stripe's [eventually consistent Search API](https://docs.stripe.com/api/payment_intents/search).
+Native NMI saved-card renewals use the persistent obligation
+order reference and check for a qualified existing payment even before the
 first local attempt. These lookups can find charges after a provider's duplicate
 window has elapsed, but a lookup and a subsequent charge are not atomic.
 
-Stripe may discard idempotency keys after 24 hours. Automatic resubmission of an
+[Stripe may discard idempotency keys after 24 hours](https://docs.stripe.com/api/idempotent_requests).
+Automatic resubmission of an
 uncertain Stripe renewal therefore stops before that deadline, with clock and
 provider-call margins measured from its original submission fence. Reads of the
 existing payment continue. An empty or unavailable lookup after that deadline
