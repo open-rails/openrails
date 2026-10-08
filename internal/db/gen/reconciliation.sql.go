@@ -1065,80 +1065,6 @@ func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error
 	return items, nil
 }
 
-const listActiveRecurringSubsWithExpiredBoundedAccess = `-- name: ListActiveRecurringSubsWithExpiredBoundedAccess :many
-SELECT DISTINCT s.id, s.customer_id
-FROM billing.subscriptions s
-JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
-WHERE s.merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'active'
-  AND p.billing_interval_hours IS NOT NULL
-  AND s.access_duration_hours_snapshot IS NULL
-  AND EXISTS (
-      SELECT 1 FROM billing.entitlements expired
-      WHERE expired.merchant_id = s.merchant_id
-        AND expired.source_type = 'subscription'
-        AND expired.source_id = s.id
-        AND expired.revoked_at IS NULL
-        AND expired.deleted_at IS NULL
-        AND expired.ends_at IS NOT NULL
-        AND expired.ends_at <= $3::timestamptz
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.entitlements live
-      WHERE live.merchant_id = s.merchant_id
-        AND live.source_type = 'subscription'
-        AND live.source_id = s.id
-        AND live.revoked_at IS NULL
-        AND live.deleted_at IS NULL
-        AND (live.ends_at IS NULL OR live.ends_at > $3::timestamptz)
-  )
-ORDER BY s.id
-LIMIT $4
-`
-
-type ListActiveRecurringSubsWithExpiredBoundedAccessParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Now        time.Time
-	RowLimit   int64
-}
-
-type ListActiveRecurringSubsWithExpiredBoundedAccessRow struct {
-	ID         uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// #955 DERIVE: the historical Stripe-resume split commit. The subscription is
-// active and its recurring price promises standing access, but every live
-// subscription window has already ended. Re-opening the latest bounded window
-// is safe: revoked/deleted windows remain recorded decisions and are excluded.
-func (q *Queries) ListActiveRecurringSubsWithExpiredBoundedAccess(ctx context.Context, arg ListActiveRecurringSubsWithExpiredBoundedAccessParams) ([]ListActiveRecurringSubsWithExpiredBoundedAccessRow, error) {
-	rows, err := q.db.Query(ctx, listActiveRecurringSubsWithExpiredBoundedAccess,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Now,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListActiveRecurringSubsWithExpiredBoundedAccessRow
-	for rows.Next() {
-		var i ListActiveRecurringSubsWithExpiredBoundedAccessRow
-		if err := rows.Scan(&i.ID, &i.CustomerID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveSubsMissingEntitlementProjection = `-- name: ListActiveSubsMissingEntitlementProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
@@ -1147,7 +1073,7 @@ FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
     SELECT jsonb_object_agg(feat, NULL::text) AS spec
-    FROM jsonb_object_keys(pd.entitlements_spec) AS feat
+    FROM jsonb_object_keys(COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec)) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -1164,7 +1090,8 @@ WHERE s.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > $3::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= $3::timestamptz

@@ -2139,35 +2139,6 @@ func (q *Queries) StampImportedSubscriptionEvidence(ctx context.Context, arg Sta
 	return err
 }
 
-const subscriptionProjectsStandingAccess = `-- name: SubscriptionProjectsStandingAccess :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.subscriptions s
-    JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
-    WHERE s.merchant_id = $1::uuid
-      AND s.id = $2::uuid
-      AND s.deleted_at IS NULL
-      AND p.billing_interval_hours IS NOT NULL
-      AND s.access_duration_hours_snapshot IS NULL
-      AND s.status IN ('pending', 'active', 'past_due', 'awaiting_method', 'unverified')
-) AS standing
-`
-
-type SubscriptionProjectsStandingAccessParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// #691 projection inversion: does this subscription project STANDING access
-// (open-ended entitlement window, closed only by proven events)? True for
-// recurring prices with no scheduled access expiry while non-terminal.
-// Finite access terms stay bounded independently of the billing interval.
-func (q *Queries) SubscriptionProjectsStandingAccess(ctx context.Context, arg SubscriptionProjectsStandingAccessParams) (bool, error) {
-	row := q.db.QueryRow(ctx, subscriptionProjectsStandingAccess, arg.MerchantID, arg.ID)
-	var standing bool
-	err := row.Scan(&standing)
-	return standing, err
-}
-
 const updateSubscriptionAt = `-- name: UpdateSubscriptionAt :execrows
 UPDATE billing.subscriptions SET
     price_id = $2,

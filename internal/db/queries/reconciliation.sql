@@ -628,42 +628,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY current_period_ends_at;
 
--- #955 DERIVE: the historical Stripe-resume split commit. The subscription is
--- active and its recurring price promises standing access, but every live
--- subscription window has already ended. Re-opening the latest bounded window
--- is safe: revoked/deleted windows remain recorded decisions and are excluded.
--- name: ListActiveRecurringSubsWithExpiredBoundedAccess :many
-SELECT DISTINCT s.id, s.customer_id
-FROM billing.subscriptions s
-JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
-  AND s.deleted_at IS NULL
-  AND s.status = 'active'
-  AND p.billing_interval_hours IS NOT NULL
-  AND s.access_duration_hours_snapshot IS NULL
-  AND EXISTS (
-      SELECT 1 FROM billing.entitlements expired
-      WHERE expired.merchant_id = s.merchant_id
-        AND expired.source_type = 'subscription'
-        AND expired.source_id = s.id
-        AND expired.revoked_at IS NULL
-        AND expired.deleted_at IS NULL
-        AND expired.ends_at IS NOT NULL
-        AND expired.ends_at <= sqlc.arg(now)::timestamptz
-  )
-  AND NOT EXISTS (
-      SELECT 1 FROM billing.entitlements live
-      WHERE live.merchant_id = s.merchant_id
-        AND live.source_type = 'subscription'
-        AND live.source_id = s.id
-        AND live.revoked_at IS NULL
-        AND live.deleted_at IS NULL
-        AND (live.ends_at IS NULL OR live.ends_at > sqlc.arg(now)::timestamptz)
-  )
-ORDER BY s.id
-LIMIT sqlc.arg(row_limit);
-
 -- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
 -- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product
 -- promises entitlements, where some promised feature was NEVER projected for
@@ -683,7 +647,7 @@ FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
     SELECT jsonb_object_agg(feat, NULL::text) AS spec
-    FROM jsonb_object_keys(pd.entitlements_spec) AS feat
+    FROM jsonb_object_keys(COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec)) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -700,7 +664,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz

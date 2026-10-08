@@ -163,27 +163,6 @@ WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
   AND ent.ends_at = sqlc.arg(old_end_at)::timestamptz;
 
--- name: ResumeEntitlementsBySubscription :exec
--- #691 resume: re-open the LATEST live window per (customer, entitlement) of a
--- resumed auto-renew subscription (ends_at = NULL), undoing an advance-written
--- cancel closure. This also repairs the historical split-commit case after the
--- bounded window has elapsed. Older bounded windows remain historical. Other
--- sources may overlap and cannot prevent this source from resuming.
-UPDATE billing.entitlements ent SET
-    ends_at = NULL,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
-  AND ent.id IN (
-    SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
-    FROM billing.entitlements e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.source_type = 'subscription'
-      AND e.source_id = $1
-      AND e.revoked_at IS NULL
-      AND e.deleted_at IS NULL
-      AND e.ends_at IS NOT NULL
-    ORDER BY e.customer_id, e.entitlement, e.ends_at DESC
-);
-
 -- name: SoftDeleteFutureOneOffEntitlements :exec
 WITH retracted AS (
 UPDATE billing.entitlements ent SET
@@ -410,22 +389,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL
 ORDER BY created_at DESC
 LIMIT 1;
-
--- name: StandingSubscriptionEntitlementExists :one
--- #691: is there a live STANDING (ends_at IS NULL) window for this subscription
--- source? One standing window satisfies every per-period grant of the sub —
--- the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
-SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements e
-    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND e.customer_id = sqlc.arg(customer_id)::uuid
-      AND e.entitlement = sqlc.arg(entitlement)::text
-      AND e.source_type = 'subscription'
-      AND e.source_id = sqlc.arg(source_id)::uuid
-      AND e.ends_at IS NULL
-      AND e.revoked_at IS NULL
-      AND e.deleted_at IS NULL
-) AS standing;
 
 -- name: MaterializeEntitlement :exec
 -- Concurrent replay of one immutable grant cannot duplicate its projection.

@@ -177,13 +177,13 @@ func transition(ctx context.Context, database *db.DB, lc *subscriptions.Subscrip
 		if len(effects) == 0 && subscriptions.SnapshotOf(cur) == before {
 			return nil
 		}
-		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
-			return err
-		}
 		if _, renewed := ev.(lifecycle.RenewalPaid); renewed {
 			if err := lc.ApplyScheduledTier(ctx, txdb, cur); err != nil {
 				return err
 			}
+		}
+		if notices, err = lc.ApplyEffects(ctx, txdb, cur, customerNotices(effects, quiet || d.Declared, d.RemoteGone), now, subscriptions.EffectOptions{}); err != nil {
+			return err
 		}
 		if cur.Status == models.StatusPastDue && cur.GraceEndsAt == nil && !d.GraceEndsAt.IsZero() {
 			grace := d.GraceEndsAt // dunning's pacing marker

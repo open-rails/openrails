@@ -249,21 +249,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
             SELECT 1 FROM billing.entitlements e
             WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
               AND e.entitlement = feat AND e.deleted_at IS NULL)
-          -- #691: one live STANDING subscription window satisfies every
-          -- per-period grant of that subscription (mirrors MaterializeGrant's
-          -- ensure-standing skip — detection and repair must agree or the
-          -- sweep never converges).
-          AND NOT (g.source_type = 'subscription' AND EXISTS (
-            SELECT 1 FROM billing.entitlements e2
-            JOIN billing.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
-              AND s2.access_duration_hours_snapshot IS NULL
-            WHERE e2.merchant_id = g.merchant_id
-              AND e2.customer_id = g.customer_id
-              AND e2.entitlement = feat
-              AND e2.source_type = 'subscription'
-              AND e2.source_id::text = g.source_id
-              AND e2.ends_at IS NULL
-              AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))
+
     ))
 
     OR
@@ -373,7 +359,7 @@ ORDER BY g.created_at;
 -- migrate logic): [COALESCE(current_period_starts_at,started_at),
 -- COALESCE(current_period_ends_at,ended_at)). active+canceled+unknown grant
 -- access (pending/expired/failed/past_due do not). #716 fail-open: `unknown`
--- matches SubscriptionProjectsStandingAccess — an imported-as-unknown sub gets
+-- an imported-as-unknown sub gets
 -- its entitlement while the resolution machinery finds the truth. #717:
 -- cancel_type='chargeback' grants NO runway — money reversed = access reversed.
 -- Bounded to windows ending within
@@ -386,7 +372,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       pd.entitlements_spec
+       COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) AS entitlements_spec
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -396,7 +382,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) IS NOT NULL
+  AND COALESCE(s.entitlements_spec_snapshot, pd.entitlements_spec) <> '{}'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= sqlc.arg(scan_since)::timestamptz)
   AND NOT EXISTS (
@@ -439,21 +426,6 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
         AND ((g.source_type = 'purchase' AND g.source_id = p.id::text) OR g.payment_id = p.id)
   )
 ORDER BY p.purchased_at;
-
--- #691 per-period grant idempotency: the latest bounded end recorded for one
--- (customer, source, feature) — a renewal replay whose period end is not past
--- this mark appends nothing.
--- name: LatestEntitlementGrantEndForSource :one
--- Zero time = no bounded grant recorded yet.
-SELECT COALESCE(max(g.ends_at), '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS latest_end
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.kind = 'entitlement' AND g.event = 'grant'
-  AND g.source_type = sqlc.arg(source_type)::text
-  AND g.source_id = sqlc.arg(source_id)::text
-  AND g.ends_at IS NOT NULL
-  AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text);
 
 -- A purchased window is a distinct fact even when it overlaps another paid
 -- window or has no expiry. A replay must not reinstate a revoked grant.

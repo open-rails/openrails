@@ -291,22 +291,6 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
--- #691 projection inversion: does this subscription project STANDING access
--- (open-ended entitlement window, closed only by proven events)? True for
--- recurring prices with no scheduled access expiry while non-terminal.
--- Finite access terms stay bounded independently of the billing interval.
--- name: SubscriptionProjectsStandingAccess :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.subscriptions s
-    JOIN billing.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
-    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND s.id = sqlc.arg(id)::uuid
-      AND s.deleted_at IS NULL
-      AND p.billing_interval_hours IS NOT NULL
-      AND s.access_duration_hours_snapshot IS NULL
-      AND s.status IN ('pending', 'active', 'past_due', 'awaiting_method', 'unverified')
-) AS standing;
-
 -- name: ListSubscriptionsByPaymentMethodIDs :many
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[])

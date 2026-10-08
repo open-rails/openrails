@@ -946,39 +946,6 @@ func (q *Queries) ResolveEffectiveTier(ctx context.Context, arg ResolveEffective
 	return i, err
 }
 
-const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscription :exec
-UPDATE billing.entitlements ent SET
-    ends_at = NULL,
-    updated_at = $2::timestamptz
-WHERE ent.merchant_id = $3::uuid AND ent.deleted_at IS NULL
-  AND ent.id IN (
-    SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
-    FROM billing.entitlements e
-    WHERE e.merchant_id = $3::uuid AND e.source_type = 'subscription'
-      AND e.source_id = $1
-      AND e.revoked_at IS NULL
-      AND e.deleted_at IS NULL
-      AND e.ends_at IS NOT NULL
-    ORDER BY e.customer_id, e.entitlement, e.ends_at DESC
-)
-`
-
-type ResumeEntitlementsBySubscriptionParams struct {
-	SourceID   uuid.UUID
-	Now        time.Time
-	MerchantID uuid.UUID
-}
-
-// #691 resume: re-open the LATEST live window per (customer, entitlement) of a
-// resumed auto-renew subscription (ends_at = NULL), undoing an advance-written
-// cancel closure. This also repairs the historical split-commit case after the
-// bounded window has elapsed. Older bounded windows remain historical. Other
-// sources may overlap and cannot prevent this source from resuming.
-func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg ResumeEntitlementsBySubscriptionParams) error {
-	_, err := q.db.Exec(ctx, resumeEntitlementsBySubscription, arg.SourceID, arg.Now, arg.MerchantID)
-	return err
-}
-
 const revokeActiveOneOffEntitlements = `-- name: RevokeActiveOneOffEntitlements :exec
 UPDATE billing.entitlements ent SET
     ends_at = $2::timestamptz,
@@ -1279,42 +1246,6 @@ func (q *Queries) SoftDeleteFutureTimelineWindows(ctx context.Context, arg SoftD
 		arg.SourceID,
 	)
 	return err
-}
-
-const standingSubscriptionEntitlementExists = `-- name: StandingSubscriptionEntitlementExists :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements e
-    WHERE e.merchant_id = $1::uuid
-      AND e.customer_id = $2::uuid
-      AND e.entitlement = $3::text
-      AND e.source_type = 'subscription'
-      AND e.source_id = $4::uuid
-      AND e.ends_at IS NULL
-      AND e.revoked_at IS NULL
-      AND e.deleted_at IS NULL
-) AS standing
-`
-
-type StandingSubscriptionEntitlementExistsParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	SourceID    uuid.UUID
-}
-
-// #691: is there a live STANDING (ends_at IS NULL) window for this subscription
-// source? One standing window satisfies every per-period grant of the sub —
-// the derive-2 skip condition (mirrored by ListLiveGrantsMissingEffects).
-func (q *Queries) StandingSubscriptionEntitlementExists(ctx context.Context, arg StandingSubscriptionEntitlementExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, standingSubscriptionEntitlementExists,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Entitlement,
-		arg.SourceID,
-	)
-	var standing bool
-	err := row.Scan(&standing)
-	return standing, err
 }
 
 const timelineHasIndefinite = `-- name: TimelineHasIndefinite :one
