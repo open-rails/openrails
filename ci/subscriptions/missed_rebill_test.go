@@ -69,6 +69,10 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	w.watchRebills()
 	require.Len(t, w.openFindings("life.rebill.missed"), 1, "one finding per cycle")
 
+	// The watch proves the missed obligation; normal account observation
+	// must also catch up before the queued recovery may write to NMI.
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.runRenewals() // the due pass may already have run on its own
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
@@ -128,7 +132,15 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 	t.Run("schedule_gone", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
-		l, due := skipped(t, w, func(l *legacy) { l.w.nmi.DeleteSchedule(l.railSub) })
+		l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
+		w.converge()
+		due := l.periodEnd()
+		w.advance(due.Sub(w.clock.Now()) + 25*time.Hour)
+		// Qualify the account while its stalled schedule still exists. The
+		// following delete is the fault whose specific guard this test probes.
+		w.refreshProviders()
+		w.settleCollectionScans()
+		w.nmi.DeleteSchedule(l.railSub)
 		// NMI answers 404 for a deleted schedule.
 		w.nmi.Intercept(func(r *http.Request) bool {
 			return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/subscriptions/"+l.railSub)

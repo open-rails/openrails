@@ -76,6 +76,7 @@ const (
 	TransactionTypeSale       TransactionType = "sale"
 	TransactionTypeAuth       TransactionType = "auth"
 	TransactionTypeRefund     TransactionType = "refund"
+	TransactionTypeVoid       TransactionType = "void"
 	TransactionTypeChargeback TransactionType = "chargeback"
 	TransactionTypeDecline    TransactionType = "decline"
 )

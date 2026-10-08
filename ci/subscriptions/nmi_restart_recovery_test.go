@@ -50,12 +50,14 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	defer pool.Close()
 	gateway, err := url.Parse(input.Gateway)
 	require.NoError(t, err)
+	realClock := clockwork.NewRealClock()
+	clock := restartClock{Clock: realClock, offset: input.Now.Sub(realClock.Now())}
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Schema: input.Schema, River: openrails.RiverHostOwned,
 		TestMode: openrails.Sandbox, ProviderWriteMode: input.Mode,
 		DB: &openrails.DBConfig{URL: input.DSN}, HTTP: &openrails.HTTPConfig{},
 		Merchant: openrails.MerchantDeclaration{Slug: input.Slug, DisplayName: input.Slug, PSPs: input.PSPs},
-	}, openrails.Deps{Postgres: pool, Clock: clockwork.NewFakeClockAt(input.Now), NMITransport: restartNMITransport{gateway: gateway}})
+	}, openrails.Deps{Postgres: pool, Clock: clock, NMITransport: restartNMITransport{gateway: gateway}})
 	require.NoError(t, err)
 	defer func() { _ = rt.Close(context.Background()) }()
 	jobs, err := riverkit.New(t.Context(), pool, &river.Config{Schema: input.Schema, ID: input.ID, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}}, rt.RiverJobs())
@@ -64,6 +66,17 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	require.NoError(t, os.WriteFile(input.Ready, []byte("ready"), 0600))
 	<-t.Context().Done()
 }
+
+// Historical business time continues advancing after boot, as production time
+// does. A frozen clock would leave recovery backoffs permanently in the future.
+type restartClock struct {
+	clockwork.Clock
+	offset time.Duration
+}
+
+func (c restartClock) Now() time.Time                   { return c.Clock.Now().Add(c.offset) }
+func (c restartClock) Since(at time.Time) time.Duration { return c.Now().Sub(at) }
+func (c restartClock) Until(at time.Time) time.Duration { return at.Sub(c.Now()) }
 
 type restartNMITransport struct{ gateway *url.URL }
 
@@ -115,6 +128,31 @@ func (w *restartWorkerProcess) kill(t *testing.T) {
 			t.Fatal("worker process did not stop")
 		}
 	})
+}
+
+// ageRestartQueue models the elapsed wall time of an offline fleet separately
+// from its injected business clock. Job states, arguments, operation leases,
+// receipts and provider coverage are unchanged; ordinary startup must resume
+// or rescue the now-old queue work itself.
+func ageRestartQueue(t *testing.T, w *world, offline time.Duration) {
+	t.Helper()
+	require.Positive(t, offline)
+	rows, err := w.pool.Query(t.Context(), w.q(`SELECT id,kind,state,attempted_at,scheduled_at FROM billing.river_job WHERE state IN ('running','available','scheduled','retryable') ORDER BY id`))
+	require.NoError(t, err)
+	for rows.Next() {
+		var id int64
+		var kind, state string
+		var attempted *time.Time
+		var scheduled time.Time
+		require.NoError(t, rows.Scan(&id, &kind, &state, &attempted, &scheduled))
+		t.Logf("before %s outage aging: job=%d kind=%s state=%s attempted_at=%v scheduled_at=%s", offline, id, kind, state, attempted, scheduled)
+	}
+	require.NoError(t, rows.Err())
+	rows.Close()
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_job SET attempted_at=attempted_at-make_interval(secs => $1),scheduled_at=scheduled_at-make_interval(secs => $1) WHERE state IN ('running','available','scheduled','retryable')`), offline.Seconds())
+	require.NoError(t, err)
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=expires_at-make_interval(secs => $1)`), offline.Seconds())
+	require.NoError(t, err)
 }
 
 // Whole-period catch-up is a different policy. These outages last five days
@@ -183,13 +221,7 @@ func TestNMIFiveDayRestartRecovery(t *testing.T) {
 				require.Len(t, w.nmi.Ledger(""), 2, "renewal already paid before local completion")
 			}
 			w.advance(end.Add(5 * 24 * time.Hour).Sub(w.clock.Now()))
-			// River uses wall time for liveness; business time is injected separately.
-			// Age only its scheduling/liveness evidence as the five-day outage would.
-			// Accepted operation payloads, leases, receipts and billing facts stay intact.
-			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_job SET attempted_at=attempted_at-interval '5 days',scheduled_at=scheduled_at-interval '5 days' WHERE state IN ('running','available','scheduled','retryable')`))
-			require.NoError(t, err)
-			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '5 days'`))
-			require.NoError(t, err)
+			ageRestartQueue(t, w, 5*day)
 			if stage == "not_admitted" {
 				require.Equal(t, 0, restartCollectionCount(t, w, e, ""))
 			}
@@ -199,9 +231,11 @@ func TestNMIFiveDayRestartRecovery(t *testing.T) {
 			require.Len(t, w.nmi.Ledger(""), 2, "one initial payment and exactly one renewal")
 			require.Len(t, w.nmi.Attempts(), 2, "recovery does not submit an additional charge")
 			if stage == "paid_before_completion" {
-				var rescued int
-				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.provider_operation' AND metadata ? 'openrails:rescue_count'`)).Scan(&rescued))
-				require.Greater(t, rescued, 0, "normal startup rescue reclaimed the killed job")
+				require.Eventually(t, func() bool {
+					var rescued int
+					err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.provider_operation' AND metadata ? 'openrails:rescue_count'`)).Scan(&rescued)
+					return err == nil && rescued > 0
+				}, 30*time.Second, 50*time.Millisecond, "normal startup rescue independently reclaims the killed job after financial recovery")
 			}
 			first.kill(t)
 			second.kill(t)
@@ -227,7 +261,7 @@ func restartCollectionCount(t *testing.T, w *world, e *engineCase, status string
 }
 
 // Monthly-floor collection must survive restarts without waiting for a new
-// thirty-day in-memory timer, and must still run at most once per River period.
+// thirty-day in-memory timer, and must retain its durable monthly cadence.
 func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 	for _, mode := range []string{openrails.ProviderWritesFull, openrails.ProviderWritesReadOnly} {
 		t.Run(mode, func(t *testing.T) {
@@ -235,9 +269,19 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps, "stripe"); delete(psps, "ccbill") }
 			})
 			w := f.any()
+			// Initial provider observation legitimately completes this month's
+			// empty collection scan. The five-day outage must cross the next
+			// monthly boundary before the later small invoice is eligible.
+			setup := w.clock.Now().UTC().Truncate(30 * day).Add(28 * day)
+			if !setup.After(w.clock.Now()) {
+				setup = setup.Add(30 * day)
+			}
+			f.advance(setup.Sub(w.clock.Now()))
 			c := w.newCustomer()
 			method := c.saveCard("nmi", visa)
 			initial := newNMIInvoice(f, c)
+			w.pull() // Qualify the setup invoice's historical period through the real provider refresh.
+			w.settleCollectionScans()
 			answer := payNMIInvoice(t.Context(), w, c, initial, method, "invoice-startup-agreement")
 			require.NoError(t, answer.err)
 			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status)
@@ -251,6 +295,9 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				return id
 			}
 			invoice := smallInvoice() // $10: below the $50 hourly threshold, above the $1 monthly floor.
+			var previousPeriod time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&previousPeriod))
+			require.True(t, previousPeriod.Equal(w.clock.Now().UTC().Truncate(30*day)), "healthy setup already completed this month's collection scan")
 			w.stop()
 			gateway := httptest.NewServer(w.nmi)
 			t.Cleanup(gateway.Close)
@@ -265,10 +312,8 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				require.Len(t, w.nmi.Attempts(), 1)
 			}
 			f.advance(5 * day)
-			_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_job SET scheduled_at=scheduled_at-interval '5 days' WHERE state IN ('scheduled','retryable')`))
-			require.NoError(t, err)
-			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '5 days'`))
-			require.NoError(t, err)
+			require.True(t, w.clock.Now().UTC().Truncate(30*day).After(previousPeriod), "the outage crosses the next monthly collection boundary")
+			ageRestartQueue(t, w, 5*day)
 			first := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			second := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			require.Eventually(t, func() bool {
@@ -279,7 +324,9 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.Eventually(t, func() bool {
 				var completed int
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
-				return err == nil && completed == 1
+				var period time.Time
+				cadenceErr := w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&period)
+				return err == nil && completed > 0 && cadenceErr == nil && period.Equal(w.clock.Now().UTC().Truncate(30*day))
 			}, 15*time.Second, 50*time.Millisecond, "the complete monthly scan retains its cadence before shutdown")
 			first.kill(t)
 			second.kill(t)
@@ -289,22 +336,29 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			w.stop()
 			// River normally prunes completed jobs after a day. Remove only the
 			// completed monthly job: billing cadence must outlive this queue GC.
-			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`))
+			_, err := w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`))
 			require.NoError(t, err)
-			var before int64
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(max(id),0) FROM billing.river_job`)).Scan(&before))
+			var completed int
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed))
+			require.Zero(t, completed, "GC removed every completed monthly scan")
+			var retainedPeriod, retainedCompletion time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&retainedPeriod, &retainedCompletion))
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
 			require.NoError(t, err)
 			third := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			// Startup may reuse the original monthly job, still waiting on its
+			// one-minute readonly snooze or recovery retry. Its ID need not be
+			// new. With old completions gone, any completed scan proves that the
+			// restarted worker checked the durable cadence after queue GC.
 			require.Eventually(t, func() bool {
 				var passes int
-				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND id>$1 AND state='completed'`), before).Scan(&passes)
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&passes)
 				return err == nil && passes > 0
-			}, 30*time.Second, 50*time.Millisecond, "the replacement monthly job has checked retained cadence")
+			}, 90*time.Second, 50*time.Millisecond, "a post-GC monthly scan has checked retained cadence")
 			third.kill(t)
-			var monthly int
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true'`)).Scan(&monthly))
-			require.Equal(t, 1, monthly, "the replacement queue job rechecks the book's retained cadence")
+			var checkedPeriod, checkedCompletion time.Time
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&checkedPeriod, &checkedCompletion))
+			require.True(t, retainedPeriod.Equal(checkedPeriod) && retainedCompletion.Equal(checkedCompletion), "post-GC scanning preserves the completed billing cadence")
 			require.Len(t, w.nmi.Attempts(), 2, "a new small balance waits for the next monthly pass")
 			w.start()
 			unpaid, err := w.client[remote].GetInvoice(t.Context(), next)
@@ -312,9 +366,8 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.Equal(t, int64(10_000_000), unpaid.AmountDue)
 			w.stop()
 			f.advance(32 * day)
+			ageRestartQueue(t, w, 32*day)
 			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND state='completed'`))
-			require.NoError(t, err)
-			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
 			require.NoError(t, err)
 			fourth := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			require.Eventually(t, func() bool {

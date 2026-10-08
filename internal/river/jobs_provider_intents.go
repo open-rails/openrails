@@ -88,6 +88,20 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			terminal = true
 			return nil
 		}
+		// A recovery hold commits an immediate successor as well as retaining
+		// its ordinary retry date. This check survives either actor crashing
+		// between completion and the optional inline wakeup.
+		if intents.IsRecoveryHeld(row) && (row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now)) {
+			if blocked, _ := intents.GateExecution(config.Mode{Config: w.Config}, intents.Origin(row.Origin)); !blocked && store.CheckRecovery(ctx, row, now) == nil {
+				if err := store.WakeRecoveryHeld(ctx, row.ID, now); err != nil {
+					return err
+				}
+				row, err = store.Get(ctx, row.ID)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		wake := row.NextAttemptAt
 		if row.LeaseExpiresAt != nil && (row.Status == intents.StatusInFlight || row.LeaseExpiresAt.After(wake)) {
 			wake = *row.LeaseExpiresAt

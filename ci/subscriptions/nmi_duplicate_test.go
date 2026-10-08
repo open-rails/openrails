@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // nmiDupWindow is the duplicate window the fake NMI applies in these rows.
@@ -68,11 +67,10 @@ func TestLegacyNMITierUpgradeDuplicateRefused(t *testing.T) {
 	}
 }
 
-// The duplicate refusal's answer is lost in transit: the operation cannot
-// read a receipt, and after the settle delay NMI's empty record under its
-// order settles it as not executed on its own. No finding stays open and
-// nothing was charged.
-func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
+// A duplicate refusal whose response was lost is indistinguishable from a
+// submitted charge that NMI has not exposed yet. An empty order lookup keeps
+// ownership and a review finding; it cannot authorize another upgrade order.
+func TestLegacyNMITierUpgradeLostDuplicateRemainsUnresolved(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	group := "g" + uuid.NewString()[:8]
@@ -91,16 +89,21 @@ func TestLegacyNMITierUpgradeLostDuplicateSettles(t *testing.T) {
 	done, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
 	require.NoError(t, err)
 	require.Equal(t, "processing", done.Status, "%+v", done)
-	w.until(func() bool {
-		_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
-		return err != nil
-	}, "the unsettled proration resolves from NMI's record")
-	_, err = w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
-	requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRefused)
-	require.Len(t, l.tierSales(), sales, "nothing was charged")
+	attempts := len(w.nmi.Attempts())
+	w.advance(2 * time.Hour)
+	w.until(func() bool { return len(w.openFindings("life.tier_change.proration_unresolved")) > 0 }, "an empty lookup remains an unresolved financial outcome")
+	again, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
+	require.NoError(t, err)
+	require.Equal(t, "processing", again.Status)
+	require.Equal(t, done.OperationID, again.OperationID, "the original operation retains ownership")
+	_, err = w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "another-" + key})
+	require.Error(t, err, "a different key cannot admit a new charge while the first outcome is unknown")
+	require.Len(t, w.nmi.Attempts(), attempts, "no resend or second order reaches NMI")
+	require.Len(t, l.tierSales(), sales, "the simulator knows no money moved, but the application cannot infer that from absence")
 	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
-	require.Empty(t, w.openFindings("life.tier_change.proration_unresolved"))
 	require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID)
+	require.True(t, l.c.entitled(old.ent))
+	require.False(t, l.c.entitled(next.ent))
 }
 
 // An engine tier upgrade refused as a duplicate is not executed, not left
@@ -158,19 +161,24 @@ func TestTinyBookCancellationConverges(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
-	book := w.mirrorBook(embedded, w.bookTier("monthly", 999, 30), 4)
-	// Another schedule stays live at NMI, so the roster is non-empty.
-	vault := w.nmi.AddVault(mastercard)
-	w.nmi.AddSchedule(nmimock.Schedule{Vault: vault, Plan: "legacy_plan_other", Amount: "9.99", NextBilling: w.clock.Now().Add(20 * day)})
-	for _, l := range book {
+	book := w.mirrorBook(embedded, w.bookTier("monthly", 999, 30), 5)
+	// A known fifth membership keeps the roster non-empty without adding an
+	// unrelated unimported provider book that must hold financial recovery.
+	keeper, ended := book[0], book[1:]
+	w.refreshProviders()
+	w.settleCollectionScans()
+	for _, l := range ended {
 		w.nmi.DeleteSchedule(l.railSub)
 	}
 	w.advance(time.Hour)
 	w.pull()
-	for _, l := range book {
+	for _, l := range ended {
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.Zero(t, w.nmi.ScheduleDeletes(l.railSub))
 	}
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, keeper.sub).Status)
+	require.True(t, w.nmi.ScheduleLive(keeper.railSub))
+	require.Zero(t, w.nmi.ScheduleDeletes(keeper.railSub))
 	require.Empty(t, w.openFindings("pull.cancellation.capped"))
 	require.Zero(t, len(w.nmi.Attempts()))
 }

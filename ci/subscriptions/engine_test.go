@@ -95,6 +95,27 @@ func (e *engineCase) toPeriodEnd() {
 	e.w.advance(e.periodEnd().Sub(e.w.clock.Now()) + time.Second)
 }
 
+// refreshBeforePeriodEnd leaves the membership not yet due, so a fault can be
+// installed before any normal worker is allowed to collect the next period.
+func (e *engineCase) refreshBeforePeriodEnd() {
+	e.w.t.Helper()
+	end := e.periodEnd()
+	if d := end.Add(-time.Minute).Sub(e.w.clock.Now()); d > 0 {
+		e.w.advance(d)
+	}
+	e.w.refreshProviders()
+	e.w.settleCollectionScans()
+	require.True(e.w.t, e.w.clock.Now().Before(end), "install the fault before the renewal becomes due")
+	require.True(e.w.t, end.Equal(e.periodEnd()), "healthy observation did not advance the paid period")
+}
+
+// toFreshPeriodEnd advances a healthy fixture through its billing boundary.
+// Fault scenarios use refreshBeforePeriodEnd, install their fault, then call
+// the unchanged toPeriodEnd instead.
+func (e *engineCase) toFreshPeriodEnd() {
+	e.w.advanceHealthyTo(e.periodEnd().Add(time.Second))
+}
+
 func forEach(t *testing.T, run func(t *testing.T, rail string, tp topology)) {
 	for _, rail := range rails {
 		for _, tp := range []topology{embedded, remote} {
@@ -116,7 +137,7 @@ func TestEngineHappyRenewals(t *testing.T) {
 		e := enroll(t, w, rail, tp)
 		for period := 2; period <= 3; period++ {
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			require.True(t, e.c.entitled(e.ent), "access is continuous across the due boundary, before the renewal pass runs")
 			w.runRenewals()
 			w.runRenewals() // a second pass in the same period admits nothing
@@ -183,7 +204,7 @@ func TestEngineRenewalPostures(t *testing.T) {
 			end := e.periodEnd()
 			w.cfg = tc.apply
 			w.restart()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.Equal(t, tc.renew, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
 			if !tc.renew {
@@ -192,9 +213,10 @@ func TestEngineRenewalPostures(t *testing.T) {
 				w.cfg = nil
 				w.restart()
 				w.advance(10 * time.Minute) // past the park re-check interval
+				w.refreshProviders()
 				w.runRenewals()
 				w.wake()
-				require.True(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
+				w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "full mode resumes the held renewal")
 				require.Len(t, e.providerLedger(), 2, "exactly one renewal charge once allowed")
 			}
 		})
@@ -271,7 +293,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				e := enroll(t, w, rail, remote)
 				e.setDecline(visa.Last4, tc.stripe, tc.nmi)
 				end := e.periodEnd()
-				e.toPeriodEnd()
+				e.toFreshPeriodEnd()
 				first := w.clock.Now()
 				w.runRenewals()
 				var offsets []time.Duration
@@ -284,7 +306,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 					}
 					require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 					offsets = append(offsets, sub.NextRetryAt.Sub(first).Round(time.Hour))
-					w.advance(sub.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+					w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 					w.runRenewals()
 				}
 				require.Equal(t, tc.retries, offsets, "retry schedule")
@@ -318,6 +340,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 					again := e.c.subscribeAgain(e.tp, rail, e.price, e.ent, fresh)
 					require.NotEqual(t, e.sub, again)
 				} else {
+					w.refreshProviders()
 					e.replaceCard(mastercard)
 					w.runRenewals()
 					sub := w.subscription(e.tp, e.sub)
@@ -383,10 +406,11 @@ func TestEngineCardReplacement(t *testing.T) {
 			e := enroll(t, w, rail, tp)
 			e.setDecline(visa.Last4, "insufficient_funds", "202")
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.Equal(t, billing.SubscriptionPastDue, w.subscription(tp, e.sub).Status)
 			w.advance(day)
+			w.refreshProviders()
 			e.replaceCard(mastercard)
 			w.runRenewals()
 			sub := w.subscription(tp, e.sub)
@@ -401,8 +425,9 @@ func TestEngineCardReplacement(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(10 * day)
+			w.refreshProviders()
 			e.replaceCard(mastercard)
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.Equal(t, billing.SubscriptionActive, w.subscription(tp, e.sub).Status)
 			require.Equal(t, mastercard.Last4, e.lastChargedCard())
@@ -421,6 +446,7 @@ func TestEngineCancelAndResume(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
+			w.refreshProviders()
 			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "done"})
 			w.settle()
 			sub := w.subscription(tp, e.sub)
@@ -437,6 +463,7 @@ func TestEngineCancelAndResume(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, tp)
 			w.advance(5 * day)
+			w.refreshProviders()
 			e.c.must(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "maybe"})
 			w.settle()
 			require.True(t, w.subscription(tp, e.sub).Resumable)
@@ -447,7 +474,7 @@ func TestEngineCancelAndResume(t *testing.T) {
 			require.Nil(t, sub.CanceledAt)
 			require.Equal(t, billing.SubscriptionActive, sub.Status)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			require.True(t, e.c.entitled(e.ent), "a resumed membership is continuous across the boundary")
 			w.runRenewals()
 			require.True(t, w.subscription(tp, e.sub).CurrentPeriodEndsAt.After(end))
@@ -469,7 +496,7 @@ func TestEngineAccountDeletionCancels(t *testing.T) {
 				e := enroll(t, w, rail, tp)
 				if state == "past_due" {
 					e.setDecline(visa.Last4, "insufficient_funds", "202")
-					e.toPeriodEnd()
+					e.toFreshPeriodEnd()
 					w.runRenewals()
 					require.Equal(t, billing.SubscriptionPastDue, w.subscription(tp, e.sub).Status)
 				}
@@ -512,7 +539,7 @@ func TestEngineRepricing(t *testing.T) {
 		require.Equal(t, bumped.ID, w.subscription(tp, newSub).PriceID)
 
 		for range 2 {
-			old.toPeriodEnd()
+			old.toFreshPeriodEnd()
 			w.runRenewals()
 		}
 		byCustomer := func(c *customer) (out []int64) {
@@ -542,7 +569,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				t.Parallel()
 				w := newWorld(t)
 				e := enroll(t, w, rail, tp)
-				e.toPeriodEnd()
+				e.toFreshPeriodEnd()
 				w.runRenewals()
 				paid := completed(w.payments(tp, e.c.id))
 				require.Len(t, paid, 2)
@@ -572,14 +599,14 @@ func TestEngineRenewalRefunds(t *testing.T) {
 				sub := w.subscription(tp, e.sub)
 				if !revoke {
 					require.Equal(t, billing.SubscriptionActive, sub.Status, "refunding money alone does not cancel the membership")
-					e.toPeriodEnd()
+					e.toFreshPeriodEnd()
 					w.runRenewals()
 					require.Len(t, e.providerLedger(), 3, "the membership renews after a refunded period")
 					require.True(t, e.c.entitled(e.ent))
 					return
 				}
 				require.Equal(t, billing.SubscriptionCanceled, sub.Status, "revoking a membership payment's access ends the membership")
-				e.toPeriodEnd()
+				e.toFreshPeriodEnd()
 				w.runRenewals()
 				require.Len(t, e.providerLedger(), 2, "a revoked membership never renews")
 				require.False(t, e.c.entitled(e.ent))
@@ -599,7 +626,7 @@ func TestEngineRenewalRefunds(t *testing.T) {
 			for _, entry := range e.providerLedger() {
 				require.Zero(t, entry.Refunded)
 			}
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.Len(t, e.providerLedger(), 2, "the grandfathered member still renews")
 			require.True(t, e.c.entitled(e.ent))
@@ -655,6 +682,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	t.Logf("create: %+v", session)
 	w.settle()
 	w.advance(2 * day)
+	w.refreshProviders()
 	w.wake()
 	w.until(func() bool { return w.attempt(session.ID)["status"] == "failed" }, "the abandoned challenge fails the enrollment")
 	require.Len(t, w.stripe.mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
@@ -672,11 +700,12 @@ func TestEngineRenewalAuthenticationAbandoned(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
 	e.setDecline(visa.Last4, "auth", "")
-	e.toPeriodEnd()
+	e.toFreshPeriodEnd()
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "an open challenge is not a decline")
 	require.True(t, e.c.entitled(e.ent), "access holds while the member can still authenticate")
 	w.advance(25 * time.Hour)
+	w.refreshProviders()
 	w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned renewal waits for a new card")
 	require.True(t, e.c.entitled(e.ent), "access returns while the membership waits for a new card")
 	require.Empty(t, e.providerLedger()[1:], "the challenged renewal never charged")
@@ -697,9 +726,10 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		w := newWorld(t)
 		e := enroll(t, w, "nmi", embedded)
 		end := e.periodEnd()
-		e.toPeriodEnd()
+		e.refreshBeforePeriodEnd()
 		before := len(w.nmi.saleOrders())
 		w.nmi.RefuseDuplicates(1)
+		e.toPeriodEnd()
 		w.runRenewals()
 		w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unexplained duplicate is an operator finding")
 		for range 6 {
@@ -772,13 +802,14 @@ func TestEngineCrashDurability(t *testing.T) {
 				w := newWorld(t)
 				e := enroll(t, w, rail, embedded)
 				end := e.periodEnd()
-				e.toPeriodEnd()
+				e.refreshBeforePeriodEnd()
 				var g *gate
 				if rail == "stripe" {
 					g = w.stripe.hold(newGate(tc.match[rail], tc.commit))
 				} else {
 					g = w.nmi.hold(newGate(tc.match[rail], tc.commit))
 				}
+				e.toPeriodEnd()
 				_, err := w.jobs.Insert(t.Context(), dunningPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 				require.NoError(t, err)
 				promoteCtx, stopPromoting := context.WithCancel(t.Context())
@@ -850,8 +881,9 @@ func TestEngineLostSubmission(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, embedded)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.refreshBeforePeriodEnd()
 			w.loseSubmissions(rail, 1)
+			e.toPeriodEnd()
 			w.runRenewals()
 			if rail == "nmi" {
 				w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the lost NMI submission requires evidence")
@@ -873,9 +905,10 @@ func TestEngineLostSubmission(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, embedded)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.refreshBeforePeriodEnd()
 			w.loseSubmissions(rail, 1)
 			w.readUnavailable(rail, true)
+			e.toPeriodEnd()
 			w.runRenewals()
 			w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the unreadable submission is an operator finding")
 			for range 6 {
@@ -885,6 +918,7 @@ func TestEngineLostSubmission(t *testing.T) {
 			require.Equal(t, 1, e.providerAttempts(), "never re-sent while the provider cannot be read")
 			require.False(t, w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end))
 			w.readUnavailable(rail, false)
+			w.refreshProviders()
 			if rail == "nmi" {
 				w.until(func() bool { return w.lostSubmissions(rail) == 1 }, "the first submission resumes after the preflight read recovers")
 				w.advance(time.Hour)
@@ -903,8 +937,9 @@ func TestEngineLostSubmission(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, rail, embedded)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.refreshBeforePeriodEnd()
 			w.loseSubmissions(rail, 10)
+			e.toPeriodEnd()
 			w.runRenewals()
 			w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "the spent cap is an operator finding")
 			for range 6 {
@@ -924,9 +959,10 @@ func TestEngineLostSubmission(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
 		e := enroll(t, w, "nmi", embedded)
-		e.toPeriodEnd()
+		e.refreshBeforePeriodEnd()
 		w.nmi.SetDecline(visa.Last4, "202")
 		w.nmi.DropSaleResponses(1)
+		e.toPeriodEnd()
 		w.runRenewals()
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "past_due" }, "the recorded decline is adopted")
 		require.Equal(t, 2, e.providerAttempts(), "the declined renewal is not re-sent")
@@ -946,7 +982,7 @@ func TestEngineDuePassIsolatesRefusals(t *testing.T) {
 	_, err := w.pool.Exec(t.Context(), `UPDATE `+pgx.Identifier{w.schema}.Sanitize()+`.subscriptions SET lifecycle_rev = lifecycle_rev + 1, current_period_ends_at = current_period_ends_at - interval '1 day' WHERE id = $1`, strings.TrimPrefix(broken.sub.String(), "sub_"))
 	require.NoError(t, err)
 	end := healthy.periodEnd()
-	healthy.toPeriodEnd()
+	healthy.toFreshPeriodEnd()
 	w.runRenewals() // waits for the pass to COMPLETE, not retry
 	require.True(t, w.subscription(embedded, healthy.sub).CurrentPeriodEndsAt.After(end), "the healthy member renews")
 	require.Len(t, broken.providerLedger(), 1, "the refused member is not charged")

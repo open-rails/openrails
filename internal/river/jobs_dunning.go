@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -16,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -64,7 +66,9 @@ const (
 )
 
 // DunningArgs triggers a dunning run that processes all due past_due subscriptions.
-type DunningArgs struct{}
+type DunningArgs struct {
+	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
+}
 
 func (DunningArgs) Kind() string { return KindDunning }
 
@@ -163,6 +167,19 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — stale subscriptions park as unknown (no local cancellations), charge intents enqueue PARKED (no provider writes until mode=full)")
 		}
 	}
+	// The completion transaction inserts this scoped normal job as its durable
+	// recovery handoff. It must wake eligible held work even if a verifier's
+	// hold committed after that transaction skipped its live lease.
+	if job.Args.MerchantID != uuid.Nil && w.Config != nil && !materialize && !observeOnly {
+		mctx := merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
+		resumed, err := intents.NewStore(w.DB).ResumeRecoveryHeld(mctx, w.now(), 100)
+		if err != nil {
+			return fmt.Errorf("resume recovered merchant work: %w", err)
+		}
+		if resumed == 100 {
+			return river.JobSnooze(time.Second)
+		}
+	}
 
 	if w.NMIResolver == nil && w.EngineCollections == nil {
 		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
@@ -183,9 +200,15 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	if w.EngineCollections != nil {
 		nmiRails = append(nmiRails, string(models.RailStripe))
 	}
-	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
-	})
+	var merchantIDs []uuid.UUID
+	var err error
+	if job.Args.MerchantID != uuid.Nil {
+		merchantIDs = []uuid.UUID{job.Args.MerchantID}
+	} else {
+		merchantIDs, err = w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
+			Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("query merchants with due subscriptions: %w", err)
 	}

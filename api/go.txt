@@ -444,6 +444,7 @@ pkg openrails, type Identity struct, Username string
 pkg openrails, type InvoiceSweepArgs struct
 pkg openrails, type InvoiceSweepArgs struct, Collect bool `json:"collect,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
+pkg openrails, type InvoiceSweepArgs struct, MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
 pkg openrails, type LLMConfig = config.LLMConfig
 pkg openrails, type LLMConfig struct

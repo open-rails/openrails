@@ -64,6 +64,8 @@ func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from the decline")
 	require.Zero(t, len(w.nmi.Attempts()))
 
+	w.refreshProviders()
+	w.settleCollectionScans()
 	w.runRenewals()
 	sub = w.subscription(embedded, l.sub)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)

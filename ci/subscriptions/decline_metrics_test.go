@@ -91,6 +91,7 @@ func TestDeclineMetrics(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1, "%v", session.Status)
 	sub := subs.Items[0].ID
+	w.advanceHealthyTo(subs.Items[0].CurrentPeriodEndsAt.Add(-time.Minute))
 	w.nmi.SetDecline(visa.Last4, "202")
 	w.advance(subs.Items[0].CurrentPeriodEndsAt.Sub(w.clock.Now()) + time.Second)
 	w.runRenewals()
@@ -100,7 +101,7 @@ func TestDeclineMetrics(t *testing.T) {
 		}
 		s := w.subscription(embedded, sub)
 		require.NotNil(t, s.NextRetryAt)
-		w.advance(s.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+		w.advanceHealthyTo(s.NextRetryAt.Add(time.Second))
 		w.runRenewals()
 	}
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, sub).Status)
@@ -152,6 +153,7 @@ func TestAttemptAndCycleReads(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
 	e.setDecline(visa.Last4, "insufficient_funds", "202")
 	e.toPeriodEnd()
 	w.runRenewals()
@@ -160,7 +162,8 @@ func TestAttemptAndCycleReads(t *testing.T) {
 			e.setDecline(visa.Last4, "", "")
 		}
 		s := w.subscription(embedded, e.sub)
-		w.advance(s.NextRetryAt.Sub(w.clock.Now()) + time.Second)
+		require.NotNil(t, s.NextRetryAt, "the declined renewal is scheduled for retry")
+		w.advanceHealthyTo(s.NextRetryAt.Add(time.Second))
 		w.runRenewals()
 	}
 	c := w.client[embedded]

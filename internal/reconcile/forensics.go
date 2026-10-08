@@ -145,7 +145,7 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		if t.Type != TransactionTypeSale && t.Type != TransactionTypeDecline {
 			continue
 		}
-		sub, _, _ := corr.subForTxn(t)
+		sub, _, _ := corr.subForTxn(provider, t)
 		if sub == nil {
 			continue
 		}

@@ -18,6 +18,7 @@ import (
 
 // ledger is the Store surface the Runner drives (interface for unit tests).
 type ledger interface {
+	CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error
 	Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error)
 	Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderIntent, error)
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.BillingProviderIntent, bool, error)
@@ -34,6 +35,8 @@ type ledger interface {
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
+	ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
+	WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
 }
 
@@ -221,7 +224,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	}
 
 	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
-		r.park(ctx, logEntry, stats, intent.ID, now, reason)
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason, false)
+		return
+	}
+	if err := r.Store.CheckRecovery(ctx, intent, now); err != nil {
+		r.holdForRecovery(ctx, logEntry, stats, intent, now, err.Error(), true)
 		return
 	}
 
@@ -479,13 +486,34 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	}
 	var err error
 	applied := outcome.Class
+	recoveryHeld, _ := outcome.Evidence["recovery_held"].(bool)
 	switch outcome.Class {
 	case OutcomeSucceeded:
 		if !terminalOwned {
 			err = r.Store.MarkSucceeded(ctx, intent.ID, now, outcome.Evidence)
 		}
 	case OutcomeRetryable:
-		err = r.Store.MarkFailedRetryable(ctx, intent.ID, now.Add(handler.Backoff(intent.Attempts)), outcome.Reason)
+		next := now.Add(handler.Backoff(intent.Attempts))
+		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == "invoice_collection") {
+			submitted, malformed := hasSubmissionEvidence(intent)
+			if !submitted && malformed == nil {
+				if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
+					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), reason, nil)
+					applied = OutcomeAmbiguous
+					break
+				}
+				if held := r.Store.CheckRecovery(ctx, intent, now); held != nil {
+					recoveryHeld = true
+					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), held.Error(), RecoveryHeld(held.Error()).Evidence)
+					applied = OutcomeAmbiguous
+					break
+				}
+				// Verified-unsubmitted recovery is ready work, not a failed
+				// provider attempt. Execute still rechecks every write guard.
+				next = now
+			}
+		}
+		err = r.Store.MarkFailedRetryable(ctx, intent.ID, next, outcome.Reason)
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
@@ -511,6 +539,9 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	if err != nil {
 		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
 		return
+	}
+	if recoveryHeld {
+		r.wakeRecoveryIfReady(ctx, logEntry, intent, now)
 	}
 	// Reporting follows a confirmed write/read. A failed transition is never a
 	// successful payment or terminal refusal in worker statistics.
@@ -710,4 +741,55 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.BillingProvi
 	var stats Stats
 	r.apply(ctx, logger, &stats, h, in, out, true)
 	return r.Store.Get(ctx, id)
+}
+
+// A held write must not strand a possibly submitted operation in an execute
+// state. Redispatch it through Verify, which can record positive receipts while
+// the write gate remains closed, without issuing another provider mutation.
+func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *Stats, in gen.BillingProviderIntent, now time.Time, reason string, recovery bool) {
+	submitted, malformed := hasSubmissionEvidence(in)
+	if in.IntentType == "subscription_collection" || in.IntentType == "invoice_collection" || submitted || malformed != nil {
+		writeCtx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		var evidence map[string]any
+		if recovery {
+			evidence = RecoveryHeld(reason).Evidence
+		}
+		if err := r.Store.MarkUnknown(r.transitionContext(writeCtx), in.ID, now, reason, evidence); err != nil {
+			logger.WithError(err).Error("cannot schedule held operation readback")
+			return
+		}
+		stats.Parked++
+		if recovery {
+			r.wakeRecoveryIfReady(writeCtx, logger, in, now)
+		}
+		return
+	}
+	if recovery {
+		writeCtx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		if err := r.Store.ParkForRecovery(r.transitionContext(writeCtx), in.ID, now.Add(ParkRetryInterval), reason); err != nil {
+			logger.WithError(err).Error("cannot retain provider recovery hold")
+			return
+		}
+		stats.Parked++
+		r.wakeRecoveryIfReady(writeCtx, logger, in, now)
+		return
+	}
+	r.park(ctx, logger, stats, in.ID, now, reason)
+}
+
+// The normal dispatcher commits a hold before this recheck. Completion might
+// have skipped the verifier's live lease just before that commit; a newly ready
+// account must not leave the now-unleased operation sleeping on its old hold.
+func (r *Runner) wakeRecoveryIfReady(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
+	if blocked, _ := GateExecution(r.Config, Origin(in.Origin)); blocked {
+		return
+	}
+	if r.Store.CheckRecovery(ctx, in, now) != nil {
+		return
+	}
+	if err := r.Store.WakeRecoveryHeld(ctx, in.ID, now); err != nil {
+		logger.WithError(err).Warn("provider recovery wake failed; durable retry remains")
+	}
 }

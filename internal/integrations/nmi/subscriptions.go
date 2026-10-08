@@ -62,6 +62,8 @@ type QueryFilter struct {
 	// OpenRails stamps on rebills/sales, used by the intent verifier to answer
 	// "did this charge land?" via reads.
 	OrderID string
+	// OrderDescription filters exact durable merchant-provided invoice identity.
+	OrderDescription string
 	// SubscriptionID filters to the sales NMI's recurring engine made for one
 	// schedule, whatever order reference the schedule carries.
 	SubscriptionID string
@@ -582,6 +584,9 @@ func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) 
 	}
 	if filter.OrderID != "" {
 		values.Set("order_id", filter.OrderID)
+	}
+	if filter.OrderDescription != "" {
+		values.Set("order_description", filter.OrderDescription)
 	}
 	if filter.CustomerVaultID != "" {
 		values.Set("customer_vault_id", filter.CustomerVaultID)

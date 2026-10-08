@@ -72,7 +72,7 @@ func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 		require.Equal(t, billing.SubscriptionActive, w.subscription(tp, e.sub).Status)
 		require.Len(t, e.providerLedger(), 1, "access expiry cannot trigger an early renewal")
 
-		e.toPeriodEnd()
+		e.toFreshPeriodEnd()
 		w.runRenewals()
 		w.runRenewals()
 		require.Len(t, e.providerLedger(), 2, "one charge at the billing boundary")
@@ -112,6 +112,7 @@ func TestDurationAccessSurvivesCancellation(t *testing.T) {
 				require.Equal(t, access.hours == nil, e.c.entitled(e.ent), "finite access expires on its own boundary; indefinite access remains")
 				requireDurationSelfAccess(t, e, access.hours == nil)
 				if access.hours == nil {
+					w.refreshProviders()
 					_, err = w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "revoke purchased access", RevokeAccess: true})
 					require.NoError(t, err)
 					require.False(t, e.c.entitled(e.ent))

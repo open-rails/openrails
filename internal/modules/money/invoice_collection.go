@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -485,6 +486,26 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		psp, err := charge.RoutePSP(ctx, q, *method)
 		if err != nil {
 			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
+		}
+		receipt, found, err := s.findObservedInvoicePayment(ctx, q, tid.UUID(), invoice.ID, psp)
+		if err != nil {
+			return err
+		}
+		if found {
+			local := NewMoneyService(s.db.NewWithPgxTx(tx), s.Clock())
+			_, err := local.RecoverObservedInvoicePayment(ctx, receipt)
+			return err // committed readback; no new operation or invented initiator
+		}
+		// A recent read on the newly selected account cannot exclude a payment
+		// through another known card account after the restored snapshot.
+		accounts, err := q.InvoiceRecoveryAccounts(ctx, gen.InvoiceRecoveryAccountsParams{MerchantID: tid.UUID(), RoutedPsp: psp})
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if err := providerrecovery.CheckPSP(ctx, s.db.NewWithPgxTx(tx), tid.UUID(), account.ID, now); err != nil {
+				return err
+			}
 		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {

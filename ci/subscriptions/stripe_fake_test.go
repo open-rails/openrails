@@ -79,6 +79,7 @@ type stripeFake struct {
 	intents         map[string]obj
 	order           []string
 	charges         map[string]obj
+	chargesDown     bool
 	refunds         map[string]obj
 	subs            map[string]obj
 	idem            map[string]*stripeIdempotentRequest
@@ -133,6 +134,7 @@ func (f *stripeFake) RoundTrip(r *http.Request) (*http.Response, error) {
 		f.lost++
 	}
 	down := f.listDown && r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents" ||
+		f.chargesDown && r.Method == http.MethodGet && r.URL.Path == "/v1/charges" ||
 		f.subsDown && r.Method != http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") ||
 		f.pricesDown && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/prices/")
 	f.mu.Unlock()
@@ -402,6 +404,10 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 			return 200, ch
 		}
 		return 404, stripeErr("resource_missing")
+	case r.Method == http.MethodGet && p == "/v1/charges":
+		return 200, stripeList(f.charges, q)
+	case r.Method == http.MethodGet && p == "/v1/disputes":
+		return 200, obj{"object": "list", "data": []any{}, "has_more": false}
 	case r.Method == http.MethodPost && p == "/v1/refunds":
 		return f.createRefund(form)
 	case r.Method == http.MethodGet && seg[0] == "refunds" && len(seg) == 2:
@@ -410,13 +416,13 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && p == "/v1/refunds":
-		data := []any{}
+		matching := map[string]obj{}
 		for _, re := range f.refunds {
 			if (q.Get("charge") == "" || re["charge"] == q.Get("charge")) && (q.Get("payment_intent") == "" || re["payment_intent"] == q.Get("payment_intent")) {
-				data = append(data, re)
+				matching[re["id"].(string)] = re
 			}
 		}
-		return 200, obj{"object": "list", "data": data, "has_more": false}
+		return 200, stripeList(matching, q)
 	case r.Method == http.MethodGet && p == "/v1/subscriptions":
 		data := []any{}
 		for _, s := range f.subs {
@@ -448,6 +454,45 @@ func stripeErr(code string) obj {
 	return obj{"error": obj{"type": "invalid_request_error", "code": code, "message": code}}
 }
 
+// stripeList implements the created window and stable cursor used by provider
+// refresh. Returning an unfiltered page would hide missing recovery windows.
+func stripeList(objects map[string]obj, q url.Values) obj {
+	ids := make([]string, 0, len(objects))
+	for id := range objects {
+		ids = append(ids, id)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	after := q.Get("starting_after")
+	started := after == ""
+	data := []any{}
+	for _, id := range ids {
+		if !started {
+			started = id == after
+			continue
+		}
+		object := objects[id]
+		created, _ := object["created"].(int64)
+		if lower, err := strconv.ParseInt(q.Get("created[gte]"), 10, 64); err == nil && created < lower {
+			continue
+		}
+		if upper, err := strconv.ParseInt(q.Get("created[lte]"), 10, 64); err == nil && created > upper {
+			continue
+		}
+		if q.Get("customer") != "" && object["customer"] != q.Get("customer") {
+			continue
+		}
+		if len(data) == limit {
+			return obj{"object": "list", "data": data, "has_more": true}
+		}
+		data = append(data, object)
+	}
+	return obj{"object": "list", "data": data, "has_more": false}
+}
+
 func (f *stripeFake) createIntent(form url.Values) (int, any) {
 	amount, err := strconv.ParseInt(form.Get("amount"), 10, 64)
 	if err != nil || amount <= 0 {
@@ -467,7 +512,7 @@ func (f *stripeFake) createIntent(form url.Values) (int, any) {
 	switch decline := f.declines[pm]; decline {
 	case "":
 		ch := obj{"object": "charge", "id": f.id("ch"), "amount": amount, "amount_captured": amount, "currency": form.Get("currency"), "customer": form.Get("customer"), "payment_method": pm,
-			"payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false}
+			"payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false, "created": f.now().Unix()}
 		f.charges[ch["id"].(string)] = ch
 		pi["status"], pi["amount_received"], pi["latest_charge"] = "succeeded", amount, ch["id"]
 		return 200, pi
@@ -504,7 +549,7 @@ func (f *stripeFake) createRefund(form url.Values) (int, any) {
 	ch["amount_refunded"] = ch["amount_refunded"].(int64) + amount
 	ch["refunded"] = ch["amount_refunded"] == ch["amount"]
 	re := obj{"object": "refund", "id": f.id("re"), "amount": amount, "charge": ch["id"], "payment_intent": ch["payment_intent"], "currency": ch["currency"], "status": "succeeded",
-		"reason": form.Get("reason"), "metadata": metadataOf(form), "created": time.Now().Unix()}
+		"reason": form.Get("reason"), "metadata": metadataOf(form), "created": f.now().Unix()}
 	f.refunds[re["id"].(string)] = re
 	return 200, re
 }

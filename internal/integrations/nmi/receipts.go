@@ -196,6 +196,9 @@ func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, refere
 	if txn.ID != id {
 		return SaleEvidence{}, false, receiptMismatch("exact transaction read returned a different identity")
 	}
+	if err := moneyutil.RequireFiatCurrency(txn.Currency); err != nil {
+		return SaleEvidence{}, false, receiptMismatch("sale currency is not a card denomination: %v", err)
+	}
 	var amount moneyutil.Cents
 	for _, action := range txn.Actions {
 		if !strings.EqualFold(strings.TrimSpace(action.Type), "sale") || !action.Success {

@@ -71,7 +71,7 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	require.NoError(t, err)
 	charges := len(e.providerLedger())
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.toFreshPeriodEnd()
 	w.runRenewals()
 	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the collection card")
 	sub := w.subscription(embedded, e.sub)
@@ -83,7 +83,7 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	require.Empty(t, w.openFindings("life.due_pass.refused"), "a member-fixable refusal is not an operator finding")
 	require.True(t, e.c.hasNotification("payment_method_update_required"), "the customer is asked for a new card")
 
-	w.advance(end.Add(window).Sub(w.clock.Now()) - time.Hour)
+	w.advanceHealthyTo(end.Add(window).Add(-time.Hour))
 	w.runRenewals()
 	w.converge()
 	require.True(t, e.c.entitled(e.ent), "access is kept through the dunning window")

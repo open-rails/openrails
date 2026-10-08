@@ -87,6 +87,11 @@ func TestLegacyNMIMirrorWebhooks(t *testing.T) {
 			m := w.mirrorBook(tp, tier, 5)
 			once, twice, late, declined, canceled := m[0], m[1], m[2], m[3], m[4]
 			end := *w.subscription(tp, once.sub).CurrentPeriodEndsAt
+			// Keep the healthy account observed before its boundary; only the
+			// signed notices below introduce the new payment/cancel facts.
+			w.advanceTo(end.Add(-time.Minute))
+			w.refreshProviders()
+			w.settleCollectionScans()
 			w.advance(end.Sub(w.clock.Now()) + time.Hour)
 
 			notices := map[*legacy]obj{}

@@ -443,7 +443,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	var sub billing.SubscriptionID
 	require.NoError(t, json.Unmarshal([]byte(`"`+unwrap(enrolled)["subscription_id"].(string)+`"`), &sub))
 	end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
-	w.advance(end.Sub(w.clock.Now()) + time.Minute)
+	w.advanceHealthyTo(end.Add(time.Minute))
 	w.runRenewals()
 	require.True(t, w.subscription(embedded, sub).CurrentPeriodEndsAt.After(end), "the renewal charged the vaulted card")
 	require.Len(t, w.nmi.ledger(""), 4, "two purchases, the first period and its renewal")

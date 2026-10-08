@@ -83,7 +83,7 @@ func TestCLIPullNMIDeclineEndsOnce(t *testing.T) {
 	// The delete waits out its cooling-off window, then runs.
 	sub := w.subscription(embedded, l.sub)
 	require.NotNil(t, sub.DeletionScheduledAt, "the provider cancel is queued")
-	w.advance(sub.DeletionScheduledAt.Sub(w.clock.Now()) + time.Minute)
+	w.advanceHealthyTo(sub.DeletionScheduledAt.Add(time.Minute))
 	w.wake()
 	w.until(func() bool { return w.nmi.ScheduleDeletes(l.railSub) > 0 }, "the NMI schedule delete")
 	w.advance(time.Hour)

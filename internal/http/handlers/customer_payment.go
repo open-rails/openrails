@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -105,6 +106,8 @@ func customerPaymentError(r *httprequest.Request, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, providerrecovery.ErrPending), errors.Is(err, money.ErrInvoiceRecoveryHeld):
+		r.ErrorCode(billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
 	case errors.Is(err, money.ErrCustomerSessionRequired):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
 	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, subscriptions.ErrSubscriptionNotFound):

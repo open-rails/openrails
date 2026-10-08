@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // NMIReader is the merchant's armed NMI client and the PSP it reads.
@@ -72,7 +73,9 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 	}
 	a := newAttribution(subs, vaults, records)
 	for _, sale := range sales {
-		a.add(sale)
+		if err := a.add(sale); err != nil {
+			return err
+		}
 	}
 
 	snaps := make(map[uuid.UUID]*RemoteSnapshot, len(subs))
@@ -217,7 +220,7 @@ func newAttribution(subs []*models.Subscription, vaults map[uuid.UUID]string, re
 	return a
 }
 
-func (a *attribution) add(sale nmi.ScheduleSale) {
+func (a *attribution) add(sale nmi.ScheduleSale) error {
 	var target *models.Subscription
 	switch vault := a.byVault[sale.VaultID]; {
 	case a.byRail[sale.SubscriptionID] != nil:
@@ -232,21 +235,35 @@ func (a *attribution) add(sale nmi.ScheduleSale) {
 		for _, s := range vault {
 			a.ambiguous[s.ID] = true
 		}
-		return
+		return nil
 	}
-	a.txns[target.ID] = append(a.txns[target.ID], remoteSale(sale.SaleAction, target.RailSubscriptionID))
+	transaction, err := remoteSale(sale.SaleAction, target.RailSubscriptionID)
+	if err != nil {
+		return err
+	}
+	a.txns[target.ID] = append(a.txns[target.ID], transaction)
+	return nil
 }
 
 // remoteSale is one sale action of NMI's transaction report as a snapshot
 // transaction of the schedule railSubID.
-func remoteSale(sale nmi.SaleAction, railSubID string) RemoteTransaction {
+func remoteSale(sale nmi.SaleAction, railSubID string) (RemoteTransaction, error) {
+	if err := moneyutil.RequireFiatCurrency(sale.Currency); err != nil {
+		return RemoteTransaction{}, err
+	}
+	if sale.At.IsZero() {
+		return RemoteTransaction{}, errors.New("NMI sale has no readable action time")
+	}
+	amount, err := moneyutil.DecimalToRailMinor(sale.Currency, sale.Amount)
+	if err != nil {
+		return RemoteTransaction{}, err
+	}
 	t := RemoteTransaction{TransactionID: sale.TransactionID, SubscriptionID: railSubID, Type: TransactionTypeSale, Success: sale.Success,
-		Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
-	t.setAmount(sale.Amount)
+		AmountCents: int64(amount), Currency: sale.Currency, OccurredAt: sale.At, Answer: sale.Evidence}
 	if !sale.Success {
 		t.Type, t.DeclineReason, t.DeclineCode = TransactionTypeDecline, sale.Evidence.Text, sale.Evidence.Code
 	}
-	return t
+	return t, nil
 }
 
 // vaultsOf maps each row to the NMI vault its stored card lives in.
@@ -330,7 +347,9 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 		}
 		q := v.DB.Gen(ctx)
 		for page := cp.next; ; page++ {
-			sales, n, err := client.SalesPage(ctx, cp.since, cp.until, page)
+			// The durable checkpoint stores a one-based ordinal; NMI Query
+			// page_number is zero-based. Preserve the stored ordinal convention.
+			sales, n, err := client.SalesPage(ctx, cp.since, cp.until, page-1)
 			if err != nil {
 				return fmt.Errorf("nmi transaction page %d: %w", page, err)
 			}
@@ -343,7 +362,11 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 					}
 				}
 				if sub := byRail[id]; sub != nil {
-					perSub[sub] = append(perSub[sub], remoteSale(sale.SaleAction, sub.RailSubscriptionID))
+					transaction, err := remoteSale(sale.SaleAction, sub.RailSubscriptionID)
+					if err != nil {
+						return err
+					}
+					perSub[sub] = append(perSub[sub], transaction)
 				}
 			}
 			for sub, txns := range perSub {

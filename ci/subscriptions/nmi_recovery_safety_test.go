@@ -21,9 +21,12 @@ func TestEngineNMIWholePeriodOutageNeverStartsFreshCharge(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, "nmi", embedded)
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.refreshBeforePeriodEnd()
 			if admitted {
 				w.nmi.QueryUnavailable(true)
+			}
+			e.toPeriodEnd()
+			if admitted {
 				w.runRenewals()
 			}
 			w.stop()
@@ -49,9 +52,10 @@ func TestEngineNMIExpiredPeriodStillRecoversPaidReceipt(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	w.nmi.HideSales(1)
 	w.nmi.DropSaleResponses(1)
+	e.toPeriodEnd()
 	w.runRenewals()
 	w.stop()
 	w.advance(35 * day)
@@ -69,7 +73,7 @@ func TestEngineNMIKnownPreDispatchFailureRecovers(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	// The second vault read happens after the submission fence. Its failure
 	// proves this live caller has not made the sale, so another attempt is safe.
 	var reads atomic.Int32
@@ -79,6 +83,7 @@ func TestEngineNMIKnownPreDispatchFailureRecovers(t *testing.T) {
 		}
 		return false
 	}, http.StatusServiceUnavailable, 1)
+	e.toPeriodEnd()
 	w.runRenewals()
 	require.Equal(t, 1, e.providerAttempts())
 	w.runRenewals()
@@ -92,8 +97,9 @@ func TestEngineNMIEarlierDeclineCannotReleaseLaterAttempt(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	w.nmi.SetDecline(visa.Last4, "202")
+	e.toPeriodEnd()
 	w.runRenewals()
 	w.nmi.SetDecline(visa.Last4, "")
 	w.nmi.UnsupportedDuplicateChecking(true)
@@ -123,10 +129,11 @@ func TestEngineNMIHiddenChargeNeverResubmitted(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	w.nmi.UnsupportedDuplicateChecking(true)
 	w.nmi.HideSales(1)
 	w.nmi.DropSaleResponses(1)
+	e.toPeriodEnd()
 	w.runRenewals()
 	require.Len(t, e.providerLedger(), 2, "the provider committed the renewal but lost its response")
 	for range 6 {

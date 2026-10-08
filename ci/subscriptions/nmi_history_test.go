@@ -122,7 +122,7 @@ func TestNMIDeclineHistory(t *testing.T) {
 		from, err := time.Parse("20060102150405", q.Get("start_date"))
 		require.NoError(t, err)
 		require.Equal(t, monthOf(w.clock.Now()).AddDate(0, i-24, 0), from, "oldest first")
-		require.Equal(t, []string{"1000", "1"}, []string{q.Get("result_limit"), q.Get("page_number")})
+		require.Equal(t, []string{"1000", ""}, []string{q.Get("result_limit"), q.Get("page_number")}, "first Query API page is the omitted default zero")
 	}
 	want := map[historyRow]int64{
 		historyKey(month(3), "one_off_sale", "approved", ""):                      2,

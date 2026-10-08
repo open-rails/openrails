@@ -324,6 +324,7 @@ func (v *Verifier) listenOnce(ctx context.Context, channel string) error {
 
 func (v *Verifier) lifecycle() *subscriptions.SubscriptionLifecycleService {
 	lc := subscriptions.NewSubscriptionLifecycleService(v.DB, nil, nil, nil, v.Notifications, nil, v.Clock)
+	lc.SetConfig(v.Builder.Config)
 	if v.DeferDelete != nil {
 		lc.SetProviderCancelScheduler(v.DeferDelete)
 	}

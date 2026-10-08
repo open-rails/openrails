@@ -67,9 +67,10 @@ func verificationReads(before, after map[string]int) map[string]int {
 // unverified, visible in the backlog finding.
 func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	t.Parallel()
-	// Destructive actions stay disarmed until the reads are counted: the
-	// provider refresh does not run, and the verifier holds its cancels.
+	// Isolate the independent import verifier's read budget from scheduled
+	// refresh, which now legitimately reads even with destruction disarmed.
 	w := newWorld(t)
+	require.NoError(t, w.jobs.Stop(t.Context()))
 	// 50 members holding 20 memberships each: 1,000 NMI schedules.
 	const members, tiers = 50, 20
 	var book []bookTier
@@ -147,6 +148,7 @@ func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	// Armed, the next pass reads the few rows left in one batch: NMI ended
 	// the gone schedules; the silent ones stay unverified.
 	w.armDestructive()
+	require.NoError(t, w.jobs.Start(t.Context()))
 	w.pullWithin(3 * time.Minute) // the pull also mirrors the whole 1,000-schedule roster
 	states = w.rowStates()
 	for _, r := range gone {

@@ -69,6 +69,7 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 	l := importLegacy(t, w, "nmi", embedded, declareRecurringAnchor)
 	w.converge()
 	e := enroll(t, w, "nmi", embedded)
+	e.refreshBeforePeriodEnd()
 	w.nmi.SetDecline(visa.Last4, "223") // expired, on both vaults
 
 	w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)

@@ -46,6 +46,11 @@ type Engine struct {
 	// unavailable history source is NEVER a run error.
 	History HistoryEventSource
 
+	// RecoverInvoicePayment qualifies an observed NMI invoice receipt through
+	// its canonical financial writer before the generic subscription diff.
+	// Nil leaves missing invoice receipts as visible findings.
+	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
+
 	// Notifier bridges persisted findings into the #736 operator notification
 	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
 	// alerting service wired). Best-effort: a notify failure is logged, never
@@ -172,6 +177,7 @@ type ProviderReport struct {
 	AutoResolved         int64             `json:"auto_resolved"`
 	AutoFixed            int               `json:"auto_fixed"`
 	ApplySkipped         int               `json:"apply_skipped,omitempty"`
+	WithheldChanges      int               `json:"withheld_changes,omitempty"`
 	ApplyErrors          []string          `json:"apply_errors,omitempty"`
 	Dunning              *DunningForensics `json:"dunning_forensics,omitempty"`
 }
@@ -445,7 +451,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// to be an absence proof (#842) — a non-exhaustive roster proves nothing and
 	// produces no absence findings to guard.
 	traits := traitsFor(provider)
-	if traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
+	if (params.Mutations == nil || params.Mutations.Overwrite) && traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
 		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
 		// or#837: the ratio is emitted on EVERY absence-capable pass, not only
 		// when it trips. A breaker whose only trace is the moment it fires
@@ -469,12 +475,47 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("load local payments: %w", err)
 	}
+	recoveryErrors := map[string]error{}
+	if provider == ProviderNMI && params.Mode == ModeEnforce && params.Mutations.allowsInsert() && e.RecoverInvoicePayment != nil {
+		known := make(map[string]bool, len(localPayments))
+		for _, payment := range localPayments {
+			known[payment.TransactionID] = true
+		}
+		recovered := false
+		for _, transaction := range snap.Transactions {
+			var raw struct {
+				OrderDescription string `json:"order_description"`
+			}
+			if json.Unmarshal(transaction.Raw, &raw) != nil || known[transaction.TransactionID] || transaction.Type != TransactionTypeSale || !transaction.Success || !strings.HasPrefix(raw.OrderDescription, "invoice") {
+				continue
+			}
+			if err := e.RecoverInvoicePayment(ctx, binding.ID, transaction.TransactionID); err != nil {
+				recoveryErrors[transaction.TransactionID] = err
+			} else {
+				recovered = true
+			}
+		}
+		if recovered {
+			localPayments, err = e.Local.PaymentsByTransactionIDs(ctx, provider, binding.ID, txnIDs)
+			if err != nil {
+				return rep, nil, nil, nil, fmt.Errorf("reload recovered invoice payments: %w", err)
+			}
+		}
+	}
 
 	now := e.now()
 	findings := diffProvider(provider, snap, local, localPayments, now, diffOptions{
 		Materialize:   params.Mode == ModeEnforce && params.Mutations.allowsInsert(),
 		EvidenceFloor: e.evidenceFloor(ctx),
 	})
+	for i := range findings {
+		finding := &findings[i]
+		if err := recoveryErrors[finding.SubjectKey]; err != nil && finding.Type == FindingChargeMissingLocal {
+			finding.Apply = nil
+			finding.Status, finding.RequiresAdmin = FindingStatusRequiresReview, true
+			finding.RecommendedAction = "invoice receipt remains unresolved: " + err.Error()
+		}
+	}
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
 	bindApplyActions(findings, binding.ID)
 
@@ -490,6 +531,9 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	// needs) and halts the merchant.
 	plannedCancels := countPlannedCancellations(findings)
 	capExceeded, capReason := e.CancelBudget.Exceeded(plannedCancels, localLive)
+	if params.Mutations != nil && !params.Mutations.Overwrite {
+		capExceeded = false
+	}
 	opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
 		"provider": string(provider), "planned_cancellations": plannedCancels,
 		"local_live": localLive, "allowed": e.CancelBudget.Limit(localLive),
@@ -537,6 +581,8 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 		if f.Apply != nil && rec.Status == FindingStatusReconcileRequired && params.Mutations.allows(f) {
 			applyByID[rec.ID] = f
+		} else if f.Apply != nil && rec.Status == FindingStatusReconcileRequired {
+			rep.WithheldChanges++
 		}
 	}
 
@@ -641,15 +687,23 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 
 	// Auto-resolve: state-roster findings absent from this completed run
 	// vanished on their own (design decision 1)...
-	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, stateRosterFindingTypes)
+	resolvable := []FindingType{FindingPaymentMethodMismatch}
+	if snap.Coverage.SubscriptionsExhaustive {
+		resolvable = stateRosterFindingTypes
+	}
+	resolved, err := e.Store.AutoResolveVanished(ctx, binding.ID, runID, resolvable)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve vanished findings: %w", err)
 	}
 	rep.AutoResolved = resolved
 
-	// ...while transaction-window findings (PS-4/5/6) only auto-resolve when
-	// this run's window re-covered the transaction and it no longer diffed.
-	coveredSince, coveredUntil := e.coveredWindow(provider, params, now)
+	// Transaction windows may be keyed by provider modification time (NMI),
+	// not occurrence time. Only an actually returned transaction can qualify
+	// its earlier finding as resolved; an absent date-window match proves none.
+	observedTransactions := make(map[string]bool, len(snap.Transactions))
+	for _, transaction := range snap.Transactions {
+		observedTransactions[transaction.TransactionID] = true
+	}
 	actionable, err := e.Store.ListActionablePullFindings(ctx, binding.ID)
 	if err != nil {
 		return rep, records, planned, appliedChanges, fmt.Errorf("list actionable findings: %w", err)
@@ -659,16 +713,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			continue
 		}
 		switch rec.Type {
-		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub:
+		case FindingChargeMissingLocal, FindingRefundUnrecorded, FindingChargebackActiveSub, FindingReversalUnlinked:
 		default:
 			continue
 		}
-		occurredAt, ok := evidenceTime(rec.RemoteEvidence, "occurred_at")
-		if !ok {
+		if !observedTransactions[rec.SubjectKey] {
 			continue
-		}
-		if occurredAt.Before(coveredSince) || occurredAt.After(coveredUntil) {
-			continue // this run did not look at that part of the timeline
 		}
 		if err := e.Store.MarkFindingVanished(ctx, rec.ID); err != nil {
 			return rep, records, planned, appliedChanges, fmt.Errorf("auto-resolve windowed finding %s: %w", rec.ID, err)
@@ -739,23 +789,6 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 	return events, fmt.Sprintf("ok: %d events", len(events))
 }
 
-// coveredWindow is the transaction timeline this run actually examined for
-// the provider (fetcher defaults applied).
-func (e *Engine) coveredWindow(provider Provider, params RunParams, now time.Time) (time.Time, time.Time) {
-	until := params.Until
-	if until.IsZero() {
-		until = now
-	}
-	since := params.Since
-	if since.IsZero() {
-		if provider == ProviderCCBill {
-			since = until.Add(-30 * 24 * time.Hour) // CCBillFetcher's default export window
-		}
-		// NMI/Stripe unbounded queries cover the full timeline.
-	}
-	return since, until
-}
-
 // bindApplyActions stamps the pull's PSP onto every local write the pass will
 // perform. or#893: the pass always HAS a PSP now (runProvider refuses a section
 // without one), so no mirror row the pull path creates is unattributed.
@@ -779,21 +812,6 @@ func bindApplyActions(findings []Finding, psp uuid.UUID) {
 			}
 		}
 	}
-}
-
-func evidenceTime(m map[string]any, key string) (time.Time, bool) {
-	if m == nil {
-		return time.Time{}, false
-	}
-	s, ok := m[key].(string)
-	if !ok {
-		return time.Time{}, false
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
 }
 
 // applyFinding executes one finding's local-write instruction. Returns the
@@ -895,6 +913,7 @@ func collectTxnLookupIDs(snap *RemoteSnapshot) []string {
 		add(t.TransactionID)
 		bc := decodeBreadcrumbs(t.Raw)
 		add(bc.Charge)
+		add(bc.PaymentIntent)
 	}
 	return out
 }

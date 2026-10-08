@@ -86,7 +86,7 @@ func (c *NMIClient) SalesForSchedules(ctx context.Context, ids []string, since t
 		return nil, err
 	}
 	var out []ScheduleSale
-	for page := 1; ; page++ {
+	for page := 0; ; page++ {
 		sales, n, err := c.salesPage(ctx, QueryFilter{SubscriptionID: list}, since, time.Time{}, page)
 		if err != nil {
 			return nil, err

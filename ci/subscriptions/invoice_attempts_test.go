@@ -48,6 +48,8 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	require.Len(t, invoices.Items, 1)
 	invoice := invoices.Items[0].ID.String()
 
+	w.refreshProviders()
+	w.settleCollectionScans()
 	declining := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
 	status, out := c.call(http.MethodPost, "/invoices/"+invoice+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": declining})
 	require.Equal(t, http.StatusPaymentRequired, status, "%v", out)

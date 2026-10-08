@@ -87,6 +87,8 @@ var providerWriteSurface = map[string]string{
 	"ReadSingleCardVaultBilling":   "read",
 	"ConfirmRefund":                "read",
 	"ReadSaleEvidence":             "read",
+	"ReadInvoiceSaleEvidence":      "read",
+	"FindInvoiceSaleEvidence":      "read",
 	"PrepareRecurringSale":         "read",
 	"ReadRecurringSaleEvidence":    "read",
 	"AccountIdentity":              "read",

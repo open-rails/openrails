@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -12,8 +11,8 @@ import (
 )
 
 // OrderAttempts describes the visible transactions for one accepted attempt.
-// Any approved sale under the shared obligation order prevents a decline from
-// releasing it. Renewal declines are bound by exact attempt description, not
+// Any approved or unresolved transaction under the shared obligation order
+// prevents another submission. Renewal declines bind the exact attempt, not
 // timestamps which can overlap when a payer retries immediately.
 type OrderAttempts struct {
 	Transactions int
@@ -66,8 +65,8 @@ func (c *NMIClient) scoped() *NMIClient {
 }
 
 // ReadOrderAttempts reads every transaction under an order owned by one
-// operation. An error is an inconclusive read; zero transactions is the
-// gateway's answer that nothing was recorded under the order.
+// operation. An error is inconclusive; an empty observed result is never proof
+// that a previously submitted request did not execute.
 func (c *NMIClient) ReadOrderAttempts(ctx context.Context, orderReference string) (OrderAttempts, error) {
 	return c.readOrderAttempts(ctx, orderReference, nil)
 }
@@ -95,12 +94,12 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 		if txn.OrderID != orderReference {
 			return OrderAttempts{}, receiptMismatch("order search returned another order's transaction")
 		}
-		if accepted != nil && txn.approvedSale() == 0 {
-			if txn.OrderDescription != accepted.OrderDescription {
+		if accepted != nil && txn.OrderDescription != accepted.OrderDescription {
+			// Other attempts' conclusive refusals did not move money. Anything
+			// else under this period's order still owns a possible charge, even
+			// when its attempt marker differs from the local operation.
+			if _, _, closed := txn.definitiveSaleDecline(); closed {
 				continue
-			}
-			if txn.CustomerVaultID != accepted.CustomerVaultID || !strings.EqualFold(txn.Currency, accepted.Currency) {
-				return OrderAttempts{}, receiptMismatch("decline does not match accepted instrument and currency")
 			}
 		}
 		mine = append(mine, txn)
@@ -110,32 +109,33 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 		return out, nil
 	}
 	txn := mine[0]
-	if strings.TrimSpace(txn.TransactionID) == "" {
+	action, code, declined := txn.definitiveSaleDecline()
+	if !declined {
 		return out, nil
 	}
-	for _, action := range txn.Actions {
-		if !action.Is("sale") {
-			continue
+	if accepted != nil {
+		if txn.CustomerVaultID != accepted.CustomerVaultID || !strings.EqualFold(txn.Currency, accepted.Currency) {
+			return OrderAttempts{}, receiptMismatch("decline does not match accepted instrument and currency")
 		}
-		if action.Succeeded() {
-			return OrderAttempts{Transactions: 1}, nil
+		amount, err := moneyutil.DecimalToRailMinor(txn.Currency, action.Amount)
+		if err != nil || amount != accepted.Amount {
+			return OrderAttempts{}, receiptMismatch("decline does not match accepted amount")
 		}
-		if accepted != nil {
-			amount, err := moneyutil.DecimalToRailMinor(txn.Currency, action.Amount)
-			if err != nil || amount != accepted.Amount {
-				return OrderAttempts{}, receiptMismatch("decline does not match accepted amount")
-			}
-			if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {
-				return OrderAttempts{}, err
-			}
+		if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {
+			return OrderAttempts{}, err
 		}
-		code, err := strconv.Atoi(strings.TrimSpace(action.ResponseCode))
-		if err != nil || code < 200 || code >= 300 || UncertainResponseCode(code) || out.Declined {
-			return OrderAttempts{Transactions: 1}, nil
-		}
-		out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)
 	}
+	out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)
 	return out, nil
+}
+
+func (t QueryTransaction) definitiveSaleDecline() (QueryAction, int, bool) {
+	if strings.TrimSpace(t.TransactionID) == "" || len(t.Actions) != 1 || !t.Actions[0].Is("sale") {
+		return QueryAction{}, 0, false
+	}
+	action := t.Actions[0]
+	code, declined := action.DefinitiveDecline(t.Condition)
+	return action, code, declined
 }
 
 // VaultTransaction is one transaction on a customer vault, of any order and

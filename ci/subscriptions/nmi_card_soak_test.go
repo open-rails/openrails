@@ -67,7 +67,7 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			require.NoError(t, err)
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.True(t, e.periodEnd().After(end), "the membership renews on the new card")
 			require.Len(t, w.nmi.ledger(""), sales+1, "exactly one renewal charge")

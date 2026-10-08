@@ -25,6 +25,8 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			l := importLegacy(t, w, "nmi", tp)
+			w.refreshProviders()
+			w.settleCollectionScans()
 			paid := completed(w.payments(tp, l.c.id))
 			require.Len(t, paid, 1)
 			legacy := paid[0]

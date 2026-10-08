@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses — read-only
@@ -144,8 +145,11 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 			}
 			subs = append(subs, page.Subscriptions...)
 			next := string(page.NextCursor)
-			if !page.HasMore || next == "" {
+			if !page.HasMore {
 				break
+			}
+			if next == "" {
+				return nil, fmt.Errorf("nmi subscription pagination omitted the next cursor")
 			}
 			if seenCursor[next] {
 				return nil, fmt.Errorf("nmi subscription pagination repeated cursor %s; refusing incomplete snapshot", next)
@@ -158,6 +162,9 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 	today := now.Truncate(24 * time.Hour)
 	out := make([]RemoteSubscription, 0, len(subs))
 	for _, s := range subs {
+		if strings.TrimSpace(s.ID) == "" {
+			return nil, fmt.Errorf("nmi subscription roster row has no identity")
+		}
 		railCustomerRef := strings.TrimSpace(s.CustomerVaultID)
 		sub := RemoteSubscription{
 			RailSubscriptionID: strings.TrimSpace(s.ID),
@@ -230,7 +237,8 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	filter.ResultLimit = nmiQueryPageLimit
 	var out []RemoteTransaction
 	seenFirst := map[string]bool{}
-	for page := 1; ; page++ {
+	// Query API pages are zero-based; omitted page_number is the first page.
+	for page := 0; ; page++ {
 		filter.PageNumber = page
 		raw, err := f.Client.SearchTransactions(ctx, filter)
 		if err != nil {
@@ -249,6 +257,9 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 		}
 		seenFirst[first] = true
 		for _, t := range parsed.Transactions {
+			if err := qualifyNMITransaction(t); err != nil {
+				return nil, err
+			}
 			out = append(out, normalizeNMITransaction(t)...)
 		}
 		if len(parsed.Transactions) < nmiQueryPageLimit {
@@ -258,15 +269,54 @@ func (f *NMIFetcher) fetchTransactions(ctx context.Context, params FetchParams) 
 	return out, nil
 }
 
+// An unreadable money fact cannot disappear while its window is marked read.
+// Non-financial actions and additional fields retain their existing semantics.
+func qualifyNMITransaction(t nmi.QueryTransaction) error {
+	if err := moneyutil.RequireFiatCurrency(t.Currency); err != nil {
+		return err
+	}
+	if strings.TrimSpace(t.TransactionID) == "" {
+		return fmt.Errorf("nmi transaction has no identity")
+	}
+	for _, action := range t.Actions {
+		if _, relevant := normalizeNMIAction(strings.TrimSpace(strings.ToLower(action.ActionType))); !relevant {
+			continue
+		}
+		if strings.TrimSpace(action.Success) != "0" && strings.TrimSpace(action.Success) != "1" {
+			return fmt.Errorf("nmi transaction %s has unreadable outcome", t.TransactionID)
+		}
+		if _, err := moneyutil.DecimalToRailMinor(t.Currency, action.Amount); err != nil {
+			return fmt.Errorf("nmi transaction %s has unreadable amount", t.TransactionID)
+		}
+		if _, ok := action.At(); !ok {
+			return fmt.Errorf("nmi transaction %s has unreadable action time", t.TransactionID)
+		}
+		if strings.TrimSpace(t.Currency) == "" {
+			return fmt.Errorf("nmi transaction %s has no currency", t.TransactionID)
+		}
+	}
+	return nil
+}
+
 func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
-	// A voided or fully refunded sale paid nothing: its sale is neither a
-	// payment nor a decline. Its refunds stay visible to the refund plane.
+	// A reversed sale is neither a payment nor a decline. A void must still
+	// be observed: a retained local allocation may need reconciliation. Keep
+	// its original sale reference, amount and date, not an invented refund.
 	reversed := t.Reversed()
+	voided := strings.EqualFold(strings.TrimSpace(t.Condition), "canceled")
+	for _, action := range t.Actions {
+		voided = voided || action.Is("void") && action.Succeeded()
+	}
+	voidRecorded := false
 	var out []RemoteTransaction
 	for _, a := range t.Actions {
 		txnType, ok := normalizeNMIAction(strings.TrimSpace(strings.ToLower(a.ActionType)))
 		if ok && reversed && txnType == TransactionTypeSale {
-			continue
+			amount, err := moneyutil.DecimalToRailMinor(t.Currency, a.Amount)
+			if !voided || voidRecorded || !a.Succeeded() || err != nil || amount <= 0 {
+				continue
+			}
+			txnType, voidRecorded = TransactionTypeVoid, true
 		}
 		if !ok {
 			// settle/check/void/etc. — settlement plumbing, not a
@@ -279,9 +329,9 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 		}
 		txn := RemoteTransaction{
 			TransactionID: strings.TrimSpace(t.TransactionID),
-			// NMI does not echo the recurring subscription_id on
-			// transactions; order_id correlation lives in Raw.
-			SubscriptionID: "",
+			// Most NMI reports omit schedule identity; preserve it when present
+			// instead of weakening exact attribution into a vault match.
+			SubscriptionID: strings.TrimSpace(t.SubscriptionID),
 			Type:           txnType,
 			Success:        success,
 			Currency:       strings.TrimSpace(t.Currency),
@@ -290,10 +340,12 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 				"source":            "nmi_transaction",
 				"condition":         strings.TrimSpace(t.Condition),
 				"order_id":          strings.TrimSpace(t.OrderID),
+				"order_description": strings.TrimSpace(t.OrderDescription),
 				"customerid":        strings.TrimSpace(t.CustomerID),
 				"customer_vault_id": strings.TrimSpace(t.CustomerVaultID),
 				"email":             strings.TrimSpace(t.Email),
 				"action":            a,
+				"actions":           t.Actions,
 			}),
 		}
 		txn.setAmount(a.Amount)
@@ -307,10 +359,6 @@ func normalizeNMITransaction(t nmi.QueryTransaction) []RemoteTransaction {
 	}
 	return out
 }
-
-// normalizeNMIAction maps NMI action_type values onto the normalized
-// TransactionType. Returns ok=false for action types that are settlement
-// plumbing rather than charge events.
 func normalizeNMIAction(actionType string) (TransactionType, bool) {
 	switch actionType {
 	case "sale":
@@ -350,8 +398,11 @@ func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams
 		}
 		customers = append(customers, page.Customers...)
 		next := string(page.NextCursor)
-		if !page.HasMore || next == "" {
+		if !page.HasMore {
 			break
+		}
+		if next == "" {
+			return nil, nil, fmt.Errorf("nmi customer pagination omitted the next cursor")
 		}
 		if seenCursor[next] {
 			return nil, nil, fmt.Errorf("nmi customer pagination repeated cursor %s; refusing incomplete snapshot", next)
@@ -377,6 +428,9 @@ func (f *NMIFetcher) paymentMethodsFromCustomers(customers []nmi.V5Customer) ([]
 	out := make([]RemotePaymentMethod, 0, len(customers))
 	identity := make(map[string]nmiCustomerIdentity, len(customers))
 	for _, c := range customers {
+		if strings.TrimSpace(c.ID) == "" {
+			return nil, nil, fmt.Errorf("nmi customer roster row has no identity")
+		}
 		entry := RemotePaymentMethod{
 			RailCustomerRef: strings.TrimSpace(c.ID),
 			Raw:             rawJSON(map[string]any{"source": "nmi_customer_vault_v5", "customer": c}),

@@ -26,10 +26,13 @@ const tierUpdateStuck = "life.tier_change.provider_update_stuck"
 // legacyOnTier imports an NMI-owned membership on price, whose NMI schedule
 // bills cents every cycle hours and next bills `left` from now (a date).
 func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, left time.Duration) *legacy {
+	return w.legacyOnTierEndingAt(tp, price, cents, cycle, w.clock.Now().Add(left).UTC().Truncate(24*time.Hour))
+}
+
+func (w *world) legacyOnTierEndingAt(tp topology, price tier, cents int64, cycle int, end time.Time) *legacy {
 	t := w.t
 	t.Helper()
 	c := w.newCustomer()
-	end := w.clock.Now().Add(left).UTC().Truncate(24 * time.Hour)
 	start := end.Add(-time.Duration(cycle) * time.Hour)
 	amount := fmt.Sprintf("%d.%02d", cents/100, cents%100)
 	vault := w.nmi.AddVault(visa)
@@ -55,6 +58,8 @@ func (w *world) legacyOnTier(tp topology, price tier, cents int64, cycle int, le
 	require.Equal(t, "nmi_schedule", subs.Items[0].CollectionPolicy)
 	l := &legacy{w: w, rail: "nmi", tp: tp, c: c, price: price.Price, railSub: railSub, sub: subs.Items[0].ID, ent: price.ent, railCust: vault}
 	require.True(t, c.entitled(price.ent))
+	w.refreshProviders()
+	w.settleCollectionScans()
 	return l
 }
 
@@ -258,6 +263,8 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 				require.Equal(t, "9.99", w.nmi.Schedule(l.railSub).Amount)
 				require.Equal(t, old.ID, w.subscription(embedded, l.sub).PriceID, "the local change waits for NMI")
 				w.nmi.FailScheduleUpdates(0)
+				w.refreshProviders()
+				w.settleCollectionScans()
 			}
 			w.until(func() bool { return w.subscription(embedded, l.sub).PriceID == next.ID }, "the schedule update converges")
 			require.Len(t, l.tierSales(), sales+1, "exactly one charge")

@@ -59,6 +59,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		for range 2 {
 			require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_stop", "needs_response", p)))
@@ -81,8 +82,9 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
-		w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+		w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
 		require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_late", "needs_response", p)))
@@ -95,6 +97,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		w.stripe.dashboardRefund(w.stripe.latestCharge(l.railSub), 999)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", w.refundNotice("stripe")))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
@@ -107,6 +110,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		w.stripe.subscriptionWritesDown(true)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_down", "needs_response", p)))
@@ -139,7 +143,7 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 			w := newWorld(t)
 			l := importLegacy(t, w, "stripe", embedded)
 			w.converge()
-			w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+			w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 			if tc.declined {
 				require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
 				require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
@@ -156,9 +160,9 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
-		w.advance(l.periodEnd().Sub(w.clock.Now()) + time.Hour)
+		w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
-		w.advance(20 * day)
+		w.advanceHealthyTo(w.clock.Now().Add(20 * day))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, "past_due", true))))
 		require.NotEqual(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.True(t, l.c.entitled(l.ent), "Stripe is still retrying")

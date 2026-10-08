@@ -22,11 +22,13 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -43,11 +45,10 @@ const (
 	// the kind onto QueueBilling instead (see AddBillingWorkersTo).
 	QueueProviderRefresh = "provider_refresh"
 
-	providerRefreshDomainEvents   = "events"
-	defaultRefreshWindow          = 24 * time.Hour
-	defaultRefreshSafetyLag       = 5 * time.Minute
-	defaultRefreshInitialLookback = 90 * 24 * time.Hour
-	defaultRefreshMaxWindows      = 8
+	providerRefreshDomainEvents = "events"
+	defaultRefreshWindow        = 24 * time.Hour
+	defaultRefreshSafetyLag     = 5 * time.Minute
+	defaultRefreshMaxWindows    = 8
 	// defaultRefreshStagger spreads the scheduler's fan-out so merchant pull
 	// windows don't align on the tick instant.
 	defaultRefreshStagger = 30 * time.Minute
@@ -188,10 +189,6 @@ func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Con
 }
 
 func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[ProviderRefreshArgs]) error {
-	if w.Config != nil && config.IsProviderReadOnly(w.Config) {
-		log.WithContext(ctx).Warn("Readonly mode: provider refresh scheduling skipped (pure observer; no local convergence)")
-		return nil
-	}
 	inserter := w.Inserter
 	if inserter == nil {
 		client, err := river.ClientFromContextSafely[pgx.Tx](ctx)
@@ -294,11 +291,12 @@ type ProviderRefreshWorker struct {
 	// Verifier reads the unverified NMI rows (#1094); nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
+	// Positive invoice recovery does not authorize provider or lifecycle writes.
+	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
 
-	Window          time.Duration
-	SafetyLag       time.Duration
-	InitialLookback time.Duration
-	MaxWindows      int
+	Window     time.Duration
+	SafetyLag  time.Duration
+	MaxWindows int
 }
 
 func (ProviderRefreshWorker) Kind() string { return KindProviderRefreshMerchant }
@@ -313,10 +311,6 @@ func (w *ProviderRefreshWorker) now() time.Time {
 func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[ProviderRefreshMerchantArgs]) error {
 	if w.DB == nil {
 		return fmt.Errorf("provider refresh: db not configured")
-	}
-	if w.Config != nil && config.IsProviderReadOnly(w.Config) {
-		log.WithContext(ctx).Warn("Readonly mode: provider refresh skipped (pure observer; no local convergence)")
-		return nil
 	}
 	mid := job.Args.MerchantID
 	if mid == uuid.Nil {
@@ -364,60 +358,70 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 		"converge_errors":  stats.ConvergeErrors,
 		"lane_errors":      stats.LaneErrors,
 		"gated":            stats.Gated,
-		"advisory":         stats.Advisory,
 	}).Info("Provider Refresh: pass completed")
 	if err != nil {
 		// Merchant connection failed — nothing ran; river retries with backoff.
 		// Lane failures stay best-effort (watermarks resume them next tick).
 		return fmt.Errorf("provider refresh: merchant %s: %w", mid, err)
 	}
+	if stats.More {
+		return river.JobSnooze(time.Second)
+	}
+	if stats.ProviderErrors+stats.WatermarkErrors+stats.LaneErrors+stats.ConvergeErrors+stats.CCBillErrors > 0 {
+		return fmt.Errorf("provider refresh incomplete: provider=%d watermark=%d lane=%d", stats.ProviderErrors, stats.WatermarkErrors, stats.LaneErrors)
+	}
 	return nil
 }
 
-// refreshMerchant is the pre-#719 per-merchant loop body, verbatim: arm →
-// CCBill DataLink lane → event refresh → proofs → scoped convergence if
-// changed → unknown-cohort reconcile.
+// refreshMerchant reads and repairs each account's financial mirror first.
+// Policy-held lifecycle repairs remain separate from that observation phase.
 func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UUID, builder reconcile.MerchantFetcherBuilder, stats *providerRefreshStats, logger *log.Entry) error {
 	gate := destructive.New(w.DB)
 	mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 	if err := w.DB.RunInMerchantConn(mctx, func(tctx context.Context) error {
-		// #836 kill switch + #835 first-enforce gate, read once per merchant
-		// per pass.
+		// Provider observation and positive receipt recovery continue when
+		// remote writes or destructive repairs are held. Only the latter needs
+		// the operator's destructive arming; readonly never changes its mode.
 		verdict := gate.Check(tctx, mid)
-		if !verdict.Allowed {
+		overwrite := verdict.Allowed && verdict.EnforceArmed && (w.Config == nil || !config.IsProviderReadOnly(w.Config))
+		if !overwrite {
 			stats.Gated++
-			logger.WithField("merchant_id", mid).Warn("Provider Refresh: destructive actions gated — " + verdict.Reason)
-			return nil
 		}
-		// #835: an UNARMED merchant pulls in ADVISORY mode. The refresh worker
-		// used to run ModeEnforce with Insert+Overwrite on a RunOnStart
-		// schedule, so the first pass against an imported legacy book applied
-		// its whole diff within seconds of process start, unattended. Now the
-		// first pass surveys: findings are persisted, nothing is mutated, and
-		// an operator arms the merchant after reading them.
-		mode := reconcile.ModeEnforce
-		if !verdict.EnforceArmed {
-			mode = reconcile.ModeAdvisory
-			stats.Advisory++
-			logger.WithField("merchant_id", mid).Warn("Provider Refresh: " + verdict.Reason)
+		accounts, err := w.DB.Gen(tctx).ListPSPsForMerchant(tctx, mid)
+		if err != nil {
+			return err
 		}
-
-		armed := builder.Build(tctx, billing.MerchantID(mid))
-		res := w.runEventRefresh(tctx, mid, mode, armed.Coverage, armed.Fetchers)
-		stats.add(res)
-
-		if mode == reconcile.ModeAdvisory {
-			// An advisory dry-run proves nothing about the LOCAL mirror, so it
-			// flips no source-domain gate and drives no local convergence. It
-			// records that the merchant has been surveyed, so the operator
-			// knows the findings are ready to review.
-			if res.Windows > 0 {
+		var res providerRefreshMerchantResult
+		for _, account := range accounts {
+			if account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)) {
+				continue
+			}
+			provider := reconcile.Provider(account.Rail)
+			accountBuilder := builder
+			accountBuilder.AccountIDs = map[reconcile.Provider]string{provider: account.AccountID}
+			armed := accountBuilder.Build(tctx, billing.MerchantID(mid))
+			fetcher, ok := armed.Fetchers[provider]
+			if !ok || armed.Coverage[provider].Binding.ID != account.ID {
+				if providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) != nil {
+					stats.ProviderErrors++
+				}
+				continue
+			}
+			accountOverwrite := overwrite && providerrecovery.CheckPSP(tctx, w.DB, mid, account.ID, w.now()) == nil
+			mutations := &reconcile.LocalMutationPolicy{Insert: true, Overwrite: accountOverwrite}
+			accountResult := w.runEventRefresh(tctx, mid, reconcile.ModeEnforce, mutations, armed.Coverage, map[reconcile.Provider]reconcile.RailFetcher{provider: fetcher})
+			res.add(accountResult.providerRefreshProviderResult)
+			stats.add(accountResult)
+			if accountResult.Windows > 0 {
 				if err := gate.RecordFirstPull(tctx, mid, w.now()); err != nil {
-					logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: record first pull failed")
+					stats.LaneErrors++
 				}
 			}
+		}
+		if !overwrite || providerrecovery.CheckMerchant(tctx, w.DB, mid, w.now()) != nil {
 			return nil
 		}
+		armed := builder.Build(tctx, billing.MerchantID(mid))
 
 		// The DataLink lane reactivates local rows, so it runs only once the
 		// merchant is armed for enforcement.
@@ -482,6 +486,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		clock = clockwork.NewRealClock()
 	}
 	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, clock)
+	lc.SetConfig(w.Config)
 	if w.DeferDelete != nil {
 		// #679: a stale-decline cancel must durably queue the deferred NMI
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.
@@ -522,7 +527,7 @@ func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUI
 	return err
 }
 
-func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshMerchantResult {
+func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UUID, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy, coverage map[reconcile.Provider]reconcile.PSPCoverage, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshMerchantResult {
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
@@ -538,7 +543,7 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 				Error("Provider Refresh: rail armed without a resolved PSP; refusing an unattributed pull")
 			continue
 		}
-		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, coverage, binding, fetchers)
+		providerRes := w.runProviderEventWindows(ctx, mid, provider, mode, mutations, coverage, binding, fetchers)
 		result.add(providerRes)
 	}
 	return result
@@ -566,7 +571,7 @@ func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []r
 	return providers
 }
 
-func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
+func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, mode reconcile.Mode, mutations *reconcile.LocalMutationPolicy, coverage map[reconcile.Provider]reconcile.PSPCoverage, binding reconcile.PSPBinding, fetchers map[reconcile.Provider]reconcile.RailFetcher) providerRefreshProviderResult {
 	out := providerRefreshProviderResult{Providers: 1}
 	pspID := binding.ID
 	bindings := map[reconcile.Provider]reconcile.PSPBinding{provider: binding}
@@ -576,17 +581,35 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		return out
 	}
 
-	since, err := w.loadWatermark(ctx, mid, provider, pspID, horizon.Add(-w.initialLookback()))
+	qualifiedRecovery := provider == reconcile.ProviderNMI || provider == reconcile.ProviderStripe
+	var since time.Time
+	var err error
+	if qualifiedRecovery {
+		since, err = w.loadAppliedWatermark(ctx, mid, pspID)
+	} else {
+		// Other rails retain their observation cursor and existing lanes;
+		// they do not acquire the card-account financial recovery contract.
+		since, err = w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			since, err = horizon.Add(-90*24*time.Hour), nil
+		}
+	}
 	if err != nil {
 		out.WatermarkErrors++
 		log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: load watermark failed")
 		return out
+	}
+	// Repeat a bounded window for late provider indexing. This is recovery
+	// overlap, not a claim that the provider can never publish older history.
+	if qualifiedRecovery {
+		since = since.Add(-w.window())
 	}
 	if !since.Before(horizon) {
 		return out
 	}
 
 	engine := reconcile.NewEngine(w.DB, w.Config, fetchers, w.DeferDelete)
+	engine.RecoverInvoicePayment = w.RecoverInvoicePayment
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
 		engine.Notifier = w.Alerts // #787: nil-check, see runConvergence
@@ -603,7 +626,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		progress.Mark(ctx, fmt.Sprintf("refresh %s window %s..%s", provider, since.Format(time.RFC3339), until.Format(time.RFC3339)))
 		params := reconcile.RunParams{
 			Mode:        mode,
-			Mutations:   &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},
+			Mutations:   mutations,
 			Providers:   []reconcile.Provider{provider},
 			PSPs:        bindings,
 			PSPCoverage: coverage,
@@ -646,7 +669,32 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: advance watermark failed")
 			break
 		}
+		if qualifiedRecovery {
+			if !res.AppliedEventCoverage(provider, since, until) {
+				out.ProviderErrors++
+				break
+			}
+			if err := w.DB.Gen(ctx).UpsertPSPAppliedRefreshWatermark(ctx, gen.UpsertPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: pspID, WatermarkAt: until}); err != nil {
+				out.WatermarkErrors++
+				break
+			}
+		}
 		since = until
+	}
+	out.More = since.Before(horizon) && out.ProviderErrors == 0 && out.WatermarkErrors == 0
+	if qualifiedRecovery && !out.More && out.ProviderErrors == 0 && out.WatermarkErrors == 0 {
+		conflicts, err := w.DB.Gen(ctx).PSPHasUnresolvedFinancialFindings(ctx, gen.PSPHasUnresolvedFinancialFindingsParams{MerchantID: mid, PspID: pspID})
+		if err != nil || conflicts {
+			out.ProviderErrors++
+		} else {
+			more, err := w.completeRecovery(ctx, mid, pspID, horizon)
+			if err != nil {
+				out.WatermarkErrors++
+				log.WithContext(ctx).WithError(err).WithField("psp_id", pspID).Warn("Provider Refresh: completion and recovery wakeups failed")
+			} else {
+				out.More = more
+			}
+		}
 	}
 	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
 	// gate compares against this pull.
@@ -658,15 +706,62 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	return out
 }
 
-func (w *ProviderRefreshWorker) loadWatermark(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, fallback time.Time) (time.Time, error) {
-	watermark, err := w.DB.Gen(ctx).GetPSPRefreshWatermark(ctx, gen.GetPSPRefreshWatermarkParams{MerchantID: mid, PspID: pspID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return fallback.UTC(), nil
+// Complete coverage and its recovery wakeups commit together. Scans use the
+// existing collection policy/cadence; refresh never invokes a provider writer.
+func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp uuid.UUID, horizon time.Time) (bool, error) {
+	const batch = 100
+	more := false
+	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := w.DB.NewWithPgxTx(tx)
+		changed, err := d.Gen(ctx).UpsertPSPCompletedRefreshWatermark(ctx, gen.UpsertPSPCompletedRefreshWatermarkParams{MerchantID: mid, PspID: psp, WatermarkAt: horizon})
+		if err != nil {
+			return err
+		}
+		if w.Config == nil || config.IsLimitedMode(w.Config) {
+			return nil
+		}
+		if err := providerrecovery.CheckPSP(ctx, d, mid, psp, w.now()); err != nil {
+			return err
+		}
+		resumed, err := intents.NewStore(d).ResumeRecoveryHeld(ctx, w.now(), batch)
+		if err != nil {
+			return err
+		}
+		more = resumed == batch
+		if changed == 0 && resumed == 0 {
+			return nil
+		}
+		merchantID := billing.MerchantID(mid)
+		jobs := []river.JobArgs{DunningArgs{MerchantID: mid}, InvoiceArgs{MerchantID: &merchantID, Collect: true}, InvoiceArgs{MerchantID: &merchantID, Collect: true, UseMonthlyFloor: true}}
+		for _, args := range jobs {
+			// Do not deduplicate against a scan sleeping on an earlier outage.
+			// Canonical invoice/renewal admission and durable cadence own money.
+			if err := w.DB.InsertRiverJobTx(ctx, tx, args, &river.InsertOpts{Queue: QueueBilling}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return more, err
+}
+
+func (w *ProviderRefreshWorker) loadAppliedWatermark(ctx context.Context, mid, psp uuid.UUID) (time.Time, error) {
+	watermark, err := w.DB.Gen(ctx).GetPSPAppliedRefreshWatermark(ctx, gen.GetPSPAppliedRefreshWatermarkParams{MerchantID: mid, PspID: psp})
+	if err == nil {
+		if watermark.After(w.now().Add(w.safetyLag())) {
+			return time.Time{}, fmt.Errorf("account %s has future-dated applied progress", psp)
+		}
+		return watermark.UTC(), nil
 	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, err
+	}
+	floor, err := w.DB.Gen(ctx).PSPRecoveryHistoryFloor(ctx, gen.PSPRecoveryHistoryFloorParams{MerchantID: mid, PspID: psp, Fallback: w.now().Add(-w.safetyLag())})
 	if err != nil {
 		return time.Time{}, err
 	}
-	return watermark.UTC(), nil
+
+	return floor.UTC(), nil
 }
 
 func (w *ProviderRefreshWorker) recordWatermarkSuccess(ctx context.Context, mid uuid.UUID, provider reconcile.Provider, pspID uuid.UUID, watermark time.Time) error {
@@ -687,13 +782,6 @@ func (w *ProviderRefreshWorker) safetyLag() time.Duration {
 	return defaultRefreshSafetyLag
 }
 
-func (w *ProviderRefreshWorker) initialLookback() time.Duration {
-	if w.InitialLookback > 0 {
-		return w.InitialLookback
-	}
-	return defaultRefreshInitialLookback
-}
-
 func (w *ProviderRefreshWorker) maxWindows() int {
 	if w.MaxWindows > 0 {
 		return w.MaxWindows
@@ -702,6 +790,7 @@ func (w *ProviderRefreshWorker) maxWindows() int {
 }
 
 type providerRefreshStats struct {
+	More            bool
 	Merchants       int
 	Providers       int
 	Windows         int
@@ -713,15 +802,12 @@ type providerRefreshStats struct {
 	CCBillErrors    int
 	ConvergeErrors  int
 	LaneErrors      int
-	// Gated (#836): merchants skipped because the destructive-action switch or
-	// their per-merchant policy is off.
+	// Gated counts passes that observed receipts with lifecycle changes held.
 	Gated int
-	// Advisory (#835): merchants pulled in advisory mode because they have
-	// never been armed for enforcing pulls.
-	Advisory int
 }
 
 func (s *providerRefreshStats) add(r providerRefreshMerchantResult) {
+	s.More = s.More || r.More
 	s.Providers += r.Providers
 	s.Windows += r.Windows
 	s.AppliedChanges += r.AppliedChanges
@@ -736,6 +822,7 @@ type providerRefreshMerchantResult struct {
 }
 
 func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
+	r.More = r.More || p.More
 	r.Providers += p.Providers
 	r.Windows += p.Windows
 	r.AppliedChanges += p.AppliedChanges
@@ -753,6 +840,7 @@ func (r *providerRefreshMerchantResult) add(p providerRefreshProviderResult) {
 }
 
 type providerRefreshProviderResult struct {
+	More            bool
 	Providers       int
 	Windows         int
 	AppliedChanges  int

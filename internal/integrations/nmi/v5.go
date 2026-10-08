@@ -340,10 +340,20 @@ func (c *NMIClient) ListCustomersPage(ctx context.Context, cursor string, perPag
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}
-	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &page); err != nil {
+	// A successful list response must actually identify its list and terminal
+	// pagination state. Unknown fields remain harmless additions.
+	var wire struct {
+		Customers  *[]V5Customer `json:"customers"`
+		NextCursor V5Cursor      `json:"next_cursor"`
+		HasMore    *bool         `json:"has_more"`
+	}
+	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &wire); err != nil {
 		return page, err
 	}
-	return page, nil
+	if wire.Customers == nil || wire.HasMore == nil || (*wire.HasMore && wire.NextCursor == "") {
+		return page, errors.New("nmi customer list is incomplete")
+	}
+	return CustomerPage{Customers: *wire.Customers, NextCursor: wire.NextCursor, HasMore: *wire.HasMore}, nil
 }
 
 // GetCustomer reads one vault customer by id (GET /v5/customers/{id}). The
@@ -432,10 +442,20 @@ func (c *NMIClient) ListSubscriptionsPage(ctx context.Context, cursor string, pe
 	if len(q) > 0 {
 		path += "?" + q.Encode()
 	}
-	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &page); err != nil {
+	// A successful list response must actually identify its list and terminal
+	// pagination state. Unknown fields remain harmless additions.
+	var wire struct {
+		Subscriptions *[]V5Subscription `json:"subscriptions"`
+		NextCursor    V5Cursor          `json:"next_cursor"`
+		HasMore       *bool             `json:"has_more"`
+	}
+	if err := c.sendV5Request(ctx, http.MethodGet, path, nil, &wire); err != nil {
 		return page, err
 	}
-	return page, nil
+	if wire.Subscriptions == nil || wire.HasMore == nil || (*wire.HasMore && wire.NextCursor == "") {
+		return page, errors.New("nmi subscription list is incomplete")
+	}
+	return SubscriptionPage{Subscriptions: *wire.Subscriptions, NextCursor: wire.NextCursor, HasMore: *wire.HasMore}, nil
 }
 
 // GetSubscription fetches one subscription by id. found=false when the

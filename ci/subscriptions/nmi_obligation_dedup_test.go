@@ -19,13 +19,14 @@ func TestEngineNMIFirstAttemptFindsRemoteObligation(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	initial := w.nmi.LastSale()
 	paid := w.nmi.AddSale(nmimock.Sale{
 		OrderID: subscriptions.ObligationOrderReference(e.sub.UUID(), end),
-		Vault:   initial.Vault, BillingID: initial.BillingID, Amount: initial.Amount,
+		Vault:   initial.Vault, BillingID: initial.BillingID, Amount: initial.Amount, At: end,
 	})
 	before := e.providerAttempts()
+	e.toPeriodEnd()
 	w.runRenewals()
 	require.Equal(t, before, e.providerAttempts(), "lookup must precede the first sale submission")
 	w.until(func() bool { return e.periodEnd().After(end) }, "the remote charge pays the first local renewal attempt")
@@ -45,9 +46,10 @@ func TestEngineNMIFirstAttemptWaitsForOrderLookup(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
-	e.toPeriodEnd()
+	e.refreshBeforePeriodEnd()
 	before := e.providerAttempts()
 	w.nmi.QueryUnavailable(true)
+	e.toPeriodEnd()
 	w.runRenewals()
 	w.until(func() bool { return len(w.openFindings("life.submission.unresolved")) == 1 }, "an unavailable order lookup holds the renewal")
 	require.Equal(t, before, e.providerAttempts(), "a failed lookup cannot authorize a charge")

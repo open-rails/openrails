@@ -211,6 +211,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: MarkProviderIntentFailedRetryable :execrows
 UPDATE billing.provider_intents
 SET status = 'failed_retryable',
+	result_evidence = result_evidence - 'recovery_held',
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     lease_expires_at = NULL,
@@ -226,7 +227,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: MarkProviderIntentUnknown :execrows
 UPDATE billing.provider_intents
 SET status = 'unknown_needs_verify',
-    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
+    result_evidence = (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
       || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
@@ -261,6 +262,8 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
 -- name: ParkProviderIntent :execrows
 UPDATE billing.provider_intents
 SET status = 'pending',
+	result_evidence = CASE WHEN sqlc.narg(recovery_evidence)::jsonb IS NULL THEN result_evidence - 'recovery_held'
+	  ELSE (COALESCE(result_evidence, '{}'::jsonb) - 'recovery_held') || sqlc.narg(recovery_evidence)::jsonb END,
     attempts = GREATEST(attempts - 1, 0),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),

@@ -85,6 +85,7 @@ func TestHeldRenewalKeepsAccess(t *testing.T) {
 
 	w.cfg = nil
 	w.restart()
+	w.refreshProviders()
 	w.runRenewals()
 	w.wake()
 	sub := w.subscription(embedded, e.sub)
@@ -104,6 +105,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		grace := graceFor(hours)
 		w := newWorld(t)
 		e := enrollEvery(t, w, "stripe", embedded, hours)
+		e.refreshBeforePeriodEnd()
 		e.setDecline(visa.Last4, "auth", "")
 		end := e.periodEnd()
 		e.toPeriodEnd()
@@ -116,6 +118,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 		w.wake()
 		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status, "the challenge stays open for the whole allowance")
 		w.advance(2 * time.Second)
+		w.refreshProviders()
 		require.True(t, e.c.entitled(e.ent), "no outcome yet: access continues past the allowance")
 		w.until(func() bool { return w.subscription(embedded, e.sub).Status == "awaiting_method" }, "the abandoned challenge waits for a new card")
 		require.True(t, e.c.entitled(e.ent), "a membership waiting for a new card keeps access")
@@ -132,6 +135,7 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 		w := newWorld(t)
 		w.armDestructive()
 		e := enrollEvery(t, w, "nmi", embedded, hours)
+		e.refreshBeforePeriodEnd()
 		e.setDecline(visa.Last4, "insufficient_funds", "202")
 		e.toPeriodEnd()
 		first := w.clock.Now()

@@ -98,6 +98,20 @@ func Succeeded(evidence map[string]any) Outcome {
 	return Outcome{Class: OutcomeSucceeded, Evidence: evidence}
 }
 func Retryable(reason string) Outcome { return Outcome{Class: OutcomeRetryable, Reason: reason} }
+
+// RecoveryHeld preserves why this operation can be reconsidered promptly when
+// provider catch-up completes. It grants no permission to dispatch a mutation.
+func RecoveryHeld(reason string) Outcome {
+	return Outcome{Class: OutcomeParked, Reason: reason, Evidence: map[string]any{"recovery_held": true}}
+}
+
+// IsRecoveryHeld identifies dispatcher waiting, never evidence of provider work.
+func IsRecoveryHeld(in gen.BillingProviderIntent) bool {
+	var evidence struct {
+		Held bool `json:"recovery_held"`
+	}
+	return json.Unmarshal(in.ResultEvidence, &evidence) == nil && evidence.Held
+}
 func Ambiguous(reason string) Outcome { return Outcome{Class: OutcomeAmbiguous, Reason: reason} }
 
 // AmbiguousWithEvidence retains an exact provider receipt while local effects
@@ -202,4 +216,35 @@ func EvidenceString(intent gen.BillingProviderIntent, key string) string {
 	var value string
 	_ = json.Unmarshal(evidence[key], &value)
 	return value
+}
+
+// hasSubmissionEvidence is shared by parking and recovery redispatch. A
+// durable marker is evidence of possible provider acceptance, never permission
+// to infer non-execution from an empty read or to issue another POST.
+func hasSubmissionEvidence(in gen.BillingProviderIntent) (bool, error) {
+	var evidence map[string]json.RawMessage
+	if len(in.ResultEvidence) > 0 {
+		if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
+			return false, err
+		}
+	}
+	key := "submitted_at"
+	switch in.IntentType {
+	case "initial_membership":
+		key = "initial_submitted"
+	case "nmi_sale":
+		key = "sale_submitted"
+	case "nmi_upgrade":
+		// Tier changes fence their one-time proration inside the step. The
+		// remaining schedule update must not strand its charge behind a gate.
+		if raw := evidence["proration"]; len(raw) > 0 && string(raw) != "null" {
+			var step map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &step); err != nil {
+				return false, err
+			}
+			evidence = step
+		}
+	}
+	_, found := evidence[key]
+	return found, nil
 }

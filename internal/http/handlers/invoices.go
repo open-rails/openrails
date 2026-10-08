@@ -18,6 +18,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
 )
@@ -427,6 +428,10 @@ var invoiceRefusals = []struct {
 }
 
 func writeInvoiceError(r *httprequest.Request, err error) {
+	if errors.Is(err, providerrecovery.ErrPending) || errors.Is(err, money.ErrInvoiceRecoveryHeld) {
+		r.ErrorCode(billing.CodeServiceUnavailable, "billing is paused while provider recovery completes")
+		return
+	}
 	if db.IsNotFound(err) {
 		r.ErrorCode(billing.CodeResourceNotFound, "invoice not found")
 		return

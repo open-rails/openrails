@@ -4302,6 +4302,7 @@
           "rebill_terms_committed",
           "resource_conflict",
           "resource_not_found",
+          "service_unavailable",
           "subscription_not_found"
         ],
         "x-openrails-error-sets": [
@@ -7914,7 +7915,8 @@
           "invoice_retry_outcome_unknown",
           "payment_method_required",
           "payment_provider_rejected",
-          "resource_not_found"
+          "resource_not_found",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -8227,7 +8229,8 @@
           "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
-          "resource_not_found"
+          "resource_not_found",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:customer",

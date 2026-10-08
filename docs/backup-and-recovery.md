@@ -94,18 +94,26 @@ grant log by convergence, not restored directly — which is why the grant log m
 
 ## Restore procedure
 
-1. **Stop the workers.** Set `provider_write_mode: readonly` before bringing the restored
-   instance up, so nothing writes to a provider from stale state. Confirm the destructive-action
-   kill switch is off (`operations.md`).
+1. **Stop and drain the source writers, and disable their automatic restart.** A restored
+   copy must become the sole authoritative database. Replicas may share that database;
+   independently writable copies are not a supported active-active deployment.
 2. Restore Postgres to the target time; confirm `ENCRYPTION_MASTER_KEY` and Vault are available.
-3. Bring OpenRails up **still in `readonly`**. Let the provider pull run and read the findings —
-   this is your divergence report, produced without touching anything.
-4. Review before enforcing. The first enforce pass after a restore is the highest-risk moment in
-   the system's life; the first-enforce gate (`operations.md`) exists for exactly this.
-5. Return to `full` once the findings look like what you expect.
+3. Start the restored instance. For established NMI and Stripe accounts, stale completed
+   coverage holds new collection and destructive work while provider reads recover qualified
+   financial receipts. Failed or incomplete reads and unresolved financial conflicts keep
+   that work held. See [provider recovery](provider-recovery.md) for coverage and limitations.
+4. If configured with `provider_write_mode: full`, eligible work resumes automatically after
+   verified catch-up. The separate destructive-action and ownership controls still apply.
+   To inspect before permitting any provider writes, start with `readonly`: reads and verified
+   local recovery continue, but this explicit setting never changes automatically. Change it
+   to `full` only when ready to resume.
+5. Review unresolved findings and application-only state that the provider cannot reconstruct.
+   Ignoring a finding does not prove that its financial conflict has been settled.
 
-Do not skip step 3. A restored database plus an immediate enforcing convergence pass is how a
-recovery becomes a second incident.
+CCBill and Solana retain their existing recovery controls and are outside the automatic NMI/Stripe
+freshness gate. Use `readonly` and their established review procedure for those books. A fresh
+coverage timestamp cannot detect every arbitrary clone, provider indexing delay, or account
+created after the backup. Never restart the old source copy after the destination begins writing.
 
 ## What is not a backup
 

@@ -101,6 +101,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_won1", "won", p)))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_won1", "needs_response", p)))
@@ -129,6 +130,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerCancelNotice()))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
@@ -142,6 +144,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		w := newWorld(t)
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
+		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_own", "needs_response", p)))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)

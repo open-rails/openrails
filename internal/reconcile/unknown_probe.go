@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // #665: per-subscription provider probes — the #367 liveness worker's probing
@@ -91,7 +92,10 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 				probe = bySchedule
 			}
 		}
-		snap.Transactions = probeSaleTransactions(probe, subj.RailSubscriptionID, since)
+		snap.Transactions, err = probeSaleTransactions(probe, subj.RailSubscriptionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	liveness, err := p.Client.GetRecurringLiveness(ctx, subj.RailSubscriptionID)
@@ -117,54 +121,67 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 }
 
 // probeSaleTransactions maps an order-reference sale probe onto snapshot
-// transactions. NMI's query response is server-filtered to actions >= since, so
-// an action with an unparseable date is floored to `since` — a provider-proven
-// lower bound, not a fabricated instant.
-func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string, since time.Time) []RemoteTransaction {
-	floored := func(at time.Time) time.Time {
-		if at.IsZero() {
-			return since
-		}
-		return at
-	}
+// transactions. Query filters modification time, so it cannot supply a missing
+// action time or turn an older charge into payment for the current period.
+func probeSaleTransactions(probe nmi.SaleProbeResult, railSubID string) ([]RemoteTransaction, error) {
 	var out []RemoteTransaction
 	if len(probe.Sales) > 0 {
 		for _, sale := range probe.Sales {
 			if sale.TransactionID == "" {
 				continue
 			}
-			t := remoteSale(sale, railSubID)
-			t.OccurredAt = floored(sale.At)
+			t, err := remoteSale(sale, railSubID)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, t)
 		}
-		return out
+		return out, nil
 	}
 	if probe.SuccessFound && probe.SuccessTransactionID != "" {
-		t := RemoteTransaction{
+		if err := moneyutil.RequireFiatCurrency(probe.SuccessCurrency); err != nil {
+			return nil, err
+		}
+		if probe.SuccessAt.IsZero() {
+			return nil, errors.New("NMI sale has no readable action time")
+		}
+		amount, err := moneyutil.DecimalToRailMinor(probe.SuccessCurrency, probe.SuccessAmount)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, RemoteTransaction{
 			TransactionID:  probe.SuccessTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeSale,
 			Success:        true,
+			AmountCents:    int64(amount),
 			Currency:       probe.SuccessCurrency,
-			OccurredAt:     floored(probe.SuccessAt),
-		}
-		t.setAmount(probe.SuccessAmount)
-		out = append(out, t)
+			OccurredAt:     probe.SuccessAt,
+		})
 	}
 	if probe.DeclineFound {
-		t := RemoteTransaction{
+		if err := moneyutil.RequireFiatCurrency(probe.DeclineCurrency); err != nil {
+			return nil, err
+		}
+		if probe.DeclineAt.IsZero() {
+			return nil, errors.New("NMI decline has no readable action time")
+		}
+		amount, err := moneyutil.DecimalToRailMinor(probe.DeclineCurrency, probe.DeclineAmount)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, RemoteTransaction{
 			TransactionID:  probe.DeclineTransactionID,
 			SubscriptionID: railSubID,
 			Type:           TransactionTypeDecline,
 			Success:        false,
+			AmountCents:    int64(amount),
 			Currency:       probe.DeclineCurrency,
-			OccurredAt:     floored(probe.DeclineAt),
+			OccurredAt:     probe.DeclineAt,
 			DeclineReason:  probe.DeclineReason,
-		}
-		t.setAmount(probe.DeclineAmount)
-		out = append(out, t)
+		})
 	}
-	return out
+	return out, nil
 }
 
 // StripeSubscriptionProber wraps the per-subscription Stripe read

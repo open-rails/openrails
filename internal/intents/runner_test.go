@@ -25,6 +25,7 @@ type fakeLedger struct {
 	due, dueVerify         []gen.BillingProviderIntent
 	refuseClaim            bool
 	markErr, logErr        error
+	recoveryErr            error
 	recs                   map[uuid.UUID]*ledgerRec
 	logs                   []MutationLogParams
 	pruned, prunedTerminal []uuid.UUID
@@ -106,6 +107,15 @@ func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason 
 }
 func (f *fakeLedger) Park(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
 	return f.set(id, StatusPending, reason, next, nil)
+}
+func (f *fakeLedger) ParkForRecovery(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
+	return f.set(id, StatusPending, reason, next, RecoveryHeld(reason).Evidence)
+}
+func (f *fakeLedger) WakeRecoveryHeld(_ context.Context, id uuid.UUID, now time.Time) error {
+	if record := f.recs[id]; record != nil {
+		record.next = now
+	}
+	return nil
 }
 func (f *fakeLedger) MarkSuperseded(_ context.Context, id uuid.UUID, reason string) error {
 	return f.set(id, StatusSuperseded, reason, time.Time{}, nil)
@@ -316,4 +326,86 @@ func TestEnqueueAndExecute(t *testing.T) {
 	assert.Zero(t, h.executed)
 	assert.Equal(t, 1, ledger.claims)
 	assert.Equal(t, StatusPending, row.Status)
+}
+
+func (f *fakeLedger) CheckRecovery(context.Context, gen.BillingProviderIntent, time.Time) error {
+	return f.recoveryErr
+}
+
+func TestHeldCollectionsRedispatchOnlyForReadback(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		kind     string
+		mode     ModeView
+		evidence []byte
+	}{
+		{"restored renewal without local fence", "subscription_collection", modeFull, nil},
+		{"old retryable submitted operation", "subscription_collection", modeFull, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"readonly submitted operation", "subscription_collection", modeReadonly, []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)},
+		{"restored invoice without local fence", "invoice_collection", modeFull, nil},
+		{"readonly invoice without local fence", "invoice_collection", modeReadonly, nil},
+		{"stale paid tier change", "nmi_upgrade", modeFull, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
+		{"readonly paid tier change", "nmi_upgrade", modeReadonly, []byte(`{"proration":{"submitted_at":"2026-10-01T00:00:00Z"}}`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			intent := testIntent(test.kind, OriginSystem, 1)
+			intent.Status = StatusFailedRetryable
+			intent.ResultEvidence = test.evidence
+			store := &fakeLedger{row: intent, due: []gen.BillingProviderIntent{intent}, recoveryErr: errors.New("provider recovery required")}
+			handler := &fakeHandler{typ: intent.IntentType, relevance: StillRelevant(), verify: Succeeded(nil)}
+			runner := &Runner{Store: store, Registry: NewRegistry(handler), Config: test.mode}
+			_, err := runner.RunExecuteOnce(context.Background())
+			require.NoError(t, err)
+			require.Zero(t, handler.executed)
+			require.Equal(t, StatusUnknownNeedsVerify, store.recs[intent.ID].status)
+			require.Equal(t, test.evidence, store.row.ResultEvidence, "recovery does not fabricate a submission fence")
+			intent.Status = StatusUnknownNeedsVerify
+			store.dueVerify = []gen.BillingProviderIntent{intent}
+			_, err = runner.RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, 1, handler.verified)
+			require.Zero(t, handler.executed)
+			require.Equal(t, StatusSucceeded, store.recs[intent.ID].status)
+		})
+	}
+}
+
+func TestVerifiedUnsubmittedRecoveryReconsidersOnlyWhenAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      ModeView
+		submitted bool
+		held      bool
+		ready     bool
+	}{
+		{"ready", modeFull, false, false, true},
+		{"readonly", modeReadonly, false, false, false},
+		{"still stale", modeFull, false, true, false},
+		{"submitted replay keeps backoff", modeFull, true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := testIntent("subscription_collection", OriginSystem, 1)
+			in.Rail = "stripe"
+			in.Status = StatusUnknownNeedsVerify
+			if tc.submitted {
+				in.ResultEvidence = []byte(`{"submitted_at":"2026-10-01T00:00:00Z"}`)
+			}
+			store := &fakeLedger{row: in, dueVerify: []gen.BillingProviderIntent{in}}
+			if tc.held {
+				store.recoveryErr = errors.New("provider recovery required")
+			}
+			handler := &fakeHandler{typ: in.IntentType, relevance: StillRelevant(), verify: Retryable("verified unsubmitted")}
+			before := time.Now()
+			_, err := (&Runner{Store: store, Registry: NewRegistry(handler), Config: tc.mode}).RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			require.Zero(t, handler.executed, "verification never dispatches the provider")
+			record := store.recs[in.ID]
+			if tc.ready {
+				require.Equal(t, StatusFailedRetryable, record.status)
+				require.WithinDuration(t, before, record.next, time.Second)
+			} else {
+				require.True(t, record.next.After(before.Add(time.Second)), "provider/policy backoff is not expedited")
+			}
+		})
+	}
 }

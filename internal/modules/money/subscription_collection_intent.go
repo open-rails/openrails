@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -73,7 +74,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	if reason := h.submissionHeld(in); reason != "" {
 		return intents.Parked(reason)
 	}
-	if outcome, done := h.obligationPaid(ctx, in, p); done {
+	if outcome, done := h.obligationOutcome(ctx, in, p); done {
 		return outcome
 	}
 	method, _, _, err := h.validateAndFence(ctx, in, p, nil)
@@ -106,11 +107,11 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 	return h.dispatchNMI(ctx, in, p, charger, proof)
 }
 
-// obligationPaid reads the obligation's shared order before every new attempt,
+// obligationOutcome reads the obligation's shared order before every new attempt,
 // including the first one in this database. A restored or stale copy may not
-// know about a provider charge yet. This lookup recovers visible payments;
-// it cannot serialize independent senders while provider reads lag.
-func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
+// know about a provider charge yet. Recover qualified payment/refusal facts and
+// hold visible unresolved work. Reads cannot serialize independent senders.
+func (h *SubscriptionCollectionHandler) obligationOutcome(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
 	if in.Rail == "stripe" || p.Instrument.CustodianHeld() {
 		return intents.Outcome{}, false
 	}
@@ -118,10 +119,23 @@ func (h *SubscriptionCollectionHandler) obligationPaid(ctx context.Context, in g
 	if err != nil {
 		return h.unresolved(ctx, in, p, "the obligation's order cannot be read before a new attempt: "+err.Error()), true
 	}
-	if !found {
-		return intents.Outcome{}, false
+	if found {
+		return h.completePaid(ctx, in, p, receipt), true
 	}
-	return h.completePaid(ctx, in, p, receipt), true
+	attempts, err := intents.ReadNMIOrderAttempts(ctx, in, h.Resolver)
+	if err != nil {
+		return h.unresolved(ctx, in, p, "the obligation's attempts cannot be qualified before submission: "+err.Error()), true
+	}
+	if attempts.Declined {
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, attempts.DeclineCode, attempts.DeclineTransactionID); err != nil {
+			return h.unresolved(ctx, in, p, "retain the existing attempt's decline: "+err.Error()), true
+		}
+		return h.completeDeclined(ctx, in, p, attempts.DeclineCode, attempts.DeclineTransactionID), true
+	}
+	if attempts.Transactions != 0 {
+		return h.unresolved(ctx, in, p, "the obligation's order contains a transaction without a definitive outcome"), true
+	}
+	return intents.Outcome{}, false
 }
 
 // hit runs the named failpoint for this operation.
@@ -295,9 +309,7 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	if outcome, done := h.completeEvidence(ctx, in, p); done {
 		return outcome
 	}
-	if intents.EvidenceString(in, "submitted_at") == "" {
-		return intents.Retryable("unsubmitted payment awaits gated execution")
-	}
+	unsubmitted := intents.EvidenceString(in, "submitted_at") == ""
 	reference := ""
 	if candidate, found, err := intents.LoadCollectionCandidate(in); err != nil {
 		return intents.Ambiguous(err.Error())
@@ -305,6 +317,29 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 		reference = candidate.TransactionID
 	}
 	if in.Rail == "stripe" {
+		if unsubmitted && reference == "" {
+			service, err := h.stripeEngineService(ctx, in)
+			if err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+			params, err := intents.StripeEngineParams(in)
+			if err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+			found, exists, err := service.ReadEngineRenewal(ctx, params)
+			if found.PaymentIntentID != "" {
+				if retainErr := intents.NewStore(h.DB).RetainCollectionCandidate(ctx, in, intents.CollectionCandidate{TransactionID: found.PaymentIntentID}); retainErr != nil {
+					return intents.Ambiguous("retain existing Stripe renewal: " + retainErr.Error())
+				}
+			}
+			if err != nil {
+				return h.unresolved(ctx, in, p, "existing renewal observation is inconclusive: "+err.Error())
+			}
+			if !exists {
+				return h.awaitRecoveredSubmission(ctx, in)
+			}
+			reference = found.PaymentIntentID
+		}
 		return h.verifyStripeEngine(ctx, in, p, reference)
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
@@ -313,6 +348,9 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Billi
 	}
 	if found {
 		return h.completePaid(ctx, in, p, receipt)
+	}
+	if unsubmitted {
+		return h.awaitRecoveredSubmission(ctx, in)
 	}
 	if p.Instrument.CustodianHeld() {
 		return h.unresolved(ctx, in, p, "custodian-held engine charge has no exact receipt")
@@ -395,6 +433,9 @@ func (h *SubscriptionCollectionHandler) completion(ctx context.Context, in gen.B
 		return intents.NewStore(d).CompleteSubscriptionCollection(ctx, in, outcome, h.now())
 	})
 	if err != nil {
+		if errors.Is(err, providerrecovery.ErrPending) {
+			return intents.RecoveryHeld(err.Error())
+		}
 		return intents.Ambiguous("engine local completion resumes from retained custody: " + err.Error())
 	}
 	return outcome
@@ -404,19 +445,24 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
+	if retained.ReversalKind() != "" {
+		// A confirmed charge is a financial fact even while readonly or stale
+		// coverage holds its cancellation. Commit the idempotent payment first;
+		// this same retained operation keeps verifying the lifecycle separately.
+		params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge has a provider reversal"}
+		if err := h.lifecycle(h.DB).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
+			return intents.Ambiguous("record reversed charge: " + err.Error())
+		}
+	}
 	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
 		if err := recordEngineAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: retained.TransactionID()}, h.now()); err != nil {
 			return err
 		}
-		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
 		if reversal := retained.ReversalKind(); reversal != "" {
-			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a canceled subscription"}
-			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
-				return err
-			}
 			if sub.Status != models.StatusCanceled {
 				kind := models.CancelTypeMerchant
 				if reversal == "dispute" {
@@ -490,4 +536,17 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
 	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
 	return attempts.Record(ctx, d.Gen(ctx), a)
+}
+
+// A restored book may have lost the original operation, while its stable
+// obligation is already paid. Verify may recover an exact positive receipt
+// without inventing a local submission fence; absence never authorizes a POST.
+func (h *SubscriptionCollectionHandler) awaitRecoveredSubmission(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
+	if reason := h.submissionHeld(in); reason != "" {
+		return intents.Parked(reason)
+	}
+	if err := intents.NewStore(h.DB).CheckRecovery(ctx, in, h.now()); err != nil {
+		return intents.RecoveryHeld(err.Error())
+	}
+	return intents.Retryable("unsubmitted payment awaits gated execution")
 }

@@ -23,11 +23,21 @@ func TestInvoiceMonthlyCadenceSerializesReplicas(t *testing.T) {
 	c := a.newCustomer()
 	method := c.saveCard("nmi", visa)
 	first := newNMIInvoice(f, c)
+	a.refreshProviders()
+	a.settleCollectionScans()
 	answer := payNMIInvoice(t.Context(), a, c, first, method, "monthly-agreement")
 	require.NoError(t, answer.err)
-	require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status)
+	require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status, string(answer.body))
 	f.settle()
 	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"currency": "USD", "payment_method_id": method})
+	// Real refresh ran the ordinary monthly scan. Keep that durable baseline,
+	// refresh before the next bucket, then cross it only after the barrier is set.
+	var baseline time.Time
+	require.NoError(t, a.pool.QueryRow(t.Context(), a.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&baseline))
+	nextPeriod := baseline.Add(30 * 24 * time.Hour)
+	f.advance(nextPeriod.Add(-10 * time.Minute).Sub(f.base.clock.Now()))
+	a.refreshProviders()
+	a.settleCollectionScans()
 	small := func(on ...*world) billing.InvoiceID {
 		id := newNMIInvoice(f, c, on...)
 		_, err := a.client[remote].CreateInvoicePayment(t.Context(), id, billing.CreateInvoicePaymentParams{Amount: 90_000_000, Reference: "partial-" + id.String()})
@@ -36,6 +46,7 @@ func TestInvoiceMonthlyCadenceSerializesReplicas(t *testing.T) {
 	}
 	invoice := small()
 	hold := f.hold("nmi", submission("nmi"), false)
+	f.advance(nextPeriod.Add(time.Second).Sub(f.base.clock.Now()))
 	start := func(r *world) int64 {
 		job, err := r.jobs.Insert(t.Context(), riverjobs.InvoiceArgs{Collect: true, UseMonthlyFloor: true}, &river.InsertOpts{Queue: r.replica.queue})
 		require.NoError(t, err)
@@ -48,15 +59,17 @@ func TestInvoiceMonthlyCadenceSerializesReplicas(t *testing.T) {
 		job, err := b.jobs.JobGet(t.Context(), secondPass)
 		return err == nil && job.State == rivertype.JobStateRetryable
 	}, 10*time.Second, 20*time.Millisecond, "the other replica retains retryable work while the monthly scan owns its session lock")
-	var completed int
-	require.NoError(t, a.pool.QueryRow(t.Context(), a.q(`SELECT count(*) FROM billing.invoice_collection_cadence`)).Scan(&completed))
-	require.Zero(t, completed, "an unfinished scan cannot advance the monthly watermark")
+	var completed time.Time
+	require.NoError(t, a.pool.QueryRow(t.Context(), a.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&completed))
+	require.True(t, baseline.Equal(completed), "an unfinished scan cannot advance the existing monthly watermark")
 	later := small(b) // A's single-worker queue is intentionally paused at the provider.
 	hold.release()
 	a.waitJob(firstPass)
 	_, err := b.jobs.JobRetry(t.Context(), secondPass)
 	require.NoError(t, err)
 	b.waitJob(secondPass)
+	require.NoError(t, a.pool.QueryRow(t.Context(), a.q(`SELECT monthly_period_started_at FROM billing.invoice_collection_cadence`)).Scan(&completed))
+	require.True(t, nextPeriod.Equal(completed), "the completed scan advances exactly one monthly bucket")
 	requireInvoicePaidOnce(f, invoice, 2, 2, 10_000_000, 1)
 	unpaid, err := a.client[remote].GetInvoice(t.Context(), later)
 	require.NoError(t, err)

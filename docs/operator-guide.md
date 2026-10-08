@@ -56,7 +56,8 @@ modes"](operations.md#operating-modes-the-safety-levers).
   (boot refuses without it); unset fail-closes to `readonly` wherever it is
   consulted. `limited` = humans can do everything (checkout, cancel, refund),
   the system initiates nothing; `readonly` = nothing writes to a provider at
-  all, wire-enforced.
+  all, wire-enforced. Provider reads and verified local financial recovery
+  continue in every mode.
 - **`test_mode`** (`TEST_MODE`, `--test-mode`) — the credential axis:
   `sandbox | live`; required explicitly with no implicit posture default. Sandbox routes every rail to
   its test environment and refuses live credentials at boot (live Stripe keys
@@ -73,12 +74,20 @@ modes"](operations.md#operating-modes-the-safety-levers).
 | Catalog provider-object writes | yes | deferred | deferred |
 | Provider reads + webhook ingestion | yes | yes | yes |
 
+For established NMI and Stripe accounts, stale completed provider coverage or
+unresolved financial conflicts also hold new collection and destructive work.
+Configured `full` resumes eligible work automatically after verified catch-up;
+explicit `readonly` stays readonly. This automatic gate does not cover CCBill
+or Solana and does not establish ownership across separate database copies.
+See [provider recovery](provider-recovery.md).
+
 ### Routine operation
 
 Everything below runs by itself under River once the server (or a `run-worker`
-process) is up. The rails themselves do the recurring billing (NMI/CCBill/Stripe
-bill provider-side and webhook the result; Solana is pulled by our crank);
-OpenRails' workers converge state around that:
+process) is up. Provider-owned schedules bill at the provider and report the
+result. OpenRails-owned NMI/Stripe agreements use the shared-database due
+worker and accepted collection operations; Solana is pulled by its crank.
+Ownership determines which system may initiate the renewal.
 
 | Worker | Cadence | Job |
 |---|---|---|
@@ -86,7 +95,7 @@ OpenRails' workers converge state around that:
 | Provider-intent verifier | 5 min | resolves `unknown_needs_verify` outcomes by *reading* the provider before any retry |
 | Convergence Engine sweep | 15 min (+ on start) | per-merchant internal-drift repair: stalled dunning, lapsed periods, unmaterialized grants ([operations.md](operations.md#the-convergence-engine)) |
 | Provider Refresh | 4 h (+ on start) | watermarked missed-event backfill, unknown-cohort reconcile, CCBill DataLink refresh — reads only, never mutates a provider |
-| Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning)) |
+| Due / dunning | 1 min | admits due engine renewals and retries `past_due` per the derived schedule; parks whole missed periods for verification instead of charging ([operations.md → Dunning](operations.md#dunning)) |
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
@@ -151,21 +160,27 @@ auto-resolve when the divergence vanishes. Taxonomy:
 
 ### Cutover / migration boots
 
-Set the mode **before first start** — freshly imported stale `past_due`
-subscriptions are immediately "due", and a `full` boot would start charging
-them within hours:
+Set the mode **before first start**. With `full`, an established NMI/Stripe
+book catches up through the automatic provider recovery gate before eligible
+collection resumes. Stop the source writers before activating a restored
+database; see [backup and recovery](backup-and-recovery.md#restore-procedure).
+For a cutover requiring manual review before system-origin collection:
 
 1. Boot with `PROVIDER_WRITE_MODE=limited` (site fully usable; system-origin
-   writes park) — or `readonly` for a strictly-observing boot.
-2. The first dunning cycle materializes the backlog as parked intents:
-   window-expired subs get the local no-charge cancel, in-window charges park.
+   writes park) — or `readonly` to block all provider writes while permitting
+   verified local recovery.
+2. Let provider reads catch up. In `limited`, eligible dunning work materializes
+   as parked intents and whole missed periods park for verification. Dunning
+   does not cancel locally in this mode. In `readonly`, it only observes due work;
+   provider receipt recovery runs separately.
 3. `openrails intents --merchant=<slug>` shows the real drain forecast
    ("N execute under limited, M require full"). Resolve anything you do not
    want to fire.
-4. `openrails pull-provider report --merchant=<slug>` — clear the human-judgment
-   findings queue (it never drains automatically).
-5. Raise to `PROVIDER_WRITE_MODE=full`: the executor drains exactly what you
-   saw. Missed periods are never back-billed.
+4. `openrails pull-provider report --merchant=<slug>` — review the human-judgment
+   findings queue. Resolve financial conflicts from evidence; dismissing a
+   finding does not satisfy the recovery gate.
+5. Raise to `PROVIDER_WRITE_MODE=full`: eligible work resumes after its current
+   policy and freshness checks pass. Missed whole periods are never back-billed.
 
 Full sequence and rationale: [operations.md →
 Cutover](operations.md#cutover-booting-against-production-credentials).

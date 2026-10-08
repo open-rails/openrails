@@ -24,6 +24,7 @@ func TestDunningScheduleParity(t *testing.T) {
 			var sub billing.SubscriptionID
 			if owner == "engine" {
 				e := enroll(t, w, "nmi", embedded)
+				e.refreshBeforePeriodEnd()
 				e.setDecline(visa.Last4, "insufficient_funds", "202")
 				e.toPeriodEnd()
 				w.runRenewals()
@@ -36,6 +37,7 @@ func TestDunningScheduleParity(t *testing.T) {
 				w.nmi.RenewSchedule(l.railSub, false)
 				w.advance(due.Sub(w.clock.Now()) + 30*time.Hour)
 				w.watchRebills()
+				w.refreshProviders()
 				sub = l.sub
 			}
 			rows := w.cycleAttempts(sub)
@@ -48,7 +50,7 @@ func TestDunningScheduleParity(t *testing.T) {
 				require.NotNil(t, s.NextRetryAt)
 				got = append(got, s.NextRetryAt.Sub(declined))
 				if i < len(want)-1 {
-					w.advanceTo(*s.NextRetryAt)
+					w.advanceHealthyTo(*s.NextRetryAt)
 					w.runRenewals()
 				}
 			}

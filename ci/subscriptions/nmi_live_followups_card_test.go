@@ -75,7 +75,7 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()
-			e.toPeriodEnd()
+			e.toFreshPeriodEnd()
 			w.runRenewals()
 			require.True(t, e.periodEnd().After(end))
 			require.Len(t, w.nmi.ledger(""), sales+1, "exactly one renewal")

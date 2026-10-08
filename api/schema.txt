@@ -12,6 +12,7 @@ migration 0008_billing_access_intervals.up.sql sha256:711cdfd7a4611d00d15617823e
 migration 0009_invoice_collection_cadence.up.sql sha256:b90e15a74c20dd154c34bbb4deb115eac0541299eae862d728153e291ca4e95d
 migration 0010_entitlement_names.up.sql sha256:b232cc073d440a64f515c5b868624efe731d3681a1373e851a21710259255acb
 migration 0011_currency_codes.up.sql sha256:513950fd96eae6df288a7afd6956ded16b0c84f6fec0ff2b9f0fd3a12103ff37
+migration 0012_provider_applied_coverage.up.sql sha256:33533330adbe12918eae947cd4c94f5c791ebff7a7e65d65d60eeafca9986f16
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1690,7 +1691,7 @@ table billing.psp_refresh_watermarks
   column watermark_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint psp_refresh_watermarks_event_domain_check CHECK ((event_domain = ANY (ARRAY['events'::text])))
+  constraint psp_refresh_watermarks_event_domain_check CHECK ((event_domain = ANY (ARRAY['events'::text, 'applied_events'::text, 'completed_events'::text])))
   constraint psp_refresh_watermarks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint psp_refresh_watermarks_pkey PRIMARY KEY (merchant_id, psp_id, event_domain)
   constraint psp_refresh_watermarks_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT

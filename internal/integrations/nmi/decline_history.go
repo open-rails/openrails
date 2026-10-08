@@ -82,7 +82,7 @@ func (c *NMIClient) readHistoryWindow(ctx context.Context, from, to time.Time, h
 	// end_date is inclusive, to the second.
 	filter := QueryFilter{StartDate: from.Format(QueryTimeFormat), EndDate: to.Add(-time.Second).Format(QueryTimeFormat), ResultLimit: QueryPageLimit}
 	firsts := map[string]bool{}
-	for filter.PageNumber = 1; ; filter.PageNumber++ {
+	for filter.PageNumber = 0; ; filter.PageNumber++ {
 		batch, err := c.TransactionReport(ctx, filter)
 		if err != nil {
 			return fmt.Errorf("nmi transactions from %s, page %d: %w", from.Format(time.DateOnly), filter.PageNumber, err)

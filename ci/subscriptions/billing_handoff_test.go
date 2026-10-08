@@ -54,6 +54,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				end := member.periodEnd()
 				initialPayments := source.payments(sourceTopology, member.c.id)
 				require.Len(t, completed(initialPayments), 1)
+				member.refreshBeforePeriodEnd()
 
 				// Another merchant in the source database stays outside the export.
 				sibling := source.rival()
@@ -126,6 +127,11 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				// Re-enter provider credentials through the normal constructor only
 				// after restoration; preserved references resolve at the same gateway.
 				target.start()
+				// The destination observes the provider through its ordinary refresh
+				// before taking over writes; imported progress is not a fresh receipt.
+				target.refreshProviders()
+				target.settleCollectionScans()
+				require.Equal(t, 1, member.providerAttempts(), "destination catch-up before due sends no charge")
 				require.Equal(t, mid, target.client[embedded].MerchantID())
 				member.w, member.c.w, member.tp = target, target, targetTopology
 				require.Equal(t, end, member.periodEnd())

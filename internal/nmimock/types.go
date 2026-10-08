@@ -65,6 +65,8 @@ type Schedule struct {
 type Sale struct {
 	TransactionID, OrderID, Vault, BillingID string
 	OrderDescription                         string
+	// Condition overrides the Query API transaction state for pending/error fixtures.
+	Condition string
 	// Amount is the wire decimal ("9.99").
 	Amount, Currency string
 	Card             Card

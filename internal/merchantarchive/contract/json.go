@@ -371,6 +371,18 @@ func validateJSON(field, raw string) error {
 		return fmt.Errorf("trailing JSON")
 	}
 	r, ok := jsonRules[field]
+	// Recovery holds are dispatcher state shared by operation kinds, never
+	// provider proof. All remaining evidence still obeys its exact kind rule.
+	if strings.HasPrefix(field, "provider_intents.") && strings.HasSuffix(field, ".result_evidence") {
+		if evidence, isObject := v.(map[string]any); isObject {
+			if held, present := evidence["recovery_held"]; present {
+				if !booleanValue(held) {
+					return fmt.Errorf("invalid recovery hold")
+				}
+				delete(evidence, "recovery_held")
+			}
+		}
+	}
 	if !ok || !r(v) {
 		return fmt.Errorf("unsupported JSON contract")
 	}

@@ -97,7 +97,7 @@ func binFor(c Card) string {
 
 // search is the transaction report: every sale, validation and refund in
 // arrival order, filtered as NMI filters and paged by result_limit and
-// page_number (off when zero). Like NMI's, it names no schedule.
+// zero-based page_number. Like NMI's, it names no schedule.
 func (m *Mock) search(form url.Values) string {
 	match := func(field string, value string) bool {
 		want := form.Get(field)
@@ -120,7 +120,7 @@ func (m *Mock) search(form url.Values) string {
 	now := m.now()
 	var rows []xmlTransaction
 	add := func(t xmlTransaction, at time.Time, schedule string) {
-		if !match("order_id", t.OrderID) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
+		if !match("order_id", t.OrderID) || !match("order_description", t.OrderDescription) || !match("transaction_id", t.TransactionID) || !match("customer_vault_id", t.CustomerVaultID) ||
 			!match("action_type", t.Action.ActionType) || !match("subscription_id", schedule) || !inRange(at) {
 			return
 		}
@@ -136,6 +136,9 @@ func (m *Mock) search(form url.Values) string {
 		}
 		if s.Voided {
 			condition = "canceled"
+		}
+		if s.Condition != "" {
+			condition = s.Condition
 		}
 		source := "api"
 		if s.ScheduleID != "" {
@@ -164,7 +167,7 @@ func (m *Mock) search(form url.Values) string {
 	limit, _ := strconv.Atoi(form.Get("result_limit"))
 	page, _ := strconv.Atoi(form.Get("page_number"))
 	if limit > 0 {
-		from := min(max(page-1, 0)*limit, len(rows))
+		from := min(max(page, 0)*limit, len(rows))
 		rows = rows[from:min(from+limit, len(rows))]
 	}
 	var b strings.Builder

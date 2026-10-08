@@ -11,7 +11,7 @@ var (
 	invoiceActionErrors = codes("invalid_param", "invoice_action_not_allowed", "resource_not_found")
 	invoiceChargeErrors = codes("card_declined", "collection_payment_method_invalid", "collection_payment_method_required", "idempotency_key_reused", "invalid_param",
 		"invoice_not_retryable", "invoice_retry_idempotency_conflict", "invoice_retry_in_progress", "invoice_retry_outcome_unknown", "payment_method_required",
-		"payment_provider_rejected", "resource_not_found")
+		"payment_provider_rejected", "resource_not_found", "service_unavailable")
 )
 
 // invoicesRoutes is invoices and their collection, for the merchant and for
@@ -40,5 +40,5 @@ var invoicesRoutes = []Route{
 	{Method: GET, Path: "/v1/me/invoices/{id}", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Responses: []Reply{{200, billing.Invoice{}}}, Errors: invoiceErrors, Handler: h(handlers.GetMyInvoice)},
 	{Method: POST, Path: "/v1/me/invoices/{id}/pay-now", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement, IdempotencyKey: true,
-		Request: billing.PayInvoiceParams{}, Responses: []Reply{{200, billing.InvoicePayNow{}}, {202, billing.InvoicePayNow{}}}, Errors: codes("card_declined", "customer_action_required", "customer_payment_unsupported", "invalid_param", "invalid_payment_method", "payment_idempotency_conflict", "payment_in_progress", "payment_method_required", "payment_not_retryable", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found"), Handler: h(handlers.PayMyInvoice)},
+		Request: billing.PayInvoiceParams{}, Responses: []Reply{{200, billing.InvoicePayNow{}}, {202, billing.InvoicePayNow{}}}, Errors: codes("card_declined", "customer_action_required", "customer_payment_unsupported", "invalid_param", "invalid_payment_method", "payment_idempotency_conflict", "payment_in_progress", "payment_method_required", "payment_not_retryable", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.PayMyInvoice)},
 }

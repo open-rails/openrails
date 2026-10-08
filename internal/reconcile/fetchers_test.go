@@ -71,8 +71,8 @@ func (f *nmiBulkFake) fetch(t *testing.T, params FetchParams) *RemoteSnapshot {
 		}
 		f.queries = append(f.queries, r.Form)
 		page, _ := strconv.Atoi(r.Form.Get("page_number"))
-		if page >= 1 && page <= len(f.txnPages) {
-			fmt.Fprint(w, f.txnPages[page-1])
+		if page >= 0 && page < len(f.txnPages) {
+			fmt.Fprint(w, f.txnPages[page])
 			return
 		}
 		fmt.Fprint(w, `<?xml version="1.0"?><nm_response></nm_response>`)
@@ -184,6 +184,8 @@ func TestNMIFetcher(t *testing.T) {
 		require.Equal(t, []string{"", "1"}, f.cursors["subscriptions"])
 		require.Equal(t, []string{"", "1"}, f.cursors["customers"])
 		require.Len(t, f.queries, 2)
+		require.Empty(t, f.queries[0].Get("page_number"), "omitted page_number means first page (zero)")
+		require.Equal(t, "1", f.queries[1].Get("page_number"))
 		require.True(t, snap.Coverage.TransactionsPaginatedComplete)
 	})
 
@@ -194,12 +196,8 @@ func TestNMIFetcher(t *testing.T) {
 	<transaction><transaction_id>y1</transaction_id><condition>complete</condition><currency>JPY</currency>
 		<action><amount>500.00</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action>
 		<action><amount>200.00</amount><action_type>refund</action_type><date>20260506193542</date><success>1</success><response_code>100</response_code></action></transaction>
-	<transaction><transaction_id>y2</transaction_id><condition>complete</condition><currency>JPY</currency>
-		<action><amount>500.50</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
 	<transaction><transaction_id>k1</transaction_id><condition>complete</condition><currency>KRW</currency>
 		<action><amount>1500</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
-	<transaction><transaction_id>n1</transaction_id><condition>complete</condition>
-		<action><amount>9.99</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success><response_code>100</response_code></action></transaction>
 </nm_response>`}}
 		snap := f.fetch(t, FetchParams{})
 		got := map[string]int64{}
@@ -207,9 +205,22 @@ func TestNMIFetcher(t *testing.T) {
 			got[txn.TransactionID+"/"+string(txn.Type)+"/"+txn.Currency] = txn.AmountCents
 		}
 		require.Equal(t, map[string]int64{
-			"y1/sale/JPY": 500, "y1/refund/JPY": 200, "y2/sale/JPY": 0, "k1/sale/KRW": 1500, "n1/sale/": 0,
+			"y1/sale/JPY": 500, "y1/refund/JPY": 200, "k1/sale/KRW": 1500,
 		}, got, "¥500 is 500 rail units (5_000_000 native), never 50 000")
-		require.Equal(t, "9.99", snap.Transactions[len(snap.Transactions)-1].Amount, "no currency is never read as USD: kept verbatim")
+	})
+
+	t.Run("unqualified named card amounts cannot complete a financial pull", func(t *testing.T) {
+		for _, tc := range []struct{ currency, amount string }{{"JPY", "500.50"}, {"", "9.99"}, {"SOL", "1"}, {"USDC", "1"}} {
+			client := newNMITestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					fmt.Fprintf(w, `{%q:[],"has_more":false}`, strings.TrimPrefix(r.URL.Path, "/"))
+					return
+				}
+				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>invalid</transaction_id><currency>%s</currency><action><amount>%s</amount><action_type>sale</action_type><date>20260505193542</date><success>1</success></action></transaction></nm_response>`, tc.currency, tc.amount)
+			}))
+			_, err := NewNMIFetcher(client).Fetch(t.Context(), FetchParams{})
+			require.Error(t, err, "%s %s must not silently become zero money", tc.currency, tc.amount)
+		}
 	})
 
 	// #842: exhaustiveness authorizes cancelling everything absent; a 200 with

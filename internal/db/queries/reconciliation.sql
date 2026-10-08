@@ -145,7 +145,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- name: ListActionablePullFindingsForPSP :many
 SELECT * FROM billing.reconciliation_findings
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
-  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review')
+  AND finding_type LIKE 'pull.%' AND status IN ('reconcile_required', 'requires_review', 'ignored')
 ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
@@ -164,8 +164,8 @@ WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
     WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
       AND f.psp_id = sqlc.arg(psp_id)::uuid
-      AND f.status IN ('reconcile_required', 'requires_review')
-      AND f.last_seen_run <> sqlc.arg(run_id)
+      AND f.status IN ('reconcile_required', 'requires_review', 'ignored')
+      AND f.last_seen_run IS DISTINCT FROM sqlc.arg(run_id)
       AND f.finding_type = ANY (sqlc.arg(finding_types)::text[])
     LIMIT sqlc.arg(row_limit)::int
 );
@@ -199,7 +199,7 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'ignored');
 
 -- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE billing.reconciliation_findings
@@ -322,7 +322,7 @@ WHERE id = sqlc.arg(id)
 
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
-       subscriptions.status, subscriptions.rail, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
+       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
        subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
@@ -1101,3 +1101,13 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
   AND status = 'requires_review';
+
+-- Canonical invoice receipts live outside billing.payments. Recognize settled
+-- NMI charges by their exact accepted PSP and transaction, never by a vault.
+-- name: ReconcileListInvoicePaymentsByTransactionIDs :many
+SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
+FROM billing.invoice_payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid AND rail = sqlc.arg(rail)::text AND status = 'settled'
+  AND rail_payment_id IS NOT NULL
+  AND rail_payment_id = ANY(sqlc.arg(transaction_ids)::text[]);

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // Store persists intents on the ledger. Producers call Enqueue/Supersede from
@@ -763,7 +764,11 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 		rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 		})
-		return rows, nextAttemptAt, err
+		wake := nextAttemptAt
+		if held, _ := evidence["recovery_held"].(bool); held {
+			wake = time.Time{} // durable immediate readiness check; the held retry date remains
+		}
+		return rows, wake, err
 	}))
 }
 
@@ -794,16 +799,30 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 }
 
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
+	return s.park(ctx, id, nextAttemptAt, reason, nil)
+}
+
+// ParkForRecovery marks a known-unsent operation for the catch-up wakeup.
+func (s *Store) ParkForRecovery(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
+	return s.park(ctx, id, nextAttemptAt, reason, []byte(`{"recovery_held":true}`))
+}
+
+func (s *Store) park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, recovery []byte) error {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr
 	}
 	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
+		wake := nextAttemptAt
+		if len(recovery) > 0 {
+			wake = time.Time{}
+		}
 		rows, err := txs.db.Gen(ctx).ParkProviderIntent(ctx, gen.ParkProviderIntentParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+			RecoveryEvidence: recovery,
 		})
 		if err != nil || rows != 0 {
-			return rows, nextAttemptAt, err
+			return rows, wake, err
 		}
 		// The SQL fence refuses to return a submitted payment to pending.
 		// Retain it as unknown inside this same transition/wakeup transaction.
@@ -814,25 +833,17 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		if err != nil || current.Status != StatusInFlight {
 			return 0, time.Time{}, err
 		}
-		var evidence map[string]json.RawMessage
-		if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
+		submitted, err := hasSubmissionEvidence(current)
+		if err != nil {
 			return 0, time.Time{}, err
 		}
-		key := ""
-		switch current.IntentType {
-		case "invoice_collection", "subscription_collection":
-			key = "submitted_at"
-		case "nmi_sale":
-			key = "sale_submitted"
-		case "initial_membership":
-			key = "initial_submitted"
-		}
-		if _, submitted := evidence[key]; key != "" && submitted {
+		if submitted {
 			// The live-state predicate still protects a concurrently sealed outcome.
 			rows, err := txs.db.Gen(ctx).MarkProviderIntentUnknown(ctx, gen.MarkProviderIntentUnknownParams{
 				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+				ResultEvidence: recovery,
 			})
-			return rows, nextAttemptAt, err
+			return rows, wake, err
 		}
 		return 0, time.Time{}, nil
 	}))
@@ -898,4 +909,18 @@ func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (g
 		return gen.BillingProviderIntent{}, err
 	}
 	return s.db.Gen(ctx).GetLiveTierChangeProviderIntent(ctx, gen.GetLiveTierChangeProviderIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
+}
+
+// CheckRecovery holds writes on an inherited account until provider observation
+// and financial receipt recovery complete. First purchases and card enrollment
+// keep their own request idempotency; they are not old-obligation recovery.
+func (s *Store) CheckRecovery(ctx context.Context, in gen.BillingProviderIntent, now time.Time) error {
+	switch in.IntentType {
+	case subscriptions.TypeInitialMembership, "nmi_sale", TypeNMICardVault:
+		return nil
+	}
+	if in.PspID == nil {
+		return providerrecovery.CheckMerchant(ctx, s.db, in.MerchantID, now)
+	}
+	return providerrecovery.CheckPSP(ctx, s.db, in.MerchantID, *in.PspID, now)
 }

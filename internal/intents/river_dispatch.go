@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/riverqueue/river"
 )
 
@@ -119,4 +120,50 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 		err = s.db.MerchantTx(ctx, transitionTx)
 	}
 	return rows, err
+}
+
+// ResumeRecoveryHeld advances only recovery-held work and durably schedules its
+// normal dispatcher. A newly ready account can unblock another account's invoice,
+// so the batch is merchant-scoped; every execution rechecks all its own guards.
+func (s *Store) ResumeRecoveryHeld(ctx context.Context, now time.Time, limit int32) (int, error) {
+	return s.resumeRecoveryHeld(ctx, nil, now, limit)
+}
+
+// WakeRecoveryHeld closes the race with completion that skipped a live verifier.
+// The caller invokes it only after its hold transition has committed.
+func (s *Store) WakeRecoveryHeld(ctx context.Context, id uuid.UUID, now time.Time) error {
+	_, err := s.resumeRecoveryHeld(ctx, &id, now, 1)
+	return err
+}
+
+func (s *Store) resumeRecoveryHeld(ctx context.Context, id *uuid.UUID, now time.Time, limit int32) (int, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	accounts, err := s.db.Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
+	if err != nil {
+		return 0, err
+	}
+	ready := make([]uuid.UUID, 0, len(accounts))
+	for _, account := range accounts {
+		if providerrecovery.CheckPSP(ctx, s.db, mid.UUID(), account.ID, now) == nil {
+			ready = append(ready, account.ID)
+		}
+	}
+	count := 0
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		ids, err := s.db.NewWithPgxTx(tx).Gen(ctx).ResumeProviderRecoveryHeldOperations(ctx, gen.ResumeProviderRecoveryHeldOperationsParams{MerchantID: mid.UUID(), IntentID: id, Now: now, BatchSize: limit, ReadyPspIds: ready, AllAccountsReady: len(ready) == len(accounts)})
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if err := s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(now)); err != nil {
+				return err
+			}
+		}
+		count = len(ids)
+		return nil
+	})
+	return count, err
 }

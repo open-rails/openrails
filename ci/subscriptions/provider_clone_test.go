@@ -54,6 +54,7 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 	a := prepareWorldAtDSN(t, 12, providerCopyDatabase(t, adminDSN))
 	a.start()
 	one := enroll(t, a, "stripe", embedded)
+	one.refreshBeforePeriodEnd()
 	a.settle()
 	merchantID := a.client[embedded].MerchantID()
 	for {
@@ -92,6 +93,11 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 	require.NotEqual(t, firstDB, secondDB)
 	a.start()
 	b.start()
+	// Restore brings billing history, not current provider observation. Catch
+	// up through the real reader before either copy creates the later fault.
+	b.refreshProviders()
+	b.settleCollectionScans()
+	require.Len(t, one.providerLedger(), 1, "observation of the restored book sends no renewal")
 	providerClock := clockwork.NewFakeClockAt(time.Now())
 	a.stripe.setClock(providerClock.Now)
 	two, customer := *one, *one.c
@@ -218,8 +224,8 @@ func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
 	require.Len(t, firstAttempt, 2, "initial payment and declined renewal")
 	a.setDecline(visa.Last4, "", "")
 	advance := sub.NextRetryAt.Sub(a.w.clock.Now()) + time.Second
-	a.w.advance(advance)
 	providerClock.Advance(advance)
+	a.w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
 	require.Len(t, a.providerLedger(), 2)

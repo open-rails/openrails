@@ -123,6 +123,9 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Billi
 		}
 		return h.Verify(ctx, intent)
 	}
+	if outcome, done := h.recoverBeforeDispatch(ctx, intent, p); done {
+		return outcome
+	}
 	if h.Charger == nil {
 		return intents.Parked("invoice collection charger not wired")
 	}
@@ -252,6 +255,18 @@ func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.Billin
 		return outcome
 	}
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) == "" {
+		// An older book can retain the accepted operation but predate its
+		// submission marker. Positive same-order evidence still belongs to the
+		// canonical writer; an empty read grants no nonexecution authority.
+		if p.Rail == string(models.RailNMI) && h.Verifier != nil {
+			receipt, found, err := h.Verifier.ReadCollectionReceipt(ctx, intent, "")
+			if err != nil {
+				return intents.Ambiguous("read accepted invoice receipt: " + err.Error())
+			}
+			if found {
+				return h.finalizeSettle(ctx, intent, receipt)
+			}
+		}
 		return intents.Retryable("collection has no submission fence; resume execution")
 	}
 	if p.Rail == string(models.RailStripe) {

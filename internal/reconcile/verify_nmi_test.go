@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -21,12 +22,12 @@ func TestAttribution(t *testing.T) {
 	records := map[string]nmi.ScheduleRecord{"s-c": {OrderID: "order-c"}}
 	at := newAttribution([]*models.Subscription{a, b, c, d}, vaults, records)
 	sale := func(vault, order, schedule string) nmi.ScheduleSale {
-		return nmi.ScheduleSale{SaleAction: nmi.SaleAction{TransactionID: uuid.NewString(), Success: true}, VaultID: vault, OrderID: order, SubscriptionID: schedule}
+		return nmi.ScheduleSale{SaleAction: nmi.SaleAction{TransactionID: uuid.NewString(), Success: true, Amount: "9.99", Currency: "USD", At: time.Now()}, VaultID: vault, OrderID: order, SubscriptionID: schedule}
 	}
-	at.add(sale("v1", "", ""))
-	at.add(sale("v2", "order-c", ""))
-	at.add(sale("v9", "", "s-b"))
-	at.add(sale("v2", "", ""))
+	require.NoError(t, at.add(sale("v1", "", "")))
+	require.NoError(t, at.add(sale("v2", "order-c", "")))
+	require.NoError(t, at.add(sale("v9", "", "s-b")))
+	require.NoError(t, at.add(sale("v2", "", "")))
 	require.Len(t, at.txns[a.ID], 1, "a vault only one row holds")
 	require.Len(t, at.txns[c.ID], 1, "a shared vault resolved by the schedule's order")
 	require.Len(t, at.txns[b.ID], 1, "a report that names the schedule")
@@ -36,6 +37,6 @@ func TestAttribution(t *testing.T) {
 	require.False(t, at.ambiguous[a.ID])
 
 	solo := newAttribution([]*models.Subscription{d}, nil, nil)
-	solo.add(sale("v7", "", ""))
+	require.NoError(t, solo.add(sale("v7", "", "")))
 	require.Len(t, solo.txns[d.ID], 1, "a single-schedule query answers only for it")
 }
