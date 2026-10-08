@@ -11,13 +11,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 type renewalEffects struct {
-	PeriodStart, PeriodEnd                      time.Time
-	RevokeRemoved, Downgrade, PreserveLifecycle bool
+	PeriodStart, PeriodEnd       time.Time
+	Downgrade, PreserveLifecycle bool
 	// Reinstate reactivates a decided cancellation on an explicit override.
 	Reinstate   bool
 	ProductName string
@@ -48,13 +47,12 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 		return nil, fmt.Errorf("update renewed subscription: %w", err)
 	}
 	entitlementsService := s.newLifecycleEntitlementService(d)
-	for name := range sub.EntitlementsSpecSnapshot {
-		if !effects.PreserveLifecycle {
-			grace, source := models.EntitlementSourceGrace, sub.ID
-			if err := entitlementsService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &grace, SourceID: &source, Reason: models.EntitlementRevokeSuperseded}); err != nil {
-				return nil, err
-			}
+	if !effects.PreserveLifecycle {
+		if err := entitlementsService.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, effects.PeriodStart, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
+			return nil, err
 		}
+	}
+	for name := range sub.EntitlementsSpecSnapshot {
 		if _, err := entitlementsService.PushNewEntitlement(ctx, subscriptionAccess(sub, name, effects.PeriodStart)); err != nil {
 			return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
 		}
@@ -62,25 +60,6 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
 		if err := pushRenewalGrace(ctx, d, entitlementsService, sub, entitlementNames(sub.EntitlementsSpecSnapshot), effects.PeriodStart, effects.PeriodEnd); err != nil {
 			return nil, err
-		}
-	}
-	if effects.RevokeRemoved {
-		// Dropped benefits stop receiving renewal grace. Prior paid grants
-		// retain their own duration, even when it exceeds the billing period.
-		for _, source := range []models.EntitlementSourceType{models.EntitlementSourceGrace} {
-			names, err := entitlementsService.ListDistinctEntitlementNamesBySource(ctx, source, sub.ID)
-			if err != nil {
-				return nil, err
-			}
-			for _, name := range names {
-				if _, keep := sub.EntitlementsSpecSnapshot[name]; keep {
-					continue
-				}
-				sourceType, sourceID := source, sub.ID
-				if err := entitlementsService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &sourceType, SourceID: &sourceID, Reason: models.EntitlementRevokeDowngrade}); err != nil {
-					return nil, err
-				}
-			}
 		}
 	}
 	data := billing.NotificationData{SubscriptionID: billing.SubscriptionID(sub.ID), PeriodStartsAt: &effects.PeriodStart, PeriodEndsAt: &effects.PeriodEnd}

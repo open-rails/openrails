@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
@@ -34,8 +33,8 @@ type EffectOptions struct {
 // row's deletion marker. Notices are queued idempotently and returned for the
 // caller to deliver after commit (DispatchNotifications).
 //
-// Dunning effects are no-ops here (Transition edits the retry fields), and so
-// is ProbeProvider: the unverified trigger wakes the resolver on commit.
+// Transition owns retry fields; these effects project the corresponding grace
+// policy. The unverified trigger separately wakes provider resolution on commit.
 func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationQueue, error) {
 	ents := s.newLifecycleEntitlementService(d)
 	var out []*models.NotificationQueue
@@ -44,11 +43,13 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 		switch e := effect.(type) {
 		case lifecycle.GrantPeriod:
 			granted = &e
+			// A paid period replaces every prior renewal allowance, including
+			// benefits removed by a scheduled tier change. Purchased grants keep
+			// their own independent expiry.
+			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.Start, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
+				return nil, fmt.Errorf("end superseded renewal grace %s: %w", sub.ID, err)
+			}
 			for name := range sub.EntitlementsSpecSnapshot {
-				grace, source := models.EntitlementSourceGrace, sub.ID
-				if err := ents.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, SourceType: &grace, SourceID: &source, Reason: models.EntitlementRevokeSuperseded}); err != nil {
-					return nil, fmt.Errorf("grant period %s: %w", sub.ID, err)
-				}
 				if _, err := ents.PushNewEntitlement(ctx, subscriptionAccess(sub, name, e.Start)); err != nil {
 					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
 				}

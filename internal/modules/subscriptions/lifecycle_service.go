@@ -911,7 +911,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		var price *models.Price
 		var newProduct *models.Product
-		applyingDowngrade, planChangeApplied := false, false
+		applyingDowngrade := false
 		preserveLifecycle := false
 		var acceptedPayment *models.Payment
 		if terms := params.Prepared; terms != nil {
@@ -946,7 +946,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.Amount, Currency: terms.Currency}
 			newProduct = &models.Product{ID: terms.ProductID, DisplayName: terms.ProductName, EntitlementsSpec: models.CloneEntitlementsSpec(terms.Entitlements)}
 			applyingDowngrade = terms.ScheduledPriceID != nil
-			planChangeApplied = terms.FromProductID != terms.ProductID
 		} else {
 			// #773: pick up a due scheduled reprice at the renewal boundary — v1's
 			// ONLY effective moment is "the subscription's first renewal on/after
@@ -955,9 +954,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			// Idempotent: a scheduled row that already applied is gone, so a second
 			// RenewMembership call for the same renewal (e.g. a caller that also
 			// pre-resolves price before charging) just sees no due reprice here.
-			// planChangeApplied (#813): a due kind=plan_change reprice moved the
-			// subscription across products at this boundary — the downgrade
-			// entitlement-diff pass below must run for it too.
 
 			repriceRepo := NewRepriceRepo(db)
 			if scheduledReprice, repriceErr := repriceRepo.GetScheduledForSubscription(ctx, subscription.ID); repriceErr == nil {
@@ -984,7 +980,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 						}
 						subscription.ProductID = repricedTo.ProductID
 						subscription.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
-						planChangeApplied = true
 					}
 					// #773 same-product reprice: price re-pin only.
 					subscription.PriceID = repricedTo.ID
@@ -1154,8 +1149,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 		notification, err := s.applyRenewalEffects(ctx, db, subscription, renewalEffects{
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
-			RevokeRemoved: params.Prepared != nil || applyingDowngrade || planChangeApplied,
-			Downgrade:     applyingDowngrade, ProductName: productName,
+			Downgrade: applyingDowngrade, ProductName: productName,
 			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
 		})
 		if err != nil {

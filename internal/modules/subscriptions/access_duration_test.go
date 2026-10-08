@@ -49,6 +49,8 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 		_, err := svc.ApplyEffects(context.Background(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: billingEnd}}, start, EffectOptions{})
 		require.NoError(t, err)
 		require.Len(t, r.grants, 1)
+		require.Equal(t, []models.EntitlementSourceType{models.EntitlementSourceGrace}, r.revoked, "a newly paid period supersedes all old renewal grace, never prior paid access")
+		r.revoked = nil
 		grant := r.grants[0]
 		require.Equal(t, start, *grant.NotBefore)
 		if hours == nil {
