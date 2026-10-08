@@ -139,6 +139,8 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 			switch r.kind {
 			case "legacy":
 				l := importLegacy(t, w, "nmi", tp)
+				w.refreshProviders()
+				w.settleCollectionScans()
 				c, ent, sub, railSub = l.c, l.ent, l.sub, l.railSub
 				tx := w.nmi.ledger(l.railCust)[0]
 				w.nmi.Refund(tx.ID, map[bool]int64{true: tx.Amount, false: tx.Amount / 2}[r.full])
