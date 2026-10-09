@@ -183,7 +183,8 @@ longer holds inline SQL fails as stale.
 ## Library schema initialization
 
 `internal/migrate/migrator.go` applies the embedded migrations through migratekit
-and creates the managed River schema. The configured schema is an identifier, so
-this initialization SQL is outside sqlc's runtime query catalog. The standalone
-AuthKit initializer delegates to AuthKit's migration API and contains no raw
-SQL. Embedded billing never initializes a host-owned River fleet.
+and, when `Start` runs OpenRails' own River, creates its River schema. The
+configured schema is an identifier, so this initialization SQL is outside sqlc's
+runtime query catalog. The standalone AuthKit initializer delegates to AuthKit's
+migration API and contains no raw SQL. Embedded billing never initializes the
+host's River fleet.

@@ -16,26 +16,33 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billingauth.Integration) error {
-	for _, e := range exposures {
+func validateCustomerRoutes(profiles []config.CustomerRoutes, rt *app.Runtime) error {
+	var auth *billingauth.Integration
+	if rt != nil {
+		auth = rt.Auth
+	}
+	for _, e := range profiles {
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
+		if e.Delegated && (rt == nil || rt.AuthenticateCustomer == nil) {
+			return fmt.Errorf("openrails: customer routes %q are Delegated; set Deps.AuthenticateCustomer", e.Prefix)
+		}
 		if !e.Delegated && (auth == nil || auth.Authentication == nil) {
-			return fmt.Errorf("openrails HTTP: customer exposure %q requires its own authenticator", e.Prefix)
+			return fmt.Errorf("openrails: customer routes %q need Deps.AuthKit or Deps.Authenticate", e.Prefix)
 		}
 		if !e.Delegated && strings.TrimSpace(e.Merchant) == "" {
-			return fmt.Errorf("openrails HTTP: native customer routes require an explicit merchant slug")
+			return fmt.Errorf("openrails: customer routes %q need a merchant: set Config.Merchant or CustomerRoutes.Merchant", e.Prefix)
 		}
 		if e.Scope != config.CustomerSelfService && e.Scope != config.CustomerSubscriptionManagement && e.Scope != config.CustomerBillingManagement {
-			return fmt.Errorf("openrails HTTP: invalid customer scope %d", e.Scope)
+			return fmt.Errorf("openrails: customer routes %q need a Scope (CustomerSelfService, CustomerSubscriptionManagement or CustomerBillingManagement)", e.Prefix)
 		}
 		if e.Prefix == "" || e.Prefix == "/" || !strings.HasPrefix(e.Prefix, "/") || path.Clean(e.Prefix) != e.Prefix || strings.ContainsAny(e.Prefix, "*+?#%\\ \t\r\n") {
-			return fmt.Errorf("openrails HTTP: invalid customer prefix %q", e.Prefix)
+			return fmt.Errorf("openrails: invalid customer routes prefix %q", e.Prefix)
 		}
 		for _, part := range strings.Split(e.Prefix, "/") {
 			if strings.ContainsAny(part, "{}") && (!strings.HasPrefix(part, "{") || !strings.HasSuffix(part, "}") || strings.ContainsAny(part[1:len(part)-1], "{}.") || len(part) < 3) {
-				return fmt.Errorf("openrails HTTP: invalid customer prefix %q", e.Prefix)
+				return fmt.Errorf("openrails: invalid customer routes prefix %q", e.Prefix)
 			}
 		}
 	}
@@ -44,7 +51,7 @@ func validateCustomerRoutes(exposures []config.CustomerRoutesConfig, auth *billi
 
 // CustomerPrefixes are the paths, beneath mount, at which the exposures serve
 // customer routes.
-func CustomerPrefixes(mount string, exposures []config.CustomerRoutesConfig) []string {
+func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string {
 	out := make([]string, 0, len(exposures))
 	for _, e := range exposures {
 		if e.Prefix != "" {
@@ -56,8 +63,8 @@ func CustomerPrefixes(mount string, exposures []config.CustomerRoutesConfig) []s
 
 // BuildCustomerRoutes builds additional customer audiences from the same
 // authoritative registrations used by the canonical customer surface.
-func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutesConfig, auth *billingauth.Integration) (*router.Table, error) {
-	if err := validateCustomerRoutes(exposures, auth); err != nil {
+func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, auth *billingauth.Integration) (*router.Table, error) {
+	if err := validateCustomerRoutes(exposures, a.Runtime); err != nil {
 		return nil, err
 	}
 	out := &router.Table{}

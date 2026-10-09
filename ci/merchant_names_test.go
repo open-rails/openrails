@@ -52,9 +52,19 @@ func operatorRename(ctx context.Context, cp *openrails.Client, id billing.Mercha
 	return err
 }
 
-// standaloneHandler is the standalone server's full HTTP surface.
-func standaloneHandler(client *openrails.Client) (http.Handler, error) {
-	server, err := operator.StandaloneServer(engine.Graph(client))
+// standaloneHandler is the standalone server's full HTTP surface, with job
+// producers bound as the standalone boot binds them; routes adds the admin
+// console or catalog edits.
+func standaloneHandler(client *openrails.Client, routes ...openrails.Routes) (http.Handler, error) {
+	graph := engine.Graph(client)
+	if err := graph.Runtime.InitRiver(context.Background()); err != nil {
+		return nil, err
+	}
+	var sel openrails.Routes
+	if len(routes) > 0 {
+		sel = routes[0]
+	}
+	server, err := operator.StandaloneServer(graph, sel)
 	if err != nil {
 		return nil, err
 	}

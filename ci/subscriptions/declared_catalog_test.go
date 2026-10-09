@@ -63,7 +63,7 @@ func (w *world) catalogRevision() int64 {
 // harness, so New's own outcome stays observable.
 func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Client, error) {
 	return openrails.New(ctx, openrails.Config{
-		Schema: w.schema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		Schema: w.schema, RiverSchema: w.schema, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
 		Catalog:  catalog,
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
@@ -75,10 +75,8 @@ func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "declared-" + uuid.NewString()[:8]
 	title, amount := "Gold", int64(9_990_000)
-	w.cfg = func(cfg *config.Config) {
-		cfg.Catalog = declaredFile(t, key, title, amount)
-		cfg.AllowCatalogUpdates = false
-	}
+	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
+	w.mount = func(r *openrails.Routes) { r.CatalogEdits = false }
 	w.start()
 	original, err := w.client[embedded].GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.NoError(t, err)

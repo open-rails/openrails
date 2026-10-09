@@ -44,7 +44,7 @@ type Config struct {
 	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
 	// the copilot panel stays Q&A-only.
 	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
-	// NewMerchantURL is AdminConsoleConfig.NewMerchantURL: the host page behind
+	// NewMerchantURL is AdminConsole.NewMerchantURL: the host page behind
 	// the console's "New merchant" action. Empty hides the action.
 	NewMerchantURL string `json:"new_merchant_url"`
 }
@@ -65,7 +65,7 @@ func Present(assets fs.FS) bool {
 var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 
 // Handler serves the console from assets (a Vite build rooted at index.html)
-// at path, a validated AdminConsoleConfig.MountPath such as "/billing/admin":
+// at path, a validated mount path such as "/billing/admin":
 // path/config.json from cfg, static files, and index.html — its <base href>
 // rewritten to path/ — as the SPA fallback for client routes; bare path
 // redirects to path/. Mount it at path without stripping the prefix (ServeMux
@@ -108,7 +108,7 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 		}
 		rel, ok := strings.CutPrefix(r.URL.Path, path+"/")
 		if !ok {
-			log.Errorf("admin console: request %q is outside its configured path %q; mount Client.AdminConsole() at Config.AdminConsole.Path without stripping the prefix", r.URL.Path, path)
+			log.Errorf("admin console: request %q is outside its configured path %q; mount it on the root router without stripping the prefix", r.URL.Path, path)
 			writeError(w, http.StatusInternalServerError, "admin console is mounted outside its configured path")
 			return
 		}

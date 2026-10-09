@@ -9,8 +9,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
-	"github.com/open-rails/openrails/internal/config"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -39,9 +37,10 @@ type Options struct {
 	// user rather than an untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// InProcess marks the embedded Client's own handler: catalog mutations are
-	// registered for its host principal whatever AllowCatalogUpdates says.
-	InProcess bool
+	// CatalogWrites mounts the catalog-write routes. Their guard still admits
+	// only the process owner unless the merchant API's mount published catalog
+	// edits (app.Runtime.CatalogEdits).
+	CatalogWrites bool
 
 	// External are the handlers the assembly owns.
 	External External
@@ -108,13 +107,6 @@ func gated(build func(billingauth.Gate) func(*httprequest.Request)) func(*Env) r
 	return func(e *Env) router.Handler { return router.Handler(build(e.Gate)) }
 }
 
-func (e *Env) config() *config.Config {
-	if e.Runtime == nil {
-		return nil
-	}
-	return e.Runtime.Config
-}
-
 // enabled reports whether the assembly's configuration mounts a feature.
 func (e *Env) enabled(f Feature) bool {
 	rt := e.Runtime
@@ -127,8 +119,6 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.SolanaSigning
 	case FeatureStripePortal:
 		return e.providers.StripePortal
-	case FeatureCheckoutSessions:
-		return CheckoutSessionsPublished(rt)
 	case FeatureMerchantDirectory:
 		return rt != nil && rt.Merchants != nil
 	case FeatureCatalogCopilot:
@@ -143,26 +133,15 @@ func (e *Env) enabled(f Feature) bool {
 	panic("routes: unknown feature " + string(f))
 }
 
-// CheckoutSessionsPublished reports whether this runtime serves checkout
-// sessions: the standalone surface always, an embedded host with
-// Config.HTTP.Checkout.
-func CheckoutSessionsPublished(rt *app.Runtime) bool {
-	if rt == nil || rt.Config == nil {
-		return true
-	}
-	cfg := rt.Config
-	return cfg.ControlPlane != nil || cfg.HTTP == nil || cfg.HTTP.Checkout != nil
-}
-
 // mount registers the selected catalog routes on rr, which is rooted at base.
 // A route is mounted when its feature is configured, its handler is supplied
-// and, for a catalog write, the deployment allows it.
+// and, for a catalog write, the assembly mounts catalog writes.
 func (e *Env) mount(rr router.Router, base string, selected func(Route) bool) {
 	for _, route := range Catalog() {
 		if !selected(route) || !e.enabled(route.When) {
 			continue
 		}
-		if route.CatalogWrite && !e.InProcess && !catalogpolicy.Enabled(e.config()) {
+		if route.CatalogWrite && !e.CatalogWrites {
 			continue
 		}
 		handler := route.Handler
@@ -208,7 +187,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 		}
 	case AuthMerchant:
 		if route.CatalogWrite {
-			mw = append(mw, catalogWriteGuardMW(e.config()))
+			mw = append(mw, catalogWriteGuardMW(e.Runtime))
 		}
 		mw = append(mw, e.merchantPermissionMW(route.Perm))
 		if route.Also != "" {

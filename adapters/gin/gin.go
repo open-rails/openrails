@@ -10,31 +10,28 @@ import (
 	"github.com/open-rails/openrails"
 )
 
-// Mount registers one native route per method and path of client.Routes under
-// target, e.g. Mount(r.Group("/billing"), client). Gin keeps its own 404, 405
-// and redirect policy.
-func Mount(target gin.IRoutes, client *openrails.Client) error {
-	if client == nil || target == nil {
-		return fmt.Errorf("openrails Gin: client and router are required")
+// Mount registers one native route per method and path of the routes
+// selection selects (Client.Routes) on the root engine: the API under
+// selection.Prefix, e.g. Mount(r, client, openrails.Routes{Prefix: "/billing",
+// Storefront: true}) serves /billing/v1/*. Gin keeps its own 404, 405 and
+// redirect policy.
+func Mount(router *gin.Engine, client *openrails.Client, selection openrails.Routes) error {
+	if client == nil || router == nil {
+		return fmt.Errorf("openrailsgin: Mount requires a Gin engine and a client")
 	}
-	routes, err := client.Routes()
+	routes, err := client.Routes(selection)
 	if err != nil {
 		return err
 	}
-	return MountRoutes(target, routes, client.RoutesRequireRoot())
+	return MountRoutes(router, routes)
 }
 
-// MountRoutes registers a host-selected subset of Client.Routes. Pass
-// Client.RoutesRequireRoot as rootOnly so issuer-anchored paths stay at the root.
-// Hosts can own an individual route without duplicating path or HEAD handling.
-func MountRoutes(target gin.IRoutes, routes []openrails.Route, rootOnly bool) error {
-	if target == nil {
-		return fmt.Errorf("openrails Gin: router is required")
-	}
-	if rootOnly {
-		if _, ok := target.(*gin.Engine); !ok {
-			return fmt.Errorf("openrails Gin: standalone routes must mount on the root Engine")
-		}
+// MountRoutes registers a host-selected subset of Client.Routes on the root
+// engine. Hosts can own an individual route without duplicating path or HEAD
+// handling.
+func MountRoutes(router *gin.Engine, routes []openrails.Route) error {
+	if router == nil {
+		return fmt.Errorf("openrailsgin: MountRoutes requires a Gin engine")
 	}
 	heads := map[string]bool{}
 	for _, route := range routes {
@@ -43,9 +40,9 @@ func MountRoutes(target gin.IRoutes, routes []openrails.Route, rootOnly bool) er
 		}
 	}
 	for _, route := range routes {
-		target.Handle(route.Method, nativePath(route.Path), gin.WrapH(route.Handler))
+		router.Handle(route.Method, nativePath(route.Path), gin.WrapH(route.Handler))
 		if route.Method == http.MethodGet && !heads[route.Path] {
-			target.Handle(http.MethodHead, nativePath(route.Path), gin.WrapH(route.Handler))
+			router.Handle(http.MethodHead, nativePath(route.Path), gin.WrapH(route.Handler))
 		}
 	}
 	return nil
@@ -70,7 +67,7 @@ func nativePath(path string) string {
 
 // CheckoutFramePolicy is middleware for the route serving the hosted checkout
 // page (billing-ui's <CheckoutPage>): only the host and
-// Config.HTTP.Checkout.EmbedOrigins may frame it.
+// Config.Checkout.EmbedOrigins may frame it.
 func CheckoutFramePolicy(client *openrails.Client) gin.HandlerFunc {
 	policy := client.CheckoutFrameAncestors()
 	return func(c *gin.Context) {

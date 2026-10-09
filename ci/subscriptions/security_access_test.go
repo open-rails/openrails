@@ -305,8 +305,8 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		recorder := newStripeFake()
 		slug := "live-" + uuid.NewString()[:8]
 		rt, err := openrails.New(t.Context(), openrails.Config{
-			Schema: w.schema, River: openrails.RiverHostOwned,
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
+			Schema: w.schema, RiverSchema: w.schema,
+			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 			DB:       &openrails.DBConfig{URL: w.dsn},
 			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_live_probe", Secrets: map[string]string{"secret_key": "sk_live_e2e", "webhook_signing_secret": "whsec_live"}}}},
 		}, openrails.Deps{Postgres: w.pool, StripeTransport: recorder, Clock: w.clock})

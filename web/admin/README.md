@@ -1,6 +1,6 @@
 # Merchant admin console
 
-The React (Vite, shadcn/ui) console OpenRails serves at `admin_console.path`.
+The React (Vite, shadcn/ui) console OpenRails serves at its mount path.
 How to turn it on, build it and mount it: [docs/admin-console.md](../../docs/admin-console.md).
 
 - `pnpm run dev` serves it against a local OpenRails on `localhost:3053`.

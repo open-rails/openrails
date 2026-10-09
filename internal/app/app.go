@@ -60,8 +60,6 @@ type BootstrapOptions struct {
 	NMITransport http.RoundTripper
 	// DNSResolver answers api_host proof lookups (test seam).
 	DNSResolver *net.Resolver
-	HostRiver   bool
-	RiverSchema string
 	PGXPool     *pgxpool.Pool
 	Redis       *redis.Client
 	Clock       clockwork.Clock
@@ -123,7 +121,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	}
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
-		HostRiver: opts != nil && opts.HostRiver,
 		StripeTransport: func() http.RoundTripper {
 			if opts != nil {
 				return opts.StripeTransport
@@ -143,12 +140,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			return nil
 		}(),
 		DB: dbOverride,
-		RiverSchema: func() string {
-			if opts != nil {
-				return opts.RiverSchema
-			}
-			return ""
-		}(),
 		Redis: func() *redis.Client {
 			if opts != nil {
 				return opts.Redis

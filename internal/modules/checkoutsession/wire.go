@@ -41,7 +41,7 @@ type CheckoutSession struct {
 	Failure        *billing.PaymentFailure   `json:"failure"`
 	SuccessURL     *string                   `json:"success_url"`
 	// EmbedOrigin is the origin of the app that minted the session, set when
-	// the serving host lists it in Config.HTTP.Checkout.EmbedOrigins: the only
+	// the serving host lists it in Config.Checkout.EmbedOrigins: the only
 	// origin the payment page exchanges frame messages with.
 	EmbedOrigin *string   `json:"embed_origin"`
 	ExpiresAt   time.Time `json:"expires_at"`

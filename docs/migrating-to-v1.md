@@ -24,19 +24,22 @@ Before the code:
 
 | Before | After |
 |---|---|
-| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `HTTPConfig.Merchant` mounts the one merchant group; each route's permission gates it |
-| `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
-| `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind`. `openrails.PSPFromEnv` is unchanged |
+| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Merchant` mounts the one merchant group; each route's permission gates it |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Prefix`, `Storefront`, `Customers`, `CustomerProfiles`, `Merchant`, `CatalogEdits`, `CookieOrigin`, `AdminConsole`. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `Config.River` (`RiverManaged`, `RiverHostOwned`) | `Migrate` always creates River's tables in `Config.RiverSchema` (default: the schema plus `_river`). `client.Start(ctx)` runs OpenRails' own River there; `client.Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with `client.RiverJobs()` in that schema. `New` starts nothing |
+| `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
+| `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind` |
+| `openrails.PSPFromEnv` | Removed: build `openrails.PSPConfig` from your own configuration, or keep the merchant in a file read by `openrails.ReadMerchantFile` |
 | `MerchantDeclaration` with `Profile`, `Invoice`, `BillingPolicies`, `CheckoutRouting` and their `*Config` types | `MerchantDeclaration.Settings` is the `billing.MerchantSettings` document the configuration API reads and applies |
-| `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail | One sender for both: `Deps.EmailSender` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused |
-| A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and a managed River schema, to that existing role |
-| `CustomerRoutesConfig{Authenticate: fn}` per profile | `CustomerRoutesConfig{Delegated: true}` and one `Deps.AuthenticateCustomer`, which receives the profile's `Prefix` |
+| `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail; `Deps.SMSSender` | One sender for both: `Deps.Email` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused. Text messages: `Deps.SMS` |
+| A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and the default River schema, to that existing role |
+| `CustomerRoutesConfig{Authenticate: fn}` per profile | `openrails.CustomerRoutes{Delegated: true}` in `Routes.CustomerProfiles` and one `Deps.AuthenticateCustomer`, which receives the profile's `Prefix` |
 | `Deps.CheckoutCustomer(ctx, string)` | `Deps.CheckoutCustomer` takes a `billing.CustomerID` |
 | `Identity.CustomerID`, the `Deps.CustomerFor` result and `DelegatedPrincipal.MerchantID` as strings | `billing.CustomerID` and `billing.MerchantID` |
 | `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
-| No parser for a merchant's YAML | `openrails.ParseMerchantDeclaration` |
-| `HTTP.Checkout` needed `Deps.Authenticate` | It needs none: the routes are public or addressed by session id |
-| Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.River == openrails.RiverHostOwned`) |
+| No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration` |
+| `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
+| Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
 | `AuthConfig.Naming merchant.NamingConfig` | `openrails.NamingConfig`, `openrails.FormerNamesConfig`, `openrails.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` returns an error for them; they belong to `openrails.NewRemote` |
@@ -439,7 +442,7 @@ Catalog documents carry `schema_version` and their changes. Remove `application_
 `expected_revision`, and `catalog_version`: the server remembers the canonical
 content hash per merchant. Replays remain no-ops after later edits. A new hash
 applies atomically; hashes do not determine which unseen batch is newer.
-`AllowCatalogUpdates` controls HTTP catalog-write route exposure only; authorized
+`Routes.CatalogEdits` controls HTTP catalog-write route exposure only; authorized
 in-process client calls always work. `Config.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 

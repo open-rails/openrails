@@ -659,7 +659,7 @@ func TestRuntimePartitionsBelongToTheSchemaOwner(t *testing.T) {
 			_, _ = admin.Exec(ctx, `DROP ROLE IF EXISTS `+pgx.Identifier{role}.Sanitize())
 		}
 	})
-	cfg := openrails.Config{Schema: schema, SchemaOwner: owner, River: openrails.RiverHostOwned}
+	cfg := openrails.Config{Schema: schema, RiverSchema: schema, SchemaOwner: owner}
 	require.NoError(t, openrails.Migrate(ctx, admin, cfg))
 
 	// owners maps each partition of both tables to the role that owns it.

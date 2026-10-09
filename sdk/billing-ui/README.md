@@ -40,7 +40,7 @@ const session = await billing.createCheckoutSession({
   priceKey: "monthly",
 })
 
-// A shared payment page (Config.HTTP.Checkout.PageURL) answers with a url:
+// A shared payment page (Config.Checkout.PageURL) answers with a url:
 <CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />
 // Without one, the app renders the checkout itself:
 <Checkout source={billing.checkoutSource(session.id)} onComplete={() => refetchAccess()} />
@@ -91,7 +91,7 @@ Stripe Elements needs the buyer's billing client (`<Checkout>` inside a
 
 The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
 behind its adapter's `CheckoutFramePolicy` (only the sites in
-`Config.HTTP.Checkout.EmbedOrigins` may frame it):
+`Config.Checkout.EmbedOrigins` may frame it):
 
 ```tsx
 import { BillingUiProvider, CheckoutPage } from "@openrails/billing-ui"

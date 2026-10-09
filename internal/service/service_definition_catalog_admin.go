@@ -11,7 +11,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -523,11 +522,7 @@ type ReconcileResult struct {
 // to the remote when drift is detected. OpenRails is authoritative.
 func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts ReconcileOptions) (*ReconcileResult, error) {
 	if !opts.DryRun {
-		cfg, err := s.requireConfig()
-		if err != nil {
-			return nil, err
-		}
-		if err := catalogpolicy.Check(ctx, cfg); err != nil {
+		if err := s.checkCatalogWritePolicy(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -674,11 +669,7 @@ type ProductReconcileResult struct {
 // This is the product-level analog of ReconcilePrice.
 func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opts ReconcileOptions) (*ProductReconcileResult, error) {
 	if !opts.DryRun {
-		cfg, err := s.requireConfig()
-		if err != nil {
-			return nil, err
-		}
-		if err := catalogpolicy.Check(ctx, cfg); err != nil {
+		if err := s.checkCatalogWritePolicy(ctx); err != nil {
 			return nil, err
 		}
 	}

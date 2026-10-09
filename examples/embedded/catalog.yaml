@@ -10,7 +10,7 @@ products:
         access_duration: null # permanent access
       - key: rent
         amount: 1.99 USD
-        access_duration: 3 days
+        access_duration: 3 days # access expires 3 days after purchase
 
   - key: course-102
     display_name: Course 102 — Intro to Tailwind
@@ -28,18 +28,18 @@ products:
     entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
-        amount: 8.99 USD # both courses, instead of 9.98 USD separately
+        amount: 8.99 USD # both courses at a discounted price
         access_duration: null
 
-  - key: channel-main
-    display_name: Main channel membership
-    entitlements: ["channel:main:membership"]
+  - key: channel-membership
+    display_name: Channel membership
+    entitlements: ["channel:membership"]
     prices:
       - key: monthly
-        amount: 9.99 USD
+        amount: 10 USD
         access_duration: 30 days
         billing_interval: 30 days
       - key: yearly
-        amount: 99.99 USD
+        amount: 99 USD
         access_duration: 365 days
         billing_interval: 365 days

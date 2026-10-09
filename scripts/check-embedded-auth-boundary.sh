@@ -35,7 +35,7 @@ func main() {
   if r.Header.Get("Authorization") == "" { return openrails.Identity{}, openrails.ErrUnauthenticated }
   return openrails.Identity{Kind: openrails.User, Issuer: "https://identity.example", SubjectID: "11111111-1111-4111-8111-111111111111"}, nil
  }}
- cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly, River: openrails.RiverHostOwned}
+ cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
  if deps.Authenticate == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
 }
 GO

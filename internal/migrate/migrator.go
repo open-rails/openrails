@@ -19,17 +19,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Options selects the OpenRails schema and the River schema it manages.
-// HostRiver leaves River's migrations to the host.
+// Options selects the OpenRails schema.
 type Options struct {
-	Schema      string
-	RiverSchema string
-	HostRiver   bool
+	Schema string
 }
 
-// ApplyPostgresMigrations applies OpenRails' embedded migrations, then River's
-// unless the host owns River. The pool's role owns every object it creates and
-// is the role OpenRails runs as. AuthKit migrates its own schema.
+// ApplyPostgresMigrations applies OpenRails' embedded migrations. The pool's
+// role owns every object it creates and is the role OpenRails runs as. River
+// migrates separately (ApplyRiver); AuthKit migrates its own schema.
 func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return fmt.Errorf("missing postgres pool")
@@ -40,10 +37,6 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 	schema := opts.Schema
 	if schema == "" {
 		schema = config.DefaultSchema
-	}
-	riverSchema := opts.RiverSchema
-	if riverSchema == "" {
-		riverSchema = config.DefaultRiverSchema
 	}
 
 	log.Infof("Running OpenRails migrations (schema %q)...", schema)
@@ -72,11 +65,6 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 	if _, err := retention.EnsurePartitions(ctx, data.GenDirectory(), time.Now()); err != nil {
 		return fmt.Errorf("openrails: %w", err)
 	}
-	if !opts.HostRiver {
-		if err := runRiverMigrationsPool(ctx, pool, riverSchema); err != nil {
-			return fmt.Errorf("river migrations failed: %w", err)
-		}
-	}
 	log.Info("✓ OpenRails migrations completed successfully")
 	return nil
 }
@@ -90,15 +78,22 @@ func loadMigrations(schema string) ([]migratekit.Migration, error) {
 	return rewriteMigrationsSchema(migrations, schema)
 }
 
+// ApplyRiver migrates River's tables in schema.
+func ApplyRiver(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	if err := runRiverMigrationsPool(ctx, pool, schema); err != nil {
+		return fmt.Errorf("openrails: River migrations in %s: %w", schema, err)
+	}
+	return nil
+}
+
 // runRiverMigrationsPool executes River's built-in schema migrations over the
-// caller's pool. Keeping this in the OpenRails migration package means the
-// consumer never needs to import rivermigrate either.
+// caller's pool, serialized with AuthKit and riverhelpers on one lock.
 func runRiverMigrationsPool(ctx context.Context, pgxPool *pgxpool.Pool, schema string) error {
 	if pgxPool == nil {
 		return fmt.Errorf("missing postgres pool")
 	}
 	if schema == "" {
-		schema = config.DefaultRiverSchema
+		return fmt.Errorf("River schema is required")
 	}
 	// Shared protocol with AuthKit: serialize schema creation and River's own
 	// version migrations without pinning the caller pool's only connection.

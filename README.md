@@ -35,7 +35,7 @@ OpenRails integrates with several payment-processors:
 
 You'll need a Go webserver, and Postgres (v18 or higher).
 
-Here we build an OnlyDemo-style creator site: users sign in with [AuthKit](https://github.com/open-rails/authkit), buy CSS courses individually or as a bundle, and subscribe to a channel for 30-day or 365-day terms. The membership is one product with monthly and yearly prices. See [OnlyDemo](https://github.com/open-rails/onlydemo) for the complete creator application. An independent [prepaid API-balance catalog](#prepaid-api-balance-catalog) appears later.
+Here we'll build a simple app where users register / login with [AuthKit](https://github.com/open-rails/authkit), buy CSS courses individually or as a bundle, and can buy a recurring monthly or annual membership.
 
 First install:
 
@@ -43,7 +43,7 @@ First install:
 go get github.com/open-rails/openrails
 ```
 
-Next, declare your catalog as a YAML config file:
+Next, declare your catalog of products + prices as a YAML config file:
 
 ```yaml
 # catalog.yaml
@@ -58,7 +58,7 @@ products:
         access_duration: null # permanent access
       - key: rent
         amount: 1.99 USD
-        access_duration: 3 days
+        access_duration: 3 days # access expires 3 days after purchase
 
   - key: course-102
     display_name: Course 102 — Intro to Tailwind
@@ -76,59 +76,477 @@ products:
     entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
       - key: purchase
-        amount: 8.99 USD # both courses, instead of 9.98 USD separately
+        amount: 8.99 USD # both courses at a discounted price
         access_duration: null
 
-  - key: channel-main
-    display_name: Main channel membership
-    entitlements: ["channel:main:membership"]
+  - key: channel-membership
+    display_name: Channel membership
+    entitlements: ["channel:membership"]
     prices:
       - key: monthly
-        amount: 9.99 USD
+        amount: 10 USD
         access_duration: 30 days
         billing_interval: 30 days
       - key: yearly
-        amount: 99.99 USD
+        amount: 99 USD
         access_duration: 365 days
         billing_interval: 365 days
 ```
 
-Product keys identify commercial offerings; entitlement keys identify the access
-they grant. Buying `course-101` or `course-bundle` grants `course:101`, so the
-host checks the same key for either purchase. A rental grants that key until its
-expiry. Both membership prices grant `channel:main:membership`; the host uses
-that key for membership-included posts. It does not automatically unlock paid
-courses 101 and 102. The two membership prices belong to the same product.
+The entitlements are arbitrary strings; OpenRails tracks these, but it's up to your application to give them meaning.
 
-The short content and channel IDs make this example readable. OnlyDemo derives its
-keys from stable UUIDs, such as `post:<post UUID>`; slugs and titles can change
-without changing what was purchased. OpenRails treats these keys as opaque
-strings. A course can contain several media files; the host decides what access
-to that content includes.
+#### Build the billing client
 
-`entitlements` is a list of arbitrary, opaque strings. OpenRails does not
-distinguish a content key such as `course:101` from a service key such as `premium`;
-your application decides what each permits. Keys are nonblank strings of at most 256 bytes, with no per-key durations.
-A product name or key does not implicitly grant an entitlement. Use `[]` to grant
-none; omitted fields preserve an existing product's list.
+You, the seller, and your payment processor account go in `merchant.yaml`. This
+one is an NMI gateway; declare as many PSPs as you like. The file holds your
+gateway's secret keys, so keep it out of version control:
 
-Price amounts always name their currency: `amount: 9.99 USD`, `amount: 199 MXN`,
-`amount: 1 SOL` or `amount: 10 USDC`. A bare `amount: 9.99` is invalid, and the
-code must be one OpenRails recognizes: major fiat currencies (USD, EUR, GBP, MXN,
-JPY, …) and the Solana tokens SOL, USDC, USDT, PYUSD, USD1 and USDG.
-`GET /v1/currencies` lists them all. Conversion uses the currency's registered
-precision exactly, without rounding. A price can use `amount` or the numeric
-`unit_amount` and `currency` fields, never both forms.
-Payment rails still determine which currencies they can charge. One-time Solana
-checkout supports token prices paid in the matching token when the merchant
-accepts it; those amounts need no FX conversion. Paying a token-denominated price
-with a different token is unsupported. New Solana recurring plans remain
-USD-denominated, and card rails accept only fiat currencies their provider supports.
+```yaml
+# merchant.yaml
+display_name: OnlyDemo
+psps:
+  mobius: # your name for this account; any key you like
+    rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
+    account_id: "000000" # the NMI dashboard's "Gateway ID"
+    settings:
+      tokenization_key: your-public-tokenization-key # the browser's card fields use it
+    secrets:
+      security_key: your-private-security-key
+      webhook_signing_secret: your-webhook-signing-key
+```
 
-Durations accept positive
-whole hours, days or weeks: `72 hours` and `3 days` mean the same thing. Numeric
-`access_duration_hours`, `billing_interval_hours` and `trial_duration_hours` are
-also accepted; use only one form of each field.
+```go
+package main
+
+import (
+	"context"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
+	authkitgin "github.com/open-rails/authkit/adapters/gin"
+	"github.com/open-rails/openrails"
+	openrailsgin "github.com/open-rails/openrails/adapters/gin"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
+)
+
+func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*openrails.Client, error) {
+	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
+	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
+	if err != nil {
+		return nil, err
+	}
+	merchant.Slug = "onlydemo"
+
+	// What you sell. New applies each distinct catalog once, even across restarts.
+	// Later edits through the Go client remain available and are not undone by a replay.
+	products, err := catalog.ReadFile("catalog.yaml")
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := openrails.Config{
+		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
+		TestMode:          openrails.Sandbox,            // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
+		ProviderWriteMode: openrails.ProviderWritesFull, // Set to ProviderWritesReadOnly to prevent any billing
+		Merchant:          merchant,
+		Catalog:           products,
+	}
+
+	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
+	if err := openrails.Migrate(ctx, db, cfg); err != nil {
+		return nil, err
+	}
+
+	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
+	// who is calling, and each user is their own paying customer.
+	return openrails.New(ctx, cfg, openrails.Deps{
+		Postgres: db,   // required: the same pool your app uses
+		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
+	})
+}
+```
+
+If your app already loads its own configuration (koanf, kong, flags), build the
+same declaration in Go instead of reading `merchant.yaml`. `MerchantDeclaration`
+and `PSPConfig` carry `yaml` tags, so they can also sit inside your own YAML
+config:
+
+```go
+merchant := openrails.MerchantDeclaration{
+	Slug: "onlydemo",
+	PSPs: map[string]openrails.PSPConfig{"mobius": {
+		Rail:      billing.RailNMI,
+		AccountID: conf.NMI.GatewayID,
+		Settings:  map[string]any{"tokenization_key": conf.NMI.TokenizationKey},
+		Secrets: map[string]string{
+			"security_key":           conf.NMI.SecurityKey,
+			"webhook_signing_secret": conf.NMI.WebhookSigningSecret,
+		},
+	}},
+}
+```
+
+#### Integrate OpenRails into your server
+
+Start OpenRails' background work, mount the billing routes next to AuthKit's,
+and gate your content with `HasEntitlement`:
+
+```go
+func main() { log.Fatal(run(context.Background())) }
+
+func run(ctx context.Context) error {
+	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	auth, err := newAuth(ctx, db) // see AuthKit's README
+	if err != nil {
+		return err
+	}
+	defer auth.Close()
+	bill, err := newBilling(ctx, db, auth)
+	if err != nil {
+		return err
+	}
+	defer bill.Close(context.WithoutCancel(ctx))
+
+	// Background work. OpenRails runs its own River workers: rebills, retries of
+	// failed payments, invoices.
+	if err := auth.Start(ctx); err != nil {
+		return err
+	}
+	if err := bill.Start(ctx); err != nil {
+		return err
+	}
+
+	r := gin.Default()
+	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
+		return err
+	}
+	// Billing. Processor webhooks are always mounted; pick the rest.
+	err = openrailsgin.Mount(r, bill, openrails.Routes{
+		Prefix:       "/billing",                    // the API is served at /billing/v1/*
+		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
+		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
+		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog); needs Deps.AuthorityFor
+		CatalogEdits: false,                         // with Merchant, also let that API change the catalog; your Go code always can
+	})
+	if err != nil {
+		return err
+	}
+
+	// Which entitlement unlocks each video. Buying course-101 or the bundle grants
+	// course:101; either membership price grants channel:membership.
+	contentAccess := map[string]string{
+		"css-101":      "course:101",
+		"tailwind-102": "course:102",
+		"members-qa":   "channel:membership",
+	}
+	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
+		id := c.Param("id")
+		entitlement, exists := contentAccess[id]
+		if !exists {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		claims, _ := auth.VerifyRequest(c.Request)
+		customer, err := billing.ParseCustomerID(claims.UserID) // each AuthKit user is their own customer
+		if err != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		if !allowed {
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
+			return
+		}
+		c.File("videos/" + id + ".mp4")
+	})
+
+	return r.Run(":8080")
+}
+```
+
+`openrails.Routes` picks what OpenRails mounts on your router; each field adds
+routes:
+
+- `Prefix`: where the API lives; `/billing` serves `/billing/v1/*`.
+- `Storefront`: what a shopper's browser needs before signing in: products,
+  prices, checkout configuration, and reading and paying a checkout.
+- `Customers`: a signed-in user's own billing at `/billing/v1/me`: their
+  entitlements, subscriptions, saved cards and invoices.
+  `openrails.CustomerSelfService` is all of it; the zero value serves none.
+- `Merchant`: the API your staff and back office call at
+  `/billing/v1/merchant`: customers, refunds, catalog, settings. Every route asks
+  your auth for its merchant permission, so it needs `Deps.AuthorityFor` (or
+  your own `Deps.Authorize`).
+- `CatalogEdits`: lets that merchant API create and change products and prices.
+  Leave it off when the catalog lives in `catalog.yaml`; your Go code can edit
+  the catalog either way.
+- `AdminConsole`: the staff dashboard (below). Leaving it out, the default,
+  mounts no dashboard routes at all.
+
+That is the whole server integration, and it is the program in
+[`examples/embedded`](examples/embedded). Your server never touches a card
+number: the browser hands the card to the processor's tokenization iframe, and
+OpenRails charges the stored token, rebills memberships at their interval,
+retries failed renewals, and keeps `HasEntitlement` current. A rental's access
+ends after its 3 days; a canceled membership keeps access until its paid term ends.
+
+#### Admin dashboard
+
+OpenRails ships a dashboard for your staff, the admin console: customers,
+subscriptions, payments and refunds, the catalog, failed-payment findings,
+PSPs and team settings. It is off by default. To turn it on, mount it with
+the merchant API it drives; to turn it off, leave `AdminConsole` out:
+
+```go
+err = openrailsgin.Mount(r, bill, openrails.Routes{
+	Prefix:       "/billing",
+	Storefront:   true,
+	Customers:    openrails.CustomerSelfService,
+	Merchant:     true,                                           // the dashboard drives the merchant API
+	AdminConsole: &openrails.AdminConsole{Path: "/billing-admin"}, // omit it and no dashboard route exists
+})
+```
+
+- **Who signs in**: your staff, with their AuthKit accounts (through
+  `Deps.AuthKit`'s `/api/v1`). Every page calls the merchant API, which checks
+  each staff member's merchant permission (`Deps.AuthorityFor` names the
+  AuthKit group they belong to), and a write after a stale sign-in asks them to
+  confirm it is them.
+- **Requirements**: `Merchant: true`, and a console build passed as
+  `Deps.ConsoleAssets` ([admin console](docs/admin-console.md)); `Mount` fails
+  without either.
+- **Its own host**: the dashboard calls `/billing/v1` and `/api/v1` on its own
+  origin, and the merchant API answers no cross-origin requests. To serve it at
+  `billing.example.com`, send that host to this server, or to a router that
+  mounts AuthKit and OpenRails for it.
+
+The standalone server's switch is `admin_console.enabled` in `config.yaml`
+(with `admin_console.path`).
+
+#### Share one River fleet
+
+`bill.Start(ctx)` runs OpenRails' own River workers in `Config.RiverSchema`
+(`billing_river` by default), whose tables `Migrate` creates. If you already
+run a River fleet, add OpenRails' jobs to it instead; the fleet is yours, so
+you start and stop it. It must use `Config.RiverSchema`:
+
+```go
+fleet, err := riverhelpers.New(ctx, db, &river.Config{Schema: "billing_river"}, auth.RiverJobs(), bill.RiverJobs())
+if err != nil {
+	return err
+}
+if err := fleet.Start(ctx); err != nil {
+	return err
+}
+defer fleet.StopAndCancel(context.WithoutCancel(ctx))
+if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil { // enqueues through your fleet; never starts or stops it
+	return err
+}
+```
+
+AuthKit joins the same fleet when its config says
+`River: authkit.RiverConfig{HostOwned: true, Schema: "billing_river"}`.
+
+#### Add a storefront
+
+[`@openrails/billing-ui`](sdk/billing-ui) is a React package with a styled
+checkout and an account page. Its components call your mounted `/billing/v1`
+routes directly, so you write no billing endpoints of your own. Install it from
+the release:
+
+```sh
+pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
+```
+
+The storefront lists the catalog's offers. A customer who already holds a
+course's entitlement gets a link to watch it instead of a buy button:
+
+```tsx
+import { useEffect, useState } from "react"
+import { createBillingClient } from "@openrails/billing-ui/client"
+import { BillingProvider } from "@openrails/billing-ui/react"
+import { AccountBilling, BillingUiProvider, CheckoutModal } from "@openrails/billing-ui"
+import "@openrails/billing-ui/styles.css"
+import { auth } from "./auth" // your auth-ui client: authFetch attaches the AuthKit token
+
+const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
+
+const courses = [
+  { video: "css-101", entitlement: "course:101", product: "course-101", title: "Intro to CSS" },
+  { video: "tailwind-102", entitlement: "course:102", product: "course-102", title: "Intro to Tailwind" },
+]
+
+export function Store() {
+  const held = useEntitlements()
+  return (
+    <BillingUiProvider appearance={{ theme: "auto" }}>
+      <BillingProvider client={billing}>
+        {courses.map((course) => (
+          <section key={course.product}>
+            <h2>{course.title}</h2>
+            {held.has(course.entitlement) ? (
+              <a href={`/videos/${course.video}`}>Watch</a>
+            ) : (
+              <>
+                <BuyButton productKey={course.product} priceKey="purchase" label="Buy for $4.99" />
+                <BuyButton productKey={course.product} priceKey="rent" label="Rent for 3 days, $1.99" />
+              </>
+            )}
+          </section>
+        ))}
+        <BuyButton productKey="course-bundle" priceKey="purchase" label="Both courses for $8.99" />
+
+        <h2>Channel membership</h2>
+        {held.has("channel:membership") ? (
+          <a href="/videos/members-qa">Members-only Q&A</a>
+        ) : (
+          <>
+            <BuyButton productKey="channel-membership" priceKey="monthly" label="$10 every 30 days" />
+            <BuyButton productKey="channel-membership" priceKey="yearly" label="$99 every 365 days" />
+          </>
+        )}
+
+        {/* Memberships (cancel, resume, change card), saved cards and payment history. */}
+        <AccountBilling plansHref="/store" collectionCurrency="USD" />
+      </BillingProvider>
+    </BillingUiProvider>
+  )
+}
+
+// The signed-in customer's current entitlements: GET /billing/v1/me/entitlements.
+function useEntitlements() {
+  const [held, setHeld] = useState(new Set<string>())
+  useEffect(() => {
+    auth
+      .authFetch("/billing/v1/me/entitlements")
+      .then((response) => response.json())
+      .then((page: { data: { entitlement: string }[] }) => setHeld(new Set(page.data.map((e) => e.entitlement))))
+  }, [])
+  return held
+}
+
+function BuyButton({ productKey, priceKey, label }: { productKey: string; priceKey: string; label: string }) {
+  const [sessionId, setSessionId] = useState<string>()
+  async function buy() {
+    // POST /billing/v1/me/checkout-sessions: OpenRails prices the offer from the catalog.
+    const session = await billing.createCheckoutSession({ productKey, priceKey })
+    setSessionId(session.id)
+  }
+  return (
+    <>
+      <button onClick={buy}>{label}</button>
+      {sessionId && (
+        <CheckoutModal
+          open
+          onOpenChange={(open) => !open && setSessionId(undefined)}
+          // Card entry happens in the processor's iframe.
+          source={billing.checkoutSource(sessionId)}
+          onComplete={() => location.reload()}
+        />
+      )}
+    </>
+  )
+}
+```
+
+Buying the bundle grants both `course:101` and `course:102`, so both courses show
+**Watch**. A membership grants `channel:membership`, which unlocks members-only
+videos but not the paid courses. `AccountBilling` lets members cancel, resume or
+change the card for a failed renewal.
+
+Several sites selling for one merchant can share one payment page instead: set `Config.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
+
+#### Routes
+
+Mounting gives your users these routes under `/billing`:
+
+**Shopping and checkout** (`Routes.Storefront`)
+
+| Route | What it does |
+|---|---|
+| `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
+| `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?recurring=`, `?limit=`, `?cursor=`) |
+| `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
+| `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
+| `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
+| `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
+| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
+| `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
+| `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
+| `GET /billing/v1/capabilities` | which route groups and features are mounted, for your UI (always mounted) |
+
+**Your customers' own billing** (`Routes.Customers`, signed in, always as the caller)
+
+| Route | What it does |
+|---|---|
+| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
+| `GET /billing/v1/me/entitlements` | everything they currently have access to |
+| `GET /billing/v1/me/subscriptions` | their subscriptions |
+| `GET /billing/v1/me/subscriptions/{id}` | one subscription |
+| `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
+| `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
+| `POST /billing/v1/me/subscriptions/{id}/change-tier` | upgrade or downgrade |
+| `POST /billing/v1/me/subscriptions/{id}/change-tier/preview` | what that change would cost |
+| `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
+| `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
+| `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
+| `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
+| `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
+| `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
+| `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
+| `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
+| `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
+| `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
+| `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
+| `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |
+| `GET /billing/v1/me/payments` | payment and refund history |
+| `GET /billing/v1/me/invoices` | invoices |
+| `GET /billing/v1/me/invoices/{id}` | one invoice |
+| `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
+| `GET /billing/v1/me/balance` | prepaid balance |
+| `GET /billing/v1/me/transactions` | its ledger |
+| `GET /billing/v1/me/usage` | metered usage |
+| `GET /billing/v1/me/spend-limits` | spending limits |
+| `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
+| `GET /billing/v1/me/notifications/unread-count` | how many are unread |
+| `POST /billing/v1/me/notifications/{id}/read` | mark one read |
+
+**Payment processors** (always mounted)
+
+| Route | What it does |
+|---|---|
+| `POST /billing/v1/webhooks/{rail}/{account_id}` | processor notifications (Stripe, NMI, CCBill), verified per account |
+
+`Routes.Merchant` publishes the merchant API (`/billing/v1/merchant/*`) for your staff and machines rather than your users: customers, refunds, catalog, settings, PSPs, alerts. Each route is gated by its merchant permission, and each has one method on the Go `Client`. Every route is in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
+
+What you will set next:
+
+| To | Set |
+|---|---|
+| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.Email`; without one OpenRails sends no email |
+| Publish the merchant API | `Routes.Merchant`, with `Deps.AuthorityFor` naming the AuthKit group that holds your staff |
+| Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
+| Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
+| Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
+| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
+
+### How access and billing work
+
 
 **Access and ownership.** Use `HasEntitlement` to check whether the customer may
 access content now. That includes individual purchases, bundles and unexpired
@@ -164,7 +582,7 @@ POST /billing/v1/me/checkout-sessions
 Content-Type: application/json
 
 {
-  "product_key": "channel-main",
+  "product_key": "channel-membership",
   "price_key": "monthly",
   "auto_renew": false
 }
@@ -177,7 +595,7 @@ Hosts that require manual cancellation simply omit the flag and need no renewal
 toggle in their checkout UI.
 
 Product keys are merchant-wide; price keys belong to their product. For example,
-`channel-main.monthly` selects the 30-day membership offer.
+`channel-membership.monthly` selects the 30-day membership offer.
 OpenRails assigns immutable price revisions automatically, starting at v0.
 Existing subscribers keep their accepted price and benefits until explicitly
 migrated. Omitted entries stay unchanged; use `archived: true` to retire an offer.
@@ -187,8 +605,8 @@ migrated. Omitted entries stay unchanged; use `archived: true` to retire an offe
 The following files form a catalog migration: update products in place, create
 new price revisions, retire offers, and restore an earlier revision. All changes
 are YAML applications. Apply each file through the same
-`catalog.ParseApplicationYAML` → `client.ApplyCatalog` startup path shown below,
-or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
+`catalog.ReadFile` → `Config.Catalog` startup path shown above, through
+`client.ApplyCatalog`, or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
 There are no caller-managed application IDs or version numbers. These examples
 build on the initial `catalog.yaml` above.
 
@@ -208,8 +626,8 @@ product and offer:
 # catalog-update.yaml
 schema_version: 1
 products:
-  - key: channel-main
-    display_name: Main channel Plus membership
+  - key: channel-membership
+    display_name: Channel Plus membership
     prices:
       - key: monthly
         amount: 12.99 USD
@@ -219,8 +637,8 @@ The `amount` field sets both the amount and currency. Other omitted fields
 preserve their existing values. If no money fields are supplied, both the amount
 and currency are preserved.
 
-For the initial catalog, this creates `channel-main.monthly.v1` at
-$12.99 and archives `channel-main.monthly.v0` at $9.99. The old price
+For the initial catalog, this creates `channel-membership.monthly.v1` at
+$12.99 and archives `channel-membership.monthly.v0` at $10. The old price
 record is retained unchanged. New subscribers buy v1; existing subscribers keep their exact accepted price and
 entitlements indefinitely. Product descriptions and `entitlements` can also
 be edited in place; changed entitlements apply to new purchases, not retroactively
@@ -235,8 +653,8 @@ list, so retain the original membership key:
 # add-membership-benefit.yaml
 schema_version: 1
 products:
-  - key: channel-main
-    entitlements: ["channel:main:membership", "channel:main:downloads"]
+  - key: channel-membership
+    entitlements: ["channel:membership", "channel:downloads"]
 ```
 
 Your application can check the new downloads key for its download feature. Prices
@@ -253,13 +671,13 @@ yearly price on sale:
 # retire-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-main
+  - key: channel-membership
     prices:
       - key: monthly
         archived: true
 ```
 
-The omitted `yearly` price under `channel-main` stays unchanged. Monthly subscribers
+The omitted `yearly` price under `channel-membership` stays unchanged. Monthly subscribers
 keep their accepted price and billing schedule. Archiving an offer does not move
 them to another product, cancel them, revoke access, or delete history.
 
@@ -317,10 +735,10 @@ give the complete financial terms to select the intended historical revision:
 # restore-original-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-main
+  - key: channel-membership
     prices:
       - key: monthly
-        amount: 9.99 USD # the original $9.99 terms
+        amount: 10 USD # the original $10 terms
         access_duration: 30 days
         billing_interval: 30 days
         trial_unit_amount: null
@@ -397,344 +815,35 @@ hash replay, so this workflow does not roll back later edits.
 
 ### Turning catalog HTTP writes on and off
 
-Set these options **before constructing the client**:
+`Routes.CatalogEdits` decides whether the merchant API can change the catalog;
+choose it when you mount:
 
 ```go
-cfg.HTTP = &openrails.HTTPConfig{Merchant: true} // authenticated merchant API
-cfg.AllowCatalogUpdates = false                // omit its catalog-write routes
-// Set AllowCatalogUpdates to true and restart to enable catalog HTTP editing.
+err = openrailsgin.Mount(r, bill, openrails.Routes{
+	Prefix:       "/billing",
+	Merchant:     true,  // the merchant API, for your staff
+	CatalogEdits: false, // without its catalog-write routes
+})
+// Set CatalogEdits to true and restart to let authorized staff edit the catalog over HTTP.
 ```
 
-| `AllowCatalogUpdates` | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
+| `Routes.CatalogEdits` | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
 |---|---|---|
 | `false` | Unavailable | Available |
 | `true` | Available to authorized callers | Available |
 
 Catalog reads remain available on the merchant API. Turning HTTP writes off does
-not make the database read-only or prevent later client edits. The startup example
-below turns them off and applies the YAML through the client on every boot.
-
-Now let's build the billing client:
-
-```go
-package main
-
-import (
-	"context"
-	"log"
-	"net/http"
-	"os"
-	"time"
-
-	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit"
-	authkitgin "github.com/open-rails/authkit/adapters/gin"
-	riverhelpers "github.com/open-rails/helpers/river"
-	"github.com/open-rails/openrails"
-	openrailsgin "github.com/open-rails/openrails/adapters/gin"
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
-	"github.com/riverqueue/river"
-)
-
-func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*openrails.Client, error) {
-	// Your payment processor account (a PSP). This one is an NMI gateway named "mobius", read
-	// from MOBIUS_RAIL=nmi, MOBIUS_ACCOUNT_ID and MOBIUS_SECURITY_KEY. Declare as many as you like.
-	mobius, err := openrails.PSPFromEnv("mobius", os.LookupEnv)
-	if err != nil {
-		return nil, err
-	}
-
-	// What you sell. Each distinct catalog batch is applied once, even across restarts.
-	// Later programmatic edits remain available and are not undone by a replay.
-	raw, err := os.ReadFile("catalog.yaml")
-	if err != nil {
-		return nil, err
-	}
-	declared, err := catalog.ParseApplicationYAML(raw)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg := openrails.Config{
-		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
-		ProviderWriteMode: openrails.ProviderWritesFull, // ProviderWritesReadOnly never charges anyone
-		Merchant: openrails.MerchantDeclaration{
-			Slug: "onlydemo", // you, the seller
-			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
-		},
-		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
-		HTTP: &openrails.HTTPConfig{
-			Merchant: true,                        // authenticated merchant routes; catalog HTTP writes stay disabled
-			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
-			CustomerRoutes: []openrails.CustomerRoutesConfig{
-				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
-			},
-		},
-		River: openrails.RiverHostOwned, // renewals, dunning and invoices run on your River workers
-	}
-
-	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
-	if err := openrails.Migrate(ctx, db, cfg); err != nil {
-		return nil, err
-	}
-
-	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
-	// who is calling, and each user is their own paying customer.
-	client, err := openrails.New(ctx, cfg, openrails.Deps{
-		Postgres: db,   // required: the same pool your app uses
-		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
-	})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := client.ApplyCatalog(ctx, declared); err != nil {
-		_ = client.Close(context.WithoutCancel(ctx))
-		return nil, err
-	}
-	return client, nil
-}
-```
-
-Now wire everything together and mount the routes:
-
-```go
-func main() { log.Fatal(run(context.Background())) }
-
-func run(ctx context.Context) error {
-	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	auth, err := newAuth(ctx, db) // see AuthKit's README; set River: authkit.RiverConfig{HostOwned: true}
-	if err != nil {
-		return err
-	}
-	defer auth.Close()
-	bill, err := newBilling(ctx, db, auth)
-	if err != nil {
-		return err
-	}
-	defer bill.Close(ctx)
-
-	// One River worker fleet runs your jobs, AuthKit's and OpenRails' (rebills, retries, invoices).
-	// The fleet is yours, so you create River's tables ("" is River's default schema, public).
-	if err := riverhelpers.ApplyMigrations(ctx, db, ""); err != nil {
-		return err
-	}
-	workers, err := riverhelpers.New(ctx, db, &river.Config{}, auth.RiverJobs(), bill.RiverJobs())
-	if err != nil {
-		return err
-	}
-	if err := workers.Start(ctx); err != nil {
-		return err
-	}
-	defer workers.StopAndCancel(context.WithoutCancel(ctx))
-	if err := auth.Start(ctx); err != nil {
-		return err
-	}
-	if err := bill.Start(ctx); err != nil {
-		return err
-	}
-
-	r := gin.Default()
-	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
-		return err
-	}
-	if err := openrailsgin.Mount(r.Group("/billing"), bill); err != nil { // billing under /billing/v1
-		return err
-	}
-
-	// The host decides which key grants access to each content item. Paid courses
-	// stay separate from membership-included posts; the bundle grants both course keys.
-	contentAccess := map[string]string{
-		"101": "course:101",
-		"102": "course:102",
-		"103": "channel:main:membership",
-	}
-	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
-		id := c.Param("id")
-		entitlement, exists := contentAccess[id]
-		if !exists {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		claims, _ := auth.VerifyRequest(c.Request)
-		customer, err := billing.ParseCustomerID(claims.UserID)
-		if err != nil {
-			c.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
-		if err != nil {
-			c.AbortWithStatus(http.StatusServiceUnavailable)
-			return
-		}
-		if !allowed {
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
-			return
-		}
-		c.File("videos/" + id + ".mp4")
-	})
-
-	return r.Run(":8080")
-}
-```
-
-That's the whole integration, and it is the program in [`examples/embedded`](examples/embedded). Your server never touches a card number: the browser hands the card to the processor's tokenization iframe, and OpenRails charges the stored token, rebills subscriptions at their selected interval, retries failed renewals, and keeps `HasEntitlement` up to date.
-
-Mounting gives your users these routes under `/billing`:
-
-**Shopping and checkout** (`HTTP.Checkout`)
-
-| Route | What it does |
-|---|---|
-| `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
-| `GET /billing/v1/prices` | prices on sale (`?product_id=`, `?currency=`, `?recurring=`, `?limit=`, `?cursor=`) |
-| `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
-| `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
-| `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
-| `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
-| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
-| `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
-| `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
-| `GET /billing/v1/capabilities` | which route groups and features are mounted, for your UI (always mounted) |
-
-**Your customers' own billing** (`HTTP.CustomerRoutes`, signed in, always as the caller)
-
-| Route | What it does |
-|---|---|
-| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
-| `GET /billing/v1/me/entitlements` | everything they currently have access to |
-| `GET /billing/v1/me/subscriptions` | their subscriptions |
-| `GET /billing/v1/me/subscriptions/{id}` | one subscription |
-| `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
-| `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier` | upgrade or downgrade |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier/preview` | what that change would cost |
-| `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
-| `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
-| `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
-| `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
-| `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
-| `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
-| `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
-| `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
-| `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
-| `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
-| `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
-| `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |
-| `GET /billing/v1/me/payments` | payment and refund history |
-| `GET /billing/v1/me/invoices` | invoices |
-| `GET /billing/v1/me/invoices/{id}` | one invoice |
-| `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
-| `GET /billing/v1/me/balance` | prepaid balance |
-| `GET /billing/v1/me/transactions` | its ledger |
-| `GET /billing/v1/me/usage` | metered usage |
-| `GET /billing/v1/me/spend-limits` | spending limits |
-| `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
-| `GET /billing/v1/me/notifications/unread-count` | how many are unread |
-| `POST /billing/v1/me/notifications/{id}/read` | mark one read |
-
-**Payment processors** (always mounted)
-
-| Route | What it does |
-|---|---|
-| `POST /billing/v1/webhooks/{rail}/{account_id}` | processor notifications (Stripe, NMI, CCBill), verified per account |
-
-`HTTP.Merchant: true` publishes the merchant API (`/billing/v1/merchant/*`) for your staff and machines rather than your users: customers, refunds, catalog, settings, PSPs, alerts. Each route is gated by its merchant permission, and each has one method on the Go `Client`. Every route is in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
-
-What you will set next:
-
-| To | Set |
-|---|---|
-| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.EmailSender`; without one OpenRails sends no email |
-| Publish the merchant API | `Config.HTTP.Merchant` |
-| Serve the admin console | `Config.AdminConsole` ([admin console](docs/admin-console.md)) |
-| Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
-| Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
-| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
-
-#### The frontend
-
-[`@openrails/billing-ui`](sdk/billing-ui) is a React package with a styled checkout and an account page; every component calls your mounted `/billing/v1` routes directly, so you write no billing endpoints of your own. Install it from the release:
-
-```sh
-pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
-```
-
-Give it a client that sends the user's AuthKit token, then use the components:
-
-```tsx
-import { useState } from "react"
-import { createBillingClient } from "@openrails/billing-ui/client"
-import { BillingProvider } from "@openrails/billing-ui/react"
-import { AccountBilling, BillingUiProvider, CheckoutModal } from "@openrails/billing-ui"
-import "@openrails/billing-ui/styles.css"
-import { auth } from "./auth" // your auth-ui client: authFetch attaches the AuthKit token
-
-const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
-
-export function App() {
-  return (
-    <BillingUiProvider appearance={{ theme: "auto" }}>
-      <BillingProvider client={billing}>
-        <BuyButton productKey="course-101" priceKey="purchase" label="Buy Course 101 — $4.99" />
-        <BuyButton productKey="course-101" priceKey="rent" label="Rent Course 101 for 3 days — $1.99" />
-        <BuyButton productKey="course-102" priceKey="purchase" label="Buy Course 102 — $4.99" />
-        <BuyButton productKey="course-bundle" priceKey="purchase" label="Buy both courses — $8.99" />
-        <BuyButton productKey="channel-main" priceKey="monthly" label="Join for $9.99 every 30 days" />
-        <BuyButton productKey="channel-main" priceKey="yearly" label="Join for $99.99 every 365 days" />
-        {/* Subscriptions (cancel, resume, change card), saved cards and payment history. */}
-        <AccountBilling plansHref="/plans" collectionCurrency="USD" />
-      </BillingProvider>
-    </BillingUiProvider>
-  )
-}
-
-function BuyButton({ productKey, priceKey, label }: { productKey: string; priceKey: string; label: string }) {
-  const [sessionId, setSessionId] = useState<string>()
-  async function buy() {
-    // POST /billing/v1/me/checkout-sessions: OpenRails prices it from the catalog, for the signed-in user.
-    const session = await billing.createCheckoutSession({ productKey, priceKey })
-    setSessionId(session.id)
-  }
-  return (
-    <>
-      <button onClick={buy}>{label}</button>
-      {sessionId && (
-        <CheckoutModal
-          open
-          onOpenChange={(open) => !open && setSessionId(undefined)}
-          // Card entry happens in the processor's iframe; the selected offer determines what is bought.
-          source={billing.checkoutSource(sessionId)}
-          onComplete={() => location.assign("/content")}
-        />
-      )}
-    </>
-  )
-}
-```
-
-After a bundle checkout, the same `course:101` and `course:102` checks used for
-individual purchases allow both pieces of content. A rental makes its course accessible until
-expiry. Either membership price allows membership-included post 103 through
-`channel:main:membership`; it does not mark courses 101 and 102 as purchased. Failed
-renewals follow the configured dunning policy, and `AccountBilling` lets members
-fix their payment method.
-
-Several sites selling for one merchant can share one payment page instead: set `HTTP.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
+not make the database read-only or prevent later client edits. `CatalogEdits`
+needs `Merchant`, and every mount of the merchant API in one process must agree
+on it; a conflicting mount fails. The startup example above leaves them off and
+applies `catalog.yaml` through `Config.Catalog` on every boot.
 
 ---
 
 ### Prepaid API-balance catalog
 
 An API service can apply this separate catalog through the same
-`catalog.ParseApplicationYAML` and `client.ApplyCatalog` flow. These products top
+`catalog.ReadFile` and `Config.Catalog` flow. These products top
 up a currency balance that metered API usage consumes; they are independent of
 the creator-site catalog above.
 

@@ -29,7 +29,7 @@ var checkoutRoutes = []Route{
 		Responses: []Reply{{200, handlers.SolanaPayGetResponse{}}}, Errors: codes("checkout_attempt_expired", "invalid_param", "resource_conflict", "resource_not_found"), Handler: h(handlers.GetSolanaPay)},
 	{Method: POST, Path: "/v1/checkout-attempts/{id}/solana-pay", Group: Checkout, Auth: AuthSessionID, When: FeatureSolana,
 		Request: handlers.SolanaPayPostRequest{}, Responses: []Reply{{200, handlers.SolanaPayPostResponse{}}}, Errors: codes("checkout_attempt_expired", "invalid_param", "resource_conflict", "resource_not_found"), Handler: h(handlers.PostSolanaPay)},
-	{Method: POST, Path: "/v1/me/checkout-sessions", Group: Customer, Auth: AuthCustomer, When: FeatureCheckoutSessions,
+	{Method: POST, Path: "/v1/me/checkout-sessions", Group: Customer, Auth: AuthCustomer,
 		Request: handlers.MintCheckoutSessionParams{}, Responses: []Reply{{201, billing.CheckoutSessionLink{}}}, Errors: codes("authentication_required", "checkout_offer_unavailable", "checkout_session_unavailable", "customer_action_required", "invalid_param", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateCheckoutSession)},
 	{Method: POST, Path: "/v1/merchant/checkout-sessions", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCheckoutCreate,
 		Request: billing.CreateCheckoutSessionParams{}, Responses: []Reply{{201, billing.CheckoutSessionLink{}}}, Errors: codes("authentication_required", "checkout_offer_unavailable", "checkout_session_unavailable", "invalid_param", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceCreateCheckoutSession)},

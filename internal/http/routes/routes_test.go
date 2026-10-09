@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -73,8 +74,12 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 // permission that matches its blast radius.
 func TestMerchantRouteAuthorization(t *testing.T) {
 	gate := &deny{}
-	rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}
-	table := merchantSurface(rt, Options{Gate: gate})
+	open := &catalogpolicy.Exposure{}
+	if err := open.Decide(true); err != nil {
+		t.Fatal(err)
+	}
+	rt := &app.Runtime{Config: &config.Config{}, CatalogEdits: open}
+	table := merchantSurface(rt, Options{Gate: gate, CatalogWrites: true})
 	h := table.Handler()
 	asked := map[string]string{}
 	for _, key := range routeKeys(table) {
@@ -169,7 +174,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		}
 		return gate.Authorize(ctx, r, perm)
 	})
-	rec := do(merchantSurface(rt, Options{Gate: allowCatalog}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
+	rec := do(merchantSurface(rt, Options{Gate: allowCatalog, CatalogWrites: true}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	require.Equal(t, []string{billing.MerchantPaymentsRefund}, gate.asked)
 
@@ -201,14 +206,14 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 	}
 }
 
-// Disabled catalog updates remove every catalog mutation registration — not
-// merely reject it — while reads, batch lookups and credit grants remain.
+// Without CatalogWrites every catalog mutation registration is gone — not
+// merely rejected — while reads, batch lookups and credit grants remain.
 func TestCatalogWritePolicy(t *testing.T) {
 	reads := []string{"POST /merchant/catalog/offers/lookup"}
 	for _, allow := range []bool{false, true} {
-		rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: allow}}
+		rt := &app.Runtime{Config: &config.Config{}}
 		merchant := &router.Table{}
-		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{})
+		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{CatalogWrites: allow})
 		all := routeKeys(merchant)
 		var keys []string
 		for _, key := range all {
@@ -243,22 +248,30 @@ func TestCatalogWritePolicy(t *testing.T) {
 	}
 
 	called := false
+	closed := &app.Runtime{Config: &config.Config{}, CatalogEdits: &catalogpolicy.Exposure{}}
 	rec := httptest.NewRecorder()
-	catalogWriteGuardMW(&config.Config{})(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/products", nil), nil))
+	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/products", nil), nil))
 	require.Equal(t, http.StatusForbidden, rec.Code, "the guard also refuses if a write is ever mounted")
 	require.Contains(t, rec.Body.String(), "catalog_updates_disabled")
 	require.False(t, called)
 
-	// The embedded Client's own handler registers mutations with the flag off,
-	// and the guard admits only its host principal: the process owner.
-	rt := &app.Runtime{Config: &config.Config{}}
+	// The embedded Client's own handler registers mutations without a mount
+	// publishing them, and the guard admits only its host principal: the
+	// process owner.
 	inProcess := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(inProcess, "", rt), rt, Options{InProcess: true})
+	RegisterMerchantRoutes(router.NewMux(inProcess, "", closed), closed, Options{CatalogWrites: true})
 	require.Contains(t, routeKeys(inProcess), "POST /merchant/catalog/applications")
 	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
 	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
 	rec = httptest.NewRecorder()
-	catalogWriteGuardMW(&config.Config{})(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, owner, nil))
+	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, owner, nil))
+	require.True(t, called)
+
+	// Once a mount publishes catalog edits, the guard admits other callers.
+	require.NoError(t, closed.CatalogEdits.Decide(true))
+	called = false
+	rec = httptest.NewRecorder()
+	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/products", nil), nil))
 	require.True(t, called)
 }
 

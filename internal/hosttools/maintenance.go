@@ -94,8 +94,8 @@ func ResolveMerchant(ctx context.Context, a *app.App, name string) (billing.Merc
 }
 
 // ApplyCatalogAsOperator applies a catalog to one explicitly selected merchant
-// with operator authority; ordinary Client writes remain governed by
-// AllowCatalogUpdates.
+// with operator authority; other callers' writes remain governed by
+// Routes.CatalogEdits.
 func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.MerchantID, params *catalog.Application) (*billing.CatalogApplicationReceipt, error) {
 	if err := initialized(a); err != nil {
 		return nil, err

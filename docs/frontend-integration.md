@@ -20,7 +20,7 @@ routing order; the page pays with one of them ([Checkout](#checkout)).
 ### Authentication
 
 Embedded applications use their normal user credential through the host's
-AuthKit request verifier. Cookie-based hosts set `Config.HTTP.CookieOrigin` to
+AuthKit request verifier. Cookie-based hosts set `Routes.CookieOrigin` to
 `"https://merchant.example"`; by default the mount strips ambient cookies.
 Admission accepts unsafe cookie
 requests only from that exact configured origin, including bodyless POSTs;

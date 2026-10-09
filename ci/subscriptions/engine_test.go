@@ -228,7 +228,7 @@ func TestEmbeddedRequiresWriteMode(t *testing.T) {
 	pool, err := pgxpool.New(t.Context(), dsn(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	_, err = openrails.New(t.Context(), openrails.Config{TestMode: openrails.Sandbox, River: openrails.RiverHostOwned}, openrails.Deps{Postgres: pool})
+	_, err = openrails.New(t.Context(), openrails.Config{TestMode: openrails.Sandbox}, openrails.Deps{Postgres: pool})
 	require.ErrorContains(t, err, "ProviderWriteMode is required")
 }
 

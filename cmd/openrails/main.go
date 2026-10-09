@@ -231,7 +231,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Public API server (user/admin JWT auth). The full standalone surface is
 	// the framework-neutral net/http stack (#670) — the same stack embedded
 	// hosts mount.
-	publicServer, err := operator.StandaloneServer(graph)
+	publicServer, err := operator.StandaloneServer(graph, listener.Routes())
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}
@@ -346,7 +346,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 }
 
 // applyStandaloneMigrations migrates like any host (openrails.Migrate): billing,
-// managed River and, with the control plane, AuthKit.
+// River and, with the control plane, AuthKit.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 	if err != nil {

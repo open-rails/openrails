@@ -45,7 +45,7 @@ Follow [embedded-integration.md](embedded-integration.md) section by section. Th
 milestone order, each verifiable before the next:
 
 1. **Migrations.** Call `openrails.Migrate` with the pool the engine will use.
-   OpenRails owns and applies its billing and managed River schemas.
+   OpenRails owns and applies its billing schema and its River tables.
    Verify: the `billing` schema (or the configured one) exists.
 2. **Boot.** `openrails.Config` (explicit `TestMode`,
    `ProviderWriteMode`), `openrails.New` with the host's pgx pool in `Deps`. Verify: boot succeeds;
@@ -57,7 +57,7 @@ milestone order, each verifiable before the next:
    push at boot. Verify: catalog list routes return the products.
 5. **Mount routes.** Pass the host's AuthKit client as `Deps.AuthKit`, or implement
    `Deps.Authenticate` (and `Authorize` for staff routes) over other auth; select
-   route groups in `Config.HTTP`, and mount with
+   route groups with an `openrails.Routes`, and mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify: an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the caller's own subject.
 6. **Backend calls.** Use the Client where the host needs admission/holds, usage,

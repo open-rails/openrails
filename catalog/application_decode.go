@@ -4,11 +4,36 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/configdocument"
 )
+
+// ReadFile reads a catalog file: YAML (.yaml, .yml) or JSON (.json). Pass the
+// result as Config.Catalog. A catalog held in memory (go:embed) uses
+// ParseApplicationYAML or ParseApplicationJSON instead.
+func ReadFile(path string) (*Application, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var app *Application
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".yaml", ".yml":
+		app, err = ParseApplicationYAML(raw)
+	case ".json":
+		app, err = ParseApplicationJSON(raw)
+	default:
+		return nil, fmt.Errorf("catalog %s: use a .yaml, .yml or .json file", path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("catalog %s: %w", path, err)
+	}
+	return app, nil
+}
 
 // ParseApplicationYAML rejects executable/reference-like YAML constructs and
 // converts losslessly to the same bounded typed JSON contract used by HTTP.

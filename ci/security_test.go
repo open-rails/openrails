@@ -30,7 +30,6 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ReturnOrigins = []string{"https://example.test"}
-	cfg.HTTP = &openrails.HTTPConfig{}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug,
 		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: account,
@@ -59,7 +58,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
 	deliver := func(payload []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, account, secret, payload, time.Now())

@@ -39,7 +39,7 @@ func TestMigrateHandsTheSchemaToItsOwner(t *testing.T) {
 		_, _ = admin.Exec(ctx, `DROP ROLE IF EXISTS `+pgx.Identifier{owner}.Sanitize())
 	})
 
-	cfg := openrails.Config{Schema: schema, SchemaOwner: "nobody_" + suffix, River: openrails.RiverHostOwned}
+	cfg := openrails.Config{Schema: schema, RiverSchema: schema, SchemaOwner: "nobody_" + suffix}
 	require.ErrorContains(t, openrails.Migrate(ctx, admin, cfg), "does not exist", "roles are infrastructure, never created")
 
 	cfg.SchemaOwner = owner

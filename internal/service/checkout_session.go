@@ -84,7 +84,7 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, in CheckoutSessionM
 		return nil, fmt.Errorf("create checkout session: %w", err)
 	}
 	link := &billing.CheckoutSessionLink{ID: id, ExpiresAt: session.ExpiresAt}
-	if page := strings.TrimSpace(config.PublishedCheckout(rt.Config).PageURL); page != "" {
+	if page := config.CheckoutPageURL(rt.Config); page != "" {
 		pageURL := page + "#" + id
 		link.URL = &pageURL
 	}

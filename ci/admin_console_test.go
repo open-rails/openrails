@@ -67,12 +67,11 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",
 	} {
 		cfg := f.config()
-		cfg.AdminConsole = &openrails.AdminConsoleConfig{Enabled: true}
 		cfg.ControlPlane = controlPlane(t, issuer)
 		cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})
 		require.NoError(t, err, issuer)
 		t.Cleanup(func() { _ = cp.Close(context.Background()) })
-		handler, err := standaloneHandler(cp)
+		handler, err := standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{}})
 		require.NoError(t, err)
 		requireConsoleAt(t, handler, "/admin", "standalone")
 
@@ -97,100 +96,96 @@ func controlPlane(t *testing.T, issuer string) *openrails.ControlPlaneConfig {
 
 // admin_console.path moves the standalone console (#1127): the binary's
 // handler and a library mount both serve it there and nothing at /admin, and
-// a path over OpenRails' own routes refuses to build the surface.
+// a path over OpenRails' own routes refuses to build the surface. Without a
+// console selected no console route exists.
 func TestStandaloneAdminConsolePath(t *testing.T) {
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	cfg := f.config()
-	cfg.AdminConsole = &openrails.AdminConsoleConfig{Enabled: true, Path: "/billing/admin"}
 	cfg.ControlPlane = controlPlane(t, "http://127.0.0.1")
 	cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = cp.Close(context.Background()) })
 
-	handler, err := standaloneHandler(cp)
+	moved := openrails.Routes{AdminConsole: &openrails.AdminConsole{Path: "/billing/admin"}}
+	handler, err := standaloneHandler(cp, moved)
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, cp))
+	require.NoError(t, openrailshttp.Mount(mux, cp, moved))
 	for _, h := range []http.Handler{handler, mux} {
 		requireConsoleAt(t, h, "/billing/admin", "standalone")
 		require.Equal(t, http.StatusNotFound, get(h, "/admin/").Code)
 	}
-
-	cfg.AdminConsole.Path = "/v1"
-	overlapping, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})
+	off, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = overlapping.Close(context.Background()) })
-	_, err = standaloneHandler(overlapping)
+	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
+
+	overlapping := openrails.Routes{AdminConsole: &openrails.AdminConsole{Path: "/v1"}}
+	_, err = standaloneHandler(cp, overlapping)
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
-	_, err = overlapping.Routes()
+	_, err = cp.Routes(overlapping)
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
 }
 
-// An embedded host mounts the console itself at Config.AdminConsole.Path, from
-// its own build; enabling it without a build, with a build lacking the
-// <base href> placeholder, or with an invalid path refuses to boot. Mounted
-// elsewhere, it refuses requests instead of serving a page whose assets 404.
+// An embedded host mounts the console with the merchant API, from its own
+// build, at Routes.AdminConsole.Path on the root router; the console finds the
+// API at Routes.Prefix. A missing or broken build, an invalid path, or no
+// merchant API fails the mount; without AdminConsole no console route exists.
 func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
-	cfg.AdminConsole = &openrails.AdminConsoleConfig{Enabled: true, AuthBaseURL: "/api/v1", APIBaseURL: "/billing/v1"}
-	_, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: fstest.MapFS{}})
-	require.ErrorContains(t, err, "no console build")
-	_, err = openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}})
+	staff := openrails.Deps{
+		Postgres: f.pool,
+		Authenticate: func(*http.Request) (openrails.Identity, error) {
+			return openrails.Identity{}, openrails.ErrUnauthenticated
+		},
+		Authorize: func(*http.Request, openrails.Identity, openrails.Requirement) error { return openrails.ErrForbidden },
+	}
+	boot := func(assets fstest.MapFS) *openrails.Client {
+		deps := staff
+		deps.ConsoleAssets = assets
+		client, err := openrails.New(t.Context(), cfg, deps)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = client.Close(context.Background()) })
+		return client
+	}
+	console := &openrails.AdminConsole{AuthBaseURL: "/api/v1"}
+	routes := openrails.Routes{Prefix: "/billing", Merchant: true, AdminConsole: console}
+	_, err := boot(fstest.MapFS{}).Routes(routes)
+	require.ErrorContains(t, err, "needs a console build")
+	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
 	require.ErrorContains(t, err, `<base href="/admin/">`)
+
+	client := boot(consoleBuild("host"))
+	_, err = client.Routes(openrails.Routes{Prefix: "/billing", AdminConsole: console})
+	require.ErrorContains(t, err, "set Routes.Merchant")
 	for _, path := range []string{"/", "admin", "/billing/admin/", "/a/../b", "/a b", `/x"><script>`} {
-		cfg.AdminConsole.Path = path
-		_, err = openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
-		require.ErrorContains(t, err, "invalid admin_console.path", path)
+		_, err = client.Routes(openrails.Routes{Prefix: "/billing", Merchant: true, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
+		require.ErrorContains(t, err, "invalid Routes.AdminConsole.Path", path)
 	}
 
-	cfg.AdminConsole.Path = ""
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	console := client.AdminConsole()
-	require.NotNil(t, console)
 	root := http.NewServeMux()
-	root.Handle("/admin/", console)
-	root.Handle("/admin", console)
+	require.NoError(t, openrailshttp.Mount(root, client, routes))
 	requireConsoleAt(t, root, "/admin", "host")
 	w := get(root, "/admin/config.json")
-	var boot struct {
+	var bootstrap struct {
 		AuthBaseURL string `json:"auth_base_url"`
 		APIBaseURL  string `json:"api_base_url"`
 	}
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&boot))
-	require.Equal(t, "/api/v1", boot.AuthBaseURL)
-	require.Equal(t, "/billing/v1", boot.APIBaseURL)
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&bootstrap))
+	require.Equal(t, "/api/v1", bootstrap.AuthBaseURL)
+	require.Equal(t, "/billing/v1", bootstrap.APIBaseURL)
 
-	// The host keeps its own /admin pages and mounts the console beneath /billing.
-	cfg.AdminConsole.Path = "/billing/admin"
-	cfg.Merchant.Slug = uniqueName("moved")
-	moved, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = moved.Close(context.Background()) })
-	root = http.NewServeMux()
-	root.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
-	root.Handle("/billing/admin/", moved.AdminConsole())
-	root.Handle("/billing/admin", moved.AdminConsole())
-	requireConsoleAt(t, root, "/billing/admin", "host")
-	require.Equal(t, "host admin", get(root, "/admin/").Body.String())
+	// The host keeps its own /admin pages and mounts the console elsewhere.
+	moved := http.NewServeMux()
+	moved.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
+	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Prefix: "/billing", Merchant: true,
+		AdminConsole: &openrails.AdminConsole{Path: "/billing/admin", AuthBaseURL: "/api/v1"}}))
+	requireConsoleAt(t, moved, "/billing/admin", "host")
+	require.Equal(t, "host admin", get(moved, "/admin/").Body.String())
 
-	misplaced := http.NewServeMux()
-	misplaced.Handle("/admin/", moved.AdminConsole())
-	misplaced.Handle("/billing/admin/", http.StripPrefix("/billing/admin", moved.AdminConsole()))
-	for _, path := range []string{"/admin/", "/billing/admin/customers"} {
-		w = get(misplaced, path)
-		require.Equal(t, http.StatusInternalServerError, w.Code, path)
-		require.Contains(t, w.Body.String(), "mounted outside its configured path", path)
-	}
-
-	cfg.AdminConsole = nil
-	cfg.Merchant.Slug = uniqueName("headless")
-	off, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = off.Close(context.Background()) })
-	require.Nil(t, off.AdminConsole(), "not enabled, not mounted")
+	off := http.NewServeMux()
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Prefix: "/billing", Merchant: true}))
+	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "not selected, not mounted")
 }

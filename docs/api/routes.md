@@ -43,7 +43,7 @@ A customer acting on its own account.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` | when `checkout_sessions` |
+| POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
 | POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `CustomerCancelSubscriptionParams` | 200 `Subscription` | scope `subscription_management` |
 | POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 200 `Subscription` | scope `subscription_management` |
 | PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | scope `subscription_management` |

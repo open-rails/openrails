@@ -127,7 +127,7 @@ The ordered phases, from a production host that migrated many years of legacy
 billing data over this seam:
 
 1. **Apply migrations.** Call `openrails.Migrate` with the pool the engine will use;
-   OpenRails owns and applies its billing baseline and managed River tables.
+   OpenRails owns and applies its billing baseline and its River tables.
    Apply your application schemas separately, then validate the target shape
    before writing anything.
 2. **Declare the merchant, PSPs, and catalog.** Upsert the merchant + its

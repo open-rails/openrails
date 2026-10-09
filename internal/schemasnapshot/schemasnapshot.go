@@ -125,7 +125,7 @@ func Capture(ctx context.Context, dsn string) ([]byte, error) {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}
 	defer pool.Close()
-	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{HostRiver: true}); err != nil {
+	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{}); err != nil {
 		return nil, fmt.Errorf("schema snapshot: %w", err)
 	}
 

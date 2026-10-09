@@ -39,7 +39,6 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "feature-limits-" + uuid.NewString()[:8]}
-	cfg.HTTP = &openrails.HTTPConfig{Merchant: true}
 	cfg.RateLimits = &openrails.RateLimitsConfig{
 		"metrics-ask":        {RequestsPerMinute: 2},
 		"catalog-ask":        {RequestsPerMinute: 2},
@@ -62,7 +61,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes()
+		routes, err := client.Routes(openrails.Routes{Merchant: true})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {

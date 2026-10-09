@@ -74,7 +74,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	err = merchantarchive.Export(t.Context(), source, merchantID, &artifact)
 	require.NoError(t, err, "archive cause: %v", errors.Unwrap(err))
 	schema := "archive_credit_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
 	quoted := pgx.Identifier{schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
 	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+`.merchants (id,slug,status,permission_group_id,display_name) VALUES ($1,$2,'active',$3,'Restored')`, merchantID.UUID(), w.slug, uuid.New())

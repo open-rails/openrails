@@ -44,7 +44,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			deps := openrails.Deps{Postgres: f.pool}
 			mail := &outbox{}
 			if registers {
-				deps.EmailSender = mail
+				deps.Email = mail
 			}
 			cp, err := openrails.New(ctx, cfg, deps)
 			require.NoError(t, err)

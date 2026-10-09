@@ -1,0 +1,13 @@
+# merchant.yaml: you, the seller, and your payment processor accounts (PSPs).
+# Copy this file to merchant.yaml and fill it in; merchant.yaml holds secrets,
+# so keep it out of version control.
+display_name: OnlyDemo
+psps:
+  mobius: # your name for this account; any key you like
+    rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
+    account_id: "000000" # the NMI dashboard's "Gateway ID"
+    settings:
+      tokenization_key: your-public-tokenization-key # the browser's card fields use it
+    secrets:
+      security_key: your-private-security-key
+      webhook_signing_secret: your-webhook-signing-key

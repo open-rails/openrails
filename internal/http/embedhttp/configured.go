@@ -3,8 +3,8 @@ package embedhttp
 import (
 	"context"
 	"fmt"
-
 	"net/http"
+	"strings"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -14,46 +14,59 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// ValidateHTTPConfig checks that every published group has the authority it needs.
-func ValidateHTTPConfig(cfg *config.HTTPConfig, auth *billingauth.Integration) error {
-	if cfg == nil {
-		return nil
+// CustomerProfiles are the customer surfaces a selection mounts: Customers
+// at /v1/me, then CustomerProfiles, each native one defaulting to merchant.
+func CustomerProfiles(sel config.Routes, merchant string) []config.CustomerRoutes {
+	var out []config.CustomerRoutes
+	if sel.Customers != config.CustomersNone {
+		out = append(out, config.CustomerRoutes{Scope: sel.Customers})
 	}
-	if err := validateCustomerRoutes(cfg.CustomerRoutes, auth); err != nil {
-		return err
+	out = append(out, sel.CustomerProfiles...)
+	for i := range out {
+		if out[i].Prefix == "" {
+			out[i].Prefix = "/v1/me"
+		}
+		if !out[i].Delegated && strings.TrimSpace(out[i].Merchant) == "" {
+			out[i].Merchant = merchant
+		}
 	}
-	if cfg.Merchant && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails HTTP: the merchant surface requires Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
-	}
-	return nil
+	return out
 }
 
-func routeSets(cfg config.HTTPConfig) []RouteSet {
+// ValidateRoutes checks that every selected group has the authority it needs,
+// before anything mounts.
+func ValidateRoutes(sel config.Routes, profiles []config.CustomerRoutes, rt *app.Runtime) error {
+	var auth *billingauth.Integration
+	if rt != nil {
+		auth = rt.Auth
+	}
+	if sel.CatalogEdits && !sel.Merchant {
+		return fmt.Errorf("openrails: Routes.CatalogEdits adds the merchant API's catalog writes; set Routes.Merchant")
+	}
+	if sel.Merchant && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
+		return fmt.Errorf("openrails: Routes.Merchant needs Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
+	}
+	return validateCustomerRoutes(profiles, rt)
+}
+
+func routeSets(sel config.Routes) []RouteSet {
 	sets := []RouteSet{RouteSetWebhooks}
-	for _, v := range []struct {
-		enabled bool
-		set     RouteSet
-	}{
-		{cfg.Checkout != nil, RouteSetCheckout},
-		{cfg.Merchant, RouteSetMerchant},
-	} {
-		if v.enabled {
-			sets = append(sets, v.set)
-		}
+	if sel.Storefront {
+		sets = append(sets, RouteSetCheckout)
+	}
+	if sel.Merchant {
+		sets = append(sets, RouteSetMerchant)
 	}
 	return sets
 }
 
-// ConfiguredRoutes is the shared configured HTTP assembly used by native adapters.
-func ConfiguredRoutes(a *app.App, policy *config.HTTPConfig) (*router.Table, error) {
-	if a == nil || a.Runtime == nil {
+// ConfiguredRoutes is the embedded HTTP surface sel selects, under /billing.
+func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
+	if a == nil || a.Runtime == nil || a.Config == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
-	if policy == nil {
-		return &router.Table{}, nil
-	}
-	cfg := *policy
-	if err := ValidateHTTPConfig(&cfg, a.Runtime.Auth); err != nil {
+	profiles := CustomerProfiles(sel, a.Config.Merchant.Slug)
+	if err := ValidateRoutes(sel, profiles, a.Runtime); err != nil {
 		return nil, err
 	}
 	asm := FromApp(a)
@@ -61,21 +74,17 @@ func ConfiguredRoutes(a *app.App, policy *config.HTTPConfig) (*router.Table, err
 		asm.Authenticator = integrationAuthenticator{auth: a.Runtime.Auth}
 		asm.Gate = integrationGate{auth: a.Runtime.Auth, runtime: a.Runtime}
 	}
-	return buildConfiguredRoutes(a, cfg, asm)
-}
-
-func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*router.Table, error) {
-	active := routeSets(cfg)
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout != nil || len(cfg.CustomerRoutes) > 0)
+	active := routeSets(sel)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, sel.Storefront || len(profiles) > 0)
 	if err != nil {
 		return nil, err
 	}
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	capabilities := configuredCapabilities(a.Runtime, cfg, providers)
-	table := asm.NewRoutes(Options{RouteSets: withoutRouteSet(active, RouteSetCustomer), AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities})
-	extra, err := BuildCustomerRoutes(a, cfg.CustomerRoutes, a.Runtime.Auth)
+	capabilities := configuredCapabilities(a.Runtime, active, profiles, providers)
+	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, CatalogWrites: sel.CatalogEdits})
+	extra, err := BuildCustomerRoutes(a, profiles, a.Runtime.Auth)
 	if err != nil {
 		return nil, err
 	}
@@ -85,18 +94,17 @@ func buildConfiguredRoutes(a *app.App, cfg config.HTTPConfig, asm *Assembler) (*
 	}
 	router.ResolveMerchantSelectors(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-	}, CustomerPrefixes("/billing", cfg.CustomerRoutes)...)
+	}, CustomerPrefixes("/billing", profiles)...)
 	return table, nil
 }
 
-func configuredCapabilities(rt *app.Runtime, cfg config.HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
-	active := routeSets(cfg)
+func configuredCapabilities(rt *app.Runtime, active []RouteSet, profiles []config.CustomerRoutes, providers routesurface.ProviderRoutes) Capabilities {
 	fullCustomer := false
-	for _, exposure := range cfg.CustomerRoutes {
-		fullCustomer = fullCustomer || exposure.Scope == config.CustomerSelfService
+	for _, profile := range profiles {
+		fullCustomer = fullCustomer || profile.Scope == config.CustomerSelfService
 	}
-	if len(cfg.CustomerRoutes) > 0 {
-		active = append(active, RouteSetCustomer)
+	if len(profiles) > 0 {
+		active = append(append([]RouteSet(nil), active...), RouteSetCustomer)
 	}
 	caps := buildCapabilities(rt, active, providers)
 	caps.Features["stripe_billing_portal"] = fullCustomer && providers.StripePortal

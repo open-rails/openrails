@@ -44,7 +44,7 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			cfg.ControlPlane.Registration = tc.mode
 			deps := openrails.Deps{Postgres: f.pool}
 			if tc.mode == iam.RegistrationModeOpen || tc.mode == iam.RegistrationModeInviteOnly {
-				deps.EmailSender = &outbox{}
+				deps.Email = &outbox{}
 			}
 			client, err := openrails.New(t.Context(), cfg, deps)
 			require.NoError(t, err)

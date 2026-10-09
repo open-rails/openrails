@@ -50,7 +50,7 @@ A host imports four kinds of package; everything else is `internal/`:
 | `openrails` | `New`, `NewRemote`, `Migrate`, the `*Client`, `Config`, `Deps` |
 | `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes, permission names (`billing.MerchantAll`) |
 | `catalog` | the catalog document (`catalog.Application`) and its charge models (rate cards, meters, prices) |
-| `adapters/http`, `adapters/gin`, `adapters/fiber` | mount `client.Routes()` on your router |
+| `adapters/http`, `adapters/gin`, `adapters/fiber` | mount the routes an `openrails.Routes` selects on your router |
 
 OpenRails owns its migrations and applies them through your pool; the pool's
 role owns the objects and is the role OpenRails runs as (no grants). Run it on
@@ -62,9 +62,9 @@ if err := openrails.Migrate(ctx, pool, cfg); err != nil {
 }
 ```
 
-`Migrate` reads `cfg.Schema` and `cfg.River`: with `RiverManaged` it also
-migrates River in `cfg.RiverSchema` (default `public`); with `RiverHostOwned`
-the host migrates River itself (`riverhelpers.ApplyMigrations`). With
+`Migrate` creates OpenRails' tables in `cfg.Schema` and River's in
+`cfg.RiverSchema` (`billing_river` for the default schema), whichever fleet
+`Start` will run there, so `New` and `Start` run no DDL. With
 `cfg.ControlPlane` it also migrates the control plane's AuthKit schema. A
 host's own AuthKit migrates through AuthKit's API.
 
@@ -91,13 +91,12 @@ explicit:
 | `Schema` | default `billing` | The Postgres schema of OpenRails' tables. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
 | `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
-| `HTTP` | no | The route groups `Client.Routes` publishes (section 6); nil publishes none. |
-| `River`, `RiverSchema` | default managed | Who runs the job fleet (section 4). |
+| `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
+| `RiverSchema` | default `Schema` + `_river` | Where OpenRails' River jobs live: `Migrate` creates the tables, and `Start` runs them there, on its own client or the host's fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `AllowCatalogUpdates` | false | Publishes catalog mutations over HTTP (`HTTP.Merchant`, delegated credentials). The in-process Client writes its own catalog without it. The in-process client remains available either way. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
-| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`), for billing and control-plane mail alike. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.EmailSender`, OpenRails sends no email. |
+| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`), for billing and control-plane mail alike. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
 
 | Deps field | Meaning |
 |---|---|
@@ -106,10 +105,10 @@ explicit:
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
 | `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
-| `ConsoleAssets` | A host-built admin console (section 6). |
+| `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `UserExists`, `UserEmail`, `ResolveUsername` | Optional identity lookups for billing notices and the CCBill username bridge. |
-| `EmailSender` | Your own sender for all of OpenRails' rendered email, billing and control plane; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
-| `SMSSender`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
+| `Email` | Your own sender for all of OpenRails' rendered email, billing and control plane; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
+| `SMS`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 
 Under `Sandbox` every rail routes to its test environment and live credentials
@@ -131,11 +130,11 @@ if err != nil { return err }
 defer client.Close(ctx)
 ```
 
-Only Postgres and a refused `Config.Catalog` can fail `New`. Vault login, PSP
-posture checks and Redis reconnect in the background (capped full-jitter
-backoff, forever); until then only their features answer 503. `Ready` is the
-readiness check (Postgres, the merchant directory, the declared catalog,
-River). Register `Probes` with the host's
+Only Postgres (including River's tables, which `Migrate` creates) and a
+refused `Config.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
+(capped full-jitter backoff, forever); until then only their features answer
+503. `Ready` is the readiness check (Postgres, the merchant directory, the
+declared catalog, River). Register `Probes` with the host's
 `github.com/open-rails/helpers/deps` supervisor:
 
 ```go
@@ -145,29 +144,37 @@ for _, p := range client.Probes() { // openrails_vault, openrails_psp_posture, o
 ```
 
 River is required: renewals, dunning, invoices, reconciliation and provider
-intents are River jobs. With `River: openrails.RiverManaged` (the zero value)
-OpenRails builds its own client and `Start` runs it. With
-`River: openrails.RiverHostOwned` the host runs one fleet for its own jobs,
-AuthKit's and OpenRails':
+intents are River jobs. Jobs queue in `Config.RiverSchema` from `New` on and
+wait there; `Start` runs them, and `Ready` fails until it does. Without options
+`Start` builds and runs OpenRails' own River client there:
 
 ```go
-if err := riverhelpers.ApplyMigrations(ctx, pool, ""); err != nil { return err } // the fleet is yours
+if err := client.Start(ctx); err != nil { return err }
+```
+
+A host that already runs a River fleet adds OpenRails' jobs to it, beside its
+own and AuthKit's, and passes the fleet to `Start`. The fleet must use
+`Config.RiverSchema`, where `Migrate` created River's tables:
+
+```go
 workers, err := riverhelpers.New(ctx, pool, &river.Config{
+    Schema: "billing_river", // Config.RiverSchema
     Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 10}},
 }, auth.RiverJobs(), client.RiverJobs())
 if err != nil { return err }
 if err := workers.Start(ctx); err != nil { return err }
 defer workers.StopAndCancel(context.WithoutCancel(ctx))
-if err := client.Start(ctx); err != nil { return err } // loops outside River, e.g. the Solana Pay poller
+if err := client.Start(ctx, openrails.WithRiverClient(workers)); err != nil { return err }
 ```
 
-A host-owned fleet migrates River itself, once per boot before composing it:
-`riverhelpers.ApplyMigrations(ctx, pool, "")` (`""` is River's default schema,
-`public`; `openrails.Migrate` leaves River alone). Without it `riverhelpers.New`
-fails naming that call, and `Start` refuses a fleet that has not composed
-`RiverJobs`. `Close` stops what `Start` started; close the client before the pool. OpenRails also
-watches the fleet from outside River: `openrails_job_progress` fails while it is
-stalled.
+OpenRails enqueues through the host's fleet and never starts or stops it.
+Composing `RiverJobs` into a fleet in another schema is refused. Once
+`RiverJobs` went to a fleet, `Start` without `WithRiverClient` is refused, and
+`WithRiverClient` refuses a fleet built without this client's `RiverJobs`; a
+second `Start` is refused too. Cancelling `Start`'s context stops nothing:
+`Close` stops what `Start` started; close the client before the pool. OpenRails
+also watches the fleet from outside River: `openrails_job_progress` fails while
+it is stalled.
 
 **Inserting an engine job.** The one job a host inserts itself is the invoice
 sweep: `workers.Insert(ctx, openrails.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
@@ -207,20 +214,19 @@ cfg.Merchant = openrails.MerchantDeclaration{
 }
 ```
 
-`client.MerchantID()` is the declared merchant's ID. To make enabling a
-provider configuration only, build each PSP with
-`openrails.PSPFromEnv(key, os.LookupEnv)`. With `P = upper(key) + "_"` it reads
-`P+"RAIL"` (default: the key), `P+"ACCOUNT_ID"`, and `P+upper(name)` for each of
-the rail's credential slots and settings, refusing a missing required secret:
+`client.MerchantID()` is the declared merchant's ID. A host builds the
+declaration from its own configuration (koanf, kong, flags), or keeps it in a
+YAML file: `openrails.ReadMerchantFile(path)` reads one merchant strictly
+(unknown fields refused; `openrails.ParseMerchantDeclaration` takes the bytes);
+set its `Slug`. `MerchantDeclaration` and `PSPConfig` carry `yaml` tags, so they
+can also sit inside the host's own YAML config. The file holds PSP secrets: keep
+it out of version control.
 
 | Rail | Secrets (required first) | Settings |
 | --- | --- | --- |
-| `stripe` | `SECRET_KEY`, `WEBHOOK_SIGNING_SECRET`; `WEBHOOK_SIGNING_SECRET_THIN`, `WEBHOOK_SIGNING_SECRET_PREVIOUS` | `PUBLISHABLE_KEY` |
-| `nmi` | `SECURITY_KEY`, `WEBHOOK_SIGNING_SECRET` | `TOKENIZATION_KEY`, `TOKENIZATION_URL`, `ENDPOINT_DEPLOYMENT` |
-| `ccbill` | `SALT`, `DATALINK_USERNAME`, `DATALINK_PASSWORD` | |
-
-YAML-first hosts keep the merchant in a file: `openrails.ParseMerchantDeclaration`
-parses one merchant strictly (unknown fields refused); set its `Slug`.
+| `stripe` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key` |
+| `nmi` | `security_key`, `webhook_signing_secret` | `tokenization_key`, `tokenization_url`, `endpoint_deployment` |
+| `ccbill` | `salt`, `datalink_username`, `datalink_password` | |
 
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving
@@ -232,14 +238,15 @@ during setup.
 
 `SecretBackend` selects only credential custody. Snapshot values stay in memory;
 managed PSP credentials are published through `Client.CreatePSP`/`UpdatePSP`
-with an operation ID and the expected PSP revision. `HTTP.Merchant` publishes
+with an operation ID and the expected PSP revision. `Routes.Merchant` publishes
 these routes with the rest of the merchant API, each gated by its permission.
 
-**Startup catalog batch:** parse a YAML document with `catalog.ParseApplicationYAML`
-and call `client.ApplyCatalog(ctx, document)`. Set `AllowCatalogUpdates: false` to
-omit catalog-write HTTP routes; the authorized in-process client still edits the
-catalog. YAML batches and individual client/API edits operate on the same merchant
-catalog. `Config.Catalog` is an optional startup convenience for the same batch.
+**Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
+and set it as `Config.Catalog`; `New` applies it, like calling
+`client.ApplyCatalog(ctx, document)` once. Leave `Routes.CatalogEdits` off to
+omit catalog-write HTTP routes; the in-process client still edits the catalog.
+YAML batches and individual client/API edits operate on the same merchant
+catalog.
 
 The server computes a canonical content hash and commits it with the batch. The
 same document replays forever, even after intervening API edits or an archive
@@ -259,8 +266,9 @@ the background, with `Ready` failing until that startup batch succeeds.
 **Catalog authoring**: storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
 (`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
-`AllowCatalogUpdates` only publishes catalog mutations to HTTP callers. YAML is
-decoded into the same `catalog.Application` as JSON (`catalog.ParseApplicationYAML`).
+`Routes.CatalogEdits` only publishes catalog mutations to HTTP and delegated
+callers. YAML is decoded into the same `catalog.Application` as JSON
+(`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
 record, and `prune: true` archives omitted products and prices. Price keys are unique within their product. Key lookups and checkout selections
 therefore carry both `product_key` and `price_key`; price IDs select one immutable
@@ -308,28 +316,35 @@ OpenRails derives everything from it and the host writes no mapping:
 - `Deps.RecentSignIn(r)` answers whether a native user signed in recently;
   without it native users are refused the operations that need it.
 
-`Config.HTTP` selects the routes `client.Routes()` returns; mount them once with
-the adapter for your router:
+An `openrails.Routes` selects the routes `client.Routes` returns; mount them
+on your root router with the adapter for it. Validation happens here: a group
+whose authority is missing fails the mount before anything is registered.
 
 ```go
+routes := openrails.Routes{Prefix: "/billing", Storefront: true, Customers: openrails.CustomerSelfService}
 // net/http or Chi: github.com/open-rails/openrails/adapters/http
-if err := openrailshttp.Mount(mux, client, "/billing"); err != nil { return err }
+if err := openrailshttp.Mount(mux, client, routes); err != nil { return err }
 // Gin: github.com/open-rails/openrails/adapters/gin
-if err := openrailsgin.Mount(r.Group("/billing"), client); err != nil { return err }
+if err := openrailsgin.Mount(r, client, routes); err != nil { return err }
 // Fiber v3: github.com/open-rails/openrails/adapters/fiber
-if err := openrailsfiber.Mount(app.Group("/billing"), client); err != nil { return err }
+if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 ```
 
-| `HTTPConfig` | Exposed surface |
+| `Routes` | Exposed surface |
 |---|---|
-| (always) | Capability discovery and signature-checked provider callbacks |
-| `Checkout` | Products, prices, checkout config and reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id. `&CheckoutConfig{}` enables it; `PageURL` and `EmbedOrigins` add a shared payment page. The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
-| `CustomerRoutes` | `/v1/me/*` per profile (`CustomerSelfService`, `CustomerSubscriptionManagement`, `CustomerBillingManagement`) |
-| `Merchant` | The merchant API (`/v1/merchant/*`), each route gated by its merchant permission; requires `Authorize` |
+| `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
+| (always) | Capability discovery (what this mount serves) and signature-checked provider callbacks |
+| `Storefront` | Products, prices, currencies, checkout config, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay and the captcha. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`). The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
+| `Customers` | `/v1/me/*` for `Config.Merchant`: `CustomerSelfService`, `CustomerSubscriptionManagement` or `CustomerBillingManagement`; the zero value `CustomersNone` mounts none |
+| `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or `Delegated` |
+| `Merchant` | The merchant API (`/v1/merchant/*`), each route gated by its merchant permission; requires `Deps.AuthorityFor` with AuthKit, or `Deps.Authorize` |
+| `CatalogEdits` | The merchant API's catalog-write routes; requires `Merchant`. Every mount of the merchant API in one process must agree |
+| `CookieOrigin` | Admits cookie-authenticated requests from this exact origin |
+| `AdminConsole` | The staff dashboard at its own `Path` (`/admin` by default); requires `Merchant`. Nil mounts none |
 
-A native customer profile serves `Config.Merchant` (or its own `Merchant`
-slug). An advanced, delegated audience mounts a profile under its own `Prefix`
-with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
+A native customer surface serves `Config.Merchant` (or its own `Merchant`
+slug). An advanced, delegated audience mounts a `CustomerProfiles` entry under
+its own `Prefix` with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
 returning an explicit merchant and paying subject. It confers no permissions
 by default and keeps verified credential
 class and invoker restrictions. An invoker-scoped principal may read only its
@@ -338,14 +353,15 @@ own `/v1/me/spend-limits`. See [hosted customer audiences](architecture/customer
 Each adapter registers ordinary method and path routes, so route inspection
 sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
 Original request URLs and bodies reach authentication and webhook verification
-unchanged. Routes are materialized once, so remounting never resets rate limits.
+unchanged. One selection is materialized once, so remounting it never resets
+rate limits.
 
-**Admin console** (optional): with `Config.AdminConsole.Enabled`,
-`client.AdminConsole()` is the console's handler for the host to mount at
-`Config.AdminConsole.Path` (`/admin` by default; e.g. `/billing/admin` when the
-host owns `/admin`) on its root router. The console is `Deps.ConsoleAssets` when the host
-supplies its own build, else the build embedded in the OpenRails module when
-the binary was built with one. See [admin-console.md](admin-console.md).
+**Admin console** (optional): `Routes.AdminConsole` mounts the staff
+dashboard at its `Path` beside the merchant API it drives; the console finds
+that API at `Routes.Prefix` and signs staff in through `Deps.AuthKit`'s JSON
+API (or `AdminConsole.AuthBaseURL`). It needs `Merchant` and a console build
+(`Deps.ConsoleAssets`); `Mount` fails without either. See
+[admin-console.md](admin-console.md).
 
 ### 7. Calling the engine
 
@@ -429,11 +445,11 @@ its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `Registration`,
 `iam.RegistrationModeClosed`); empty is closed. Open and invite-only mount
 AuthKit's self-service API and need an email or SMS sender. Its AuthKit mail
 goes through the deployment's one email sender (`Config.SendGrid` or
-`Deps.EmailSender`), rendered; text goes through
-`Deps.SMSSender` (AuthKit's `adapters/twilio` provides one). `Routes` is then the standalone surface
-(billing, AuthKit and the admin console), mounted at the router's root
-(`RoutesRequireRoot`); `HTTP.CustomerRoutes` may add delegated customer
-profiles. Its workers join the same fleet through `RiverJobs`.
+`Deps.Email`), rendered; text goes through `Deps.SMS` (AuthKit's
+`adapters/twilio` provides one). `Routes` is then the standalone surface
+(billing and AuthKit), mounted at the router's root with no `Prefix`; `Routes`
+may add `CatalogEdits`, `AdminConsole` and delegated `CustomerProfiles`. Its
+workers join the same River client through `Start`.
 
 The operations a hosted product runs as the operator are Client methods of the
 in-process engine only (a remote Client refuses them): `ProvisionMerchant`,

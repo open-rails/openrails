@@ -98,7 +98,6 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		Schema:               BillingSchema,
 		TestMode:             openrails.Sandbox,
 		ProviderWriteMode:    openrails.ProviderWritesFull,
-		AllowCatalogUpdates:  true,
 		PublicBillingBaseURL: baseURL + "/billing",
 		ReturnOrigins:        []string{baseURL},
 		ProviderSandbox:      &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL(), NMIGatewayURL: gateway.URL()},
@@ -120,13 +119,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 				},
 			},
 		},
-		HTTP: &openrails.HTTPConfig{
-			Checkout: checkoutConfig(baseURL, pageURL),
-			CustomerRoutes: []openrails.CustomerRoutesConfig{
-				{Scope: openrails.CustomerSelfService},
-				{Scope: openrails.CustomerBillingManagement, Prefix: ManagePrefix},
-			},
-		},
+		Checkout: checkoutConfig(baseURL, pageURL),
 	}
 	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
 	if err != nil {
@@ -157,11 +150,21 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 
 // checkoutConfig serves the payment page at pageURL, framed by the app at
 // baseURL.
-func checkoutConfig(baseURL, pageURL string) *openrails.CheckoutConfig {
+func checkoutConfig(baseURL, pageURL string) openrails.CheckoutConfig {
 	if pageURL == "" {
-		return &openrails.CheckoutConfig{}
+		return openrails.CheckoutConfig{}
 	}
-	return &openrails.CheckoutConfig{PageURL: pageURL, EmbedOrigins: []string{baseURL}}
+	return openrails.CheckoutConfig{PageURL: pageURL, EmbedOrigins: []string{baseURL}}
+}
+
+// billingRoutes is the billing surface the storefront and account pages call.
+var billingRoutes = openrails.Routes{
+	Prefix:     "/billing",
+	Storefront: true,
+	Customers:  openrails.CustomerSelfService,
+	CustomerProfiles: []openrails.CustomerRoutes{
+		{Scope: openrails.CustomerBillingManagement, Prefix: ManagePrefix},
+	},
 }
 
 // authConfig is AuthKit's configuration: its JSON API at /auth/v1 beside
@@ -185,17 +188,12 @@ var checkoutRouting = []billing.CheckoutRoutingRule{
 	{Prefer: []string{SolanaPSPKey}},
 }
 
-// BillingRoutes returns the embedded billing routes, relative to /billing.
-func (r *Runtime) BillingRoutes() ([]openrails.Route, error) {
-	return r.Client.Routes()
-}
-
 // Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux.
 func (r *Runtime) Mount(mux *http.ServeMux) error {
 	if err := r.Auth.Mount(mux); err != nil {
 		return err
 	}
-	return openrailshttp.Mount(mux, r.Client, "/billing")
+	return openrailshttp.Mount(mux, r.Client, billingRoutes)
 }
 
 // PaymentPage wraps the handler serving the hosted checkout page.

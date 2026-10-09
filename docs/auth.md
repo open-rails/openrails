@@ -54,7 +54,7 @@ signing application's authority.
 ## Cookies and local account admission
 
 Billing HTTP mounts ignore ambient cookies by default. A cookie-based host
-sets `Config.HTTP.CookieOrigin` to `"https://merchant.example"`. Every unsafe
+sets `Routes.CookieOrigin` to `"https://merchant.example"` when it mounts. Every unsafe
 cookie request must carry that exact Origin, including bodyless POSTs. Missing,
 opaque, cross-origin and sibling origins are refused. Explicit Authorization
 never falls back to an attached cookie. AuthKit's own `/auth` transport keeps

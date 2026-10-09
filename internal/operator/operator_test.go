@@ -79,7 +79,7 @@ func TestOperatorVerbsRequireControlPlane(t *testing.T) {
 		"FleetAnalytics":                     func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
 		"FleetTimeseries":                    func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },
 		"CompletePendingMerchantRetirements": func() error { _, err := CompletePendingMerchantRetirements(ctx, a, 10); return err },
-		"StandaloneRoutes":                   func() error { _, err := StandaloneRoutes(a); return err },
+		"StandaloneRoutes":                   func() error { _, err := StandaloneRoutes(a, config.Routes{}); return err },
 		"SubjectHasVaultedPaymentMethod": func() error {
 			_, err := SubjectHasVaultedPaymentMethod(ctx, a, id, "user")
 			return err

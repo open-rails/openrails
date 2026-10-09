@@ -36,15 +36,17 @@ func init() {
 // It is idempotent: run it on every boot, before New. The pool's role owns
 // what it creates and is the role OpenRails runs as; with cfg.SchemaOwner,
 // Migrate hands the schema and everything in it to that role instead, touching
-// only what it does not already own. With Config.River
-// RiverManaged it also migrates River; a host-owned fleet migrates River itself.
+// only what it does not already own. It also migrates River in
+// cfg.RiverSchema, whichever fleet Start will run there, so New and Start run
+// no DDL.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
 	return engine.Migrate(ctx, pool, cfg)
 }
 
 // New runs the OpenRails engine in this process and returns the same Client
-// NewRemote builds, over an in-process transport. ctx bounds the wait for the
-// database; nothing else does. With Config.Catalog, New applies it before
+// NewRemote builds, over an in-process transport. It starts no workers: Start
+// does, and jobs queued before it wait in Config.RiverSchema. ctx bounds the
+// wait for the database; nothing else does. With Config.Catalog, New applies it before
 // returning and fails with the reason if it is refused; only provider
 // references it cannot confirm within seconds finish in the background, and
 // Ready fails until they do. Vault login, PSP posture checks and Redis recover
@@ -95,20 +97,48 @@ func (c *Client) embedded() (*engine.Engine, error) {
 	return c.engine, nil
 }
 
-// Start starts OpenRails' workers; Close stops them. With RiverManaged that is
-// OpenRails' own River fleet. With RiverHostOwned, pass RiverJobs to the
-// host's fleet (riverhelpers.New) first; the host starts the fleet.
-func (c *Client) Start(ctx context.Context) error {
+// StartOption adjusts Start.
+type StartOption func(*startOptions)
+
+type startOptions struct {
+	fleet    *river.Client[pgx.Tx]
+	fleetSet bool
+}
+
+// WithRiverClient runs OpenRails' jobs on the host's River fleet, which
+// riverhelpers.New built with RiverJobs in Config.RiverSchema (alongside the
+// host's and AuthKit's jobs). OpenRails enqueues through it and never starts
+// or stops it.
+func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption {
+	return func(o *startOptions) { o.fleet, o.fleetSet = fleet, true }
+}
+
+// Start starts OpenRails' background work: River (renewals, dunning,
+// invoices, provider intents), the Solana Pay poller and the job-progress
+// monitor. With no options it builds and runs OpenRails' own River client in
+// Config.RiverSchema; with WithRiverClient the jobs run on the host's fleet.
+// Jobs queued before Start wait for it. It runs no DDL, and ctx ending stops
+// nothing: Close stops what Start started. Call it once, before serving.
+func (c *Client) Start(ctx context.Context, opts ...StartOption) error {
 	e, err := c.embedded()
 	if err != nil {
 		return err
 	}
-	return e.Start(ctx)
+	var o startOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+	if o.fleetSet && o.fleet == nil {
+		return fmt.Errorf("openrails: WithRiverClient requires a River client")
+	}
+	return e.Start(ctx, o.fleet)
 }
 
-// Close stops the workers and closes the engine, leaving the host's pool,
-// Redis and Vault clients open. On a remote client it releases idle
-// connections. Only the Client that New or NewRemote returned closes: one
+// Close stops what Start started (OpenRails' own River, never the host's
+// fleet) and closes the engine, leaving the host's pool, Redis and Vault
+// clients open. On a remote client it releases idle connections. Only the Client that New or NewRemote returned closes: one
 // derived from it (With) shares its engine and transport, and
 // Close on it changes nothing and returns an error.
 func (c *Client) Close(ctx context.Context) error {
@@ -126,9 +156,9 @@ func (c *Client) Close(ctx context.Context) error {
 }
 
 // Ready reports whether the Client can serve. Embedded: Postgres, the merchant
-// directory, Config.Catalog (applied) and River (bound when host-owned,
-// running when managed); optional providers never fail it (see Probes).
-// Remote: the server's /health/ready.
+// directory, Config.Catalog (applied) and River (the host's fleet bound to
+// RiverJobs, or OpenRails' own running since Start); optional providers never
+// fail it (see Probes). Remote: the server's /health/ready.
 func (c *Client) Ready(ctx context.Context) error {
 	if c.engine != nil {
 		return c.engine.Ready(ctx)
@@ -185,16 +215,17 @@ type Route struct {
 	Handler http.Handler
 }
 
-// Routes returns the HTTP surface Config.HTTP selects, for the host to mount
-// (adapters/http, adapters/gin and adapters/fiber do). Mounted under /billing
-// it serves /billing/v1/*. With Config.ControlPlane it is the standalone
-// surface instead; see RoutesRequireRoot.
-func (c *Client) Routes() ([]Route, error) {
+// Routes returns the HTTP surface selection selects, with paths for the
+// host's root router (adapters/http, adapters/gin and adapters/fiber mount
+// them): the API under selection.Prefix and the admin console at its own path.
+// It fails when the engine lacks what a selected group needs, before anything
+// mounts. With Config.ControlPlane it is the standalone surface, at the root.
+func (c *Client) Routes(selection Routes) ([]Route, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	routes, err := e.Routes()
+	routes, err := e.Routes(selection)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +238,7 @@ func (c *Client) Routes() ([]Route, error) {
 
 // CheckoutFrameAncestors is the Content-Security-Policy an embedded host sends
 // with the payment page it serves: only the host itself and
-// Config.HTTP.Checkout.EmbedOrigins may frame it. The adapters'
+// Config.Checkout.EmbedOrigins may frame it. The adapters'
 // CheckoutFramePolicy sets it.
 func (c *Client) CheckoutFrameAncestors() string {
 	if c == nil || c.engine == nil {
@@ -216,28 +247,11 @@ func (c *Client) CheckoutFrameAncestors() string {
 	return config.CheckoutFrameAncestors(c.engine.App.Config)
 }
 
-// RoutesRequireRoot reports whether Routes must be mounted at the router's
-// root without a prefix: the control plane's issuer-anchored URLs do.
-func (c *Client) RoutesRequireRoot() bool {
-	return c != nil && c.engine != nil && c.engine.RoutesRequireRoot()
-}
-
-// AdminConsole is the merchant admin console, for an embedded host to mount at
-// Config.AdminConsole.Path ("/admin" by default) on its root router, without
-// stripping the prefix; a request outside that path answers 500 and is logged.
-// It is nil unless Config.AdminConsole is enabled; the console comes from
-// Deps.ConsoleAssets, else from the build embedded in this module. With
-// Config.ControlPlane the console is part of Routes instead.
-func (c *Client) AdminConsole() http.Handler {
-	if c == nil || c.engine == nil {
-		return nil
-	}
-	return c.engine.Console()
-}
-
-// RiverJobs is OpenRails' contribution to a host-owned River fleet (workers,
-// periodic jobs and QueueBilling), for riverhelpers.New alongside the host's
-// and AuthKit's. It fails that composition on a remote client.
+// RiverJobs is OpenRails' contribution to the host's River fleet (workers,
+// periodic jobs and QueueBilling), for riverhelpers.New in Config.RiverSchema
+// alongside the host's and AuthKit's; then pass the fleet to Start with
+// WithRiverClient. Requesting it rules out OpenRails' own River. It fails that
+// composition on a remote client.
 func (c *Client) RiverJobs() riverhelpers.Contribution {
 	if c == nil || c.engine == nil {
 		return riverhelpers.NewContribution("openrails", func(context.Context, *river.Config) error { return ErrRemoteClient }, nil, nil)
@@ -251,7 +265,7 @@ const QueueBilling = riverjobs.QueueBilling
 
 // InvoiceSweepArgs is the invoice job OpenRails schedules on QueueBilling
 // (daily period finalize, hourly collection, monthly-floor collection). A host
-// that owns the fleet may insert one run itself, e.g.
+// whose fleet runs RiverJobs may insert one run itself, e.g.
 // InvoiceSweepArgs{FinalizePreviousMonth: true} to finalize every payer's
 // previous period now. Every run is idempotent.
 type InvoiceSweepArgs struct {

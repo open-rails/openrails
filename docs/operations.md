@@ -903,9 +903,10 @@ public and carry no dependency detail: a failing check is logged and answers
 503 `service_unavailable`. There is no `/health`, `/healthz` or `/readyz`. Embedded hosts wire the same checks into
 their own handler. Readiness requires Postgres, the merchants service, the River producer and a
 locally managed River worker consumer; Redis, Vault and PSP posture are
-reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. A
-host-owned embedded River fleet is outside that local-process check and is
-observed through the `openrails_job_progress` probe (`Client.Probes`).
+reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. An
+embedded host's own River fleet (`WithRiverClient`) is outside that
+local-process check and is observed through the `openrails_job_progress` probe
+(`Client.Probes`).
 
 `GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
 dependency readiness reports, optional ones included. The authenticated

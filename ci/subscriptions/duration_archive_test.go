@@ -79,7 +79,7 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 	require.NoError(t, writer.Close())
 
 	schema := "duration_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
 	quoted := pgx.Identifier{schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
 	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+".merchants(id,slug,status) VALUES($1,'historical-duration','active')", client.MerchantID().UUID())

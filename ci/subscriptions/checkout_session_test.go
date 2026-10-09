@@ -52,8 +52,9 @@ func hostedHosts(t *testing.T, deps func(*openrails.Deps)) (app, pay *world) {
 		b := f.base
 		w := &world{t: t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth, clock: b.clock,
 			selfService: true, deps: deps, replica: &replicaEnv{f: f, name: name, queue: "replica_" + name},
-			cfg:   func(c *config.Config) { c.ReturnOrigins, c.PublicBillingBaseURL = origins, origins[0]+"/billing" },
-			mount: func(h *openrails.HTTPConfig) { h.Checkout = &checkout },
+			cfg: func(c *config.Config) {
+				c.ReturnOrigins, c.PublicBillingBaseURL, c.Checkout = origins, origins[0]+"/billing", checkout
+			},
 		}
 		w.start()
 		t.Cleanup(w.stop)
@@ -475,7 +476,6 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
 	w.selfService = true
-	w.mount = func(h *openrails.HTTPConfig) { h.Checkout = &openrails.CheckoutConfig{} }
 	w.start()
 	buyer := w.newCustomer()
 	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
@@ -518,7 +518,6 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 		account.Settings = map[string]any{"card_entry": "server"}
 		psps["nmi"] = account
 	}
-	w.mount = func(h *openrails.HTTPConfig) { h.Checkout = &openrails.CheckoutConfig{} }
 	w.start()
 	buyer := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)

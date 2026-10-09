@@ -37,7 +37,6 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 					tokens["USDC"] = map[string]any{}
 					tokens["PYUSD"] = map[string]any{}
 				}
-				w.mount = func(c *openrails.HTTPConfig) { c.Checkout = &openrails.CheckoutConfig{} }
 				w.start()
 				chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 				chain.runWorkers(w)

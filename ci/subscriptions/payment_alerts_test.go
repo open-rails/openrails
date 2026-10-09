@@ -230,7 +230,7 @@ func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
 	t.Parallel()
 	mail := &mailbox{}
 	w := prepareWorld(t, 12)
-	w.deps = func(d *openrails.Deps) { d.EmailSender = mail }
+	w.deps = func(d *openrails.Deps) { d.Email = mail }
 	w.start()
 	w.armDestructive()
 	alertTo, from := "ops@merchant.test", "billing@merchant.test"

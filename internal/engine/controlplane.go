@@ -29,8 +29,8 @@ func attachControlPlane(ctx context.Context, a *app.App, cp config.ControlPlaneC
 	if sender := a.Runtime.EmailSender; sender != nil {
 		opts.EmailSender = email.AuthKitSender{Sender: sender}
 	}
-	if deps.SMSSender != nil {
-		opts.SMSSender = deps.SMSSender
+	if deps.SMS != nil {
+		opts.SMSSender = deps.SMS
 	}
 	if len(cp.AuthRateLimits) > 0 {
 		opts.AuthRateLimitOverrides = make(map[string]authkit.RateLimit, len(cp.AuthRateLimits))

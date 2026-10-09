@@ -47,6 +47,11 @@ type Dependencies struct {
 	// The console mounts only when this is present AND admin_console.enabled;
 	// enabled without assets is a boot error.
 	ConsoleAssets fs.FS
+	// CatalogEdits mounts the merchant API's catalog-write routes and opens
+	// them to authorized callers.
+	CatalogEdits bool
+	// AdminConsole serves the merchant admin console; nil serves none.
+	AdminConsole *config.AdminConsole
 }
 
 type Server struct {
@@ -65,6 +70,9 @@ type Server struct {
 	adminLimiter           *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
+	// catalogEdits mounts the catalog-write routes (Dependencies.CatalogEdits).
+	catalogEdits bool
+	adminConsole *config.AdminConsole
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
@@ -224,7 +232,12 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		captchaStore:           deps.Runtime.CaptchaStore,
 		adminLimiter:           middleware.NewAdminOperationLimiter(deps.Redis),
 		consoleAssets:          deps.ConsoleAssets,
+		catalogEdits:           deps.CatalogEdits,
+		adminConsole:           deps.AdminConsole,
 		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
+	}
+	if err := deps.Runtime.CatalogEdits.Decide(deps.CatalogEdits); err != nil {
+		return nil, err
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It

@@ -206,8 +206,8 @@ scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
 Reads need `merchant:catalog:read`. Writes need `merchant:catalog:update` and
-`allow_catalog_updates: true`: without it the write routes are not mounted (the
-in-process Client is not gated). `Config.Catalog` is an optional startup batch
+`Routes.CatalogEdits` (standalone: `catalog_edits: true`): without it the write
+routes are not mounted (the in-process Client is not gated). `Config.Catalog` is an optional startup batch
 and does not restrict later edits. JSON/YAML batches are deduplicated permanently
 by content hash, even after intervening edits.
 

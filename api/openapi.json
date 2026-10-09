@@ -486,7 +486,6 @@
           }
         ],
         "x-openrails-auth": "customer",
-        "x-openrails-mounted-when": "checkout_sessions",
         "x-openrails-customer-scope": "self_service",
         "x-openrails-errors": [
           "authentication_required",

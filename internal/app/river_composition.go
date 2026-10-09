@@ -30,9 +30,10 @@ func (r *Runtime) CheckRiverConfigurable() error {
 	return r.riverConfigurableLocked()
 }
 
-// RiverJobs seals the attached component set before handing it to the host.
-// Request it only after optional control-plane attachment. No client is built
-// and no job starts until the host composes and starts the returned group.
+// RiverJobs seals the attached component set before handing it to the host's
+// fleet; OpenRails' own River is then refused. Request it only after optional
+// control-plane attachment. No client is built and no job starts until the
+// host composes and starts the returned group.
 func (r *Runtime) RiverJobs() riverhelpers.Contribution { return r.riverJobs(true) }
 func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 	refuse := func(err error) riverhelpers.Contribution {
@@ -46,10 +47,6 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		r.riverCompositionMu.Unlock()
 		return refuse(err)
 	}
-	if r.hostRiver != host {
-		r.riverCompositionMu.Unlock()
-		return refuse(fmt.Errorf("host composition requires RiverHostOwned"))
-	}
 	r.riverCompositionSealed = true
 	components := slices.Clone(r.riverContributions)
 	r.riverCompositionMu.Unlock()
@@ -62,6 +59,11 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		}
 		claimed = true
 		r.riverCompositionMu.Unlock()
+		// Migrate prepared River's tables in RiverSchema only, and the
+		// producer New bound queues jobs there.
+		if want := r.riverSchemaOrDefault(); cfg.Schema != want {
+			return fmt.Errorf("openrails: River fleet schema %q differs from Config.RiverSchema %q", cfg.Schema, want)
+		}
 		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers}
 		refreshQueue := riverjobs.QueueBilling
 		if !host {
@@ -93,9 +95,8 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 	}, func(ctx context.Context, binding riverhelpers.Binding) error {
 		client := binding.Client
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
-			if host && errors.Is(err, db.ErrRiverTablesMissing) {
-				// A host-owned fleet migrates River itself; name the call.
-				return fmt.Errorf("%w: call riverhelpers.ApplyMigrations(ctx, pool, %q) before riverhelpers.New (a host-owned fleet migrates River itself; openrails.Migrate does not)", err, client.Schema())
+			if errors.Is(err, db.ErrRiverTablesMissing) {
+				return fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) first", err)
 			}
 			return err
 		}
@@ -104,16 +105,10 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 			r.riverCompositionMu.Unlock()
 			return fmt.Errorf("runtime closed during River composition")
 		}
-		r.SetRiverSchema(client.Schema())
 		r.RiverClient = client
+		r.RiverProducer = client
 		r.DB.SetRiverJobInserter(client)
-		if host {
-			r.RiverProducer = client
-			r.externalRiverClient = true
-			r.hostRiverBound.Store(true)
-		}
-		// Close must not consume the monitor's stop-once before its start hook.
-		r.StartRiverProgressMonitor(ctx)
+		r.externalRiverClient = host
 		r.riverCompositionMu.Unlock()
 		return nil
 	}, func() error {
@@ -127,14 +122,14 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		}
 		r.riverCompositionFailed = true
 		r.RiverClient = nil
-		r.DB.SetRiverJobInserter(nil)
-		if host {
-			r.RiverProducer = nil
-			r.externalRiverClient = false
-			r.hostRiverBound.Store(false)
+		r.RiverProducer = r.insertProducer
+		if r.insertProducer != nil {
+			r.DB.SetRiverJobInserter(r.insertProducer)
+		} else {
+			r.DB.SetRiverJobInserter(nil)
 		}
+		r.externalRiverClient = false
 		r.riverCompositionMu.Unlock()
-		r.stopRiverProgressMonitor()
 		return nil
 	})
 	return riverhelpers.Group(append([]riverhelpers.Contribution{own}, components...)...)

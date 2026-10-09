@@ -4,26 +4,26 @@
 //
 // River is required (#895): renewals, credit expiry, invoices, webhook
 // reconciliation and provider intents all run as River jobs. With River
-// absent every read keeps answering and the money silently stops. The fleet is
-// either OpenRails-managed (Start runs it) or host-owned (the host composes
-// RiverJobs into its one fleet). OpenRails also watches the fleet's progress
-// from outside River and reports a stall through Probes.
+// absent every read keeps answering and the money silently stops. Start runs
+// OpenRails' own River client, or takes the host's fleet built with
+// RiverJobs. OpenRails also watches the fleet's progress from outside River
+// and reports a stall through Probes.
 package engine
 
 import (
 	"context"
+
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/service"
 	admin "github.com/open-rails/openrails/web/admin"
@@ -35,13 +35,13 @@ type Engine struct {
 	svc *service.Service
 
 	merchant config.MerchantDeclaration
-	http     *config.HTTPConfig
 
 	mu          sync.Mutex
 	closed      bool
 	stopWorkers func()
-	routes      []routebundle.Route
-	console     http.Handler
+	routes      map[string][]routebundle.Route
+	// authAPIBase is Deps.AuthKit's JSON API path, for the admin console.
+	authAPIBase string
 
 	handlerOnce sync.Once
 	handler     http.Handler
@@ -84,18 +84,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
-	httpCfg, err := httpConfig(cfg, auth)
-	if err != nil {
-		return nil, err
-	}
 	consoleAssets := deps.ConsoleAssets
 	if consoleAssets == nil {
 		consoleAssets = admin.FS()
-	}
-	// A control plane checks this when it builds its surface, so its
-	// maintenance commands run on a console-less binary.
-	if cfg.ControlPlane == nil && config.AdminConsoleEnabled(cfg.AdminConsole) && !adminconsole.Present(consoleAssets) {
-		return nil, fmt.Errorf("openrails: Config.AdminConsole is enabled but there is no console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
 	if deps.Postgres != nil && (cfg.DB == nil || config.DBConnectionString(cfg.DB) == "") {
 		url := deps.Postgres.Config().ConnString()
@@ -110,8 +101,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		cfg.DB = &db
 	}
 	bootstrap := &app.BootstrapOptions{
-		HostRiver:        cfg.River == config.RiverHostOwned,
-		RiverSchema:      cfg.RiverSchema,
 		PGXPool:          deps.Postgres,
 		Redis:            deps.Redis,
 		UserDirectory:    userDirectory(deps),
@@ -120,16 +109,13 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		NMITransport:     deps.NMITransport,
 		DNSResolver:      deps.DNSResolver,
 		Clock:            deps.Clock,
-		EmailSender:      deps.EmailSender,
-	}
-	if cfg.River != config.RiverHostOwned && strings.TrimSpace(bootstrap.RiverSchema) == "" {
-		bootstrap.RiverSchema = config.DefaultRiverSchema
+		EmailSender:      deps.Email,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchant: cfg.Merchant, http: httpCfg}
+	e := &Engine{App: application, merchant: cfg.Merchant, authAPIBase: authAPIBase(deps)}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -142,9 +128,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	application.ConsoleAssets = consoleAssets
-	if e.console, err = console(&cfg, consoleAssets); err != nil {
-		return fail(err)
-	}
 	rt.Auth = auth
 	rt.CheckoutCustomer = checkoutCustomer(deps)
 	rt.AuthenticateCustomer = deps.AuthenticateCustomer
@@ -163,11 +146,8 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 			return fail(err)
 		}
 	}
-	if cfg.River != config.RiverHostOwned {
-		if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
-			return fail(fmt.Errorf("build billing periodic jobs: %w", err))
-		}
-		rt.StartRiverProgressMonitor(ctx)
+	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {
+		return fail(fmt.Errorf("build billing periodic jobs: %w", err))
 	}
 	if e.svc, err = service.New(rt); err != nil {
 		return fail(err)
@@ -210,17 +190,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 		return fmt.Errorf("openrails: Config.Merchant.Slug is required")
 	}
 	cfg.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.RiverSchema))
-	switch cfg.River {
-	case "", config.RiverManaged:
-		if cfg.RiverSchema != "" && !validIdentifier(cfg.RiverSchema) {
-			return fmt.Errorf("openrails: Config.RiverSchema %q is not a valid schema name", cfg.RiverSchema)
-		}
-	case config.RiverHostOwned:
-		if cfg.RiverSchema != "" {
-			return fmt.Errorf("openrails: Config.RiverSchema applies to managed River; a host-owned fleet keeps River's tables in its client's schema")
-		}
-	default:
-		return fmt.Errorf("openrails: Config.River %q is invalid; use RiverManaged or RiverHostOwned", cfg.River)
+	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
+		return err
+	}
+	if err := config.ValidateCheckout(cfg.Checkout); err != nil {
+		return fmt.Errorf("openrails: Config.Checkout: %w", err)
 	}
 	if cfg.TestMode == config.CredentialPostureLive {
 		for name, set := range map[string]bool{
@@ -232,18 +206,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			}
 		}
 	}
-	if cfg.HTTP != nil && deps.AuthenticateCustomer == nil {
-		for _, routes := range cfg.HTTP.CustomerRoutes {
-			if routes.Delegated {
-				return fmt.Errorf("openrails: Config.HTTP.CustomerRoutes profile %q is Delegated; set Deps.AuthenticateCustomer", routes.Prefix)
-			}
-		}
-	}
 	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
 		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")
 	}
-	if deps.EmailSender != nil && cfg.SendGrid != nil {
-		return fmt.Errorf("openrails: set Deps.EmailSender or Config.SendGrid, not both")
+	if deps.Email != nil && cfg.SendGrid != nil {
+		return fmt.Errorf("openrails: set Deps.Email or Config.SendGrid, not both")
 	}
 	if cfg.SendGrid != nil && strings.TrimSpace(cfg.SendGrid.APIKey) == "" {
 		return fmt.Errorf("openrails: Config.SendGrid.APIKey is required")
@@ -286,56 +253,24 @@ func validIdentifier(s string) bool {
 	return true
 }
 
-// httpConfig copies Config.HTTP, defaulting native customer routes to the
-// declared merchant, and validates it against the host's authentication.
-func httpConfig(cfg config.Config, auth *billingauth.Integration) (*config.HTTPConfig, error) {
-	if cfg.HTTP == nil {
-		return nil, nil
+// validRiverSchema accepts what River and riverhelpers accept: an identifier
+// short enough for River's own derived names.
+func validRiverSchema(schema string) error {
+	if !validIdentifier(schema) || len(schema) > 63-len(".river_leadership") {
+		return fmt.Errorf("openrails: River schema %q is not a valid schema name (at most 46 characters); set Config.RiverSchema", schema)
 	}
-	out := *cfg.HTTP
-	out.CustomerRoutes = append([]config.CustomerRoutesConfig(nil), cfg.HTTP.CustomerRoutes...)
-	for i := range out.CustomerRoutes {
-		if !out.CustomerRoutes[i].Delegated && strings.TrimSpace(out.CustomerRoutes[i].Merchant) == "" {
-			out.CustomerRoutes[i].Merchant = cfg.Merchant.Slug
-		}
-	}
-	if out.CookieOrigin != "" {
-		if _, err := billingauth.CookieAuthentication(out.CookieOrigin); err != nil {
-			return nil, fmt.Errorf("openrails: Config.HTTP.CookieOrigin: %w", err)
-		}
-	}
-	if out.Checkout != nil {
-		checkout := *out.Checkout
-		checkout.EmbedOrigins = append([]string(nil), checkout.EmbedOrigins...)
-		if err := config.ValidateCheckout(checkout); err != nil {
-			return nil, fmt.Errorf("openrails: Config.HTTP.Checkout: %w", err)
-		}
-		out.Checkout = &checkout
-	}
-	if cfg.ControlPlane != nil {
-		if out.Checkout != nil || out.Merchant {
-			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes serves the standalone surface; Config.HTTP may only add CustomerRoutes")
-		}
-		for _, routes := range out.CustomerRoutes {
-			if !routes.Delegated {
-				return nil, fmt.Errorf("openrails: with Config.ControlPlane, CustomerRoutes must be Delegated (Deps.AuthenticateCustomer)")
-			}
-		}
-		return &out, nil
-	}
-	if err := embedhttp.ValidateHTTPConfig(&out, auth); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return nil
 }
 
 // ConfiguredMerchant is the declared merchant's ID, zero when unbound.
 func (e *Engine) ConfiguredMerchant() billing.MerchantID { return e.App.Runtime.ConfiguredMerchant() }
 
-// Start starts OpenRails' workers on goroutines Close stops: the managed River
-// fleet and the loops that run outside River. With a host-owned fleet, compose
-// RiverJobs into it first; the host starts it.
-func (e *Engine) Start(ctx context.Context) error {
+// Start starts OpenRails' workers on goroutines Close stops: River, the loops
+// that run outside it and the progress monitor. fleet nil runs OpenRails' own
+// River client; otherwise fleet is the host's, composed with RiverJobs, and
+// the host starts and stops it. It runs no DDL, and ctx ending stops nothing:
+// only Close does.
+func (e *Engine) Start(ctx context.Context, fleet *river.Client[pgx.Tx]) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -345,10 +280,10 @@ func (e *Engine) Start(ctx context.Context) error {
 		return fmt.Errorf("openrails: already started")
 	}
 	wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	stop, err := e.App.Runtime.StartWorkers(wctx)
+	stop, err := e.App.Runtime.StartWorkers(wctx, fleet)
 	if err != nil {
 		cancel()
-		return err
+		return fmt.Errorf("openrails: %w", err)
 	}
 	e.stopWorkers = func() { cancel(); stop() }
 	return nil

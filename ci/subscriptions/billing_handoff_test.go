@@ -210,7 +210,7 @@ func handoffTarget(t *testing.T, source *world) *world {
 		require.NoError(t, err)
 	})
 	t.Cleanup(target.checkMoneyInvariants)
-	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: target.schema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: target.schema, RiverSchema: target.schema}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, target.schema))
 	return target
 }
@@ -225,7 +225,7 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	target := handoffTarget(t, source)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), target.pool))
 	client, err := openrails.New(t.Context(), openrails.Config{
-		Schema: target.schema, River: openrails.RiverHostOwned,
+		Schema: target.schema, RiverSchema: target.schema,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		DB: &openrails.DBConfig{URL: target.dsn},
 		ControlPlane: &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{

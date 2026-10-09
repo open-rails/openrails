@@ -1,4 +1,4 @@
-// Package openrailsfiber registers an OpenRails Client's routes natively in Fiber v3.
+// Package openrailsfiber registers an OpenRails Client's routes natively on a Fiber v3 app.
 package openrailsfiber
 
 import (
@@ -14,26 +14,22 @@ import (
 // RouteNamePrefix identifies native OpenRails registrations in Fiber inspection.
 const RouteNamePrefix = "openrails."
 
-// Mount registers one native route per method and path of client.Routes under
-// target. Fiber keeps its native matching and 404/405 behavior; configure
-// CaseSensitive and StrictRouting on the host for exact matching.
-func Mount(target fiber.Router, client *openrails.Client) error {
-	if client == nil || target == nil {
-		return fmt.Errorf("openrails Fiber: client and router are required")
+// Mount registers one native route per method and path of the routes
+// selection selects (Client.Routes) on the root app: the API under
+// selection.Prefix. Fiber keeps its native matching and 404/405 behavior;
+// configure CaseSensitive and StrictRouting on the host for exact matching.
+func Mount(app *fiber.App, client *openrails.Client, selection openrails.Routes) error {
+	if client == nil || app == nil {
+		return fmt.Errorf("openrailsfiber: Mount requires a Fiber app and a client")
 	}
-	routes, err := client.Routes()
+	routes, err := client.Routes(selection)
 	if err != nil {
 		return err
 	}
-	return mount(target, routes, client.RoutesRequireRoot())
+	return mount(app, routes)
 }
 
-func mount(target fiber.Router, routes []openrails.Route, rootOnly bool) error {
-	if rootOnly {
-		if _, ok := target.(*fiber.App); !ok {
-			return fmt.Errorf("openrails Fiber: standalone routes must mount on the root App")
-		}
-	}
+func mount(app *fiber.App, routes []openrails.Route) error {
 	heads := map[string]bool{}
 	for _, route := range routes {
 		if route.Method == http.MethodHead {
@@ -52,7 +48,7 @@ func mount(target fiber.Router, routes []openrails.Route, rootOnly bool) error {
 			methods = append(methods, http.MethodHead)
 		}
 		for _, method := range methods {
-			target.Add([]string{method}, nativePath(route.Path), h).Name(RouteNamePrefix + method + " " + route.Path)
+			app.Add([]string{method}, nativePath(route.Path), h).Name(RouteNamePrefix + method + " " + route.Path)
 		}
 	}
 	return nil
@@ -77,7 +73,7 @@ func nativePath(path string) string {
 
 // CheckoutFramePolicy is middleware for the route serving the hosted checkout
 // page (billing-ui's <CheckoutPage>): only the host and
-// Config.HTTP.Checkout.EmbedOrigins may frame it.
+// Config.Checkout.EmbedOrigins may frame it.
 func CheckoutFramePolicy(client *openrails.Client) fiber.Handler {
 	policy := client.CheckoutFrameAncestors()
 	return func(c fiber.Ctx) error {

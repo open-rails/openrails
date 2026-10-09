@@ -1,6 +1,9 @@
 package openrails
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 )
@@ -20,17 +23,18 @@ type (
 
 	// CredentialPosture is Config.TestMode: Sandbox or Live.
 	CredentialPosture = config.CredentialPosture
-	// RiverOwnership is Config.River: who runs the job fleet.
-	RiverOwnership = config.RiverOwnership
-	// HTTPConfig is Config.HTTP: the route groups Client.Routes publishes.
-	HTTPConfig = config.HTTPConfig
-	// CheckoutConfig is HTTPConfig.Checkout: the checkout session routes.
+	// CheckoutConfig is Config.Checkout: the shared payment page.
 	CheckoutConfig = config.CheckoutConfig
-	// CustomerRoutesConfig is one customer route profile of
-	// HTTPConfig.CustomerRoutes.
-	CustomerRoutesConfig = config.CustomerRoutesConfig
-	// CustomerHTTPScope is CustomerRoutesConfig.Scope: which routes a profile
-	// publishes.
+	// Routes selects the HTTP surface Client.Routes returns and the adapters
+	// mount on the root router.
+	Routes = config.Routes
+	// AdminConsole is Routes.AdminConsole: the merchant admin console.
+	AdminConsole = config.AdminConsole
+	// CustomerRoutes is one further customer surface of
+	// Routes.CustomerProfiles.
+	CustomerRoutes = config.CustomerRoutes
+	// CustomerHTTPScope is Routes.Customers and CustomerRoutes.Scope: which
+	// customer routes a surface mounts.
 	CustomerHTTPScope = config.CustomerHTTPScope
 	// ControlPlaneConfig is Config.ControlPlane: the OpenRails-owned AuthKit
 	// control plane.
@@ -86,8 +90,6 @@ type (
 	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails
 	// opens when Deps.Vault is nil.
 	VaultConfig = config.VaultConfig
-	// AdminConsoleConfig is Config.AdminConsole: the merchant admin console.
-	AdminConsoleConfig = config.AdminConsoleConfig
 	// LLMConfig is Config.LLM: the model behind the console's natural-language
 	// features.
 	LLMConfig = config.LLMConfig
@@ -98,14 +100,14 @@ type (
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
 
-	// EmailSender is Deps.EmailSender: it delivers OpenRails' rendered email,
+	// EmailSender is Deps.Email: it delivers OpenRails' rendered email,
 	// billing and control plane alike.
 	EmailSender = config.EmailSender
 	// Email is one message an EmailSender delivers.
 	Email = config.Email
 	// EmailAddress is a mailbox and its display name.
 	EmailAddress = config.EmailAddress
-	// SMSSender is Deps.SMSSender: it delivers the control plane's AuthKit
+	// SMSSender is Deps.SMS: it delivers the control plane's AuthKit
 	// text messages.
 	SMSSender = config.SMSSender
 
@@ -156,12 +158,6 @@ const (
 	// SecretBackendDB stores credentials encrypted in the database.
 	SecretBackendDB = config.SecretBackendDB
 
-	// RiverManaged has OpenRails run its own River fleet; Client.Start starts
-	// it.
-	RiverManaged = config.RiverManaged
-	// RiverHostOwned has the host run Client.RiverJobs in its own fleet.
-	RiverHostOwned = config.RiverHostOwned
-
 	// FormerNamesFinite forwards a former name for FormerNamesConfig.Duration.
 	FormerNamesFinite = config.FormerNamesFinite
 	// FormerNamesForever forwards a former name indefinitely.
@@ -169,6 +165,8 @@ const (
 	// FormerNamesImmediate releases a former name at once.
 	FormerNamesImmediate = config.FormerNamesImmediate
 
+	// CustomersNone mounts no customer routes.
+	CustomersNone = config.CustomersNone
 	// CustomerSelfService is the full customer self-service API.
 	CustomerSelfService = config.CustomerSelfService
 	// CustomerSubscriptionManagement is cancellation, resumption,
@@ -211,10 +209,17 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
 }
 
-// PSPFromEnv declares one PSP from conventionally named variables, so enabling
-// a provider is configuration only. With P = upper(key)+"_": P+"RAIL"
-// (default: key), P+"ACCOUNT_ID", then P+upper(name) for each of the rail's
-// credential slots and settings. Required slots must be set.
-func PSPFromEnv(key string, lookup func(string) (string, bool)) (PSPConfig, error) {
-	return config.PSPFromEnv(key, lookup)
+// ReadMerchantFile reads Config.Merchant from a YAML file in
+// ParseMerchantDeclaration's shape; the caller sets Slug. The file carries
+// PSP credentials, so keep it out of version control.
+func ReadMerchantFile(path string) (MerchantDeclaration, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return MerchantDeclaration{}, err
+	}
+	m, err := config.ParseMerchantDeclaration(raw)
+	if err != nil {
+		return MerchantDeclaration{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return m, nil
 }

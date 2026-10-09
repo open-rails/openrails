@@ -1,5 +1,5 @@
 // CheckoutPage — the shared payment page. A host serves it from one HTML entry
-// at Config.HTTP.Checkout.PageURL behind the adapter's CheckoutFramePolicy.
+// at Config.Checkout.PageURL behind the adapter's CheckoutFramePolicy.
 // The session id arrives in the URL fragment; the page reads and pays the
 // session with it and, when framed by the app that minted it, speaks the
 // frame protocol with that app only.

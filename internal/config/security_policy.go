@@ -36,7 +36,7 @@ func WebhookSecretOverlapDuration(cfg *Config) (time.Duration, error) {
 
 // AllowedReturnOrigins are the exact origins checkout success/cancel and
 // billing-portal return URLs may name (SEC-33): ReturnOrigins, else the origin
-// of PublicBillingBaseURL, then HTTP.Checkout.EmbedOrigins. Empty refuses
+// of PublicBillingBaseURL, then Checkout.EmbedOrigins. Empty refuses
 // every return URL.
 func AllowedReturnOrigins(cfg *Config) []string {
 	if cfg == nil {
@@ -55,7 +55,7 @@ func AllowedReturnOrigins(cfg *Config) []string {
 	}
 	// The sites framing this host's payment page are where its redirect
 	// rails return the buyer.
-	for _, raw := range PublishedCheckout(cfg).EmbedOrigins {
+	for _, raw := range checkoutOf(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			out = append(out, origin)
 		}
@@ -82,13 +82,16 @@ func ReturnURLAllowed(cfg *Config, raw string) bool {
 	return false
 }
 
-// PublishedCheckout is Config.HTTP.Checkout, zero when checkout is not published.
-func PublishedCheckout(cfg *Config) CheckoutConfig {
-	if cfg == nil || cfg.HTTP == nil || cfg.HTTP.Checkout == nil {
+func checkoutOf(cfg *Config) CheckoutConfig {
+	if cfg == nil {
 		return CheckoutConfig{}
 	}
-	return *cfg.HTTP.Checkout
+	return cfg.Checkout
 }
+
+// CheckoutPageURL is Config.Checkout.PageURL, trimmed; empty without a shared
+// payment page.
+func CheckoutPageURL(cfg *Config) string { return strings.TrimSpace(checkoutOf(cfg).PageURL) }
 
 // CheckoutEmbedAllowed reports whether origin may frame the payment page this
 // host serves: one of EmbedOrigins, or the page's own origin.
@@ -96,7 +99,7 @@ func CheckoutEmbedAllowed(cfg *Config, origin string) bool {
 	if origin == "" {
 		return false
 	}
-	checkout := PublishedCheckout(cfg)
+	checkout := checkoutOf(cfg)
 	if page, ok := URLOrigin(checkout.PageURL); ok && page == origin {
 		return true
 	}
@@ -112,7 +115,7 @@ func CheckoutEmbedAllowed(cfg *Config, origin string) bool {
 // this host serves: only the host itself and EmbedOrigins may frame it.
 func CheckoutFrameAncestors(cfg *Config) string {
 	policy := "frame-ancestors 'self'"
-	for _, raw := range PublishedCheckout(cfg).EmbedOrigins {
+	for _, raw := range checkoutOf(cfg).EmbedOrigins {
 		if origin, ok := URLOrigin(raw); ok {
 			policy += " " + origin
 		}
@@ -158,6 +161,9 @@ func URLOrigin(raw string) (string, bool) {
 func validateSecurityPolicy(cfg *Config) error {
 	if _, err := WebhookSecretOverlapDuration(cfg); err != nil {
 		return err
+	}
+	if err := ValidateCheckout(cfg.Checkout); err != nil {
+		return fmt.Errorf("checkout: %w", err)
 	}
 	for _, raw := range cfg.ReturnOrigins {
 		if err := validatePublicURL(strings.TrimSpace(raw), true, true); err != nil {

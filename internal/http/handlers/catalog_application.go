@@ -57,7 +57,10 @@ func GetCatalogRevision(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	ctx, cfg := r.Request.Context(), r.State.Config
-	allowed := catalogpolicy.Check(ctx, cfg) == nil
+	var exposure *catalogpolicy.Exposure
+	if r.State != nil {
+		exposure = r.State.CatalogEdits
+	}
+	allowed := catalogpolicy.Check(r.Request.Context(), exposure) == nil
 	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
 }

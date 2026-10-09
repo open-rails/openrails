@@ -141,7 +141,8 @@ func (v *verifier) mint(t testing.TB, subject, sid string, signedIn time.Time) s
 }
 
 // world is one merchant in one fresh schema with the demo's embedded
-// posture: sandbox credentials, full provider writes, host-owned River.
+// posture: sandbox credentials, full provider writes, River on the host's
+// fleet.
 type world struct {
 	t      *testing.T
 	pool   *pgxpool.Pool
@@ -159,7 +160,7 @@ type world struct {
 	// included) instead of billing management.
 	selfService bool
 	// mount adjusts the mounted HTTP surface before start.
-	mount func(*openrails.HTTPConfig)
+	mount func(*openrails.Routes)
 	// deps adjusts the host hooks before start.
 	deps func(*openrails.Deps)
 	// booted sees the engine the moment New returns, before anything else runs.
@@ -239,8 +240,7 @@ func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configu
 		pool.Close()
 	})
 	t.Cleanup(w.checkMoneyInvariants)
-	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: w.schema, River: openrails.RiverHostOwned}))
-	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, w.schema))
+	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: w.schema, RiverSchema: w.schema}))
 	return w
 }
 
@@ -275,12 +275,11 @@ func (w *world) start() {
 		w.replica.configureRiver(riverConfig)
 	}
 	cfg := &openrails.Config{
-		Schema:              w.schema,
-		River:               openrails.RiverHostOwned,
-		TestMode:            openrails.Sandbox,
-		ProviderWriteMode:   openrails.ProviderWritesFull,
-		AllowCatalogUpdates: true,
-		DB:                  &openrails.DBConfig{URL: dbURL},
+		Schema:            w.schema,
+		RiverSchema:       w.schema,
+		TestMode:          openrails.Sandbox,
+		ProviderWriteMode: openrails.ProviderWritesFull,
+		DB:                &openrails.DBConfig{URL: dbURL},
 		// The test server's loopback peer is the site's reverse proxy.
 		TrustedProxies: []string{"127.0.0.1/32"},
 		ReturnOrigins:  []string{"https://e2e.test"},
@@ -301,11 +300,10 @@ func (w *world) start() {
 	if w.selfService {
 		scope = openrails.CustomerSelfService
 	}
-	httpConfig := &openrails.HTTPConfig{Merchant: true, Checkout: &openrails.CheckoutConfig{}, CustomerRoutes: []openrails.CustomerRoutesConfig{{Merchant: w.slug, Scope: scope}}}
+	routes := openrails.Routes{Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, Customers: scope}
 	if w.mount != nil {
-		w.mount(httpConfig)
+		w.mount(&routes)
 	}
-	cfg.HTTP = httpConfig
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps}
 	deps := hooks(identity)
 	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = pool, stripe, nmi, w.clock
@@ -326,7 +324,7 @@ func (w *world) start() {
 	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
 	w.jobs = jobs
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, rt, mountPrefix))
+	require.NoError(t, openrailshttp.Mount(mux, rt, routes))
 	w.server = httptest.NewServer(mux)
 	local := rt
 	staff := w.auth.token(t, "staff")

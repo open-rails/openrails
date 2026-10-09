@@ -90,22 +90,22 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 	}
 }
 
-// The console path lands in route patterns and its <base href> (#1127).
-func TestValidateAdminConsolePath(t *testing.T) {
+// Mount paths land in route patterns and the console's <base href> (#1127).
+func TestValidateMountPath(t *testing.T) {
 	for path, ok := range map[string]bool{
-		"": true, "/admin": true, "/billing/admin": true, "/a.b/c~d/e_f-g": true,
-		"/": false, "admin": false, "/admin/": false, "//admin": false, "/a//b": false,
+		"/admin": true, "/billing/admin": true, "/a.b/c~d/e_f-g": true,
+		"": false, "/": false, "admin": false, "/admin/": false, "//admin": false, "/a//b": false,
 		"/a/../b": false, "/./a": false, "/..": false, "/a b": false, "/a%2Fb": false,
 		`/x"><script>`: false, "/a?b": false, "/a#b": false, "/{x}": false, " /admin": false,
 	} {
-		cfg := validConfig()
-		cfg.AdminConsole = &AdminConsoleConfig{Path: path}
-		if err := Validate(cfg); ok {
+		if err := ValidateMountPath("admin_console.path", path); ok {
 			require.NoError(t, err, path)
 		} else {
 			require.ErrorContains(t, err, "invalid admin_console.path", path)
 		}
 	}
+	require.Equal(t, "/admin", AdminConsolePath(&AdminConsole{}))
+	require.Equal(t, "/ops", AdminConsolePath(&AdminConsole{Path: "/ops"}))
 }
 
 // The console navigates to NewMerchantURL, so only a same-origin path or an
@@ -124,9 +124,7 @@ func TestValidateNewMerchantURL(t *testing.T) {
 		"https:///new":                        false,
 		"/new\r\nX: y":                        false,
 	} {
-		cfg := validConfig()
-		cfg.AdminConsole = &AdminConsoleConfig{NewMerchantURL: raw}
-		if err := Validate(cfg); ok {
+		if err := ValidateNewMerchantURL("admin_console.new_merchant_url", raw); ok {
 			require.NoError(t, err, raw)
 		} else {
 			require.ErrorContains(t, err, "invalid admin_console.new_merchant_url", raw)

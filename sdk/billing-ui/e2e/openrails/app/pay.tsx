@@ -1,4 +1,4 @@
-// The shared payment page (Config.HTTP.Checkout.PageURL), on its own origin.
+// The shared payment page (Config.Checkout.PageURL), on its own origin.
 import { createRoot } from "react-dom/client"
 
 import { BillingUiProvider, CheckoutPage } from "../../../dist/index.js"

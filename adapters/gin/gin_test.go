@@ -21,12 +21,7 @@ import (
 )
 
 // Bundle stands in for a Client's routes in these unit tests.
-type Bundle struct {
-	routes   []openrails.Route
-	rootOnly bool
-}
-
-func Routes(s routeSource) (*Bundle, error) { return &Bundle{routes: s.routes, rootOnly: s.root}, nil }
+type Bundle struct{ routes []openrails.Route }
 
 func toRoutes(in []routebundle.Route) []openrails.Route {
 	out := make([]openrails.Route, len(in))
@@ -36,16 +31,11 @@ func toRoutes(in []routebundle.Route) []openrails.Route {
 	return out
 }
 
-func (b *Bundle) Mount(target gin.IRoutes) error {
+func (b *Bundle) Mount(target *gin.Engine) error {
 	if b == nil || target == nil {
 		return errors.New("nil bundle or router")
 	}
-	return MountRoutes(target, b.routes, b.rootOnly)
-}
-
-type routeSource struct {
-	routes []openrails.Route
-	root   bool
+	return MountRoutes(target, b.routes)
 }
 
 func denyDelegated(calls *int) func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
@@ -58,7 +48,7 @@ func denyDelegated(calls *int) func(*http.Request, string) (*billingauth.Delegat
 // inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
 	auth := &billingauth.Integration{
 		Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
 			return billingauth.Identity{}, billingauth.ErrUnauthenticated
@@ -68,17 +58,15 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: denyDelegated(new(int))}}
-	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Delegated: true}},
-		Merchant: true}
-	table, err := embedhttp.ConfiguredRoutes(graph, policy)
+	selection := config.Routes{Storefront: true, Merchant: true, CatalogEdits: true,
+		CustomerProfiles: []config.CustomerRoutes{{Delegated: true, Scope: config.CustomerSelfService}}}
+	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
-		table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, "/billing")
+		table.Entries[i].Path = "/api/pay" + strings.TrimPrefix(table.Entries[i].Path, "/billing")
 	}
 	require.NoError(t, embedhttp.ValidateRouteTable(table))
-	bundle, err := Routes(routeSource{routes: toRoutes(routebundle.FromTable(table))})
-	require.NoError(t, err)
-	return bundle
+	return &Bundle{routes: toRoutes(routebundle.FromTable(table))}
 }
 
 func serve(engine http.Handler, method, path string, body io.Reader) *httptest.ResponseRecorder {
@@ -95,7 +83,7 @@ func TestInventoryMountsNatively(t *testing.T) {
 	engine := gin.New()
 	engine.HandleMethodNotAllowed = true
 	engine.NoRoute(func(c *gin.Context) { c.Status(http.StatusTeapot) })
-	require.NoError(t, b.Mount(engine.Group("/api/pay")))
+	require.NoError(t, b.Mount(engine))
 	gets := 0
 	for _, r := range b.routes {
 		if r.Method == http.MethodGet {
@@ -128,7 +116,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	const body = "{ \"whitespace\": true, \"unicode\": \"é\" }\n"
 	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=original"
 	calls := 0
-	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/api/pay/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -138,7 +126,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})}}}
 	engine := gin.New()
-	require.NoError(t, b.Mount(engine.Group("/api/pay")))
+	require.NoError(t, b.Mount(engine))
 	engine.NoRoute(func(c *gin.Context) { c.Status(http.StatusTeapot) })
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
 	req.Header.Set("Stripe-Signature", "exact-signature")
@@ -151,16 +139,15 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
-func TestRootOnlyBundleRefusesGroupBeforeRegistration(t *testing.T) {
+// A subtree route (the admin console's assets) mounts at the root, for GET
+// and HEAD.
+func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	b, err := Routes(routeSource{root: true, routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/admin/js/site.js?q=raw", r.RequestURI)
 		w.WriteHeader(http.StatusNoContent)
-	})}}})
-	require.NoError(t, err)
+	})}}}
 	engine := gin.New()
-	require.ErrorContains(t, b.Mount(engine.Group("/outer")), "root")
-	require.Empty(t, engine.Routes())
 	require.NoError(t, b.Mount(engine))
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		require.Equal(t, http.StatusNoContent, serve(engine, method, "/admin/js/site.js?q=raw", nil).Code)
@@ -168,12 +155,13 @@ func TestRootOnlyBundleRefusesGroupBeforeRegistration(t *testing.T) {
 	var nilBundle *Bundle
 	require.Error(t, nilBundle.Mount(engine))
 	require.Error(t, (&Bundle{}).Mount(nil))
+	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "client")
 }
 
 // Configured customer prefixes may use a merchant parameter, never a Gin wildcard.
 func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, AllowCatalogUpdates: true}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	for _, tc := range []struct {
 		prefixes []string
@@ -185,13 +173,13 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	} {
 		calls := 0
 		graph.Runtime.AuthenticateCustomer = denyDelegated(&calls)
-		policy := &config.HTTPConfig{}
+		var profiles []config.CustomerRoutes
 		for _, prefix := range tc.prefixes {
-			policy.CustomerRoutes = append(policy.CustomerRoutes, config.CustomerRoutesConfig{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true})
+			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true})
 		}
-		err := embedhttp.ValidateHTTPConfig(policy, nil)
+		err := embedhttp.ValidateRoutes(config.Routes{CustomerProfiles: profiles}, profiles, graph.Runtime)
 		if err == nil {
-			table, buildErr := embedhttp.BuildCustomerRoutes(graph, policy.CustomerRoutes, nil)
+			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
 			require.NoError(t, buildErr)
 			if err = embedhttp.ValidateRouteTable(table); err == nil {
 				engine := gin.New()

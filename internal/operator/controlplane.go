@@ -129,7 +129,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		return fmt.Errorf("control plane: runtime is required")
 	}
 	if err := a.Runtime.CheckRiverConfigurable(); err != nil {
-		return fmt.Errorf("control plane: attach before River initialization; a host-owned fleet must compose AuthKit workers before binding its client")
+		return fmt.Errorf("control plane: attach before River initialization; a host fleet must compose AuthKit workers before binding its client")
 	}
 
 	// The control plane needs a pgx pool over the database holding AuthKit's

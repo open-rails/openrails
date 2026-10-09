@@ -66,7 +66,7 @@ func TestCapabilities(t *testing.T) {
 		{config.CustomerBillingManagement, false, true},
 		{config.CustomerSubscriptionManagement, false, true},
 	} {
-		caps := configuredCapabilities(nil, config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Scope: tc.scope}}}, routesurface.AllProviderRoutes())
+		caps := configuredCapabilities(nil, routeSets(config.Routes{}), []config.CustomerRoutes{{Scope: tc.scope}}, routesurface.AllProviderRoutes())
 		require.True(t, caps.RouteGroups[string(RouteSetCustomer)])
 		require.Equal(t, tc.portal, caps.Features["stripe_billing_portal"], tc.scope)
 		require.Equal(t, tc.solana, caps.Features["solana_subscription_management"], tc.scope)
@@ -77,34 +77,51 @@ func TestCapabilities(t *testing.T) {
 	require.Equal(t, []RouteSet{RouteSetCheckout, RouteSetWebhooks}, ResolveRouteSets([]RouteSet{RouteSetCheckout, "", RouteSetCheckout, RouteSetWebhooks}))
 }
 
-// HTTP publication is refused unless each surface has the authority it needs.
-func TestHTTPConfigValidation(t *testing.T) {
+// Route selection is refused unless each surface has the authority it needs.
+func TestRoutesValidation(t *testing.T) {
 	authn := identityAuth(billingauth.Identity{}, nil)
 	full := &billingauth.Integration{Authentication: authn.Authentication, Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error { return nil })}
-	customer := func(c config.CustomerRoutesConfig) *config.HTTPConfig {
-		return &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{c}}
+	delegate := func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
+		return nil, billingauth.ErrUnauthenticated
+	}
+	runtime := func(auth *billingauth.Integration) *app.Runtime {
+		return &app.Runtime{Auth: auth, AuthenticateCustomer: delegate}
+	}
+	customer := func(c config.CustomerRoutes) config.Routes {
+		return config.Routes{CustomerProfiles: []config.CustomerRoutes{c}}
 	}
 	for _, tc := range []struct {
 		name string
-		cfg  *config.HTTPConfig
+		sel  config.Routes
 		auth *billingauth.Integration
 		ok   bool
 	}{
-		{"no HTTP", nil, nil, true},
-		{"checkout needs no authenticator: a session id is its credential", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, nil, true},
-		{"checkout", &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}, authn, true},
-		{"merchant without authorization", &config.HTTPConfig{Merchant: true}, authn, false},
-		{"merchant", &config.HTTPConfig{Merchant: true}, full, true},
-		{"customer without any authenticator", customer(config.CustomerRoutesConfig{Merchant: "store"}), nil, false},
-		{"native customer without merchant", customer(config.CustomerRoutesConfig{}), authn, false},
-		{"native customer", customer(config.CustomerRoutesConfig{Merchant: "store"}), authn, true},
-		{"unknown scope", customer(config.CustomerRoutesConfig{Scope: 9, Delegated: true}), nil, false},
-		{"parameterized prefix", customer(config.CustomerRoutesConfig{Prefix: "/v1/tenants/{tenant}/me", Delegated: true}), nil, true},
+		{"nothing selected", config.Routes{}, nil, true},
+		{"storefront needs no authenticator: a session id is its credential", config.Routes{Storefront: true}, nil, true},
+		{"storefront", config.Routes{Storefront: true}, authn, true},
+		{"merchant without authorization", config.Routes{Merchant: true}, authn, false},
+		{"merchant", config.Routes{Merchant: true}, full, true},
+		{"catalog edits without merchant", config.Routes{CatalogEdits: true}, full, false},
+		{"catalog edits", config.Routes{Merchant: true, CatalogEdits: true}, full, true},
+		{"customer without any authenticator", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), nil, false},
+		{"native customer without merchant", customer(config.CustomerRoutes{Scope: config.CustomerSelfService}), authn, false},
+		{"native customer", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), authn, true},
+		{"customers shorthand", config.Routes{Customers: config.CustomerBillingManagement}, authn, true},
+		{"no scope", customer(config.CustomerRoutes{Delegated: true}), nil, false},
+		{"unknown scope", customer(config.CustomerRoutes{Scope: 9, Delegated: true}), nil, false},
+		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me", Scope: config.CustomerSelfService, Delegated: true}), nil, true},
 	} {
-		require.Equal(t, tc.ok, ValidateHTTPConfig(tc.cfg, tc.auth) == nil, tc.name)
+		profiles := CustomerProfiles(tc.sel, "store")
+		if tc.name == "native customer without merchant" {
+			profiles = CustomerProfiles(tc.sel, "")
+		}
+		require.Equal(t, tc.ok, ValidateRoutes(tc.sel, profiles, runtime(tc.auth)) == nil, tc.name)
 	}
+	delegated := customer(config.CustomerRoutes{Prefix: "/portal", Scope: config.CustomerSelfService, Delegated: true})
+	require.ErrorContains(t, ValidateRoutes(delegated, CustomerProfiles(delegated, ""), &app.Runtime{}), "Deps.AuthenticateCustomer")
 	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		require.Error(t, ValidateHTTPConfig(customer(config.CustomerRoutesConfig{Prefix: prefix, Delegated: true}), nil), prefix)
+		sel := customer(config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSelfService, Delegated: true})
+		require.Error(t, ValidateRoutes(sel, CustomerProfiles(sel, ""), runtime(nil)), prefix)
 	}
 }
 

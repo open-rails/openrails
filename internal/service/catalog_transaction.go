@@ -16,7 +16,7 @@ func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Con
 	if s == nil || s.rt == nil {
 		return out, fmt.Errorf("catalog service not initialized")
 	}
-	if err = catalogpolicy.Check(ctx, s.rt.Config); err != nil {
+	if err = catalogpolicy.Check(ctx, s.rt.CatalogEdits); err != nil {
 		return out, err
 	}
 	if s.catalogWriteLocked {
@@ -73,7 +73,7 @@ func (s *Service) checkCatalogWritePolicy(ctx context.Context) error {
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("catalog service not initialized")
 	}
-	if err := catalogpolicy.Check(ctx, s.rt.Config); err != nil {
+	if err := catalogpolicy.Check(ctx, s.rt.CatalogEdits); err != nil {
 		return err
 	}
 	return nil

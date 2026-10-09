@@ -1,12 +1,13 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
 // creator site where users sign in with AuthKit, buy courses individually or
-// as a bundle, and choose a channel membership term. newBilling and run are
+// as a bundle, and buy a monthly or yearly channel membership. newBilling and run are
 // the README's code; newAuth is a development AuthKit.
 //
-// Run it from this directory (it reads catalog.yaml) with DATABASE_URL and the
-// PSP's MOBIUS_ACCOUNT_ID, MOBIUS_SECURITY_KEY and MOBIUS_WEBHOOK_SIGNING_SECRET
-// (MOBIUS_RAIL=nmi). ADDR is the listen address (default :8080);
-// EXAMPLE_CHECK_ONLY=1 boots, checks readiness and exits.
+// Run it from this directory with DATABASE_URL. It reads catalog.yaml and
+// merchant.yaml: copy merchant.example.yaml to merchant.yaml and fill in your
+// NMI gateway's IDs and keys (merchant.yaml is git-ignored). ADDR is the
+// listen address (default :8080); EXAMPLE_CHECK_ONLY=1 boots, checks
+// readiness and exits.
 package main
 
 import (
@@ -24,8 +25,6 @@ import (
 	"github.com/open-rails/authkit"
 	authkitgin "github.com/open-rails/authkit/adapters/gin"
 	"github.com/open-rails/authkit/iam"
-	riverhelpers "github.com/open-rails/helpers/river"
-	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
@@ -34,7 +33,7 @@ import (
 )
 
 // newAuth is a development AuthKit: open registration, ephemeral signing keys,
-// and a River fleet the host owns (shared with OpenRails below).
+// and its own River client (auth.Start runs it).
 func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 	cfg := authkit.Config{
 		Schema:       "profiles",
@@ -43,7 +42,6 @@ func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-		River:        authkit.RiverConfig{HostOwned: true},
 	}
 	if err := authkit.Migrate(ctx, db, cfg, authkit.MigrateOptions{}); err != nil {
 		return nil, err
@@ -52,41 +50,26 @@ func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 }
 
 func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*openrails.Client, error) {
-	// Your payment processor account (a PSP). This one is an NMI gateway named "mobius", read
-	// from MOBIUS_RAIL=nmi, MOBIUS_ACCOUNT_ID and MOBIUS_SECURITY_KEY. Declare as many as you like.
-	mobius, err := openrails.PSPFromEnv("mobius", os.LookupEnv)
+	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
+	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
 		return nil, err
 	}
+	merchant.Slug = "onlydemo"
 
-	// What you sell. Each distinct catalog batch is applied once, even across restarts.
-	// Later programmatic edits remain available and are not undone by a replay.
-	raw, err := os.ReadFile("catalog.yaml")
-	if err != nil {
-		return nil, err
-	}
-	declared, err := catalog.ParseApplicationYAML(raw)
+	// What you sell. New applies each distinct catalog once, even across restarts.
+	// Later edits through the Go client remain available and are not undone by a replay.
+	products, err := catalog.ReadFile("catalog.yaml")
 	if err != nil {
 		return nil, err
 	}
 
 	cfg := openrails.Config{
 		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,            // Sandbox or Live: which PSP credentials are accepted
-		ProviderWriteMode: openrails.ProviderWritesFull, // ProviderWritesReadOnly never charges anyone
-		Merchant: openrails.MerchantDeclaration{
-			Slug: "onlydemo", // you, the seller
-			PSPs: map[string]openrails.PSPConfig{"mobius": mobius},
-		},
-		AllowCatalogUpdates: false, // hide catalog-write HTTP routes; the Go client can still edit
-		HTTP: &openrails.HTTPConfig{
-			Merchant: true,                        // authenticated merchant routes; catalog HTTP writes stay disabled
-			Checkout: &openrails.CheckoutConfig{}, // products, prices, checkout sessions and processor webhooks
-			CustomerRoutes: []openrails.CustomerRoutesConfig{
-				{Scope: openrails.CustomerSelfService}, // /v1/me/*: users manage their own subscriptions and cards
-			},
-		},
-		River: openrails.RiverHostOwned, // renewals, dunning and invoices run on your River workers
+		TestMode:          openrails.Sandbox,            // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
+		ProviderWriteMode: openrails.ProviderWritesFull, // Set to ProviderWritesReadOnly to prevent any billing
+		Merchant:          merchant,
+		Catalog:           products,
 	}
 
 	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
@@ -96,18 +79,10 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 
 	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
 	// who is calling, and each user is their own paying customer.
-	client, err := openrails.New(ctx, cfg, openrails.Deps{
+	return openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,   // required: the same pool your app uses
 		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
 	})
-	if err != nil {
-		return nil, err
-	}
-	if _, err := client.ApplyCatalog(ctx, declared); err != nil {
-		_ = client.Close(context.WithoutCancel(ctx))
-		return nil, err
-	}
-	return client, nil
 }
 
 func main() {
@@ -134,21 +109,10 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer bill.Close(ctx)
+	defer bill.Close(context.WithoutCancel(ctx))
 
-	// One River worker fleet runs your jobs, AuthKit's and OpenRails' (rebills, retries, invoices).
-	// The fleet is yours, so you create River's tables ("" is River's default schema, public).
-	if err := riverhelpers.ApplyMigrations(ctx, db, ""); err != nil {
-		return err
-	}
-	workers, err := riverhelpers.New(ctx, db, &river.Config{}, auth.RiverJobs(), bill.RiverJobs())
-	if err != nil {
-		return err
-	}
-	if err := workers.Start(ctx); err != nil {
-		return err
-	}
-	defer workers.StopAndCancel(context.WithoutCancel(ctx))
+	// Background work. OpenRails runs its own River workers: rebills, retries of
+	// failed payments, invoices.
 	if err := auth.Start(ctx); err != nil {
 		return err
 	}
@@ -160,18 +124,26 @@ func run(ctx context.Context) error {
 	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
 		return err
 	}
-	if err := openrailsgin.Mount(r.Group("/billing"), bill); err != nil { // billing under /billing/v1
+	// Billing. Processor webhooks are always mounted; pick the rest.
+	err = openrailsgin.Mount(r, bill, openrails.Routes{
+		Prefix:       "/billing",                    // the API is served at /billing/v1/*
+		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
+		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
+		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog); needs Deps.AuthorityFor
+		CatalogEdits: false,                         // with Merchant, also let that API change the catalog; your Go code always can
+	})
+	if err != nil {
 		return err
 	}
 
-	// The host decides which key grants access to each content item. Paid courses
-	// stay separate from membership-included posts; the bundle grants both course keys.
+	// Which entitlement unlocks each video. Buying course-101 or the bundle grants
+	// course:101; either membership price grants channel:membership.
 	contentAccess := map[string]string{
-		"101": "course:101",
-		"102": "course:102",
-		"103": "channel:main:membership",
+		"css-101":      "course:101",
+		"tailwind-102": "course:102",
+		"members-qa":   "channel:membership",
 	}
-	r.GET("/content/:id/video", authkitgin.Required(auth), func(c *gin.Context) {
+	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
 		id := c.Param("id")
 		entitlement, exists := contentAccess[id]
 		if !exists {
@@ -179,7 +151,7 @@ func run(ctx context.Context) error {
 			return
 		}
 		claims, _ := auth.VerifyRequest(c.Request)
-		customer, err := billing.ParseCustomerID(claims.UserID)
+		customer, err := billing.ParseCustomerID(claims.UserID) // each AuthKit user is their own customer
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return

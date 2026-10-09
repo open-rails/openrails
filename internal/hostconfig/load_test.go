@@ -47,14 +47,14 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NotEmpty(t, cfg.DB.URL, "the DSN is assembled from the atomic parts")
 	require.NotNil(t, cfg.Auth)
 	require.Empty(t, cfg.Auth.Issuer, "no URL setting supplies an issuer fallback")
-	require.False(t, cfg.AllowCatalogUpdates)
+	require.False(t, cfg.CatalogEdits)
 
 	for key, value := range map[string]string{
 		"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DB_SCHEMA": "  Custom_Billing  ",
 		"VAULT_ENABLED": "true", "VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
 		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "SENDGRID_API_KEY": "SG.test-key", "SENDGRID_FROM_ADDRESS": "noreply@billing.example",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
-		"ALLOW_CATALOG_UPDATES": "true", "TRUSTED_PROXIES": `["10.0.0.0/8"]`,
+		"CATALOG_EDITS": "true", "TRUSTED_PROXIES": `["10.0.0.0/8"]`,
 		"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"pem"}`,
 		"AUTH_ISSUER": "https://billing.example.com/", "AUTH_DIRECT_PEER_IP": "true",
 	} {
@@ -80,7 +80,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	quiet, err := billing.ProviderBillingQuiescence(cfg.Config)
 	require.NoError(t, err)
 	require.Equal(t, 36*time.Hour, quiet)
-	require.True(t, cfg.AllowCatalogUpdates)
+	require.True(t, cfg.CatalogEdits)
 	require.Equal(t, []string{"10.0.0.0/8"}, cfg.TrustedProxies)
 	require.Equal(t, "kid-1", cfg.Auth.ActiveKeyID)
 	require.Equal(t, "-----BEGIN PRIVATE KEY-----", cfg.Auth.ActivePrivateKeyPEM)
@@ -93,7 +93,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL, "an explicit URL beats the parts")
 
-	for key, value := range map[string]string{"ALLOW_CATALOG_UPDATES": "maybe", "TRUSTED_PROXIES": "0.0.0.0/0", "DB_SCHEMA": "bad schema"} {
+	for key, value := range map[string]string{"CATALOG_EDITS": "maybe", "TRUSTED_PROXIES": "0.0.0.0/0", "DB_SCHEMA": "bad schema"} {
 		t.Run("refuses "+key, func(t *testing.T) {
 			t.Setenv(key, value)
 			_, err := Load("")
@@ -105,7 +105,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 func TestEnvKeyRouting(t *testing.T) {
 	for env, key := range map[string]string{
 		"SECRET_BACKEND":                    "secret_backend", // #710: multi-word top-level scalar
-		"ALLOW_CATALOG_UPDATES":             "allow_catalog_updates",
+		"CATALOG_EDITS":                     "catalog_edits",
 		"DB_URL":                            "db.url",
 		"db_url":                            "db.url",
 		"VAULT_ADDR":                        "vault.address",

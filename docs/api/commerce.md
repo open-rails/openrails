@@ -26,7 +26,7 @@ operation enforces any customer restriction on the credential, and the attempt
 routes enforce ownership of the addressed attempt.
 
 `CreateCheckoutSession` hands a price to a customer's browser: the answer is the
-session id and, when `HTTP.Checkout.PageURL` is set, the payment page URL.
+session id and, when `Config.Checkout.PageURL` is set, the payment page URL.
 
 `CreateCheckoutAttempt` charges now, on the customer's behalf: the host relays
 the customer's pay click, and creating the attempt accepts the price's terms.
@@ -74,7 +74,7 @@ database share it, so one of them can serve the payment page for all.
   Hand it only to that customer's browser; put it in a URL fragment, not a
   query. It is payable for 30 minutes and readable for 24 hours more, so a
   late provider return still learns its outcome.
-- Config: `HTTP.Checkout` publishes the routes. `PageURL` is the shared payment
+- Config: `Routes.Storefront` publishes the routes. `Config.Checkout.PageURL` is the shared payment
   page (the mint answers `url = PageURL#id`); `EmbedOrigins` are the sites
   allowed to frame the page this host serves. Both empty is the single-site
   case: the app renders `<Checkout source={client.checkoutSource(id)}>` itself.

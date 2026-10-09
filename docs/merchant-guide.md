@@ -14,8 +14,9 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 ### The mental model
 
 The database is the catalog. The authorized in-process client can always edit
-individual records or apply a JSON/YAML batch. `allow_catalog_updates` controls
-whether catalog-write HTTP routes are exposed; it defaults false.
+individual records or apply a JSON/YAML batch. `Routes.CatalogEdits` (the
+standalone server's `catalog_edits`) controls whether catalog-write HTTP routes
+are exposed; it defaults false.
 
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
@@ -291,9 +292,10 @@ caller's reproducible idempotency key: retrying it can never double-credit
 
 ### The admin console
 
-A React SPA served at `admin_console.path` (`/admin/` by default), driving the same `/v1/merchant/*` API — off by
-default. It mounts only when console assets are built into the binary **and**
-`admin_console.enabled: true` (env `ADMIN_CONSOLE_ENABLED`). Login is a real AuthKit
+A React SPA served at its path (`/admin/` by default), driving the same `/v1/merchant/*` API — off by
+default. It mounts only when console assets are built into the binary **and** it is
+switched on: `Routes.AdminConsole` embedded, `admin_console.enabled: true` (env
+`ADMIN_CONSOLE_ENABLED`) standalone. Login is a real AuthKit
 login (password standalone; OIDC when the embedded host configures it). Build and
 mount details: `docs/admin-console.md`.
 

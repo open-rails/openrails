@@ -33,8 +33,6 @@ var hostingMethods = map[string]string{
 	"Ready":                  "the readiness probe (/health/ready when remote)",
 	"Probes":                 "the optional dependencies, for the host's supervisor",
 	"Routes":                 "the HTTP surface the host mounts",
-	"RoutesRequireRoot":      "whether Routes must be mounted without a prefix",
-	"AdminConsole":           "the console handler the host mounts",
 	"CheckoutFrameAncestors": "the frame policy of the payment page the host serves",
 	"RiverJobs":              "the jobs a host-owned River fleet runs",
 	"With":                   "a client with other options over the same transport",

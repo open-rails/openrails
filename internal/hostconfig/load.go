@@ -287,7 +287,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// Merchant configuration authority is broader than provider secrets. Retired
 	// spellings must fail even if a new spelling is also supplied.
 	if _, present := os.LookupEnv("CATALOG_SOURCE"); k.Exists("catalog_source") || present {
-		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; set allow_catalog_updates / ALLOW_CATALOG_UPDATES to enable ordinary catalog mutations")
+		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; set catalog_edits / CATALOG_EDITS to enable ordinary catalog mutations")
 	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
 		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend")

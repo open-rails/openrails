@@ -22,7 +22,7 @@ import (
 )
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
-// Both managed and host-owned RiverJobs contributions use this registry.
+// OpenRails' own River and the host fleet's RiverJobs use this registry.
 // merchantRefreshQueue routes the #719 per-merchant refresh jobs: the bounded
 // QueueProviderRefresh in standalone, QueueBilling for embedded hosts (whose
 // river clients only configure that queue).

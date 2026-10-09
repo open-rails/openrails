@@ -51,7 +51,7 @@ func TestCheckoutConfig(t *testing.T) {
 		require.Equal(t, ok, ValidateCheckout(CheckoutConfig{EmbedOrigins: []string{raw}}) == nil, raw)
 	}
 
-	cfg := &Config{HTTP: &HTTPConfig{Checkout: &CheckoutConfig{PageURL: "https://pay.example/checkout", EmbedOrigins: []string{"https://Host-One.example/", "https://host-two.example"}}}}
+	cfg := &Config{Checkout: CheckoutConfig{PageURL: "https://pay.example/checkout", EmbedOrigins: []string{"https://Host-One.example/", "https://host-two.example"}}}
 	require.Equal(t, "frame-ancestors 'self' https://host-one.example https://host-two.example", CheckoutFrameAncestors(cfg))
 	require.True(t, CheckoutEmbedAllowed(cfg, "https://host-two.example"))
 	require.True(t, CheckoutEmbedAllowed(cfg, "https://pay.example"), "the payment host may frame its own page")
@@ -61,7 +61,7 @@ func TestCheckoutConfig(t *testing.T) {
 	require.True(t, ReturnURLAllowed(cfg, "https://host-two.example/subscribe"))
 	require.False(t, ReturnURLAllowed(cfg, "https://host-three.example/subscribe"))
 
-	for _, single := range []*Config{{}, {HTTP: &HTTPConfig{}}, {HTTP: &HTTPConfig{Checkout: &CheckoutConfig{}}}} {
+	for _, single := range []*Config{nil, {}, {Checkout: CheckoutConfig{}}} {
 		require.Equal(t, "frame-ancestors 'self'", CheckoutFrameAncestors(single))
 		require.False(t, CheckoutEmbedAllowed(single, "https://host-one.example"))
 	}

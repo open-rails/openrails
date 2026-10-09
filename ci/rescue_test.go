@@ -11,6 +11,7 @@ import (
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,9 +26,7 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	f := newFixture(t)
 	jobsTable := pgx.Identifier{f.schema, "river_job"}.Sanitize()
 	start := func(at time.Time) func() {
-		cfg := f.config()
-		cfg.RiverSchema, cfg.River = "", openrails.RiverHostOwned
-		rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
 		require.NoError(t, err)
 		jobs, err := riverkit.New(t.Context(), f.pool, &river.Config{
 			Schema: f.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
@@ -80,23 +79,70 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	stop()
 }
 
-// A host-owned fleet migrates River itself. Forgetting to is refused with the
-// exact call to make, when the fleet is composed and again at Start.
-func TestHostOwnedRiverNamesTheMissingMigration(t *testing.T) {
+// Migrate creates River's tables in Config.RiverSchema; New refuses a schema
+// without them, naming the call. Neither New nor Start runs DDL.
+func TestNewNamesTheMissingRiverMigration(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.RiverSchema, cfg.River = "", openrails.RiverHostOwned
+	cfg.RiverSchema = f.schema + "_jobs"
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{cfg.RiverSchema}.Sanitize()+" CASCADE")
+	})
+	_, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	require.ErrorContains(t, err, "call openrails.Migrate(ctx, pool, cfg) before openrails.New")
+	var schemas int
+	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_namespace WHERE nspname = $1", cfg.RiverSchema).Scan(&schemas))
+	require.Zero(t, schemas, "New runs no DDL")
+
+	require.NoError(t, openrails.Migrate(t.Context(), f.pool, cfg))
 	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	require.NoError(t, client.Close(t.Context()))
+}
 
-	unmigrated := f.schema + "_jobs"
-	_, err = f.pool.Exec(t.Context(), "CREATE SCHEMA "+pgx.Identifier{unmigrated}.Sanitize())
+// Start without options runs OpenRails' own River in Config.RiverSchema. Jobs
+// queued before it wait there; Ready fails until it runs. Cancelling Start's
+// context stops nothing; Close stops what Start started.
+func TestStartRunsItsOwnRiver(t *testing.T) {
+	f := newFixture(t)
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{unmigrated}.Sanitize()+" CASCADE")
-	})
-	_, err = riverkit.New(t.Context(), f.pool, &river.Config{Schema: unmigrated}, client.RiverJobs())
-	require.ErrorContains(t, err, `riverhelpers.ApplyMigrations(ctx, pool, "`+unmigrated+`")`)
-	require.ErrorContains(t, client.Start(t.Context()), "riverhelpers.ApplyMigrations")
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	require.ErrorContains(t, client.Ready(t.Context()), "River is not running")
+
+	started, cancel := context.WithCancel(t.Context())
+	require.NoError(t, client.Start(started))
+	cancel()
+	require.ErrorContains(t, client.Start(t.Context()), "already started")
+	require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "a cancelled Start context leaves River running")
+	require.NoError(t, client.Close(t.Context()))
+	require.Error(t, client.Ready(t.Context()))
+}
+
+// WithRiverClient takes only the fleet built with this client's RiverJobs in
+// Config.RiverSchema; once RiverJobs went to a fleet, OpenRails' own River is
+// refused.
+func TestStartWithTheHostFleet(t *testing.T) {
+	f := newFixture(t)
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	other, err := river.NewClient(riverpgxv5.New(f.pool), &river.Config{Schema: f.schema})
+	require.NoError(t, err)
+	require.ErrorContains(t, client.Start(t.Context(), openrails.WithRiverClient(other)), "WithRiverClient takes the fleet riverhelpers.New built with RiverJobs")
+	require.ErrorContains(t, client.Start(t.Context(), openrails.WithRiverClient(nil)), "WithRiverClient requires a River client")
+
+	fleet, err := riverkit.New(t.Context(), f.pool, &river.Config{Schema: f.schema}, client.RiverJobs())
+	require.NoError(t, err)
+	require.ErrorContains(t, client.Start(t.Context()), "RiverJobs is composed into a host fleet; pass it to Start with WithRiverClient")
+	require.NoError(t, client.Ready(t.Context()), "a bound host fleet is ready: the host starts it")
+	require.NoError(t, client.Start(t.Context(), openrails.WithRiverClient(fleet)))
+	require.ErrorContains(t, client.Start(t.Context(), openrails.WithRiverClient(fleet)), "already started")
+
+	elsewhere, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = elsewhere.Close(context.Background()) })
+	_, err = riverkit.New(t.Context(), f.pool, &river.Config{Schema: "public"}, elsewhere.RiverJobs())
+	require.ErrorContains(t, err, `River fleet schema "public" differs from Config.RiverSchema "`+f.schema+`"`)
+	require.ErrorContains(t, elsewhere.Start(t.Context()), "composition failed")
 }

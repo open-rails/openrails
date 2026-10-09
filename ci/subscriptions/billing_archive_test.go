@@ -94,7 +94,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.Contains(t, archive.String(), `"version":1`)
 
 	destinationSchema := "archive_metadata_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: destinationSchema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: destinationSchema, RiverSchema: destinationSchema}))
 	destinationName := pgx.Identifier{destinationSchema}.Sanitize()
 	t.Cleanup(func() {
 		_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+destinationName+" CASCADE")

@@ -71,7 +71,6 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	f := newFixture(t)
 	provider := &creditCheckoutFake{}
 	cfg := f.config()
-	cfg.HTTP = &openrails.HTTPConfig{}
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	slug := "credit-purchase-" + uuid.NewString()[:8]
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe", AccountID: "acct_e2e", Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": "whsec_e2e"}}}}
@@ -97,7 +96,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	_, err = client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{CreditGrant: catalog.Value(catalog.CreditGrantSpec{Currency: "USD", Amount: &face, ExpiresAfterDays: &days})})
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
 	deliver := func(raw []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, "acct_e2e", "whsec_e2e", raw, time.Now())

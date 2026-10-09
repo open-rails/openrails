@@ -86,8 +86,6 @@ const (
 	FeatureSolanaSigning Feature = "solana_signing"
 	// FeatureStripePortal: a Stripe PSP is armed.
 	FeatureStripePortal Feature = "stripe_portal"
-	// FeatureCheckoutSessions: the deployment publishes checkout sessions.
-	FeatureCheckoutSessions Feature = "checkout_sessions"
 	// FeatureMerchantDirectory: the deployment has a merchant directory.
 	FeatureMerchantDirectory Feature = "merchant_directory"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
@@ -249,9 +247,8 @@ type Route struct {
 	// InvokerScoped: an invoker-scoped credential, which spends a customer's
 	// balance without being the customer, may call this Customer route.
 	InvokerScoped bool
-	// CatalogWrite: the route changes the catalog over HTTP, which a
-	// deployment enables (Config.AllowCatalogUpdates); it is not mounted
-	// otherwise.
+	// CatalogWrite: the route changes the catalog over HTTP; it is mounted
+	// only where the mount enables catalog edits (Routes.CatalogEdits).
 	CatalogWrite bool
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool

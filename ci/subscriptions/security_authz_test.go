@@ -170,24 +170,24 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		},
 	})
 	require.NoError(t, err)
-	routes := openrails.CustomerRoutesConfig{Merchant: slug, Scope: scope}
+	profile := openrails.CustomerRoutes{Merchant: slug, Scope: scope}
 	deps := hooks(identity)
 	if len(delegated) > 0 {
-		routes.Delegated = true
+		profile.Delegated = true
 		deps.AuthenticateCustomer = func(r *http.Request, _ string) (*billingauth.DelegatedPrincipal, error) { return delegated[0](r) }
 	}
 	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = w.pool, w.stripe, w.nmi, w.clock
 	rt, err := openrails.New(t.Context(), openrails.Config{
-		Schema: w.schema, River: openrails.RiverHostOwned,
-		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull, AllowCatalogUpdates: true,
+		Schema: w.schema, RiverSchema: w.schema,
+		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		HTTP:     &openrails.HTTPConfig{Merchant: true, Checkout: &openrails.CheckoutConfig{}, CustomerRoutes: []openrails.CustomerRoutesConfig{routes}},
 		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
 	}, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	routes := openrails.Routes{Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, CustomerProfiles: []openrails.CustomerRoutes{profile}}
 	if slug != w.slug {
-		return w.serve(slug, rt)
+		return w.serve(slug, rt, routes)
 	}
 	// A replica binds its own River producer and workers. Another merchant
 	// stays headless: one fleet per merchant runtime in this harness.
@@ -202,13 +202,13 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 		defer cancel()
 		_ = jobs.StopAndCancel(ctx)
 	})
-	return w.serve(slug, rt)
+	return w.serve(slug, rt, routes)
 }
 
-func (w *world) serve(slug string, rt *openrails.Client) *rival {
+func (w *world) serve(slug string, rt *openrails.Client, routes openrails.Routes) *rival {
 	t := w.t
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, rt, mountPrefix))
+	require.NoError(t, openrailshttp.Mount(mux, rt, routes))
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	client := rt

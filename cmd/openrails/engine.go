@@ -11,10 +11,9 @@ import (
 )
 
 // openEngine builds the standalone engine through openrails.New like any host,
-// with OpenRails-managed River and, when controlPlane, the control plane.
+// with, when controlPlane, the control plane.
 func openEngine(ctx context.Context, cfg *config.Config, deps openrails.Deps, controlPlane bool) (*openrails.Client, *app.App, error) {
 	c := *cfg
-	c.River = config.RiverManaged
 	if !controlPlane {
 		c.ControlPlane = nil
 	}

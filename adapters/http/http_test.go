@@ -21,12 +21,7 @@ import (
 )
 
 // Bundle stands in for a Client's routes in these unit tests.
-type Bundle struct {
-	routes   []openrails.Route
-	rootOnly bool
-}
-
-func Routes(s routeSource) (*Bundle, error) { return &Bundle{routes: s.routes, rootOnly: s.root}, nil }
+type Bundle struct{ routes []openrails.Route }
 
 func toRoutes(in []routebundle.Route) []openrails.Route {
 	out := make([]openrails.Route, len(in))
@@ -36,24 +31,17 @@ func toRoutes(in []routebundle.Route) []openrails.Route {
 	return out
 }
 
-func (b *Bundle) Mount(target any, prefix ...string) error {
+func (b *Bundle) Mount(target any) error {
 	if b == nil {
 		return errors.New("nil bundle")
 	}
-	return mount(target, b.routes, b.rootOnly, false, prefix...)
-}
-
-func (b *Bundle) MountRoot(target any) error { return mount(target, b.routes, b.rootOnly, true) }
-
-type routeSource struct {
-	routes []openrails.Route
-	root   bool
+	return mount(target, b.routes)
 }
 
 // inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
 	deny := func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	}
@@ -66,17 +54,15 @@ func inventoryBundle(t *testing.T) *Bundle {
 		}),
 	}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: deny}}
-	policy := &config.HTTPConfig{Checkout: &config.CheckoutConfig{}, CustomerRoutes: []config.CustomerRoutesConfig{{Delegated: true}},
-		Merchant: true}
-	table, err := embedhttp.ConfiguredRoutes(graph, policy)
+	selection := config.Routes{Storefront: true, Merchant: true, CatalogEdits: true,
+		CustomerProfiles: []config.CustomerRoutes{{Delegated: true, Scope: config.CustomerSelfService}}}
+	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
-		table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, "/billing")
+		table.Entries[i].Path = "/api/pay" + strings.TrimPrefix(table.Entries[i].Path, "/billing")
 	}
 	require.NoError(t, embedhttp.ValidateRouteTable(table))
-	bundle, err := Routes(routeSource{routes: toRoutes(routebundle.FromTable(table))})
-	require.NoError(t, err)
-	return bundle
+	return &Bundle{routes: toRoutes(routebundle.FromTable(table))}
 }
 
 func serve(target http.Handler, method, path string, body io.Reader) *httptest.ResponseRecorder {
@@ -87,13 +73,13 @@ func serve(target http.Handler, method, path string, body io.Reader) *httptest.R
 	return w
 }
 
-// mountings are the supported host shapes: ServeMux with a prefix and a Chi group.
+// mountings are the supported root routers: ServeMux and Chi.
 func mountings(t *testing.T, b *Bundle) map[string]http.Handler {
 	mux := http.NewServeMux()
-	require.NoError(t, b.Mount(mux, "/api/pay/"))
+	require.NoError(t, b.Mount(mux))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	router := chi.NewRouter()
-	router.Route("/api/pay", func(group chi.Router) { require.NoError(t, b.Mount(group)) })
+	require.NoError(t, b.Mount(router))
 	router.NotFound(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	router.MethodNotAllowed(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
 	return map[string]http.Handler{"servemux": mux, "chi": router}
@@ -125,7 +111,7 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	const body = "{ \"signed\" : \"bytes\", \"unicode\": \"é\" }\n"
 	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=unchanged"
 	calls := 0
-	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodPost, Path: "/api/pay/v1/webhooks/{provider}/{account_id}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
@@ -145,21 +131,17 @@ func TestWebhookRequestReachesHandlerUnchanged(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-// Anchored standalone routes refuse prefixes and subrouters before registering anything.
-func TestRootOnlyBundleRequiresTheRootRouter(t *testing.T) {
-	b, err := Routes(routeSource{root: true, routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// A subtree route (the admin console's assets) mounts at the root of either
+// router, for GET and HEAD.
+func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
+	b := &Bundle{routes: []openrails.Route{{Method: http.MethodGet, Path: "/admin/{asset...}", Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/admin/js/site.js?q=raw", r.RequestURI)
 		w.WriteHeader(http.StatusNoContent)
-	})}}})
-	require.NoError(t, err)
+	})}}}
 	mux := http.NewServeMux()
-	require.ErrorContains(t, b.Mount(mux, "/outer"), "root")
-	require.Equal(t, http.StatusNotFound, serve(mux, http.MethodGet, "/outer/admin/a", nil).Code)
 	require.NoError(t, b.Mount(mux))
 	router := chi.NewRouter()
-	require.ErrorContains(t, b.Mount(router), "MountRoot")
-	require.Empty(t, router.Routes())
-	require.NoError(t, b.MountRoot(router))
+	require.NoError(t, b.Mount(router))
 	for _, target := range []http.Handler{mux, router} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			require.Equal(t, http.StatusNoContent, serve(target, method, "/admin/js/site.js?q=raw", nil).Code)
@@ -168,21 +150,8 @@ func TestRootOnlyBundleRequiresTheRootRouter(t *testing.T) {
 }
 
 func TestMountRefusesInvalidTargets(t *testing.T) {
-	b := &Bundle{}
 	var nilBundle *Bundle
 	require.Error(t, nilBundle.Mount(http.NewServeMux()))
-	require.Error(t, b.Mount(struct{}{}))
-	require.Error(t, b.Mount(http.NewServeMux(), "/a", "/b"))
-	for _, prefix := range []string{"api", "/api/{id}", "/api?x", "/a b", "/a#b"} {
-		require.Error(t, b.Mount(http.NewServeMux(), prefix), prefix)
-	}
-}
-
-// A client that serves no payment page lets only itself frame one.
-func TestCheckoutFramePolicy(t *testing.T) {
-	page := CheckoutFramePolicy(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "page") }))
-	w := httptest.NewRecorder()
-	page.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/checkout", nil))
-	require.Equal(t, "frame-ancestors 'self'", w.Header().Get("Content-Security-Policy"))
-	require.Equal(t, "page", w.Body.String())
+	require.Error(t, (&Bundle{}).Mount(struct{}{}))
+	require.ErrorContains(t, Mount(http.NewServeMux(), nil, openrails.Routes{}), "requires a client")
 }

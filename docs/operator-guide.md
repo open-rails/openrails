@@ -8,7 +8,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 
 | Service | Required | What it does | Losing it |
 |---|---|---|---|
-| **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
+| **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`) and its River's (default `billing_river`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional | Shared route/admin rate limits, captcha escalation of card abuse, FX quote caching, failed-work grace/cutoff windows, and admission-denial counters flushed to Postgres every 5 minutes. The atomic spending-admission gate is in PostgreSQL. | Boot and readiness do not require Redis. HTTP rate limits fall back to per-process memory; FX uses fresh local rates. Denial statistics are best-effort. Wasted-spend reporting still requires Redis. |
 | **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `billing.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
 
@@ -112,9 +112,9 @@ starts; a separate `run-worker` process contributes both billing and AuthKit
 lifecycle workers using the same database, issuer and manifest configuration.
 Embedded hosts wire the dependency checks into their own
 handler with `client.Ready(ctx)` and register `client.Probes()` as optional
-dependencies with their supervisor; a host-owned River fleet is watched by the
-`openrails_job_progress` probe because its process state is outside
-OpenRails.
+dependencies with their supervisor; a host fleet passed to `Start` with
+`WithRiverClient` is watched by the `openrails_job_progress` probe because its
+process state is outside OpenRails.
 
 The standalone server serves `GET /metrics` with one gauge per dependency,
 `openrails_dependency_up{dependency,class}` (class `required` or `optional`);

@@ -23,6 +23,17 @@ type Config struct {
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
 	MerchantManifestOverlays []string
+	// CatalogEdits mounts the merchant API's catalog-write routes
+	// (openrails.Routes.CatalogEdits).
+	CatalogEdits bool
+	// AdminConsole serves the merchant admin console
+	// (openrails.Routes.AdminConsole); nil, the default, serves none.
+	AdminConsole *billing.AdminConsole
+}
+
+// Routes is the surface the standalone server mounts.
+func (c *Config) Routes() billing.Routes {
+	return billing.Routes{CatalogEdits: c.CatalogEdits, AdminConsole: c.AdminConsole}
 }
 
 type contextKey struct{}
@@ -57,23 +68,23 @@ type fileConfig struct {
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
 
-	DB                 *billing.DBConfig           `koanf:"db"`
-	Redis              *billing.RedisConfig        `koanf:"redis"`
-	Logger             *billing.LoggerConfig       `koanf:"logger"`
-	SendGrid           *sendGridFile               `koanf:"sendgrid"`
-	RateLimits         *billing.RateLimitsConfig   `koanf:"rate_limits"`
-	RateLimitsDisabled bool                        `koanf:"rate_limits_disabled"`
-	Captcha            *billing.CaptchaConfig      `koanf:"captcha"`
-	Encryption         *billing.EncryptionConfig   `koanf:"encryption"`
-	Vault              *billing.VaultConfig        `koanf:"vault"`
-	AdminConsole       *billing.AdminConsoleConfig `koanf:"admin_console"`
-	LLM                *billing.LLMConfig          `koanf:"llm"`
+	DB                 *billing.DBConfig         `koanf:"db"`
+	Redis              *billing.RedisConfig      `koanf:"redis"`
+	Logger             *billing.LoggerConfig     `koanf:"logger"`
+	SendGrid           *sendGridFile             `koanf:"sendgrid"`
+	RateLimits         *billing.RateLimitsConfig `koanf:"rate_limits"`
+	RateLimitsDisabled bool                      `koanf:"rate_limits_disabled"`
+	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
+	Encryption         *billing.EncryptionConfig `koanf:"encryption"`
+	Vault              *billing.VaultConfig      `koanf:"vault"`
+	AdminConsole       *adminConsoleFile         `koanf:"admin_console"`
+	LLM                *billing.LLMConfig        `koanf:"llm"`
 
 	SecretBackend        string `koanf:"secret_backend"`
 	CredentialSnapshotID string `koanf:"credential_snapshot_id"`
 	CredentialReadOnly   bool   `koanf:"credential_read_only"`
 	AlertSecretBackend   string `koanf:"alert_secret_backend"`
-	AllowCatalogUpdates  bool   `koanf:"allow_catalog_updates"`
+	CatalogEdits         bool   `koanf:"catalog_edits"`
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
@@ -129,6 +140,21 @@ func (s *sendGridFile) config() *billing.SendGridConfig {
 	return &billing.SendGridConfig{APIKey: s.APIKey, From: billing.EmailAddress{Address: s.FromAddress, Name: s.FromName}}
 }
 
+// adminConsoleFile is the admin_console section: the server serves the
+// console at path only while enabled.
+type adminConsoleFile struct {
+	Enabled        bool   `koanf:"enabled"`
+	Path           string `koanf:"path"`
+	NewMerchantURL string `koanf:"new_merchant_url"`
+}
+
+func (a *adminConsoleFile) mount() *billing.AdminConsole {
+	if a == nil || !a.Enabled {
+		return nil
+	}
+	return &billing.AdminConsole{Path: a.Path, NewMerchantURL: a.NewMerchantURL}
+}
+
 // config is the loaded file as the server's configuration.
 func (f *fileConfig) config() (*Config, error) {
 	posture, err := billing.ParseCredentialPosture(f.TestMode)
@@ -152,13 +178,11 @@ func (f *fileConfig) config() (*Config, error) {
 			Captcha:                           f.Captcha,
 			Encryption:                        f.Encryption,
 			Vault:                             f.Vault,
-			AdminConsole:                      f.AdminConsole,
 			LLM:                               f.LLM,
 			SecretBackend:                     f.SecretBackend,
 			CredentialSnapshotID:              f.CredentialSnapshotID,
 			CredentialReadOnly:                f.CredentialReadOnly,
 			AlertSecretBackend:                f.AlertSecretBackend,
-			AllowCatalogUpdates:               f.AllowCatalogUpdates,
 			CatalogReconciliationInterval:     f.CatalogReconciliationInterval,
 			ProviderBillingQuiescenceInterval: f.ProviderBillingQuiescenceInterval,
 			WebhookSecretOverlap:              f.WebhookSecretOverlap,
@@ -174,6 +198,8 @@ func (f *fileConfig) config() (*Config, error) {
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
+		CatalogEdits:             f.CatalogEdits,
+		AdminConsole:             f.AdminConsole.mount(),
 	}, nil
 }
 
@@ -221,6 +247,14 @@ func Validate(cfg *Config) error {
 	}
 	if err := billing.Validate(cfg.Config); err != nil {
 		return err
+	}
+	if cfg.AdminConsole != nil {
+		if err := billing.ValidateMountPath("admin_console.path", billing.AdminConsolePath(cfg.AdminConsole)); err != nil {
+			return err
+		}
+		if err := billing.ValidateNewMerchantURL("admin_console.new_merchant_url", cfg.AdminConsole.NewMerchantURL); err != nil {
+			return err
+		}
 	}
 	return billing.ValidateAuthTransport(cfg.Auth)
 }

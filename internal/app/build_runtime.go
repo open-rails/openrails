@@ -2,10 +2,11 @@ package app
 
 import (
 	"database/sql"
-	"errors"
-	"github.com/open-rails/openrails/internal/identity"
 	"net"
 	"net/http"
+
+	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/identity"
 
 	"context"
 	"fmt"
@@ -14,11 +15,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
-	"github.com/riverqueue/river"
-	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -76,8 +73,6 @@ type runtimeOverrides struct {
 	StripeTransport  http.RoundTripper
 	NMITransport     http.RoundTripper
 	DNSResolver      *net.Resolver
-	HostRiver        bool
-	RiverSchema      string
 	DB               *db.DB
 	Redis            *redis.Client
 	Clock            clockwork.Clock
@@ -407,29 +402,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
 
-	// Managed HTTP processes need a producer even when their workers run
-	// elsewhere. A host-owned fleet publishes its one producer only after shared River composition;
-	// construction must never target an undeclared public queue in the meantime.
-	if overrides != nil {
-		runtime.SetRiverSchema(overrides.RiverSchema)
-		runtime.hostRiver = overrides.HostRiver
+	// Jobs queue in RiverSchema from the start; Client.Start binds the fleet
+	// that runs them there, OpenRails' own or the host's.
+	runtime.SetRiverSchema(config.RiverSchemaName(cfg))
+	if err := runtime.BindRiverProducer(ctx); err != nil {
+		return nil, err
 	}
-	if !runtime.hostRiver {
-		if producer, pool, err := buildRiverProducer(ctx, cfg, runtime.riverSchemaOrDefault()); err != nil {
-			return nil, fmt.Errorf("init river producer: %w", err)
-		} else {
-			if err := runtime.DB.ValidateRiverJobBinding(ctx, pool, producer.Schema()); err != nil {
-				pool.Close() // This producer pool was created internally above.
-				if errors.Is(err, db.ErrRiverTablesMissing) {
-					return nil, fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) before openrails.New", err)
-				}
-				return nil, fmt.Errorf("init River producer binding: %w", err)
-			}
-			runtime.RiverProducer = producer
-			runtime.DB.SetRiverJobInserter(producer)
-			runtime.riverProducerPool = pool
-		}
-	}
+	runtime.CatalogEdits = &catalogpolicy.Exposure{}
 
 	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
 	// scheduling enqueues a durable nmi_delete_subscription intent on the
@@ -515,30 +494,6 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 		return overrides.Clock
 	}
 	return clockwork.NewRealClock()
-}
-
-func buildRiverProducer(ctx context.Context, cfg *config.Config, schema string) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
-	if cfg.DB == nil {
-		return nil, nil, fmt.Errorf("missing database configuration for River producer")
-	}
-	dbURL := config.DBConnectionString(cfg.DB)
-	if dbURL == "" {
-		return nil, nil, fmt.Errorf("missing database configuration for River producer (DB_URL or DB_HOST/DB_PORT/etc.)")
-	}
-	pool, err := db.NewPGXPoolWithRetry(ctx, dbURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed creating pgx pool for River producer: %w", err)
-	}
-
-	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Schema:              schema,
-		SkipUnknownJobCheck: true,
-	})
-	if err != nil {
-		pool.Close()
-		return nil, nil, fmt.Errorf("failed creating River producer client: %w", err)
-	}
-	return client, pool, nil
 }
 
 func createDatabase(ctx context.Context, cfg *config.Config) (*db.DB, error) {

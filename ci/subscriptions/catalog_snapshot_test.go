@@ -90,7 +90,7 @@ products:
 	require.Equal(t, []string{buyer.id}, document.Dependencies.Customers)
 
 	schema := "catalog_snapshot_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
 	dst := pgx.Identifier{schema}.Sanitize()
 	src := pgx.Identifier{w.schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+dst+" CASCADE") })
@@ -207,7 +207,7 @@ products:
 	// uses the public Client with the original host UUID. No raw PSP inserts are
 	// required for this ordinary destination path.
 	provisionedSchema := "catalog_provisioned_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: provisionedSchema, River: openrails.RiverHostOwned}))
+	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: provisionedSchema, RiverSchema: provisionedSchema}))
 	provisionedName := pgx.Identifier{provisionedSchema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+provisionedName+" CASCADE") })
 	provisioned, err := db.NewWithPGXPool(w.pool, provisionedSchema)
@@ -217,7 +217,7 @@ products:
 	_, _, err = directory.RegisterForRestore(t.Context(), mid, "catalog-provisioned")
 	require.NoError(t, err)
 	client, err := openrails.New(t.Context(), openrails.Config{
-		Schema: provisionedSchema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		Schema: provisionedSchema, RiverSchema: provisionedSchema, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: "catalog-provisioned", DisplayName: "Catalog destination", PSPs: w.psps},
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)

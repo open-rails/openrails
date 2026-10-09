@@ -4,36 +4,33 @@ import (
 	"context"
 	"testing"
 
-	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/stretchr/testify/require"
 )
 
-func TestCatalogWritesDeniedUnlessEnabledOrOperator(t *testing.T) {
+func TestCatalogWritesDeniedUnlessMountedOrOwner(t *testing.T) {
 	ctx := context.Background()
-	require.ErrorIs(t, Check(ctx, nil), ErrUpdatesDisabled, "missing config never enables writes")
-	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
-		cfg := &config.Config{SecretBackend: backend}
-		require.ErrorIs(t, Check(ctx, cfg), ErrUpdatesDisabled, backend)
-		require.NoError(t, Check(OperatorContext(ctx), cfg), backend)
-		cfg.AllowCatalogUpdates = true
-		require.NoError(t, Check(ctx, cfg), backend)
-	}
+	require.ErrorIs(t, Check(ctx, nil), ErrUpdatesDisabled, "a missing policy never enables writes")
+	exposure := &Exposure{}
+	require.ErrorIs(t, Check(ctx, exposure), ErrUpdatesDisabled, "undecided is closed")
+	require.NoError(t, Check(OperatorContext(ctx), exposure))
+	host := requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{Subject: "host"})
+	require.NoError(t, Check(host, exposure), "the process owner writes its own catalog")
+
+	require.NoError(t, exposure.Decide(false))
+	require.ErrorIs(t, Check(ctx, exposure), ErrUpdatesDisabled)
+	require.NoError(t, exposure.Decide(false), "a second agreeing mount")
+	require.ErrorContains(t, exposure.Decide(true), "every mount must agree")
+	require.ErrorIs(t, Check(ctx, exposure), ErrUpdatesDisabled, "a refused mount changes nothing")
+
+	open := &Exposure{}
+	require.NoError(t, open.Decide(true))
+	require.NoError(t, Check(ctx, open))
+	require.ErrorContains(t, open.Decide(false), "every mount must agree")
+
 	child, cancel := context.WithCancel(OperatorContext(ctx))
 	defer cancel()
 	require.NoError(t, Check(child, nil), "derived contexts keep operator authority")
 	type lookalike string
 	require.ErrorIs(t, Check(context.WithValue(ctx, lookalike("operator"), true), nil), ErrUpdatesDisabled, "only the private key grants authority")
-}
-
-func TestStartupCatalogDoesNotMakeTheCatalogReadOnly(t *testing.T) {
-	ctx := context.Background()
-	cfg := &config.Config{Catalog: &catalog.Application{SchemaVersion: 1}}
-	host := requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{Subject: "host"})
-	require.NoError(t, Check(host, cfg), "programmatic host writes remain available")
-	require.NoError(t, Check(OperatorContext(ctx), cfg))
-	require.ErrorIs(t, Check(ctx, cfg), ErrUpdatesDisabled, "startup YAML does not enable HTTP writes")
-	cfg.AllowCatalogUpdates = true
-	require.NoError(t, Check(ctx, cfg), "the HTTP flag allows updates alongside startup YAML")
 }

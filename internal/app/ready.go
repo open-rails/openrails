@@ -22,8 +22,8 @@ type ReadinessDependency struct {
 }
 
 // Ready is the readiness shared by the standalone /readyz and embedded
-// Runtime.Ready. Postgres, River and a declared catalog (applied) are
-// required. Redis, Vault and PSP
+// Runtime.Ready. Postgres, River (the host's fleet bound to RiverJobs, or
+// OpenRails' own running) and a declared catalog (applied) are required. Redis, Vault and PSP
 // posture are reported from cached background state as optional (degraded)
 // entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
@@ -55,16 +55,14 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	}
 
 	var riverErr error
-	if r.hostRiver && !r.hostRiverBound.Load() {
-		riverErr = fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
-	} else if r.RiverProducer == nil {
-		riverErr = fmt.Errorf("river producer not initialized")
+	if !r.RiverBound() {
+		riverErr = fmt.Errorf("River is not running: call Client.Start")
 	}
 	add("river", false, riverErr)
-	if !r.hostRiver && !r.externalRiverClient {
+	if riverErr == nil && !r.externalRiverClient {
 		var consumerErr error
 		if !r.workerConsumerRunning.Load() {
-			consumerErr = fmt.Errorf("managed River worker consumer is not running")
+			consumerErr = fmt.Errorf("OpenRails' River is bound but not running: call Client.Start")
 		}
 		add("river_consumer", false, consumerErr)
 	}

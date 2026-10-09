@@ -23,7 +23,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	ctx := t.Context()
 	boot := func(slug string, settings billing.MerchantSettings) (*openrails.Client, error) {
 		return openrails.New(ctx, openrails.Config{
-			Schema: w.schema, River: openrails.RiverHostOwned, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Schema: w.schema, RiverSchema: w.schema, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: settings},
 		}, openrails.Deps{Postgres: w.pool, Clock: w.clock})
 	}

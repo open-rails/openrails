@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
@@ -67,7 +66,6 @@ func (w *world) public(path string) map[string]any {
 func TestCatalogOneShapePerNoun(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.mount = func(h *openrails.HTTPConfig) { h.Checkout = &openrails.CheckoutConfig{} }
 	w.start()
 	c := w.client[remote]
 	tier := "plans-" + uuid.NewString()[:6]

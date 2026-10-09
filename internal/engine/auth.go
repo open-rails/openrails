@@ -141,3 +141,12 @@ func usernameResolver(deps config.Deps) identity.UsernameResolver {
 	}
 	return usernameResolverFunc(deps.ResolveUsername)
 }
+
+// authAPIBase is the path Deps.AuthKit serves its JSON API at, when the host
+// passed its *authkit.Client.
+func authAPIBase(deps config.Deps) string {
+	if base, ok := deps.AuthKit.(interface{ APIBase() string }); ok && base != nil {
+		return base.APIBase()
+	}
+	return ""
+}

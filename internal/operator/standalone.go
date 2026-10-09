@@ -4,15 +4,17 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/config"
 	server "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
 // StandaloneServer builds the full standalone surface (billing routes, the
 // attached control plane's AuthKit routes and the admin console) over the
-// graph. The control plane must already be attached.
-func StandaloneServer(a *app.App) (*server.Server, error) {
-	deps, err := standaloneDependencies(a)
+// graph, with the catalog-write routes and the admin console sel selects. The
+// control plane must already be attached.
+func StandaloneServer(a *app.App, sel config.Routes) (*server.Server, error) {
+	deps, err := standaloneDependencies(a, sel)
 	if err != nil {
 		return nil, err
 	}
@@ -20,15 +22,15 @@ func StandaloneServer(a *app.App) (*server.Server, error) {
 }
 
 // StandaloneRoutes assembles HTTP over the runtime-owned resource graph.
-func StandaloneRoutes(a *app.App) (*router.Table, error) {
-	deps, err := standaloneDependencies(a)
+func StandaloneRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
+	deps, err := standaloneDependencies(a, sel)
 	if err != nil {
 		return nil, err
 	}
 	return server.ConfiguredRoutes(*deps)
 }
 
-func standaloneDependencies(a *app.App) (*server.Dependencies, error) {
+func standaloneDependencies(a *app.App, sel config.Routes) (*server.Dependencies, error) {
 	cp := Get(a)
 	if cp == nil {
 		return nil, fmt.Errorf("standalone surface: no control plane attached (call Attach first)")
@@ -44,5 +46,7 @@ func standaloneDependencies(a *app.App) (*server.Dependencies, error) {
 		Authenticator: authenticator,
 		ControlPlane:  cp,
 		ConsoleAssets: a.ConsoleAssets,
+		CatalogEdits:  sel.CatalogEdits,
+		AdminConsole:  sel.AdminConsole,
 	}, nil
 }

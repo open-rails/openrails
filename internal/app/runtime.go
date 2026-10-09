@@ -17,15 +17,16 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	riverhelpers "github.com/open-rails/helpers/river"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
@@ -125,13 +126,16 @@ type Runtime struct {
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock clockwork.Clock
-	// RiverProducer inserts jobs. Host mode uses the composed worker client;
-	// managed HTTP-only processes use an unstarted producer client.
-	RiverProducer *river.Client[pgx.Tx]
+	// RiverProducer inserts jobs: the bound fleet, OpenRails' own or the
+	// host's, else the insert-only client New binds in the same schema.
+	RiverProducer  *river.Client[pgx.Tx]
+	insertProducer *river.Client[pgx.Tx]
 	// ProviderRefreshQueue is where per-merchant provider refresh jobs run.
 	ProviderRefreshQueue string
-	riverProducerPool    *pgxpool.Pool
 	RiverClient          *river.Client[pgx.Tx]
+	// CatalogEdits is whether catalog writes reach callers other than the
+	// process owner; the merchant API's mount decides it.
+	CatalogEdits *catalogpolicy.Exposure
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService
@@ -266,14 +270,12 @@ type Runtime struct {
 	riverCompositionMu     sync.Mutex
 	riverCompositionSealed bool
 	riverClosed            atomic.Bool
-	hostRiver              bool
-	hostRiverBound         atomic.Bool
 	riverContributions     []riverhelpers.Contribution
 	riverCompositionFailed bool
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
-	riverSchema            string // managed override or actual host-client schema
+	riverSchema            string // Config.RiverSchema's, or the bound host client's
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -391,10 +393,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 		}
 		r.riverStarted = false
 	}
-	if r.riverProducerPool != nil {
-		r.riverProducerPool.Close()
-		r.riverProducerPool = nil
-	}
 	if r.leaseDB != nil {
 		_ = r.leaseDB.Close()
 		r.leaseDB = nil
@@ -433,25 +431,28 @@ func (r *Runtime) AddRiverContribution(jobs riverhelpers.Contribution) error {
 	return nil
 }
 
-// InitRiver uses the same contribution composer as hosts. Managed queues use
-// the runtime's pool; the runtime already owns or borrows that pool explicitly.
+// InitRiver binds OpenRails' own River client, without starting it, in the
+// runtime's River schema, which Migrate prepared; it runs no DDL. The client
+// is composed from the same contributions a host fleet takes. A process that
+// only serves HTTP binds its producers this way; StartWorkers starts it.
 func (r *Runtime) InitRiver(ctx context.Context) error {
 	r.riverCompositionMu.Lock()
-	if r.riverClosed.Load() || r.riverCompositionFailed {
+	switch {
+	case r.riverClosed.Load():
 		r.riverCompositionMu.Unlock()
-		return fmt.Errorf("runtime is closed or River composition failed")
-	}
-	if r.hostRiver {
-		bound := r.hostRiverBound.Load()
+		return fmt.Errorf("client is closed")
+	case r.riverCompositionFailed:
 		r.riverCompositionMu.Unlock()
-		if !bound {
-			return fmt.Errorf("compose RiverJobs with riverhelpers.New before starting the host fleet")
-		}
-		return nil
-	}
-	if r.RiverClient != nil {
+		return fmt.Errorf("River composition failed; recreate the client")
+	case r.externalRiverClient:
+		r.riverCompositionMu.Unlock()
+		return errHostFleet
+	case r.RiverClient != nil:
 		r.riverCompositionMu.Unlock()
 		return nil
+	case r.riverCompositionSealed:
+		r.riverCompositionMu.Unlock()
+		return errHostFleet
 	}
 	r.riverCompositionMu.Unlock()
 	if r.DB == nil || r.DB.Pool() == nil {
@@ -461,9 +462,16 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	return err
 }
 
-// RunWorkers runs StartWorkers until ctx is done.
+var errHostFleet = fmt.Errorf("RiverJobs is composed into a host fleet; pass it to Start with WithRiverClient")
+
+// RunWorkers runs StartWorkers until ctx is done: on the host fleet bound to
+// RiverJobs, else on OpenRails' own River.
 func (r *Runtime) RunWorkers(ctx context.Context) error {
-	stop, err := r.StartWorkers(ctx)
+	var fleet *river.Client[pgx.Tx]
+	if r != nil && r.externalRiverClient {
+		fleet = r.RiverClient
+	}
+	stop, err := r.StartWorkers(ctx, fleet)
 	if err != nil {
 		return err
 	}
@@ -472,19 +480,32 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// StartWorkers starts the managed River client and the non-River loops (the
-// Solana Pay poller) and returns once they run. With host-owned River only the
-// loops start; the host starts its fleet. ctx bounds the workers' lifetime;
-// stop joins the loops so the host can then stop its fleet and close pools.
-func (r *Runtime) StartWorkers(ctx context.Context) (stop func(), err error) {
+// StartWorkers starts OpenRails' work and returns once it runs: the River
+// fleet, the non-River loops (the Solana Pay poller) and the River progress
+// monitor. With fleet nil it binds and starts OpenRails' own River client.
+// Otherwise fleet is the host's client, composed with RiverJobs; the host
+// starts and stops it. ctx bounds the workers' lifetime; stop joins the loops
+// so the host can then stop its fleet and close pools.
+func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx]) (stop func(), err error) {
 	if r == nil {
 		return nil, fmt.Errorf("runtime is nil")
 	}
 	if r.riverClosed.Load() {
 		return nil, fmt.Errorf("runtime is closed")
 	}
-	if r.hostRiver && !r.hostRiverBound.Load() {
-		return nil, fmt.Errorf("host-owned River is not bound: before Start, call riverhelpers.ApplyMigrations(ctx, pool, schema) and riverhelpers.New(ctx, pool, riverConfig, client.RiverJobs())")
+	if fleet != nil {
+		r.riverCompositionMu.Lock()
+		bound := r.externalRiverClient && r.RiverClient == fleet
+		failed := r.riverCompositionFailed
+		r.riverCompositionMu.Unlock()
+		switch {
+		case failed:
+			return nil, fmt.Errorf("River composition failed; recreate the client")
+		case !bound:
+			return nil, fmt.Errorf("WithRiverClient takes the fleet riverhelpers.New built with RiverJobs")
+		}
+	} else if err := r.InitRiver(ctx); err != nil {
+		return nil, err
 	}
 	loopCtx, stopLoops := context.WithCancel(ctx)
 	var pollerDone chan struct{}
@@ -492,19 +513,15 @@ func (r *Runtime) StartWorkers(ctx context.Context) (stop func(), err error) {
 		pollerDone = make(chan struct{})
 		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
 	}
+	r.StartRiverProgressMonitor(ctx)
 	joinLoops := func() {
 		stopLoops()
 		if pollerDone != nil {
 			<-pollerDone
 		}
 	}
-	if r.externalRiverClient {
-		log.Info("External River client configured - skipping River worker startup")
+	if fleet != nil {
 		return joinLoops, nil
-	}
-	if err := r.InitRiver(ctx); err != nil {
-		joinLoops()
-		return nil, err
 	}
 	if r.RiverClient == nil {
 		joinLoops()
@@ -540,18 +557,45 @@ func (r *Runtime) SetRiverSchema(schema string) {
 }
 
 // riverSchemaOrDefault is the schema for every direct read of River's tables:
-// the bound client's schema when a host injected one, else OpenRails' default.
+// the bound client's schema, else the one OpenRails' own River uses.
 func (r *Runtime) riverSchemaOrDefault() string {
 	if r.riverSchema != "" {
 		return r.riverSchema
 	}
-	return config.DefaultRiverSchema
+	return config.RiverSchemaName(r.Config)
 }
 
-// HostRiverBound reports whether the host's River composer bound this
-// runtime's jobs.
-func (r *Runtime) HostRiverBound() bool {
-	return r != nil && r.hostRiverBound.Load()
+// RiverBound reports whether a River fleet is bound: OpenRails' own
+// (InitRiver) or the host's (RiverJobs).
+func (r *Runtime) RiverBound() bool {
+	if r == nil {
+		return false
+	}
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	return r.RiverClient != nil
+}
+
+// BindRiverProducer binds an insert-only River client in the runtime's River
+// schema, so jobs queued before Start wait there for whichever fleet runs
+// them. Migrate must have created River's tables.
+func (r *Runtime) BindRiverProducer(ctx context.Context) error {
+	schema := r.riverSchemaOrDefault()
+	producer, err := river.NewClient(riverpgxv5.New(r.DB.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
+	if err != nil {
+		return fmt.Errorf("River producer: %w", err)
+	}
+	if err := r.DB.ValidateRiverJobBinding(ctx, r.DB.Pool(), schema); err != nil {
+		if errors.Is(err, db.ErrRiverTablesMissing) {
+			return fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) before openrails.New", err)
+		}
+		return fmt.Errorf("River producer: %w", err)
+	}
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	r.insertProducer, r.RiverProducer = producer, producer
+	r.DB.SetRiverJobInserter(producer)
+	return nil
 }
 
 // SetSolanaCranker injects the recurring Solana cranker built once the merchant

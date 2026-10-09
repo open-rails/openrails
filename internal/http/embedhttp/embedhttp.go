@@ -56,6 +56,8 @@ type Options struct {
 	ProviderRoutes     *routesurface.ProviderRoutes
 	// Capabilities includes separately mounted customer exposure profiles.
 	Capabilities *Capabilities
+	// CatalogWrites mounts the merchant API's catalog-write routes.
+	CatalogWrites bool
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -224,8 +226,9 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	}
 	if routeSets[RouteSetMerchant] {
 		httproutes.RegisterMerchantRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
-			Gate:         s.Gate,
-			AdminLimiter: s.AdminLimiter,
+			Gate:          s.Gate,
+			AdminLimiter:  s.AdminLimiter,
+			CatalogWrites: opts.CatalogWrites,
 		})
 	}
 	if routeSets[RouteSetWebhooks] {

@@ -81,11 +81,11 @@ type Deps struct {
 	// the binary was built with one.
 	ConsoleAssets fs.FS
 
-	// EmailSender delivers OpenRails' email: billing receipts and alerts, and
-	// the control plane's AuthKit messages. Nil uses Config.SendGrid.
-	EmailSender EmailSender
-	// SMSSender delivers the control plane's AuthKit text messages.
-	SMSSender SMSSender
+	// Email delivers OpenRails' email: billing receipts and alerts, and the
+	// control plane's AuthKit messages. Nil uses Config.SendGrid.
+	Email EmailSender
+	// SMS delivers the control plane's AuthKit text messages.
+	SMS SMSSender
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond the free allowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)

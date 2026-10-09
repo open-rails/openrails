@@ -5,9 +5,9 @@ import (
 )
 
 // Ready is the standalone /readyz check: Postgres, the merchants service,
-// Config.Catalog (applied) and River (a host-owned fleet must have bound
-// RiverJobs; a managed one must be started). Optional providers never fail
-// it; see Probes.
+// Config.Catalog (applied) and River (the host's fleet bound to RiverJobs, or
+// OpenRails' own running since Start). Optional providers never fail it; see
+// Probes.
 func (e *Engine) Ready(ctx context.Context) error {
 	_, err := e.App.Runtime.Ready(ctx)
 	return err

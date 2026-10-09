@@ -2,11 +2,10 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -37,44 +36,25 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 		deps config.Deps
 		want string
 	}{
-		"merchant without slug":     {with(sandbox, func(c *config.Config) { c.Merchant.DisplayName = "x" }), config.Deps{}, "Merchant.Slug"},
-		"customer without merchant": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}} }), config.Deps{Authenticate: authenticate}, "explicit merchant slug"},
-		"customer without verifier": {with(sandbox, func(c *config.Config) {
-			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{}}}
-		}), config.Deps{}, "requires its own authenticator"},
-		"delegated customer without hook": {with(sandbox, func(c *config.Config) {
-			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Prefix: "/portal", Delegated: true}}}
-		}), config.Deps{}, "set Deps.AuthenticateCustomer"},
-		"control plane with native customers": {with(sandbox, func(c *config.Config) {
-			c.ControlPlane = &config.ControlPlaneConfig{}
-			c.HTTP = &config.HTTPConfig{CustomerRoutes: []config.CustomerRoutesConfig{{Merchant: "m"}}}
-		}), config.Deps{}, "must be Delegated"},
-		"merchant without auth":      {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{}, "the merchant surface requires"},
-		"merchant without authorize": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{Authenticate: authenticate}, "the merchant surface requires"},
-		"control plane with groups": {with(sandbox, func(c *config.Config) {
-			c.ControlPlane = &config.ControlPlaneConfig{}
-			c.HTTP = &config.HTTPConfig{Checkout: &config.CheckoutConfig{}}
-		}), config.Deps{}, "may only add CustomerRoutes"},
-		"river schema injection":   {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
-		"river schema host owned":  {with(sandbox, func(c *config.Config) { c.River = config.RiverHostOwned; c.RiverSchema = "jobs" }), config.Deps{}, "applies to managed River"},
-		"unknown river owner":      {with(sandbox, func(c *config.Config) { c.River = "nobody" }), config.Deps{}, "Config.River"},
-		"posture unset":            {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
-		"write mode unset":         {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
-		"unknown write mode":       {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
-		"authorize without authn":  {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
-		"authkit and authenticate": {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
+		"merchant without slug":         {with(sandbox, func(c *config.Config) { c.Merchant.DisplayName = "x" }), config.Deps{}, "Merchant.Slug"},
+		"river schema injection":        {with(sandbox, func(c *config.Config) { c.RiverSchema = "jobs;drop" }), config.Deps{}, "RiverSchema"},
+		"derived river schema too long": {with(sandbox, func(c *config.Config) { c.Schema = strings.Repeat("b", 42) }), config.Deps{}, "set Config.RiverSchema"},
+		"checkout page with fragment":   {with(sandbox, func(c *config.Config) { c.Checkout.PageURL = "https://pay.example/#x" }), config.Deps{}, "Config.Checkout"},
+		"posture unset":                 {config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, config.Deps{}, "Config.TestMode is required"},
+		"write mode unset":              {config.Config{TestMode: config.CredentialPostureSandbox}, config.Deps{}, "ProviderWriteMode is required"},
+		"unknown write mode":            {with(sandbox, func(c *config.Config) { c.ProviderWriteMode = "sometimes" }), config.Deps{}, "is invalid"},
+		"authorize without authn":       {sandbox, config.Deps{Authorize: func(*http.Request, billingauth.Identity, billingauth.Requirement) error { return nil }}, "require Deps.Authenticate"},
+		"authkit and authenticate":      {sandbox, config.Deps{AuthKit: verifier{}, Authenticate: authenticate}, "not both"},
 		"customer hook without kit": {sandbox, config.Deps{CustomerFor: func(context.Context, billingauth.Identity) (billing.CustomerID, error) {
 			return billing.CustomerID{}, nil
 		}}, "require Deps.AuthKit"},
-		"nil authkit client":          {sandbox, config.Deps{AuthKit: (*verifier)(nil)}, "Deps.AuthKit"},
-		"authkit staff without group": {with(sandbox, func(c *config.Config) { c.HTTP = &config.HTTPConfig{Merchant: true} }), config.Deps{AuthKit: verifier{}}, "Deps.AuthorityFor"},
-		"control plane and authkit":   {with(sandbox, func(c *config.Config) { c.ControlPlane = &config.ControlPlaneConfig{} }), config.Deps{AuthKit: verifier{}}, "its own AuthKit"},
-		"console without a build":     {with(sandbox, func(c *config.Config) { c.AdminConsole = &config.AdminConsoleConfig{Enabled: true} }), config.Deps{ConsoleAssets: fstest.MapFS{}}, "no console build"},
-		"half a user directory":       {sandbox, config.Deps{UserExists: func(context.Context, string) (bool, error) { return true, nil }}, "together"},
-		"stripe seam on live":         {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
-		"nmi seam on live":            {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
-		"clock seam on live":          {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
-		"catalog without merchant":    {with(sandbox, func(c *config.Config) { c.Catalog = &catalog.Application{SchemaVersion: 1} }), config.Deps{}, "set Config.Merchant"},
+		"nil authkit client":        {sandbox, config.Deps{AuthKit: (*verifier)(nil)}, "Deps.AuthKit"},
+		"control plane and authkit": {with(sandbox, func(c *config.Config) { c.ControlPlane = &config.ControlPlaneConfig{} }), config.Deps{AuthKit: verifier{}}, "its own AuthKit"},
+		"half a user directory":     {sandbox, config.Deps{UserExists: func(context.Context, string) (bool, error) { return true, nil }}, "together"},
+		"stripe seam on live":       {live, config.Deps{StripeTransport: seam}, "StripeTransport is a test seam"},
+		"nmi seam on live":          {live, config.Deps{NMITransport: seam}, "NMITransport is a test seam"},
+		"clock seam on live":        {live, config.Deps{Clock: clockwork.NewFakeClock()}, "Clock is a test seam"},
+		"catalog without merchant":  {with(sandbox, func(c *config.Config) { c.Catalog = &catalog.Application{SchemaVersion: 1} }), config.Deps{}, "set Config.Merchant"},
 		"invalid catalog": {with(sandbox, func(c *config.Config) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{}
@@ -195,45 +175,6 @@ func TestAuthKitDerivesAuthentication(t *testing.T) {
 	var gate billingauth.GateError
 	require.ErrorAs(t, mapped.Authorization.Authorize(r.Context(), r, got, billingauth.Requirement{Permission: "merchant:settings:update"}), &gate)
 	require.Equal(t, http.StatusForbidden, gate.Status)
-}
-
-// The console is the host's build when supplied, mounted only when enabled,
-// at its configured path.
-func TestAdminConsoleServesHostAssets(t *testing.T) {
-	assets := fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
-	cfg := func(enabled bool) *config.Config {
-		return &config.Config{AdminConsole: &config.AdminConsoleConfig{Enabled: enabled, Path: "/billing/admin", APIBaseURL: "/billing/v1", AuthBaseURL: "/api/v1"}}
-	}
-	off, err := console(cfg(false), assets)
-	require.NoError(t, err)
-	require.Nil(t, off)
-	off, err = console(cfg(true), nil)
-	require.NoError(t, err)
-	require.Nil(t, off, "no build, no console")
-	_, err = console(cfg(true), fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}})
-	require.ErrorContains(t, err, "rebuild it")
-
-	on, err := console(cfg(true), assets)
-	require.NoError(t, err)
-	rec := httptest.NewRecorder()
-	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/", nil))
-	require.Equal(t, `<!doctype html><base href="/billing/admin/">host build`, rec.Body.String())
-	rec = httptest.NewRecorder()
-	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/config.json", nil))
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"new_merchant_url":""}`, rec.Body.String())
-
-	// A host's merchant-creation page reaches the console only through config.json.
-	hosted := cfg(true)
-	hosted.AdminConsole.NewMerchantURL = "/merchants/new"
-	on, err = console(hosted, assets)
-	require.NoError(t, err)
-	rec = httptest.NewRecorder()
-	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/config.json", nil))
-	var boot struct {
-		NewMerchantURL string `json:"new_merchant_url"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &boot))
-	require.Equal(t, "/merchants/new", boot.NewMerchantURL)
 }
 
 // Host transactions run under the engine's merchant; a caller context pinned

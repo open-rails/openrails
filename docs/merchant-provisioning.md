@@ -351,7 +351,7 @@ Merchant routes are scoped to the authenticated merchant; cross-merchant
 operations are the standalone operator's (`/v1/platform`). PSP metadata and
 archive decisions are always available through the Client; writing a PSP
 credential needs a writable secret backend, so it is refused under `snapshot`
-custody. Catalog mutation routes are mounted only with
-`allow_catalog_updates: true`; the embedded in-process Client is the process
-owner and writes its own catalog whatever the flag says. Catalog data always
+custody. Catalog mutation routes are mounted only with `Routes.CatalogEdits`
+(standalone: `catalog_edits: true`); the embedded in-process Client is the
+process owner and writes its own catalog whatever the mount says. Catalog data always
 lives in the database. See [self-hosting-mode1.md](self-hosting-mode1.md).

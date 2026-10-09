@@ -90,6 +90,5 @@ own schemas.
 The role that runs the migrations owns every object and is the role OpenRails
 runs as; there are no grants and no row-level security. When two apps share one
 schema, `schema_owner` (`Config.SchemaOwner`) names an existing role both logins
-inherit: `Migrate` hands the schema, and a managed River schema, to it, and a
-rerun changes nothing. The whole schema is listed in
+inherit: `Migrate` hands the schema, and the default River schema, to it, and a rerun changes nothing. The whole schema is listed in
 [`api/schema.txt`](../api/schema.txt); see [compatibility](compatibility.md#database-schema).

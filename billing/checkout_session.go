@@ -25,7 +25,7 @@ type CreateCheckoutSessionParams struct {
 
 // CheckoutSessionLink is a minted checkout session. ID (ocs_) is the bearer
 // credential for reading and paying it: hand it to the buyer's browser only.
-// URL is the payment page for the session (Config.HTTP.Checkout.PageURL#ID),
+// URL is the payment page for the session (Config.Checkout.PageURL#ID),
 // null when the app renders checkout itself.
 type CheckoutSessionLink struct {
 	ID        string    `json:"id"`

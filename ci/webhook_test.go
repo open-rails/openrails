@@ -142,7 +142,6 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.ReturnOrigins = []string{"https://example.test"}
-	cfg.HTTP = &openrails.HTTPConfig{}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug,
 		PSPs: map[string]openrails.PSPConfig{"stripe": {Rail: "stripe",
 			AccountID: account,
@@ -187,7 +186,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.Equal(t, strings.TrimPrefix(session.ID.String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
 	now := time.Now()
 	completed := stripeWebhookBody(t, "evt_e2e_completed", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataPriceID, now.Unix())
 	status, body := postSignedStripeWebhook(t, mux, account, secret, completed, now)

@@ -63,25 +63,27 @@ type Config struct {
 	// "billing".
 	Schema string
 	// SchemaOwner is the role Migrate hands the schema and everything in it
-	// to, when the logins OpenRails runs as inherit a shared owner rather than
-	// being the migrating role. The role must exist. Empty: the migrating role
-	// owns what it creates.
+	// to, with the default River schema, when the logins OpenRails runs as
+	// inherit a shared owner rather than being the migrating role. The role
+	// must exist. Empty: the migrating role owns what it creates.
 	SchemaOwner string
-	// River selects who runs the job fleet. Zero is RiverManaged.
-	River RiverOwnership
-	// RiverSchema is the managed fleet's schema (default public). A host-owned
-	// fleet keeps River's tables where the host's client puts them.
+	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
+	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
+	// host's River. Migrate creates them; Start runs OpenRails' own River
+	// client there, and a host fleet passed to Start with WithRiverClient
+	// must use the same schema.
 	RiverSchema string
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
 	Merchant MerchantDeclaration
 	// Catalog optionally applies one merchant-scoped batch at startup, using
 	// the same permanent content-hash replay as Client.ApplyCatalog. Later
-	// programmatic edits remain available; AllowCatalogUpdates only controls
-	// HTTP catalog-write route exposure. Requires Merchant. Nil skips the batch.
+	// programmatic edits remain available; Routes.CatalogEdits only controls
+	// the catalog-write HTTP routes. Requires Merchant. Nil skips the batch.
 	Catalog *catalog.Application
-	// HTTP selects the route groups Client.Routes publishes; nil publishes none.
-	HTTP *HTTPConfig
+	// Checkout is the shared payment page several sites sell through; zero
+	// when each site renders its own checkout.
+	Checkout CheckoutConfig
 	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the
 	// standalone server and hosted products); nil for hosts with their own auth.
 	ControlPlane *ControlPlaneConfig
@@ -99,7 +101,7 @@ type Config struct {
 	// Logger sets the log level.
 	Logger *LoggerConfig
 	// SendGrid selects the built-in SendGrid sender for billing and
-	// control-plane email when Deps.EmailSender is nil; with neither, OpenRails
+	// control-plane email when Deps.Email is nil; with neither, OpenRails
 	// sends no email.
 	SendGrid *SendGridConfig
 	// RateLimits are the per-bucket request limits; nil takes the built-in
@@ -114,10 +116,6 @@ type Config struct {
 	Encryption *EncryptionConfig
 	// Vault connects to HashiCorp Vault when Deps.Vault is nil.
 	Vault *VaultConfig
-
-	// AdminConsole serves the merchant admin console. Off by default; enabled
-	// without a console build (Deps.ConsoleAssets) New refuses.
-	AdminConsole *AdminConsoleConfig
 
 	// LLM is the model behind the console's natural-language widgets and
 	// questions. Without an API key those features are off.
@@ -137,11 +135,6 @@ type Config struct {
 	// AlertSecretBackend selects vault or db custody for outbound webhook
 	// credentials, independently of SecretBackend.
 	AlertSecretBackend string
-	// AllowCatalogUpdates enables the product, price, catalog and metering
-	// mutation routes. An in-process Client applies its own catalog without
-	// it; Config.Catalog does not restrict later programmatic changes.
-	AllowCatalogUpdates bool
-
 	// CatalogReconciliationInterval schedules the alert-only catalog
 	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
 	CatalogReconciliationInterval string
@@ -371,67 +364,39 @@ type VaultConfig struct {
 	TransitMount string
 }
 
-// AdminConsoleConfig serves the merchant admin console at Path, with a
-// Path/config.json document the console reads to find its auth and API bases.
-type AdminConsoleConfig struct {
-	Enabled bool
-	// Path is where the console is served: an absolute URL path without a
-	// trailing slash, such as "/billing/admin". Empty is "/admin". An embedded
-	// host mounts Client.AdminConsole at exactly this path.
-	Path string
-	// AuthBaseURL is the base of the AuthKit HTTP API the console signs in
-	// through. Empty is the control plane's, "/auth/v1". Embedded hosts set
-	// their AuthKit API, "/api/v1" by default; it may be absolute.
-	AuthBaseURL string
-	// APIBaseURL is the base of the merchant API. Empty is "/v1"; embedded
-	// hosts typically use "/billing/v1".
-	APIBaseURL string
-	// NewMerchantURL is where the console's "New merchant" action sends the
-	// user: a host page that creates a merchant and returns to the console
-	// with #merchant=<slug>. Empty hides the action; the engine has no
-	// self-service merchant creation, so standalone leaves it unset.
-	NewMerchantURL string
-}
-
-// AdminConsoleEnabled reports whether the admin console SPA should be served.
-func AdminConsoleEnabled(c *AdminConsoleConfig) bool { return c != nil && c.Enabled }
-
-// DefaultAdminConsolePath is where the console is served when Path is unset.
-const DefaultAdminConsolePath = "/admin"
-
-// AdminConsoleMountPath is Path, defaulted to DefaultAdminConsolePath.
-func AdminConsoleMountPath(c *AdminConsoleConfig) string {
+// AdminConsolePath is AdminConsole.Path, defaulted to "/admin".
+func AdminConsolePath(c *AdminConsole) string {
 	if c == nil || c.Path == "" {
-		return DefaultAdminConsolePath
+		return "/admin"
 	}
 	return c.Path
 }
 
-var adminConsolePathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
-
-// validateNewMerchantURL accepts a same-origin absolute path ("/merchants/new")
-// or an https URL: the console navigates to it, so it must not be a
-// protocol-relative or script URL.
-func validateNewMerchantURL(raw string) error {
-	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") && !strings.ContainsAny(raw, "\\\r\n") {
+// ValidateNewMerchantURL accepts a same-origin absolute path
+// ("/merchants/new") or an https URL: the console navigates to it, so it must
+// not be a protocol-relative or script URL. name says which setting it is.
+func ValidateNewMerchantURL(name, raw string) error {
+	if raw == "" || strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") && !strings.ContainsAny(raw, "\\\r\n") {
 		return nil
 	}
 	if u, err := url.Parse(raw); err == nil && u.Scheme == "https" && u.Host != "" {
 		return nil
 	}
-	return fmt.Errorf("invalid admin_console.new_merchant_url %q: want an absolute path like /merchants/new or an https URL", raw)
+	return fmt.Errorf("invalid %s %q: want an absolute path like /merchants/new or an https URL", name, raw)
 }
 
-// validateAdminConsolePath accepts one or more slash-led segments of RFC 3986
+var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+// ValidateMountPath accepts one or more slash-led segments of RFC 3986
 // unreserved characters, none of them "." or "..": the value lands in route
-// patterns and the console's <base href>.
-func validateAdminConsolePath(p string) error {
-	bad := !adminConsolePathRe.MatchString(p)
+// patterns and the console's <base href>. name says which setting it is.
+func ValidateMountPath(name, p string) error {
+	bad := !mountPathRe.MatchString(p)
 	for _, segment := range strings.Split(p, "/") {
 		bad = bad || segment == "." || segment == ".."
 	}
 	if bad {
-		return fmt.Errorf("invalid admin_console.path %q: want an absolute path like /billing/admin — no trailing slash, no . or .. segments, only letters, digits and . _ ~ -", p)
+		return fmt.Errorf("invalid %s %q: want an absolute path like /billing — no trailing slash, no . or .. segments, only letters, digits and . _ ~ -", name, p)
 	}
 	return nil
 }
@@ -590,8 +555,16 @@ const DefaultSchema = "billing"
 // for this value, so hosts must keep it in lockstep.
 const MigratekitApp = "openrails"
 
-// DefaultRiverSchema is the default namespace for managed River tables.
-const DefaultRiverSchema = "public"
+// RiverSchemaName is the schema of the River client Client.Start runs:
+// RiverSchema, or Schema plus "_river".
+func RiverSchemaName(c *Config) string {
+	if c != nil {
+		if s := strings.ToLower(strings.TrimSpace(c.RiverSchema)); s != "" {
+			return s
+		}
+	}
+	return SchemaName(c) + "_river"
+}
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
 // start with a letter or underscore and contain only letters, digits, and
@@ -1158,16 +1131,6 @@ func Validate(cfg *Config) error {
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
-	}
-	if cfg.AdminConsole != nil && cfg.AdminConsole.Path != "" {
-		if err := validateAdminConsolePath(cfg.AdminConsole.Path); err != nil {
-			return err
-		}
-	}
-	if cfg.AdminConsole != nil && cfg.AdminConsole.NewMerchantURL != "" {
-		if err := validateNewMerchantURL(cfg.AdminConsole.NewMerchantURL); err != nil {
-			return err
-		}
 	}
 
 	// #741/#761: an unknown llm.provider must never silently boot with one

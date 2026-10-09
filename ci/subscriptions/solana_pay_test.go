@@ -64,7 +64,6 @@ func newSolanaPay(t *testing.T) *solanaPay {
 		declared(psps)
 		psps["solana"].Settings["tokens"].(map[string]any)["PYUSD"] = map[string]any{} // Token-2022
 	}
-	w.mount = func(c *openrails.HTTPConfig) { c.Checkout = &openrails.CheckoutConfig{} }
 	w.start()
 	p := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 	p.runWorkers(w)

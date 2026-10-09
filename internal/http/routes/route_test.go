@@ -122,13 +122,13 @@ func (rec recorder) Group(string, ...router.Middleware) router.Router {
 // surface that owns it, and nothing the catalog does not declare. Only the
 // routes whose configuration this runtime lacks stay out.
 func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
-	rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}
+	rt := &app.Runtime{Config: &config.Config{}}
 	seen := map[string]int{}
 	at := func(base string) router.Router { return recorder{base: base, seen: seen} }
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{ProviderRoutes: &providers, External: External{
+	opts := Options{ProviderRoutes: &providers, CatalogWrites: true, External: External{
 		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
@@ -204,7 +204,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 
 	closed, open := map[string]int{}, map[string]int{}
 	RegisterMerchantRoutes(recorder{base: "/v1", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{})
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{InProcess: true})
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{CatalogWrites: true})
 	require.NotContains(t, closed, "POST /v1/merchant/catalog/products")
 	require.Contains(t, closed, "GET /v1/merchant/catalog/products")
 	require.Contains(t, closed, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")
