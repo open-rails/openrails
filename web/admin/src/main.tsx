@@ -217,8 +217,7 @@ loadBootstrap(bootstrapURL()).then(
     const session = createConsoleSession(config)
     bindConsoleRuntime({
       useConsole: useConsoleHandle,
-      authClient: () =>
-        session.kind === "local" ? session.client : undefined,
+      authClient: () => (session.kind === "local" ? session.client : undefined),
       authFetch: (input, init) => session.client.authFetch(input, init),
       mountPath: () => `${routerBasename().replace(/\/$/, "")}/`,
     })
