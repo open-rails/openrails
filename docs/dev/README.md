@@ -127,8 +127,9 @@ gh workflow run cut-release.yaml -f bump=minor   # or bump=patch, bump=major
 This tags master's head with the next version; the tag runs `release.yaml`
 (GoReleaser: binaries, checksums, SBOMs, generated notes, the
 `openrails-billing-ui-X.Y.Z.tgz` asset, build provenance) and
-`docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR).
-Edit the generated notes on the release page if needed. Dry run:
+`docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one
+manifest for linux/amd64 and linux/arm64). Edit the generated notes on the
+release page if needed. Dry run:
 `goreleaser release --snapshot --clean --skip=publish,sign`.
 
 `cut-release.yaml` pushes the tag with the `RELEASE_TOKEN` secret (a

@@ -1,6 +1,7 @@
 # Stage 1: admin console SPA into web/admin/dist, which web/admin/embed.go
-# go:embeds (#754). Node is a BUILD-time dependency only.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
+# go:embeds (#754). Node is a BUILD-time dependency only. Its output is static
+# files, so it runs once on the build platform for every target platform.
+FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
 
 WORKDIR /web/admin
 RUN npm install -g --ignore-scripts pnpm@11.0.0
@@ -12,8 +13,9 @@ COPY web/admin/ ./
 RUN pnpm --config.verify-deps-before-run=false run build
 
 
-# Stage 2: build
-FROM golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
+# Stage 2: build. Cross-compiles on the build platform (the binary needs no cgo),
+# so only the runtime stage runs as the target platform.
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
@@ -46,13 +48,15 @@ COPY --from=console /web/admin/dist ./web/admin/dist
 ARG VERSION=
 ARG COMMIT=
 ARG DATE=
+ARG TARGETOS
+ARG TARGETARCH
 
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     test -f web/admin/dist/index.html && \
     mkdir -p bin && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \
       -o bin/openrails ./cmd/openrails
 
