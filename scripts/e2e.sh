@@ -101,7 +101,7 @@ if ((ran != planned)); then
   status=1
 fi
 echo "e2e: slowest on worker $worker:"
-sort -t$'\t' -k3,3gr "$E2E_OUT/results.tsv" | head -15 | awk -F'\t' '{ printf "  %6.1fs  %s %s\n", $3, $1, $2 }'
+sort -t$'\t' -k3,3gr "$E2E_OUT/results.tsv" | awk -F'\t' 'NR <= 15 { printf "  %6.1fs  %s %s\n", $3, $1, $2 }'
 echo "e2e: load average $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo '?') on $(nproc 2>/dev/null || echo '?') CPUs"
 if [[ -n "${OPENRAILS_E2E_TIMINGS:-}" ]]; then
   cut -f1-3 "$E2E_OUT/results.tsv" | sort >"$OPENRAILS_E2E_TIMINGS"
