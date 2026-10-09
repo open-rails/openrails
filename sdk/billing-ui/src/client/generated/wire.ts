@@ -654,7 +654,6 @@ export type Subscription = {
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_change: ScheduledChange | null
-  scheduled_price_id?: string
   payment_method_id: string | null
   started_at: string
   ended_at: string | null
@@ -668,8 +667,6 @@ export type Subscription = {
   cancel_mode: string
   price?: Price
   product?: ProductSummary
-  scheduled_price?: Price
-  scheduled_product?: ProductSummary
   card?: CardDetails
   cancel_portal_url?: string
   access?: SubscriptionAccess

@@ -26,7 +26,7 @@ import (
 // path that actually calls those APIs, which enforce every constraint anew.
 
 // noticeWindowDaysDoctrine is the copilot's fallback effective-date proposal
-// for an increase and matches subscriptions.DefaultRepriceNoticeWindowDays.
+// for an increase and matches subscriptions.DefaultPriceIncreaseNoticeDays.
 // The console validates the proposal against the loaded merchant setting, and
 // the reprice API enforces that setting before mutation.
 const noticeWindowDaysDoctrine = 30

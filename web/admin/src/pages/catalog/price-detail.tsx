@@ -50,10 +50,10 @@ export function PriceDetailPage() {
   const { data: history } = useQuery(
     adminQueries.priceHistory(product?.key, price?.key)
   )
-  const { data: batches } = useQuery(
-    adminQueries.repriceBatches(product?.key, price?.key)
+  const { data: migrations } = useQuery(
+    adminQueries.priceMigrations(product?.key, price?.key)
   )
-  const latestBatch = batches?.data?.[0]
+  const latestBatch = migrations?.data?.[0]
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
@@ -182,7 +182,7 @@ export function PriceDetailPage() {
                 : "Last move to a new price"}
             </CardTitle>
             {isPending && (
-              <CancelMigrationButton batchId={latestBatch.id} />
+              <CancelMigrationButton migrationId={latestBatch.id} />
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
@@ -214,9 +214,9 @@ export function PriceDetailPage() {
   )
 }
 
-function CancelMigrationButton({ batchId }: { batchId: string }) {
+function CancelMigrationButton({ migrationId }: { migrationId: string }) {
   const queryClient = useQueryClient()
-  const cancelBatch = useMutation(adminMutations.cancelRepriceBatch(queryClient))
+  const cancelBatch = useMutation(adminMutations.cancelPriceMigration(queryClient))
   return (
     <Button
       variant="destructive"
@@ -224,11 +224,15 @@ function CancelMigrationButton({ batchId }: { batchId: string }) {
       disabled={cancelBatch.isPending}
       onClick={async () => {
         try {
-          const result = await cancelBatch.mutateAsync(batchId)
+          const result = await cancelBatch.mutateAsync(migrationId)
           toast.success(
-            `Canceled ${result.canceled} pending reprice${result.canceled === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
+            `Canceled ${result.canceled} pending move${result.canceled === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
           )
-          if (result.warning) toast.warning(result.warning)
+          const release = result.rail_release_required.length
+          if (release > 0)
+            toast.warning(
+              `${release} Stripe subscription${release === 1 ? " still carries" : "s still carry"} the move as a Stripe subscription schedule: release it in Stripe, or the price changes at period end.`
+            )
         } catch (err) {
           toastApiError(err, "Cancel migration")
         }

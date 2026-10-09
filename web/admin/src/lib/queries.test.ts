@@ -35,19 +35,19 @@ it("scopes cached server state before a merchant is selected", () => {
   expect(queryKeys.dashboard()).toEqual(["merchant", "unselected", "dashboard"])
 })
 
-it("keeps same-named price histories and reprice batches separate by product", async () => {
+it("keeps same-named price histories and price migrations separate by product", async () => {
   selectMerchant("merchant-a")
   const requests = await server({
     "/admin/catalog/products/by-key/premium/prices/by-key/monthly/history": { data: [{ price_id: "premium_price" }] },
     "/admin/catalog/products/by-key/basic/prices/by-key/monthly/history": { data: [{ price_id: "basic_price" }] },
-    "/admin/reprice-batches": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
+    "/admin/price-migrations": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
   })
   const queries = client({ staleTime: Infinity })
   try {
     const premiumHistory = await queries.fetchQuery(adminQueries.priceHistory("premium", "monthly"))
     const basicHistory = await queries.fetchQuery(adminQueries.priceHistory("basic", "monthly"))
-    const premiumBatches = await queries.fetchQuery(adminQueries.repriceBatches("premium", "monthly"))
-    const basicBatches = await queries.fetchQuery(adminQueries.repriceBatches("basic", "monthly"))
+    const premiumBatches = await queries.fetchQuery(adminQueries.priceMigrations("premium", "monthly"))
+    const basicBatches = await queries.fetchQuery(adminQueries.priceMigrations("basic", "monthly"))
 
     expect(premiumHistory.data).toEqual([{ price_id: "premium_price" }])
     expect(basicHistory.data).toEqual([{ price_id: "basic_price" }])
@@ -56,8 +56,8 @@ it("keeps same-named price histories and reprice batches separate by product", a
     expect(calls(requests)).toEqual([
       "GET /admin/catalog/products/by-key/premium/prices/by-key/monthly/history",
       "GET /admin/catalog/products/by-key/basic/prices/by-key/monthly/history",
-      "GET /admin/reprice-batches",
-      "GET /admin/reprice-batches",
+      "GET /admin/price-migrations",
+      "GET /admin/price-migrations",
     ])
     expect(new URLSearchParams(requests[2].query).get("price_key")).toBe("monthly")
     expect(new URLSearchParams(requests[3].query).get("price_key")).toBe("monthly")
@@ -67,7 +67,7 @@ it("keeps same-named price histories and reprice batches separate by product", a
 })
 
 it("waits for both product and price before loading price history or batches", () => {
-  for (const query of [adminQueries.priceHistory, adminQueries.repriceBatches]) {
+  for (const query of [adminQueries.priceHistory, adminQueries.priceMigrations]) {
     expect(query(undefined, "monthly").enabled).toBe(false)
     expect(query("premium", undefined).enabled).toBe(false)
     expect(query("premium", "monthly").enabled).toBe(true)

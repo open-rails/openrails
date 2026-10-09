@@ -61,7 +61,6 @@ type Subscription struct {
 	Status             SubscriptionStatus `json:"status"`
 	// ScheduledChange is the change waiting for the next renewal, or null.
 	ScheduledChange       *ScheduledChange `json:"scheduled_change"`
-	ScheduledPriceID      *PriceID         `json:"scheduled_price_id,omitempty"`
 	PaymentMethodID       *PaymentMethodID `json:"payment_method_id"`
 	StartedAt             time.Time        `json:"started_at"`
 	EndedAt               *time.Time       `json:"ended_at"`
@@ -75,8 +74,6 @@ type Subscription struct {
 	CancelMode            string           `json:"cancel_mode"`
 	Price                 *Price           `json:"price,omitempty"`
 	Product               *ProductSummary  `json:"product,omitempty"`
-	ScheduledPrice        *Price           `json:"scheduled_price,omitempty"`
-	ScheduledProduct      *ProductSummary  `json:"scheduled_product,omitempty"`
 	// Card is display data for the card behind PaymentMethodID, when it is one.
 	Card *CardDetails `json:"card,omitempty"`
 	// CancelPortalURL is where the customer cancels when CancelMode is

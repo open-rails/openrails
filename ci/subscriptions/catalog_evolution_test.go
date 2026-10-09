@@ -326,6 +326,7 @@ func TestCatalogRepriceStaysWithinProduct(t *testing.T) {
 	products := make([]*billing.Product, 2)
 	prices := make([]*billing.Price, 2)
 	subs := make([]billing.SubscriptionID, 2)
+	var current *billing.Price
 	hours := monthHours
 	for i := range products {
 		entitlement := fmt.Sprintf("content:scoped-%d", i)
@@ -336,21 +337,22 @@ func TestCatalogRepriceStaysWithinProduct(t *testing.T) {
 		require.NoError(t, err)
 		buyer := w.newCustomer()
 		subs[i] = buyer.subscribe(embedded, "stripe", prices[i].ID.String(), entitlement, buyer.saveCard("stripe", visa))
-		_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
+		next, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		require.Equal(t, prices[i].ID, w.subscription(embedded, subs[i]).PriceID, "catalog replacement cannot reprice the existing subscription")
+		if i == 0 {
+			current = next
+		}
 	}
-	preview, err := c.PreviewRepriceBatch(t.Context(), billing.PreviewRepriceBatchParams{ProductKey: products[0].Key, PriceKey: "monthly"})
+	preview, err := c.PreviewPriceMigration(t.Context(), billing.CreatePriceMigrationParams{ProductKey: products[0].Key, PriceKey: "monthly", ToPriceID: current.ID})
 	require.NoError(t, err)
 	require.Equal(t, 1, preview.Matched)
-	batch, err := c.CreateRepriceBatch(t.Context(), billing.CreateRepriceBatchParams{ProductKey: products[0].Key, PriceKey: "monthly", EffectiveAt: w.clock.Now().Add(45 * 24 * time.Hour)})
+	migration, err := c.CreatePriceMigration(t.Context(), billing.CreatePriceMigrationParams{ProductKey: products[0].Key, PriceKey: "monthly", ToPriceID: current.ID, EffectiveAt: w.clock.Now().Add(45 * 24 * time.Hour)})
 	require.NoError(t, err)
-	require.Len(t, batch.Scheduled, 1)
-	require.Equal(t, subs[0], batch.Scheduled[0].SubscriptionID)
-	other, err := c.ListReprices(t.Context(), billing.RepriceListParams{SubscriptionID: subs[1]})
-	require.NoError(t, err)
-	require.Empty(t, other.Items)
-	listed, err := c.ListRepriceBatches(t.Context(), billing.RepriceBatchListParams{ProductKey: products[1].Key, PriceKey: "monthly"})
+	require.Equal(t, 1, migration.Scheduled)
+	require.NotNil(t, w.subscription(embedded, subs[0]).ScheduledChange)
+	require.Nil(t, w.subscription(embedded, subs[1]).ScheduledChange, "a key names one product's prices")
+	listed, err := c.ListPriceMigrations(t.Context(), billing.PriceMigrationListParams{ProductKey: products[1].Key, PriceKey: "monthly"})
 	require.NoError(t, err)
 	require.Empty(t, listed.Items)
 }

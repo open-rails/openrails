@@ -21,11 +21,10 @@ export type MigrationMode = "grandfather" | "migrate"
 // DEFAULT_NOTICE_WINDOW_DAYS is only a fallback for the brief window before
 // the merchant's configured value (GET /v1/admin/configuration,
 // reprice_notice_window_days) has loaded — it mirrors the server's own
-// default (subscriptions.DefaultRepriceNoticeWindowDays) so the UI never
-// under-gates while loading. #781: the server now ALSO enforces this
-// server-side (an INCREASE whose effective_at is inside the merchant's
-// configured window is refused, 422 reprice_notice_window_violation) — this
-// client-side gate is fail-fast UX, not the boundary.
+// default (subscriptions.DefaultPriceIncreaseNoticeDays) so the UI never
+// under-gates while loading. The server also enforces it: a migration skips a
+// subscription whose increase is inside the window unless acknowledged
+// (price_increase_notice_too_short). This gate is fail-fast UX.
 export const DEFAULT_NOTICE_WINDOW_DAYS = 30
 
 // defaultMigrationMode is the direction-aware Step 2 default: increases

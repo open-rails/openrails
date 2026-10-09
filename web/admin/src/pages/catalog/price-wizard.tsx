@@ -52,9 +52,9 @@ const priceChangeFormValues = (
     draft?.new_amount ?? price.unit_amount,
     price.currency
   ),
-  mode: (draft?.reprice ? "migrate" : "grandfather") as MigrationMode,
-  effectiveAt: draft?.reprice
-    ? toDateInputValue(new Date(draft.reprice.effective_at))
+  mode: (draft?.migration ? "migrate" : "grandfather") as MigrationMode,
+  effectiveAt: draft?.migration?.effective_at
+    ? toDateInputValue(new Date(draft.migration.effective_at))
     : "",
 })
 
@@ -62,12 +62,12 @@ const priceChangeFormValues = (
 // amount-edit affordance on a price. Three steps: new amount -> migration
 // plan (direction-aware defaults, live affected-count preview, notice-window
 // gate on increase+migrate) -> review in words, then confirm applies the
-// catalog price update followed (if migrating) by the reprice schedule.
+// catalog price update followed (if migrating) by the price migration.
 //
 // draft (#779): when the catalog copilot proposed this change, the dialog
 // opens PRE-FILLED straight at Step 3 (review) — the affected count already
 // rode in the draft, so no extra preview call is needed. Confirm behaves
-// EXACTLY as a hand-typed change (the same create-price and reprice-batch
+// EXACTLY as a hand-typed change (the same create-price and price-migration
 // calls).
 export function PriceChangeWizard({
   price,

@@ -48,12 +48,9 @@ import type {
   PSPRoutingPreview,
   RailDefinition,
   RawProductAccessGrant,
-  RepriceBatch,
-  Reprice,
-  RepriceBatchCancel,
-  RepriceBatchPreview,
-  RepriceBatchResult,
-  RepriceStatus,
+  PriceMigration,
+  PriceMigrationCancel,
+  PriceMigrationPreview,
   TierChangePreview,
   TierChangeResult,
   TeamInvite,
@@ -516,68 +513,44 @@ export const getPriceKeyHistory = (
     { query: { limit: PAGE_MAX }, signal }
   )
 
-// --- Repricing / migration (#773 primitive, #777 console wizard) ---
+// --- Price migrations ---
 
-// previewRepriceBatch is the wizard's Step 2 affected-count dry run, called
-// BEFORE the price edit lands; it never writes.
-export const previewRepriceBatch = (productKey: string, priceKey: string) =>
-  api<RepriceBatchPreview>("/admin/reprice-batches/preview", {
+// previewPriceMigration is the wizard's affected-count dry run, called
+// before the price edit lands: by key with no target it counts every
+// version's subscribers. It never writes.
+export const previewPriceMigration = (productKey: string, priceKey: string) =>
+  api<PriceMigrationPreview>("/admin/price-migrations/preview", {
     method: "POST",
     body: { product_key: productKey, price_key: priceKey },
   })
 
-// createRepriceBatch schedules every active subscription on a prior version
-// of priceKey to move to its current price at effectiveAt.
-export const createRepriceBatch = (
+// createPriceMigration moves the subscribers of every version of priceKey
+// but toPriceId to it, each at its first renewal on or after effectiveAt.
+export const createPriceMigration = (
   productKey: string,
   priceKey: string,
+  toPriceId: string,
   effectiveAt: string
 ) =>
-  api<RepriceBatchResult>("/admin/reprice-batches", {
+  api<PriceMigration>("/admin/price-migrations", {
     method: "POST",
-    body: {
-      product_key: productKey,
-      price_key: priceKey,
-      effective_at: effectiveAt,
-    },
+    body: { product_key: productKey, price_key: priceKey, to_price_id: toPriceId, effective_at: effectiveAt },
   })
 
-// listRepriceBatches lists a price key's batches, newest first.
-export const listRepriceBatches = (
+// listPriceMigrations lists a price key's migrations, newest first.
+export const listPriceMigrations = (
   productKey: string,
   priceKey: string,
   limit = 20,
   signal?: AbortSignal
 ) =>
-  api<CursorEnvelope<RepriceBatch>>("/admin/reprice-batches", {
+  api<CursorEnvelope<PriceMigration>>("/admin/price-migrations", {
     query: { product_key: productKey, price_key: priceKey, limit },
     signal,
   })
 
-export const cancelRepriceBatch = (id: string) =>
-  api<RepriceBatchCancel>(`/admin/reprice-batches/${id}/cancel`, {
-    method: "POST",
-  })
-
-export interface RepriceFilters {
-  subscription_id?: string
-  reprice_batch_id?: string
-  status?: RepriceStatus
-}
-
-export const listReprices = (
-  filters: RepriceFilters,
-  limit = 100,
-  cursor?: string,
-  signal?: AbortSignal
-) =>
-  api<CursorEnvelope<Reprice>>("/admin/reprices", {
-    query: { ...filters, limit, ...(cursor ? { cursor } : {}) },
-    signal,
-  })
-
-export const cancelReprice = (id: string) =>
-  api<Reprice>(`/admin/reprices/${id}/cancel`, {
+export const cancelPriceMigration = (id: string) =>
+  api<PriceMigrationCancel>(`/admin/price-migrations/${id}/cancel`, {
     method: "POST",
   })
 

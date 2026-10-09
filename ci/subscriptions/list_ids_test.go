@@ -104,7 +104,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	e.toPeriodEnd()
 	w.runRenewals()
 	c := e.c
-	// A reprice batch moving the membership to a new version of its key.
+	// A price migration moving the membership to a new version of its key.
 	priceID, err := billing.ParsePriceID(e.price)
 	require.NoError(t, err)
 	price, err := client.GetPrice(ctx, priceID, billing.GetPriceParams{})
@@ -112,9 +112,9 @@ func TestListsReadNamedRecords(t *testing.T) {
 	product, err := client.GetProduct(ctx, price.ProductID)
 	require.NoError(t, err)
 	hours := monthHours
-	_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
+	next, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: price.ProductID, Key: price.Key, UnitAmount: 12_000_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(t, err)
-	_, err = client.CreateRepriceBatch(ctx, billing.CreateRepriceBatchParams{ProductKey: product.Key, PriceKey: price.Key, EffectiveAt: w.clock.Now().Add(45 * 24 * time.Hour)})
+	_, err = client.CreatePriceMigration(ctx, billing.CreatePriceMigrationParams{ProductKey: product.Key, PriceKey: price.Key, ToPriceID: next.ID, EffectiveAt: w.clock.Now().Add(45 * 24 * time.Hour)})
 	require.NoError(t, err)
 	// Two free product grants.
 	gift := w.giftProduct("content:gift")
@@ -178,8 +178,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/catalog/prices":                               {"/v1/admin/catalog/prices", "", "prices", "", ""},
 		"GET /v1/admin/catalog/drift":                                {"/v1/admin/catalog/drift", "", "reconciliation_findings", "", ""},
 		"GET /v1/admin/subscriptions":                                {"/v1/admin/subscriptions", "", "subscriptions", "", ""},
-		"GET /v1/admin/reprice-batches":                              {"/v1/admin/reprice-batches", "", "reprice_batches", "", ""},
-		"GET /v1/admin/reprices":                                     {"/v1/admin/reprices", "", "subscription_reprices", "", ""},
+		"GET /v1/admin/price-migrations":                             {"/v1/admin/price-migrations", "", "price_migrations", "", ""},
 		"GET /v1/admin/customers/{customer_id}/product-access":       {customer + "/product-access", "", "product_access", "", ""},
 		"GET /v1/admin/customers/{customer_id}/credit-grants":        {funded + "/credit-grants", "", "grants", "", ""},
 		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},

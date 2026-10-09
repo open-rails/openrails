@@ -38,7 +38,7 @@ type MerchantConfiguration struct {
 
 	// RepriceNoticeWindowDays (#781) is the minimum number of days' advance
 	// notice a subscription price INCREASE's effective_at must give existing
-	// subscribers. Decreases are exempt. Nil ⇒ DefaultRepriceNoticeWindowDays
+	// subscribers. Decreases are exempt. Nil ⇒ DefaultPriceIncreaseNoticeDays
 	// (30). Zero is a valid explicit merchant choice (no minimum enforced).
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 

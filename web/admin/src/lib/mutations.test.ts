@@ -55,8 +55,6 @@ const cases: Case[] = [
     "POST /admin/subscriptions/sub_1/change-tier/preview", []],
   ["applies a reviewed tier change", (c, g) => g(M.changeSubscriptionTier(c, "sub_1", "cus_1"), { priceId: "price_2", idempotencyKey: "tier-key-1" }),
     "POST /admin/subscriptions/sub_1/change-tier", [...customerTree, "payment", "payments", ...subTree], { price_id: "price_2" }],
-  ["cancels a scheduled reprice", (c, g) => g(M.cancelSubscriptionReprice(c, "sub_1"), "rep_1"),
-    "POST /admin/reprices/rep_1/cancel", [...catalogTree, ...subTree]],
   ["grants a product until an instant", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), { productId: "prod_1", endsAt: effectiveAt }),
     "POST /admin/product-access", customerTree, { items: [{ customer_id: "cus_1", product_id: "prod_1", ends_at: effectiveAt }] }],
   ["grants a product for hours with a note", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), { productId: "prod_1", hours: 48, note: "support fix" }),
@@ -82,9 +80,9 @@ const cases: Case[] = [
   ["restores a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true }),
     "PATCH /admin/catalog/prices/price_1", catalogTree, { archived: false }],
   ["previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), { productKey: "pro", priceKey: "monthly" }),
-    "POST /admin/reprice-batches/preview", [], { product_key: "pro", price_key: "monthly" }],
-  ["cancels a reprice batch", (c, g) => g(M.cancelRepriceBatch(c), "rpb_1"),
-    "POST /admin/reprice-batches/rpb_1/cancel", catalogTree],
+    "POST /admin/price-migrations/preview", [], { product_key: "pro", price_key: "monthly" }],
+  ["cancels a price migration", (c, g) => g(M.cancelPriceMigration(c), "pmig_1"),
+    "POST /admin/price-migrations/pmig_1/cancel", catalogTree],
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
     "PUT /admin/catalog/meters/tokens", meterTree, meter],
   ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { key: "tokens", rateCard }),
@@ -257,22 +255,23 @@ describe("price change", () => {
   const change = { price, migration: { productKey: "pro", priceKey: "monthly", effectiveAt } }
   const refreshed = catalogTree.map((name) => `merchant-a:${name}`)
 
-  it("creates the replacement price before scheduling its migration", async () => {
+  it("creates the replacement price before migrating to it", async () => {
     const queryClient = client()
     const seeded = seedCache(queryClient, "merchant-a")
+    routes["POST /admin/catalog/prices"] = { id: "price_2" }
     await exec(queryClient, M.changePrice(queryClient), change)
     expect(calls(requests).slice(0, 2)).toEqual([
       "POST /admin/catalog/prices",
-      "POST /admin/reprice-batches",
+      "POST /admin/price-migrations",
     ])
-    expect(requests[1].body).toEqual({ product_key: "pro", price_key: "monthly", effective_at: effectiveAt })
+    expect(requests[1].body).toEqual({ product_key: "pro", price_key: "monthly", to_price_id: "price_2", effective_at: effectiveAt })
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)
   })
 
   it("refreshes the catalog when scheduling fails after the price was created", async () => {
     const queryClient = client()
     const seeded = seedCache(queryClient, "merchant-a")
-    routes["POST /admin/reprice-batches"] = () =>
+    routes["POST /admin/price-migrations"] = () =>
       Response.json({ error: { message: "schedule failed" } }, { status: 503 })
     await expect(exec(queryClient, M.changePrice(queryClient), change)).rejects.toThrow("schedule failed")
     expect(invalidated(queryClient, seeded)).toEqual(refreshed)

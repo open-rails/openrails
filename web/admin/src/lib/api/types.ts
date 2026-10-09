@@ -28,7 +28,9 @@ export interface RawSubscription {
   psp_id?: string
   product_id: string // prod_...
   price_id: string // price_...
-  scheduled_price_id?: string | null // price_...
+  // The change waiting for the next renewal (a migration's move or a
+  // scheduled downgrade), or null.
+  scheduled_change?: import("./generated/wire").ScheduledChange | null
   status: SubscriptionStatus
   started_at: string
   ended_at: string | null
@@ -155,77 +157,14 @@ export interface PSPRoutingPreview {
   candidates: PSPRoutingCandidate[]
 }
 
-// --- Price repricing / migration ---
+// --- Price migrations ---
 
-export type RepriceStatus = "scheduled" | "applied" | "canceled" | "blocked"
-export type RepriceKind = "reprice" | "plan_change"
-
-// Reprice is one subscription's scheduled price change.
-export interface Reprice {
-  id: string
-  subscription_id: string
-  from_price_id: string
-  to_price_id: string
-  effective_at: string
-  status: RepriceStatus
-  kind: RepriceKind
-  blocked_reason: string | null
-  reprice_batch_id: string | null
-  acknowledged_short_notice: boolean
-  created_at: string
-  applied_at: string | null
-  canceled_at: string | null
-}
-
-// RepriceBatch is one bulk reprice or plan migration. matched and skipped
-// are fixed at creation; scheduled/applied/canceled/blocked count its
-// reprices now.
-export interface RepriceBatch {
-  id: string
-  kind: RepriceKind
-  price_key: string | null
-  source_price_id: string | null
-  to_price_id: string
-  effective_at: string
-  fallback_policy: string | null
-  matched: number
-  skipped: number
-  scheduled: number
-  applied: number
-  canceled: number
-  blocked: number
-  created_at: string
-}
-
-export interface RepriceOutcome {
-  subscription_id: string
-  reprice_id: string | null
-  reason: string | null
-  acknowledged_short_notice: boolean
-}
-
-export interface RepriceBatchResult {
-  batch_id: string
-  to_price_id: string
-  matched: number
-  scheduled: RepriceOutcome[]
-  skipped: RepriceOutcome[]
-}
-
-// RepriceBatchPreview is the wizard's affected-count dry run, called before
-// the price edit lands.
-export interface RepriceBatchPreview {
-  product_key: string
-  price_key: string
-  to_price_id: string
-  matched: number
-}
-
-export interface RepriceBatchCancel {
-  canceled: number
-  rail_release_required: string[]
-  warning: string | null
-}
+export type {
+  PriceMigration,
+  PriceMigrationCancel,
+  PriceMigrationPreview,
+  ScheduledChange,
+} from "./generated/wire"
 
 // --- Ops: findings / repair alerts / worker health ---
 
@@ -301,7 +240,7 @@ export interface MerchantSettings {
   alert_email?: string
   // Minimum advance-notice window (days) a subscription price INCREASE's
   // effective_at must give existing subscribers (#781). Unset ⇒ the server's
-  // DefaultRepriceNoticeWindowDays (30). Decreases are exempt.
+  // DefaultPriceIncreaseNoticeDays (30). Decreases are exempt.
   reprice_notice_window_days?: number
 }
 

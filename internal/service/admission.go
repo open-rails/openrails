@@ -516,7 +516,7 @@ type MerchantConfiguration struct {
 	// advance-notice window (in days) for a subscription price INCREASE. A
 	// nil pointer preserves the stored value; a non-nil pointer sets it (the
 	// reprice service falls back to
-	// subscriptions.DefaultRepriceNoticeWindowDays when unset).
+	// subscriptions.DefaultPriceIncreaseNoticeDays when unset).
 	RepriceNoticeWindowDays *int
 	// RenewalReceiptMinIntervalHours (#1069) spaces renewal receipts per
 	// subscription. A nil pointer preserves the stored value.

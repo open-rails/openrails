@@ -40,7 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { Reprice } from "@/lib/api/types"
+import type { ScheduledChange } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
   formatCard,
@@ -59,12 +59,6 @@ export function SubscriptionDetailPage() {
   const { data: sub, isPending: loading } = useQuery(
     adminQueries.subscription(id)
   )
-  // #777: pending-reprice badge — at most one scheduled reprice can exist per
-  // subscription at a time.
-  const { data: scheduledReprices } = useQuery(
-    adminQueries.subscriptionReprices(id)
-  )
-  const pendingReprice = scheduledReprices?.data?.[0]
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!sub)
     return (
@@ -107,8 +101,7 @@ export function SubscriptionDetailPage() {
             productId={sub.product_id}
             priceId={sub.price_id}
             currency={sub.price?.currency}
-            scheduledPriceId={sub.scheduled_price_id}
-            hasPendingReprice={Boolean(pendingReprice)}
+            scheduledChange={sub.scheduled_change}
             rail={sub.rail}
             status={sub.status}
           />
@@ -176,11 +169,8 @@ export function SubscriptionDetailPage() {
                 {sub.price.key}
               </span>
             )}
-            {pendingReprice && (
-              <PendingRepriceBadge
-                subscriptionId={sub.id}
-                reprice={pendingReprice}
-              />
+            {sub.scheduled_change && (
+              <ScheduledChangeBadge change={sub.scheduled_change} />
             )}
           </div>
         </Fact>
@@ -494,48 +484,18 @@ function ChangePaymentMethodDialog({
   )
 }
 
-// PendingRepriceBadge (#777) surfaces a subscription's scheduled price move
-// (from the #773 primitive, usually scheduled in bulk by the price-change
-// wizard) with an inline cancel — allowed until the effective date; an
-// already-applied reprice cannot reach this badge (it's filtered to
-// status=scheduled by the caller).
-function PendingRepriceBadge({
-  subscriptionId,
-  reprice,
-}: {
-  subscriptionId: string
-  reprice: Reprice
-}) {
-  const queryClient = useQueryClient()
-  const { data: toPrice } = useQuery(adminQueries.price(reprice.to_price_id))
-  const cancel = useMutation(
-    adminMutations.cancelSubscriptionReprice(queryClient, subscriptionId)
-  )
+// ScheduledChangeBadge shows the change waiting for the next renewal: a price
+// migration's move or a scheduled downgrade. A change back to the current
+// price clears it.
+function ScheduledChangeBadge({ change }: { change: ScheduledChange }) {
+  const { data: toPrice } = useQuery(adminQueries.price(change.price_id))
   return (
-    <span className="flex items-center gap-1.5">
-      <Badge className="bg-held-surface text-held">
-        moves to{" "}
-        {toPrice
-          ? formatNativeAmount(toPrice.unit_amount, toPrice.currency)
-          : shortId(reprice.to_price_id, 9)}{" "}
-        on {formatDate(reprice.effective_at)}
-      </Badge>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-5 px-1.5 text-xs"
-        disabled={cancel.isPending}
-        onClick={async () => {
-          try {
-            await cancel.mutateAsync(reprice.id)
-            toast.success("Reprice canceled")
-          } catch (err) {
-            toastApiError(err, "Cancel reprice")
-          }
-        }}
-      >
-        cancel
-      </Button>
-    </span>
+    <Badge className="bg-held-surface text-held">
+      {change.source === "migration" ? "migrates" : "changes"} to{" "}
+      {toPrice
+        ? formatNativeAmount(toPrice.unit_amount, toPrice.currency)
+        : shortId(change.price_id, 9)}{" "}
+      at the first renewal from {formatDate(change.effective_at)}
+    </Badge>
   )
 }

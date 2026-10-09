@@ -31,8 +31,7 @@ import {
   listPrices,
   listProducts,
   listRebillCycles,
-  listRepriceBatches,
-  listReprices,
+  listPriceMigrations,
   listSubscriptions,
   listUsageMeterOverrides,
   listUsageMeters,
@@ -162,18 +161,6 @@ export const adminQueries = {
       queryFn: ({ signal }) => getSubscription(id, signal),
       enabled: Boolean(id),
       meta: { errorAction: "Load subscription" },
-    }),
-  subscriptionReprices: (id: string) =>
-    queryOptions({
-      queryKey: [...queryKeys.subscription(id), "reprices", "scheduled"],
-      queryFn: ({ signal }) =>
-        listReprices(
-          { subscription_id: id, status: "scheduled" },
-          100,
-          undefined,
-          signal
-        ),
-      enabled: Boolean(id),
     }),
   // Every saved method: pickers must offer all of them.
   customerPaymentMethods: (customerId?: string) =>
@@ -326,15 +313,14 @@ export const adminQueries = {
         getPriceKeyHistory(productKey!, priceKey!, signal),
       enabled: Boolean(productKey && priceKey),
     }),
-  repriceBatches: (productKey?: string, priceKey?: string, limit = 5) =>
+  priceMigrations: (productKey?: string, priceKey?: string, limit = 5) =>
     queryOptions({
       queryKey: [
         ...queryKeys.catalog(),
-        "reprice-batches",
+        "price-migrations",
         { productKey, priceKey, limit },
       ],
-      queryFn: ({ signal }) =>
-        listRepriceBatches(productKey!, priceKey!, limit, signal),
+      queryFn: ({ signal }) => listPriceMigrations(productKey!, priceKey!, limit, signal),
       enabled: Boolean(productKey && priceKey),
     }),
   catalogRevision: () =>

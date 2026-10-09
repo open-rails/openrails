@@ -42,7 +42,7 @@ it("shows qualified price revisions while history links keep the immutable price
       })),
       next_cursor: null,
     },
-    "/admin/reprice-batches": { data: [], next_cursor: null },
+    "/admin/price-migrations": { data: [], next_cursor: null },
     "/admin/psps/routing-preview": { candidates: [] },
   })
   selectMerchant("merchant-a")

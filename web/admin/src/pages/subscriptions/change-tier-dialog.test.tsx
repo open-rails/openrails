@@ -78,7 +78,7 @@ beforeEach(async () => {
     <QueryClientProvider client={queryClient}>
       <ChangeTierDialog
         subscriptionId="sub-one" customerId="customer-one" productId="basic"
-        priceId="price-basic" currency="USD" hasPendingReprice={false}
+        priceId="price-basic" currency="USD" scheduledChange={null}
         rail="stripe" status="active"
       />
     </QueryClientProvider>
@@ -233,15 +233,14 @@ describe("tier change options", () => {
   it.each([
     [{}, undefined],
     [{ status: "canceled" as const }, "Only active or past-due subscriptions can change tier"],
-    [{ scheduledPriceId: "price-next" }, "A tier change is already scheduled"],
-    [{ hasPendingReprice: true }, "A price change is already scheduled"],
+    [{ scheduledChange: { source: "change" as const } }, "A tier change is already scheduled"],
+    [{ scheduledChange: { source: "migration" as const } }, "A price change is already scheduled"],
     [{ rail: "ccbill" }, "CCBill tier changes require customer self-service"],
     [{ rail: "solana" }, "Solana tier changes require the customer's wallet signature"],
   ])("blocks the admin workflow it cannot complete: %o", (override, reason) => {
     expect(
       adminTierChangeBlockReason({
-        rail: "nmi", status: "active", scheduledPriceId: null,
-        hasPendingReprice: false, ...override,
+        rail: "nmi", status: "active", scheduledChange: null, ...override,
       })
     ).toBe(reason)
   })

@@ -5,6 +5,7 @@ import type {
 import type {
   Price,
   Product,
+  ScheduledChange,
 } from "@/lib/api/generated/wire"
 import { formatNativeAmount } from "@/lib/format"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
@@ -28,19 +29,17 @@ export function tierChangeOptionLabel(option: TierChangeOption): string {
 export function adminTierChangeBlockReason({
   rail,
   status,
-  scheduledPriceId,
-  hasPendingReprice,
+  scheduledChange,
 }: {
   rail: Rail
   status: SubscriptionStatus
-  scheduledPriceId?: string | null
-  hasPendingReprice: boolean
+  scheduledChange?: Pick<ScheduledChange, "source"> | null
 }): string | undefined {
   if (status !== "active" && status !== "past_due") {
     return "Only active or past-due subscriptions can change tier"
   }
-  if (scheduledPriceId) return "A tier change is already scheduled"
-  if (hasPendingReprice) return "A price change is already scheduled"
+  if (scheduledChange?.source === "change") return "A tier change is already scheduled"
+  if (scheduledChange) return "A price change is already scheduled"
   if (rail === "ccbill")
     return "CCBill tier changes require customer self-service"
   if (rail === "solana") {

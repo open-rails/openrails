@@ -7,8 +7,7 @@ import { mutationOptions, type QueryClient } from "@tanstack/react-query"
 
 import { askCatalog } from "@/lib/api/copilot"
 import {
-  cancelReprice,
-  cancelRepriceBatch,
+  cancelPriceMigration,
   cancelSubscription,
   changeTeamRole,
   changeSubscriptionPaymentMethod,
@@ -38,13 +37,13 @@ import {
   putCustomerUsageRateOverride,
   updatePSP,
   putUsageMeter,
-  previewRepriceBatch,
+  previewPriceMigration,
   previewSubscriptionTierChange,
   applyCatalog,
   refreshCatalogDrift,
   refundPayment,
   removeTeamMember,
-  createRepriceBatch,
+  createPriceMigration,
   resolveFinding,
   resumeSubscription,
   revokeApiKey,
@@ -430,23 +429,6 @@ export const adminMutations = {
         ]),
     })
   },
-  cancelSubscriptionReprice: (
-    queryClient: QueryClient,
-    subscriptionId: string
-  ) => {
-    const keys = merchantQueryKeys()
-    const subscriptionsKey = keys.subscriptions()
-    const catalogKey = keys.catalog()
-    return mutationOptions({
-      mutationKey: [...subscriptionsKey, subscriptionId, "reprices", "cancel"],
-      mutationFn: (repriceId: string) => cancelReprice(repriceId),
-      onSuccess: () =>
-        Promise.all([
-          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
-          queryClient.invalidateQueries({ queryKey: catalogKey }),
-        ]),
-    })
-  },
   grantCustomerProductAccess: (
     queryClient: QueryClient,
     customerId: string
@@ -708,7 +690,7 @@ export const adminMutations = {
       }: {
         productKey: string
         priceKey: string
-      }) => previewRepriceBatch(productKey, priceKey),
+      }) => previewPriceMigration(productKey, priceKey),
     })
   },
   changePrice: (queryClient: QueryClient) => {
@@ -728,9 +710,10 @@ export const adminMutations = {
       }) => {
         const created = await createPrice(price)
         if (migration) {
-          await createRepriceBatch(
+          await createPriceMigration(
             migration.productKey,
             migration.priceKey,
+            created.id,
             migration.effectiveAt
           )
         }
@@ -741,11 +724,11 @@ export const adminMutations = {
       onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
-  cancelRepriceBatch: (queryClient: QueryClient) => {
+  cancelPriceMigration: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
-      mutationKey: [...keys.catalog(), "reprice-batches", "cancel"],
-      mutationFn: (batchId: string) => cancelRepriceBatch(batchId),
+      mutationKey: [...keys.catalog(), "price-migrations", "cancel"],
+      mutationFn: (migrationId: string) => cancelPriceMigration(migrationId),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },

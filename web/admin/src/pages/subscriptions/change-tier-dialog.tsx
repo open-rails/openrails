@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { Rail, SubscriptionStatus } from "@/lib/api/types"
+import type { Rail, ScheduledChange, SubscriptionStatus } from "@/lib/api/types"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "@/lib/format"
@@ -40,8 +40,7 @@ interface ChangeTierDialogProps {
   productId: string
   priceId: string
   currency?: string
-  scheduledPriceId?: string | null
-  hasPendingReprice: boolean
+  scheduledChange?: ScheduledChange | null
   rail: Rail
   status: SubscriptionStatus
 }
@@ -61,8 +60,7 @@ function ChangeTierForm({
   productId,
   priceId,
   currency,
-  scheduledPriceId,
-  hasPendingReprice,
+  scheduledChange,
   rail,
   status,
 }: ChangeTierDialogProps) {
@@ -115,8 +113,7 @@ function ChangeTierForm({
   const blockReason = adminTierChangeBlockReason({
     rail,
     status,
-    scheduledPriceId,
-    hasPendingReprice,
+    scheduledChange,
   })
 
   const handleOpenChange = (next: boolean) => {
