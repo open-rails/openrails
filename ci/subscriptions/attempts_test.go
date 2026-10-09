@@ -55,11 +55,11 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
 
-	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, billing.ErrPaymentRefused)
-	session, err := h.pay("pay-fixed", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	declined, err := h.pay("pay-cvc", w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"}))
+	declinedPay(t, declined, err)
+	session, err := h.pay("pay-fixed", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", string(session.Status))
+	require.Equal(t, "succeeded", session.Status)
 	w.settle()
 
 	rows := w.attempts(h.c.id)
@@ -88,10 +88,11 @@ func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: price.ID.String()}
 
-	_, err := h.pay("pay-nsf", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
-	require.ErrorIs(t, err, billing.ErrPaymentRefused)
-	_, err = h.pay("pay-ok", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	paid, err := h.pay("pay-nsf", w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"}))
+	declinedPay(t, paid, err)
+	paid, err = h.pay("pay-ok", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
+	require.Equal(t, "succeeded", paid.Status)
 	w.settle()
 
 	rows := w.attempts(h.c.id)
@@ -130,8 +131,9 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.NoError(t, err)
 	buyer := w.newCustomer()
 	h := hostedPay{w: w, c: buyer, tp: embedded, price: post.ID.String()}
-	_, err = h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	paid, err := h.pay("sale-1", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
+	require.Equal(t, "succeeded", paid.Status)
 	w.settle()
 	rows = w.attempts(buyer.id)
 	require.Len(t, rows, 2)

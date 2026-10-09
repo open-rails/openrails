@@ -105,9 +105,6 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 	for _, topology := range []topology{embedded, remote} {
 		t.Run(string(topology), func(t *testing.T) {
 			client := w.client[topology]
-			// A saved card is charged in process; over HTTP only on a session
-			// its customer pays.
-			charge := w.client[embedded]
 			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 				Key: "product-without-implicit-access-" + string(topology), DisplayName: "Mixed opaque benefits",
 				Entitlements: []string{"post:101", "premium", " private key "},
@@ -117,14 +114,12 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			require.NoError(t, err)
 			customer := w.newCustomer()
 			method := customer.saveCard("nmi", visa)
-			request := billing.CreateCheckoutAttemptParams{
-				Customer: customer.identity(), PriceID: price.ID, OfferKind: billing.OfferPermanent, Entitlement: "post:101",
-				IdempotencyKey: "opaque-purchase-" + uuid.NewString(),
-				PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
-			}
-			initial, err := createCheckoutAttempt(t.Context(), charge, request)
+			purchase := order{price: price.ID, rail: "nmi", method: method}
+			session, err := customer.sell(topology, purchase)
 			require.NoError(t, err)
-			require.Equal(t, billing.CheckoutAttemptSucceeded, initial.Status)
+			initial, err := session.buy(customer, purchase)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", initial.Status)
 			w.settle()
 			require.True(t, customer.entitled("post:101"))
 			require.True(t, customer.entitled("premium"), "content and service names receive identical access")
@@ -148,22 +143,17 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			require.False(t, customer.entitled(product.Key), "the product key is not an implicit entitlement")
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"post:202"})})
 			require.NoError(t, err)
-			replayed, err := createCheckoutAttempt(t.Context(), charge, request)
+			replayed, err := session.buy(customer, purchase)
 			require.NoError(t, err, "an accepted purchase must replay after its live product changes")
-			require.Equal(t, initial.ID, replayed.ID)
+			require.Equal(t, "succeeded", replayed.Status)
+			require.Equal(t, initial.PaymentID, replayed.PaymentID)
 			require.True(t, customer.entitled("post:202"), "a key added to the product reaches its holder")
 			require.False(t, customer.entitled("post:101"), "a key removed from the product leaves its holder")
 			require.False(t, customer.entitled("premium"))
 
 			next := w.newCustomer()
 			nextMethod := next.saveCard("nmi", visa)
-			request.Customer, request.Entitlement = next.identity(), "post:202"
-			request.IdempotencyKey = "next-opaque-purchase-" + uuid.NewString()
-			request.PaymentOptions.PaymentMethodID = pmid(nextMethod)
-			purchased, err := createCheckoutAttempt(t.Context(), charge, request)
-			require.NoError(t, err)
-			require.Equal(t, billing.CheckoutAttemptSucceeded, purchased.Status)
-			w.settle()
+			next.mustCheckout(topology, order{price: price.ID, rail: "nmi", method: nextMethod})
 			require.True(t, next.entitled("post:202"))
 			require.False(t, next.entitled("post:101"))
 			require.False(t, next.entitled("premium"))

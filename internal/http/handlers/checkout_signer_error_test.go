@@ -20,7 +20,7 @@ func TestCheckoutSignerUnavailableIs503(t *testing.T) {
 		fmt.Errorf("%w: %w", checkout.ErrCheckoutAttemptValidation, vault.ErrNotAuthenticated),
 	} {
 		r, rec := newTestRequest(http.MethodPost, "/v1/checkout", nil, nil)
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		require.Equal(t, http.StatusServiceUnavailable, rec.Code, err.Error())
 	}
 }

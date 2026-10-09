@@ -435,12 +435,14 @@ func (f *fleet) until(cond func() bool, msg string) {
 }
 
 // crash kills r as SIGKILL does: its database link is cut first, so neither
-// its jobs nor its operations record anything more. Its running jobs are
-// then aged past the rescue silence, as elapsed time would.
+// its jobs nor its operations record anything more, then its HTTP clients'
+// connections. Its running jobs are then aged past the rescue silence, as
+// elapsed time would.
 func (f *fleet) crash(r *world) {
 	f.t.Helper()
 	id := r.replica.id
 	r.replica.proxy.kill()
+	r.server.CloseClientConnections()
 	r.stop()
 	f.dead[r] = true
 	_, err := f.base.pool.Exec(f.t.Context(), f.q(`UPDATE billing.river_job SET attempted_at = now() - interval '10 minutes'

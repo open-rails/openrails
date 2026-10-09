@@ -112,6 +112,7 @@ type rival struct {
 	rt     *openrails.Client
 	server *httptest.Server
 	client *openrails.Client
+	auth   *verifier
 }
 
 func (w *world) rival() *rival {
@@ -135,7 +136,7 @@ func (w *world) siblingWith(scope openrails.CustomerHTTPScope) *rival {
 
 func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 	return map[string]openrails.PSPConfig{
-		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}},
+		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}, Settings: map[string]any{"publishable_key": "pk_test_e2e"}},
 		"nmi":    {Rail: "nmi", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
 		"ccbill": {Rail: "ccbill", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
 	}
@@ -181,7 +182,8 @@ func (w *world) serve(slug string, rt *openrails.Client, routes openrails.Routes
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	client := rt
-	return &rival{slug: slug, rt: rt, server: server, client: client}
+	auth, _ := routes.Auth.(*verifier)
+	return &rival{slug: slug, rt: rt, server: server, client: client, auth: auth}
 }
 
 // SEC: merchant isolation. A second merchant on the same database, and staff
@@ -214,22 +216,18 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.Empty(t, list.Items)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
-	_, err = createCheckoutAttempt(ctx, r.client, billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: e.ent, PriceID: pid(e.price),
-		IdempotencyKey: "rival-price-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(e.method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-	})
+	_, err = r.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: e.c.identity(), PriceID: pid(e.price), SuccessURL: "https://e2e.test/return"})
 	require.Error(t, err)
 	own := r.client
 	product, err := own.CreateProduct(ctx, billing.CreateProductParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", Entitlements: []string{"content:rival"}})
 	require.NoError(t, err)
 	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	_, err = createCheckoutAttempt(ctx, own, billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(e.c.id)}, Entitlement: "content:rival", PriceID: rivalPrice.ID,
-		IdempotencyKey: "rival-card-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(e.method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-	})
+	link, err := own.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: e.c.identity(), PriceID: rivalPrice.ID, SuccessURL: "https://e2e.test/return"})
+	require.NoError(t, err)
+	// The same subject signed in at merchant B names merchant A's card.
+	there := &customer{w: w, id: e.c.id, token: r.auth.token(t, e.c.id)}
+	_, err = hostedSession{w: w, id: link.ID}.buyAt(r.server.URL, there, order{rail: "nmi", method: e.method})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")
 	require.NotContains(t, err.Error(), "River", "refused by ownership, not by the headless harness")
 	require.Len(t, e.providerLedger(), 1, "nothing charged the member's card")

@@ -65,7 +65,7 @@ func TestSecurityNMIChargebackRevokesOneTimePurchase(t *testing.T) {
 	price := w.finitePass("content:pass")
 	c := w.newCustomer()
 	method := c.saveCard("nmi", card{Brand: "visa", Last4: "5100"})
-	c.buyWith("nmi", method, price, billing.OfferFinite, "content:pass")
+	c.buyWith("nmi", method, price)
 	paid := completed(w.payments(embedded, c.id))
 	require.Len(t, paid, 1)
 	require.True(t, c.entitled("content:pass"))
@@ -119,7 +119,7 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 		price := w.finitePass("content:pass")
 		c := w.newCustomer()
 		method := c.saveCard("stripe", visa)
-		c.buyWith("stripe", method, price, billing.OfferFinite, "content:pass")
+		c.buyWith("stripe", method, price)
 		p := completed(w.payments(embedded, c.id))[0]
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_won2", "won", p)))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_won2", "needs_response", p)))

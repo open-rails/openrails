@@ -52,17 +52,6 @@ func (s *Service) ListCheckoutOptions(ctx context.Context, priceID billing.Price
 	return out, nil
 }
 
-// CreateCheckoutAttempt charges one price for a customer, relaying that
-// customer's pay action: a recurring price is enrolled and charged now.
-func (s *Service) CreateCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptParams) (*billing.CheckoutAttempt, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return s.createCheckoutAttempt(ctx, req, nil)
-}
-
 // createCheckoutAttempt runs the engine's checkout. card is a card the
 // checkout session's page entered; the engine wipes it.
 func (s *Service) createCheckoutAttempt(ctx context.Context, req billing.CreateCheckoutAttemptParams, card *cardguard.Card) (*billing.CheckoutAttempt, error) {
@@ -133,16 +122,7 @@ func (s *Service) lookupCheckoutAttempt(ctx context.Context, req billing.CreateC
 	return checkoutAttemptFromResponse(resp, req.Customer.ID), nil
 }
 
-// GetCheckoutAttempt reads one attempt.
-func (s *Service) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID) (*billing.CheckoutAttempt, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	return s.getCheckoutAttempt(ctx, id)
-}
-
+// getCheckoutAttempt reads one attempt.
 func (s *Service) getCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID) (*billing.CheckoutAttempt, error) {
 	engine, err := s.requireCheckoutAttemptService()
 	if err != nil {
@@ -162,41 +142,6 @@ func (s *Service) getCheckoutAttempt(ctx context.Context, id billing.CheckoutAtt
 			return err
 		}
 		resp, err = engine.GetSession(scoped, id.UUID(), &checkout.UserIdentity{ID: owner.CustomerID.String()})
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return checkoutAttemptFromResponse(resp, billing.CustomerID(owner.CustomerID)), nil
-}
-
-// ConfirmCheckoutAttempt completes a Solana attempt with the signature of the
-// transaction the buyer's wallet signed.
-func (s *Service) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, req billing.ConfirmCheckoutAttemptParams) (*billing.CheckoutAttempt, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	engine, err := s.requireCheckoutAttemptService()
-	if err != nil {
-		return nil, err
-	}
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.DB == nil {
-		return nil, fmt.Errorf("billing service: database unavailable")
-	}
-	var resp *checkout.CheckoutAttemptResponse
-	var owner checkout.AttemptOwner
-	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
-		if owner, err = engine.Owner(scoped, id.UUID()); err != nil {
-			return err
-		}
-		in := &checkout.CheckoutAttemptConfirmRequest{Payment: checkout.CheckoutAttemptConfirmPayment{Rail: owner.Rail, Signature: req.Signature, Wallet: req.Wallet}}
-		resp, err = engine.ConfirmSession(scoped, id.UUID(), in, &checkout.UserIdentity{ID: owner.CustomerID.String()})
 		return err
 	})
 	if err != nil {
@@ -270,8 +215,8 @@ func checkoutAttemptPayment(payment billing.CheckoutPaymentOptions, card *cardgu
 	return out
 }
 
-// checkoutAttemptFromResponse is the merchant's view of an engine answer: rail
-// steps become one NextAction.
+// checkoutAttemptFromResponse is a checkout session's view of an engine
+// answer: rail steps become one NextAction.
 func checkoutAttemptFromResponse(resp *checkout.CheckoutAttemptResponse, customer billing.CustomerID) *billing.CheckoutAttempt {
 	out := &billing.CheckoutAttempt{
 		ID: resp.ID, CustomerID: customer,
@@ -288,9 +233,6 @@ func checkoutAttemptFromResponse(resp *checkout.CheckoutAttemptResponse, custome
 func checkoutNextAction(resp *checkout.CheckoutAttemptResponse) *billing.NextAction {
 	if resp.Status != string(billing.CheckoutAttemptRequiresAction) {
 		return nil
-	}
-	if next := resp.NextAction; next != nil && next.Type == "solana_sign_transactions" && len(next.Transactions) > 0 {
-		return &billing.NextAction{Type: "solana_sign_transactions", Transactions: next.Transactions}
 	}
 	redirect := strings.TrimSpace(resp.URL)
 	if redirect == "" && resp.NextAction != nil && resp.NextAction.RedirectToURL != nil {

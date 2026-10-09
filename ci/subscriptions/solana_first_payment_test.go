@@ -5,20 +5,19 @@ package subscriptions_test
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/gagliardetto/solana-go/programs/token"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
@@ -92,37 +91,35 @@ type solanaCheckout struct {
 }
 
 // checkout opens a wallet-connected subscribe checkout for b naming wallet.
+// No checkout session offers one (a session's Solana option is a Solana Pay
+// request), so it is created straight on the engine.
 func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.PublicKey) *solanaCheckout {
 	t.Helper()
-	session, err := createCheckoutAttempt(t.Context(), s.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(b.id)}, PriceID: pid(s.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: s.option.PSP, TokenSymbol: "DUSD", Wallet: wallet.String()},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
+	got, err := s.w.engineCheckout(b.customer, checkout.CheckoutAttemptCreateRequest{
+		PriceID: s.price, SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
+		Payment: checkout.CheckoutAttemptPaymentRequest{Rail: s.option.PSP, TokenSymbol: "DUSD", Wallet: wallet.String()},
 	})
 	require.NoError(t, err)
-	got := s.w.attempt(session.ID)
-	require.Equal(t, "requires_action", got["status"], "%v", got)
-	next := got["next_action"].(map[string]any)
-	require.Equal(t, "solana_sign_transactions", next["type"])
-	txs := next["transactions"].([]any)
-	require.Len(t, txs, 1)
-	bundle, err := solanago.TransactionFromBase64(txs[0].(string))
+	require.Equal(t, "requires_action", got.Status, "%+v", got)
+	require.NotNil(t, got.NextAction, "%+v", got)
+	require.Equal(t, "solana_sign_transactions", got.NextAction.Type)
+	require.Len(t, got.NextAction.Transactions, 1)
+	bundle, err := solanago.TransactionFromBase64(got.NextAction.Transactions[0])
 	require.NoError(t, err)
-	expires, err := time.Parse(time.RFC3339, got["expires_at"].(string))
-	require.NoError(t, err)
+	require.NotNil(t, got.ExpiresAt)
 	var reference string
-	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT reference FROM billing.checkout_attempts WHERE id = $1`), session.ID.UUID()).Scan(&reference))
+	require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT reference FROM billing.checkout_attempts WHERE id = $1`), got.ID.UUID()).Scan(&reference))
 	return &solanaCheckout{
-		id:        session.ID,
+		id:        got.ID,
 		reference: solanago.MustPublicKeyFromBase58(reference),
-		expiresAt: expires,
+		expiresAt: *got.ExpiresAt,
 		bundle:    bundle,
 	}
 }
 
-// confirm is the merchant relaying the signature the buyer's wallet sent.
-func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (int, map[string]any) {
-	return b.w.confirmAttempt(c.id, signature)
+// confirm relays the signature the buyer's wallet sent.
+func (b *solanaBuyer) confirm(c *solanaCheckout, signature string) (*checkout.CheckoutAttemptResponse, error) {
+	return b.w.engineConfirm(c.id, signature)
 }
 
 // requireNothingGranted: no subscription, payment or entitlement, and the
@@ -134,7 +131,7 @@ func (s *solanaShop) requireNothingGranted(t *testing.T, b *solanaBuyer, c *sola
 	require.Empty(t, subs.Items)
 	require.Empty(t, s.w.payments(embedded, b.id))
 	require.False(t, b.entitled(s.key))
-	require.Equal(t, "requires_action", s.w.attempt(c.id)["status"])
+	require.Equal(t, "requires_action", s.w.attemptStatus(c.id))
 }
 
 func (s *solanaShop) land(t *testing.T, tx *solanago.Transaction, at time.Time) string {
@@ -240,11 +237,10 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		b := s.buyer(t, false) // first-time: the bundle initializes the authority too
 		c := s.checkout(t, b, b.wallet.PublicKey())
 		sig := s.land(t, signAs(t, c.bundle, b.wallet), s.w.clock.Now())
-		status, out := b.confirm(c, sig)
-		require.Equal(t, http.StatusOK, status, "%v", out)
-		done := unwrap(out)
-		require.Equal(t, "succeeded", done["status"], "%v", done)
-		require.NotEmpty(t, done["subscription_id"])
+		done, err := b.confirm(c, sig)
+		require.NoError(t, err)
+		require.Equal(t, "succeeded", done.Status, "%+v", done)
+		require.NotNil(t, done.SubscriptionID)
 		require.Equal(t, uint64(solanaPlanAmount), s.fake.Balance(s.merchant.PublicKey(), s.mint))
 
 		s.w.advance(time.Minute)
@@ -253,8 +249,8 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.Len(t, payments, 1)
 		require.Equal(t, sig, payments[0].TransactionID)
 
-		status, out = b.confirm(c, sig)
-		require.Equal(t, http.StatusOK, status, "a repeated confirm is idempotent: %v", out)
+		_, err = b.confirm(c, sig)
+		require.NoError(t, err, "a repeated confirm is idempotent")
 		require.Len(t, completed(s.w.payments(embedded, b.id)), 1)
 		paid.buyer, paid.session, paid.sig = b, c.id, sig
 	})
@@ -269,16 +265,16 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 			}
 		}
 		sig := s.land(t, build(t, ixs, b.wallet), s.w.clock.Now())
-		status, out := b.confirm(c, sig)
-		require.Equal(t, http.StatusBadRequest, status, "%v", out)
+		_, err := b.confirm(c, sig)
+		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
 		s.requireNothingGranted(t, b, c)
 
 		// Paying the amount by a plain transfer is not the merchant's pull either.
 		from, _, _ := solanago.FindAssociatedTokenAddress(b.wallet.PublicKey(), s.mint)
 		ixs = append(ixs, token.NewTransferInstruction(solanaPlanAmount, from, merchantATA, b.wallet.PublicKey(), nil).Build())
 		sig = s.land(t, build(t, ixs, b.wallet), s.w.clock.Now())
-		status, out = b.confirm(c, sig)
-		require.Equal(t, http.StatusBadRequest, status, "%v", out)
+		_, err = b.confirm(c, sig)
+		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
 		s.requireNothingGranted(t, b, c)
 	})
 
@@ -302,8 +298,8 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		_, err := s.fake.Land(c.bundle, s.w.clock.Now())
 		require.Error(t, err, "the prepared payment cannot land without the victim's signature")
 		for _, sig := range []string{"not-a-real-signature", victimSubscribe} {
-			status, out := attacker.confirm(c, sig)
-			require.Equal(t, http.StatusBadRequest, status, "%s: %v", sig, out)
+			_, err := attacker.confirm(c, sig)
+			require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation, sig)
 		}
 		s.requireNothingGranted(t, attacker, c)
 		require.Equal(t, uint64(3*solanaPlanAmount), s.fake.Balance(victim.wallet.PublicKey(), s.mint))
@@ -315,8 +311,8 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		require.NotEmpty(t, paid.sig, "needs the activated payment")
 		b := s.buyer(t, true)
 		c := s.checkout(t, b, paid.buyer.wallet.PublicKey())
-		status, out := b.confirm(c, paid.sig)
-		require.Equal(t, http.StatusBadRequest, status, "%v", out)
+		_, err := b.confirm(c, paid.sig)
+		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
 		s.requireNothingGranted(t, b, c)
 		require.Len(t, completed(s.w.payments(embedded, paid.buyer.id)), 1)
 	})
@@ -330,8 +326,8 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 			s.withPull(t, c, b, solanaPlanAmount, elsewhere),
 		} {
 			sig := s.land(t, tx, s.w.clock.Now())
-			status, out := b.confirm(c, sig)
-			require.Equal(t, http.StatusBadRequest, status, "%v", out)
+			_, err := b.confirm(c, sig)
+			require.ErrorIs(t, err, checkout.ErrCheckoutAttemptValidation)
 		}
 		s.requireNothingGranted(t, b, c)
 	})
@@ -340,8 +336,8 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 		b := s.buyer(t, true)
 		c := s.checkout(t, b, b.wallet.PublicKey())
 		sig := s.land(t, signAs(t, c.bundle, b.wallet), c.expiresAt.Add(solanaint.LateSettlementWindow+time.Minute))
-		status, out := b.confirm(c, sig)
-		require.Equal(t, http.StatusGone, status, "%v", out)
+		_, err := b.confirm(c, sig)
+		require.ErrorIs(t, err, checkout.ErrCheckoutAttemptExpired)
 		s.requireNothingGranted(t, b, c)
 	})
 

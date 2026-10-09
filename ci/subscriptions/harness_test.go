@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -362,7 +361,7 @@ func (w *world) start() {
 		w.cfg(cfg)
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": openrails.StripePSP{AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe}.PSPConfig(),
+		"stripe": openrails.StripePSP{AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe, PublishableKey: "pk_test_e2e"}.PSPConfig(),
 		"nmi":    openrails.NMIPSP{AccountID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
 		"ccbill": openrails.CCBillPSP{AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig(),
 	}
@@ -405,7 +404,6 @@ func (w *world) start() {
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return host, nil }))
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
-	enginesOf.Store(over, local)
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
 	config, err := local.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 	require.NoError(t, err)
@@ -822,9 +820,9 @@ func (c *customer) saveCard(rail string, card card) string {
 	return ""
 }
 
-// subscribe enrolls an engine-owned membership the way the demo does: the
-// application creates the catalog-authoritative session through the merchant
-// Client, then the signed-in payer reads the quote and confirms it.
+// subscribe enrolls an engine-owned membership: the merchant hands the
+// customer a checkout session through tp's Client, and the customer pays it
+// signed in with a saved card.
 func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
 	id := c.enrollOnce(tp, rail, priceID, entitlement, method)
@@ -841,20 +839,11 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 	return c.enrollOnce(tp, rail, priceID, entitlement, method)
 }
 
-func (c *customer) enrollOnce(_ topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
+func (c *customer) enrollOnce(tp topology, rail, priceID, _, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	// The host charges a saved card in process. Over HTTP it may only mint a
-	// session its customer pays signed in (identity_test.go).
-	attempt, err := createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
-	require.NoError(c.w.t, err)
-	require.Equal(c.w.t, billing.CheckoutAttemptSucceeded, attempt.Status, "%+v", attempt)
-	c.w.settle()
-	require.NotNil(c.w.t, attempt.SubscriptionID, "the attempt names the membership: %+v", attempt)
-	return *attempt.SubscriptionID
+	paid := c.mustCheckout(tp, order{price: pid(priceID), rail: rail, method: method, successURL: "https://e2e.test/return"})
+	require.NotNil(c.w.t, paid.SubscriptionID, "the payment names the membership: %+v", paid.CheckoutSessionPayResult)
+	return *paid.SubscriptionID
 }
 
 // identity is the customer as a host hands it to checkout.
@@ -879,39 +868,6 @@ func pid(id string) billing.PriceID {
 		panic(err)
 	}
 	return parsed
-}
-
-// attempt reads a checkout attempt from the engine, as its JSON.
-func (w *world) attempt(id billing.CheckoutAttemptID) map[string]any {
-	w.t.Helper()
-	got, err := getCheckoutAttempt(w.t.Context(), w.client[embedded], id)
-	require.NoError(w.t, err)
-	return asJSON(w.t, got)
-}
-
-// latestAttempt reads the customer's newest purchase attempt (card setups
-// excluded: they share the frozen clock's timestamp).
-func (w *world) latestAttempt(customerID string) map[string]any {
-	w.t.Helper()
-	var id uuid.UUID
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT id FROM billing.checkout_attempts WHERE customer_id = $1 AND mode <> 'payment_method' ORDER BY created_at DESC, id DESC LIMIT 1`), customerID).Scan(&id))
-	return w.attempt(billing.CheckoutAttemptID(id))
-}
-
-// confirmAttempt confirms a Solana attempt with the engine, as the host
-// relaying its buyer's wallet: the status and body the API would answer.
-func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (int, map[string]any) {
-	w.t.Helper()
-	got, err := confirmCheckoutAttempt(w.t.Context(), w.client[embedded], id, billing.ConfirmCheckoutAttemptParams{Signature: signature})
-	var status *billing.StatusError
-	if errors.As(asStatusError(err), &status) {
-		return status.Status, map[string]any{"error": asJSON(w.t, status.ErrorDetails)}
-	}
-	require.NoError(w.t, err)
-	if got.Status == billing.CheckoutAttemptProcessing {
-		return http.StatusAccepted, asJSON(w.t, got)
-	}
-	return http.StatusOK, asJSON(w.t, got)
 }
 
 // asJSON is v as its wire JSON object.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
 // SEC: checkout money is the catalog's. Hosts forward browser-chosen price
@@ -32,15 +33,12 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			cheap := w.membership("content:basic", 1_000_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			request := func(priceID billing.PriceID, entitlement string) billing.CreateCheckoutAttemptParams {
-				return billing.CreateCheckoutAttemptParams{
-					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: priceID,
-					IdempotencyKey: "terms-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-				}
-			}
-
-			_, err := createCheckoutAttempt(ctx, client, request(cheap.ID, "content:vip"))
+			// The engine refuses a price that does not grant an asserted
+			// entitlement; no session asserts one, but the check stands.
+			_, err := w.engineCheckout(c, checkout.CheckoutAttemptCreateRequest{
+				PriceID: cheap.ID.String(), Entitlement: "content:vip", OfferKind: billing.OfferRecurring,
+				Payment: checkout.CheckoutAttemptPaymentRequest{Rail: rail, PaymentMethodID: method},
+			})
 			require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
 			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
@@ -51,7 +49,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			archived := w.membership("content:archived", 1_000_000)
 			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, PurchaseAction: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
 			require.NoError(t, err)
-			_, err = createCheckoutAttempt(ctx, client, request(archived.ID, "content:archived"))
+			_, err = c.sell(embedded, order{price: archived.ID})
 			require.Error(t, err, "an archived price is not purchasable")
 
 			// The caller cannot name a currency or a quantity.
@@ -62,9 +60,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			code, _ := errorOf(body)
 			require.Equal(t, billing.CodeUnknownField, code)
 
-			_, err = createCheckoutAttempt(ctx, client, request(member.ID, "content:vip"))
-			require.NoError(t, err)
-			w.settle()
+			c.mustCheckout(embedded, order{price: member.ID, rail: rail, method: method})
 			ledger := w.railLedger(rail)
 			require.Len(t, ledger, 1)
 			require.EqualValues(t, 999, ledger[0].Amount, "the quoted catalog amount, in cents")
@@ -92,31 +88,40 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			require.NoError(t, err)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			buy := func(client *openrails.Client) error {
-				_, err := createCheckoutAttempt(context.WithoutCancel(t.Context()), client, billing.CreateCheckoutAttemptParams{
-					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
-					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-				})
-				return err
+			// Each purchase is its own session, minted and paid on one process.
+			buy := func(mint *openrails.Client, server string) error {
+				link, err := mint.CreateCheckoutSession(context.WithoutCancel(t.Context()), billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
+				if err != nil {
+					return err
+				}
+				ctx := context.WithoutCancel(t.Context())
+				session := hostedSession{w: w, id: link.ID}
+				option, err := session.optionOf(ctx, server, rail)
+				if err != nil {
+					return err
+				}
+				return succeeded(session.payAt(ctx, server, option, c, order{method: method}))
 			}
 			g := w.chargeGate(rail)
 			var first, racers sync.WaitGroup
 			first.Add(1)
 			go func() {
 				defer first.Done()
-				t.Logf("first purchase: %v", buy(client))
+				t.Logf("first purchase: %v", buy(client, w.server.URL))
 			}()
 			select {
 			case <-g.arrived:
 			case <-time.After(20 * time.Second):
 				t.Fatal("the first purchase never reached the provider")
 			}
-			for _, other := range []*openrails.Client{replica.client, w.client[remote]} {
+			for _, other := range []struct {
+				mint   *openrails.Client
+				server string
+			}{{replica.client, replica.server.URL}, {w.client[remote], w.server.URL}} {
 				racers.Add(1)
 				go func() {
 					defer racers.Done()
-					t.Logf("racing purchase: %v", buy(other))
+					t.Logf("racing purchase: %v", buy(other.mint, other.server))
 				}()
 			}
 			releaseAfterRacers(t, g, &racers)
@@ -126,7 +131,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			w.settle()
 			require.Len(t, w.railLedger(rail), 1, "one charge for one permanent product")
 			require.True(t, c.entitled("content:post"))
-			require.Error(t, buy(client), "an owned permanent product cannot be bought again")
+			require.Error(t, buy(client, w.server.URL), "an owned permanent product cannot be bought again")
 			w.settle()
 			require.Len(t, w.railLedger(rail), 1)
 		})

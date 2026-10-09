@@ -58,15 +58,10 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 	return price
 }
 
-func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
+// buyWith pays a session for price with a card saved on rail.
+func (c *customer) buyWith(rail, method string, price *billing.Price) {
 	c.w.t.Helper()
-	_, err := createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: price.ID,
-		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-	})
-	require.NoError(c.w.t, err)
-	c.w.settle()
+	c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method, successURL: "https://e2e.test/return"})
 }
 
 func (c *customer) entitledAt(entitlement string, at time.Time) bool {
@@ -89,11 +84,11 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			start := w.clock.Now()
-			c.buyWith(rail, method, price, billing.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price)
 			first := completed(w.payments(embedded, c.id))
 			require.Len(t, first, 1)
 			w.advance(time.Hour)
-			c.buyWith(rail, method, price, billing.OfferFinite, "content:pass")
+			c.buyWith(rail, method, price)
 			paid := completed(w.payments(embedded, c.id))
 			require.Len(t, paid, 2)
 			require.True(t, c.entitledAt("content:pass", start.Add(45*day)), "the second pass is stacked after the first")
@@ -301,12 +296,10 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
-			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
-			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
+		_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/return",
 		})
-		require.Error(t, err, "a live key is disarmed in a sandbox deployment")
+		require.ErrorIs(t, err, billing.ErrInvalid, "a live key is disarmed in a sandbox deployment: nothing sells")
 		recorder.mu.Lock()
 		defer recorder.mu.Unlock()
 		for _, call := range recorder.writes {

@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -73,10 +72,10 @@ func (w *world) refundGate(rail string) *gate {
 	return w.nmi.hold(newGate(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/refund") }, false))
 }
 
-// SEC: double spend on one checkout. While the first request's charge is in
-// flight at the provider, the same checkout (one idempotency key) is sent
-// again on another replica and on the same one. The provider sees one charge
-// and exactly one membership is created.
+// SEC: double spend on one checkout. While the first pay's charge is in
+// flight at the provider, the same session is paid again on another replica
+// and on the same one. The provider sees one charge and exactly one
+// membership is created.
 func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -87,35 +86,32 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			request := billing.CreateCheckoutAttemptParams{
-				OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: "content:members", PriceID: price.ID,
-				IdempotencyKey: "race-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-			}
+			session, err := c.sell(embedded, order{price: price.ID})
+			require.NoError(t, err)
+			option := session.optionAt(w.server.URL, rail)
 			g := w.chargeGate(rail)
 			var first, racers sync.WaitGroup
 			outcomes := make(chan error, 8)
-			send := func(wg *sync.WaitGroup, client *openrails.Client) {
+			send := func(wg *sync.WaitGroup, server string) {
 				defer wg.Done()
-				_, err := createCheckoutAttempt(context.WithoutCancel(t.Context()), client, request)
-				outcomes <- err
+				outcomes <- succeeded(session.payAt(context.WithoutCancel(t.Context()), server, option, c, order{method: method}))
 			}
 			first.Add(1)
-			go send(&first, w.client[embedded])
+			go send(&first, w.server.URL)
 			select {
 			case <-g.arrived:
 			case <-time.After(20 * time.Second):
 				t.Fatal("the first request never reached the provider")
 			}
-			for _, client := range []*openrails.Client{w.client[embedded], replica.client, replica.client, w.client[remote]} {
+			for _, server := range []string{w.server.URL, replica.server.URL, replica.server.URL, w.server.URL} {
 				racers.Add(1)
-				go send(&racers, client)
+				go send(&racers, server)
 			}
 			releaseAfterRacers(t, g, &racers)
 			first.Wait()
 			close(outcomes)
 			for err := range outcomes {
-				t.Logf("create -> %v", err)
+				t.Logf("pay -> %v", err)
 			}
 			w.stripe.unhold()
 			w.nmi.unhold()

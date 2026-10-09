@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -82,6 +83,11 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) 
 func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	w := prepareWorld(t, 12)
 	fake, merchant := withSolana(t, w)
+	declared := w.declare
+	w.declare = func(psps map[string]openrails.PSPConfig) {
+		declared(psps)
+		delete(psps["stripe"].Settings, "publishable_key")
+	}
 	w.start()
 
 	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
@@ -128,18 +134,16 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	// The advertised Solana option is sellable: a subscription session opens
 	// a Solana Pay request for the published plan.
 	buyer := w.newCustomer()
-	session, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(priceID(t, w, key, key+"-monthly")),
-		IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: solana.PSP, TokenSymbol: solana.PublicConfig["token_symbol"]},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+	paid, err := buyer.checkout(embedded, order{price: pid(priceID(t, w, key, key+"-monthly")), rail: "solana", successURL: "https://e2e.test/return"})
 	require.NoError(t, err)
-	require.Equal(t, "subscription", session.Mode)
-	require.Equal(t, billing.CheckoutAttemptRequiresAction, session.Status)
-	require.NotNil(t, session.NextAction, "%+v", session)
-	require.Equal(t, "solana_pay", session.NextAction.Type)
-	require.True(t, strings.HasPrefix(*session.NextAction.URL, "solana:https://e2e.test/billing/v1/checkout-attempts/"+session.ID.String()+"/solana-pay"), "%+v", session.NextAction)
+	require.Equal(t, "requires_action", paid.Status)
+	require.NotNil(t, paid.NextAction, "%+v", paid.CheckoutSessionPayResult)
+	require.Equal(t, "solana_pay", paid.NextAction.Type)
+	attempt := paid.session.attemptID()
+	var mode string
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT mode FROM billing.checkout_attempts WHERE id = $1`), attempt.UUID()).Scan(&mode))
+	require.Equal(t, "subscription", mode)
+	require.True(t, strings.HasPrefix(*paid.NextAction.URL, "solana:https://e2e.test/billing/v1/checkout-attempts/"+attempt.String()+"/solana-pay"), "%+v", paid.NextAction)
 }
 
 func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
@@ -186,15 +190,17 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	require.Contains(t, options, "nmi")
 
 	buyer := w.newCustomer()
-	_, err = createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id), VerifiedEmail: "buyer@e2e.test"}, PriceID: pid(priceID(t, w, key, key+"-monthly")),
-		IdempotencyKey: "ccbill-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "ccbill", BillingDetails: &billing.BillingDetails{Name: new("E2E Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
-	require.Error(t, err, "a named CCBill PSP still cannot enroll")
-	require.True(t, errors.Is(err, billing.ErrInvalid), "%v", err)
-	require.Contains(t, err.Error(), "mode_unsupported")
+	session, err := buyer.sell(embedded, order{price: pid(priceID(t, w, key, key+"-monthly")), successURL: "https://e2e.test/return"})
+	require.NoError(t, err)
+	for _, raw := range session.read()["options"].([]any) {
+		require.NotEqual(t, "ccbill", raw.(map[string]any)["rail"], "a CCBill PSP is never offered a new subscription")
+	}
+	status, out := session.pay(map[string]any{"option_id": "option_ccbill"})
+	require.Equal(t, http.StatusUnprocessableEntity, status, "%v", out)
+	require.Equal(t, "checkout_request_invalid", hostedErrorCode(out))
+	var attempts int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.checkout_attempts WHERE customer_id = $1`), buyer.id).Scan(&attempts))
+	require.Zero(t, attempts, "no attempt is made on CCBill")
 }
 
 func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {

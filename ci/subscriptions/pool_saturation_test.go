@@ -49,14 +49,18 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 					return
 				}
 			}
-			session, err := createCheckoutAttempt(ctx, client, billing.CreateCheckoutAttemptParams{
-				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1",
-				PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Pool Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
-			})
-			if err == nil && session.Status != "succeeded" {
-				err = errUnexpected(string(session.Status))
+			link, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
+			if err != nil {
+				errs[i] = err
+				return
 			}
-			errs[i] = err
+			session := hostedSession{w: w, id: link.ID}
+			option, err := session.optionOf(ctx, w.server.URL, "nmi")
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			errs[i] = succeeded(session.payAt(ctx, w.server.URL, option, c, order{token: w.nmi.Tokenize(visa)}))
 		}()
 	}
 	close(start)
@@ -68,7 +72,3 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 	w.settle()
 	require.Len(t, w.nmi.Ledger(""), requests, "one charge per buyer")
 }
-
-type errUnexpected string
-
-func (e errUnexpected) Error() string { return "unexpected session status " + string(e) }

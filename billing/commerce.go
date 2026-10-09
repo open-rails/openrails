@@ -218,13 +218,6 @@ type NextAction struct {
 	Transactions []string `json:"transactions"`
 }
 
-// ConfirmCheckoutAttemptParams completes a Solana attempt the buyer's wallet
-// signed.
-type ConfirmCheckoutAttemptParams struct {
-	Signature string `json:"signature"`
-	Wallet    string `json:"wallet"`
-}
-
 // PaymentFailure is the customer-facing reason a card payment was definitely
 // declined. Reason is provider-neutral (incorrect_cvc, incorrect_zip,
 // incorrect_address, incorrect_number, expired_card, invalid_expiry,

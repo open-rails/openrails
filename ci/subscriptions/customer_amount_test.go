@@ -63,8 +63,8 @@ func TestHostedCreditDepositSnapshot(t *testing.T) {
 	require.Zero(t, current.Revision, "deposits are not catalog price revisions")
 }
 
-// The selected amount participates in the durable buyer/request identity, so
-// a retried pay action cannot silently become a different-sized deposit.
+// The selected amount is the session's, fixed at mint: a retried pay replays
+// the deposit and cannot silently become a different-sized one.
 func TestCreditDepositAttemptIdempotency(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
@@ -74,20 +74,21 @@ func TestCreditDepositAttemptIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	buyer := w.newCustomer()
 	method := buyer.saveCard("nmi", visa)
-	request := billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price.ID, Amount: new(int64(100_000_000)), IdempotencyKey: "chosen-deposit", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}}
-	result, err := createCheckoutAttempt(t.Context(), client, request)
+	deposit := order{price: price.ID, amount: new(int64(100_000_000)), rail: "nmi", method: method}
+	session, err := buyer.sell(embedded, deposit)
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, result.Status)
-	require.Equal(t, int64(100_000_000), *result.Amount)
-	replay, err := createCheckoutAttempt(t.Context(), client, request)
+	require.Equal(t, "100000000", session.read()["due_today"])
+	result, err := session.buy(buyer, deposit)
 	require.NoError(t, err)
-	require.Equal(t, result.ID, replay.ID)
-	request.Amount = new(int64(200_000_000))
-	_, err = createCheckoutAttempt(t.Context(), client, request)
-	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-	request.Amount = nil
-	_, err = createCheckoutAttempt(t.Context(), client, request)
-	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
+	require.Equal(t, "succeeded", result.Status)
+	replay, err := session.buy(buyer, deposit)
+	require.NoError(t, err)
+	require.Equal(t, result.PaymentID, replay.PaymentID)
+	for _, amount := range []any{"200000000", nil} {
+		status, out := session.payAs(buyer, map[string]any{"option_id": session.option("nmi"), "payment_method_id": method, "amount": amount})
+		require.Equal(t, http.StatusBadRequest, status, "the page cannot name another amount: %v", out)
+	}
 	w.settle()
 	require.Len(t, w.nmi.Sales(), 1, "only the original deposit was charged")
+	require.Equal(t, "100.00", w.nmi.LastSale().Amount)
 }

@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -20,19 +19,11 @@ func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	w := newWorld(t)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: remote, price: w.membership("content:members", 9_990_000).ID.String()}
 
-	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, billing.ErrPaymentRefused)
-	var status *billing.StatusError
-	require.True(t, errors.As(err, &status))
-	require.Equal(t, billing.CodeCardDeclined, status.Code)
-	failure, ok := billing.PaymentFailureFrom(err)
-	require.True(t, ok)
+	paid, err := h.pay("pay-cvc", w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"}))
+	failure := declinedPay(t, paid, err)
 	require.Equal(t, "incorrect_cvc", failure.Reason)
-	require.Equal(t, "cvc", failure.Field)
-	reason, ok := billing.DeclineReasonFrom(err)
-	require.True(t, ok)
-	require.Equal(t, billing.DeclineIncorrectCVC, reason, "decline_reason carries the AVS/CVV evidence too")
-	require.Equal(t, reason.Failure(), *failure)
+	require.Equal(t, "cvc", failure.Field, "the page points at the field to correct")
+	require.Equal(t, billing.DeclineIncorrectCVC.Failure(), failure, "the CVV evidence decides the customer's reason")
 	require.Empty(t, h.subscriptions())
 	require.Empty(t, h.methods())
 }

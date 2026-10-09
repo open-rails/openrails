@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -62,12 +61,11 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", refusedCard), "blocked on replica %s", r.replica.name)
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
 			for _, tp := range []topology{embedded, remote} {
-				_, err := createCheckoutAttempt(t.Context(), r.client[tp], billing.CreateCheckoutAttemptParams{
-					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
-					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
-					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-				})
-				require.Error(t, err, "%s checkout for a blocked customer", tp)
+				link, err := r.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
+				require.NoError(t, err)
+				_, err = hostedSession{w: r, id: link.ID}.buy(c, order{rail: "nmi", token: r.nmi.Tokenize(refusedCard)})
+				blocked := requireStatus(t, err, http.StatusTooManyRequests)
+				require.Equal(t, "card_attempts_blocked", blocked.Code, "%s checkout for a blocked customer", tp)
 			}
 		}
 		require.Equal(t, 6, f.refusedSaves(), "blocked attempts never reach the gateway")
@@ -109,21 +107,21 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 	})
 }
 
-// SEC: a host that checks out in-process through the Client passes each
-// customer's client address, and the decline ledger counts it as it counts the
-// customer routes. One address testing cards through many accounts is
-// blocked; a card-testing wave from many accounts and addresses is attack
-// mode, where a tester's next card is refused before the gateway while a clean
-// buyer still pays. A client_ip that is not an IP address is refused.
+// SEC: a checkout counts each pay's client address, as the site's trusted
+// proxy forwards it, as the customer routes do. One address testing cards
+// through many accounts is blocked; a card-testing wave from many accounts and
+// addresses is attack mode, where a tester's next card is refused before the
+// gateway while a clean buyer still pays. A forwarded address that is not an
+// IP address is refused.
 func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}
-	pay := func(w *world, tp topology, price string, c *customer, ip string, cd card) error {
-		_, err := createCheckoutAttempt(t.Context(), w.client[tp], billing.CreateCheckoutAttemptParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id), ClientIP: ip}, PriceID: pid(price), IdempotencyKey: "host-" + uuid.NewString(),
-			PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(cd), BillingDetails: &billing.BillingDetails{Name: new("Host Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
-		})
-		return err
+	pay := func(w *world, tp topology, price billing.PriceID, c *customer, ip string, cd card) error {
+		return succeeded(c.checkout(tp, order{price: price, rail: "nmi", token: w.nmi.Tokenize(cd), ip: ip}))
+	}
+	isDecline := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorContains(t, err, "checkout failed")
 	}
 	refused := func(t *testing.T, err error, status int) {
 		t.Helper()
@@ -139,12 +137,12 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		for range 6 {
-			require.ErrorIs(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.20", declined), billing.ErrPaymentRefused)
+			isDecline(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", declined))
 		}
 		sales := len(w.nmi.Sales())
-		refused(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.20", visa), http.StatusTooManyRequests)
+		refused(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.20", visa), http.StatusTooManyRequests)
 		require.Len(t, w.nmi.Sales(), sales, "a blocked attempt never reaches the gateway")
-		require.NoError(t, pay(w, embedded, price.String(), w.newCustomer(), "192.0.2.21", visa), "another address pays")
+		require.NoError(t, pay(w, embedded, price, w.newCustomer(), "192.0.2.21", visa), "another address pays")
 	})
 	t.Run("wave", func(t *testing.T) {
 		t.Parallel()
@@ -153,19 +151,19 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		var tester *customer
 		for i := range 100 {
 			tester = w.newCustomer()
-			require.ErrorIs(t, pay(w, embedded, price.String(), tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined), billing.ErrPaymentRefused)
+			isDecline(t, pay(w, embedded, price, tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined))
 		}
 		sales := len(w.nmi.Sales())
-		refused(t, pay(w, embedded, price.String(), tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)
+		refused(t, pay(w, embedded, price, tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)
 		require.Len(t, w.nmi.Sales(), sales, "in attack mode one recent decline blocks, before the gateway")
-		require.NoError(t, pay(w, embedded, price.String(), w.newCustomer(), "2001:db8:77:1000::1", visa), "a clean buyer still pays")
+		require.NoError(t, pay(w, embedded, price, w.newCustomer(), "2001:db8:77:1000::1", visa), "a clean buyer still pays")
 	})
 	t.Run("invalid", func(t *testing.T) {
 		t.Parallel()
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		for _, tp := range []topology{embedded, remote} {
-			refused(t, pay(w, tp, price.String(), w.newCustomer(), "not-an-ip", visa), http.StatusBadRequest)
+			refused(t, pay(w, tp, price, w.newCustomer(), "not-an-ip", visa), http.StatusBadRequest)
 		}
 		require.Empty(t, w.nmi.Sales())
 	})

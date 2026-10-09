@@ -81,7 +81,7 @@ func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessi
 		Advertise:                   func(options []billing.CheckoutOption) { advertiseCheckoutOptions(options, config) },
 	})
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.JSON(http.StatusCreated, link)
@@ -98,7 +98,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 	}
 	session, err := svc.GetCheckoutSession(r.Request.Context(), r.Param("id"), checkoutViewer(r))
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(session)
@@ -123,7 +123,7 @@ func PayCheckoutSession(r *httprequest.Request) {
 	}
 	result, err := svc.PayCheckoutSession(r.Request.Context(), r.Param("id"), body, r.ClientIP(), checkoutViewer(r))
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	if result.Status == "failed" && result.Failure != nil {

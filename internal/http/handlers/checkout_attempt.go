@@ -28,22 +28,7 @@ func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.Payer {
 	return scope.Payer(c)
 }
 
-// checkoutAttemptErrorContext carries per-request context threaded into
-// actionable checkout error metadata (e.g. the usdc_funding payload on the
-// pre-flight insufficient-USDC 402), so the frontend can drive a funding flow.
-type checkoutAttemptErrorContext struct {
-	Rail              string
-	Wallet            string
-	CheckoutAttemptID string
-}
-
-// WriteCheckoutAttemptError answers err as a checkout attempt's route does,
-// for a caller that runs the engine's checkout itself (the e2e suite).
-func WriteCheckoutAttemptError(w http.ResponseWriter, req *http.Request, err error) {
-	writeCheckoutAttemptError(httprequest.NewHTTP(w, req, nil), err, checkoutAttemptErrorContext{})
-}
-
-func writeCheckoutAttemptError(r *httprequest.Request, err error, ectx checkoutAttemptErrorContext) {
+func writeCheckoutAttemptError(r *httprequest.Request, err error) {
 	var blocked *checkout.CardAttemptsBlockedError
 	if errors.As(err, &blocked) {
 		writeCardAttemptsBlocked(r, blocked.RetryAfter)
@@ -91,15 +76,6 @@ func writeCheckoutAttemptError(r *httprequest.Request, err error, ectx checkoutA
 			"amount_base_units":    strconv.FormatUint(need, 10),
 			"balance_base_units":   strconv.FormatUint(have, 10),
 			"shortfall_base_units": strconv.FormatUint(short, 10),
-		}
-		if w := strings.TrimSpace(ectx.Wallet); w != "" {
-			funding["wallet"] = w
-		}
-		if id := strings.TrimSpace(ectx.CheckoutAttemptID); id != "" {
-			funding["checkout_attempt_id"] = id
-		}
-		if p := strings.TrimSpace(ectx.Rail); p != "" {
-			funding["rail"] = p
 		}
 		r.APIError(apiErr.WithMetadata(map[string]any{"usdc_funding": funding}))
 		return

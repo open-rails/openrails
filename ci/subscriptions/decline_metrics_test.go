@@ -81,9 +81,9 @@ func TestDeclineMetrics(t *testing.T) {
 	since := w.clock.Now().Add(-time.Hour)
 	price := w.membership("content:members", 9_990_000)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
-	_, err := h.pay("pay-cvc", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"})})
-	require.ErrorIs(t, err, billing.ErrPaymentRefused)
-	session, err := h.pay("pay-fixed", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	paid, err := h.pay("pay-cvc", w.nmi.Tokenize(card{Brand: "visa", Last4: "0005", Decline: "200", CVV: "N"}))
+	declinedPay(t, paid, err)
+	session, err := h.pay("pay-fixed", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
 	w.settle()
 

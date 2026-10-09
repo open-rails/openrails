@@ -49,11 +49,11 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(userID))}})
 	require.NoError(t, err)
-	_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "refund@example.test"}, PriceID: price.ID,
-		Entitlement: "content:refunded", OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
-		IdempotencyKey: "security-" + uuid.NewString(), SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
+	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "refund@example.test"}, PriceID: price.ID, SuccessURL: "https://example.test/success",
 	})
+	require.NoError(t, err)
+	_, err = session.pay("stripe", nil)
 	require.NoError(t, err)
 	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
 

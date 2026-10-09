@@ -36,7 +36,7 @@ func CreatePaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.CreateStripeMethodSetup(r.Request.Context(), req.PSPID.UUID(), r.Header("Idempotency-Key"), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(result)
@@ -56,7 +56,7 @@ func GetPaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.StripeMethodSetup(r.Request.Context(), id.UUID(), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(result)
@@ -76,7 +76,7 @@ func ConfirmPaymentMethodSetup(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.ConfirmStripeMethodSetup(r.Request.Context(), id.UUID(), checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(result)

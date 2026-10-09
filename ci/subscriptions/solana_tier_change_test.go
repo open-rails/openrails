@@ -81,14 +81,15 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
 	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options(billing.GetCheckoutConfigParams{ProductKey: "basic-" + sfx, PriceKey: "basic-" + sfx + "-monthly"})["solana"], price: price("basic"), key: "basic-" + sfx}
 	c := shop.checkout(t, b, b.wallet.PublicKey())
-	status, out := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
-	require.Equal(t, http.StatusOK, status, "%v", out)
-	sub := unwrap(out)["subscription_id"].(string)
+	done, err := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
+	require.NoError(t, err)
+	require.NotNil(t, done.SubscriptionID)
+	sub := done.SubscriptionID.String()
 	w.advance(time.Minute)
 	require.True(t, b.entitled("basic-"+sfx))
 
 	// The ungrouped product is refused on every route, and grants nothing.
-	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip")})
+	status, out := b.call(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip")})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	require.Contains(t, fmt.Sprint(out), "tier group")
 	status, out = b.call(http.MethodPost, "/subscriptions/"+sub+"/change-tier", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip"), "signature": solanago.Signature{}.String()})

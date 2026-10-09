@@ -134,20 +134,14 @@ func (w *world) permanent(entitlement string) *billing.Price {
 // buy completes a permanent purchase through checkout, as enrollment does.
 func (c *customer) buy(priceID, entitlement, method string) {
 	c.w.t.Helper()
-	c.purchase(billing.OfferPermanent, priceID, entitlement, method)
+	c.purchase(priceID, method)
 	require.True(c.w.t, c.entitled(entitlement))
 }
 
-func (c *customer) purchase(kind billing.OfferKind, priceID, entitlement, method string) {
+// purchase pays a session for the price with a saved Stripe card.
+func (c *customer) purchase(priceID, method string) {
 	c.w.t.Helper()
-	attempt, err := createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		OfferKind: kind, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
-	require.NoError(c.w.t, err)
-	require.Equal(c.w.t, billing.CheckoutAttemptSucceeded, attempt.Status, "%+v", attempt)
-	c.w.settle()
+	c.mustCheckout(embedded, order{price: pid(priceID), rail: "stripe", method: method, successURL: "https://e2e.test/return"})
 }
 
 func uuidShort() string { return uuid.NewString()[:8] }
@@ -195,7 +189,7 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 		require.NoError(t, err)
 	}
 	method := c.saveCard("stripe", visa)
-	got := w.count(func() { c.purchase(billing.OfferFinite, price.ID.String(), "content:cov-b", method) })
+	got := w.count(func() { c.purchase(price.ID.String(), method) })
 	require.Equal(t, 1, got["ProductAccessCoverage"], "one coverage query for the product: %v", got)
 	// The rental stacks after the customer's latest window of the product.
 	start := now.Add(10 * 24 * time.Hour)

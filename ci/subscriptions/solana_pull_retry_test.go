@@ -5,7 +5,6 @@ package subscriptions_test
 import (
 	"context"
 	"errors"
-	"net/http"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/failpoint"
 )
 
@@ -30,10 +28,10 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	b := s.buyer(t, false)
 	c := s.checkout(t, b, b.wallet.PublicKey())
 	sig := s.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now())
-	status, out := b.confirm(c, sig)
-	require.Equal(t, http.StatusOK, status, "%v", out)
-	sub, err := billing.ParseSubscriptionID(unwrap(out)["subscription_id"].(string))
+	done, err := b.confirm(c, sig)
 	require.NoError(t, err)
+	require.NotNil(t, done.SubscriptionID)
+	sub := *done.SubscriptionID
 
 	// The wallet is empty when the period ends: the pull is refused on-chain.
 	s.fake.Fund(b.wallet.PublicKey(), s.mint, 0)

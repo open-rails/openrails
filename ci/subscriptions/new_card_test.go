@@ -3,7 +3,7 @@
 package subscriptions_test
 
 import (
-	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -14,9 +14,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A hosted checkout (#1085) relays the customer's one "Subscribe" click with a
-// fresh Collect.js token: OpenRails saves the card, quotes the price and
-// enrolls it in one merchant call.
+// A hosted checkout (#1085): the customer's one "Subscribe" click on the
+// payment page sends a fresh Collect.js token, and OpenRails saves the card,
+// quotes the price and enrolls it in one pay.
 type hostedPay struct {
 	w     *world
 	c     *customer
@@ -24,16 +24,36 @@ type hostedPay struct {
 	price string
 }
 
-func (h hostedPay) pay(key string, payment billing.CheckoutPaymentOptions) (*billing.CheckoutAttempt, error) {
+// hostedPaySessions are the sessions hostedPay minted, by customer and key.
+var hostedPaySessions sync.Map
+
+// session is the session key names: the first pay with a key mints it through
+// tp's Client, later pays with it pay the same session again.
+func (h hostedPay) session(key string) hostedSession {
 	h.w.t.Helper()
-	payment.PSP = "nmi"
-	if payment.PaymentToken != "" {
-		payment.BillingDetails = &billing.BillingDetails{Name: new("Hosted Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}
+	if s, ok := hostedPaySessions.Load(h.c.id + "/" + key); ok {
+		return s.(hostedSession)
 	}
-	return createCheckoutAttempt(h.w.t.Context(), h.w.client[h.tp], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(h.c.id)}, PriceID: pid(h.price), IdempotencyKey: key,
-		PaymentOptions: payment,
-	})
+	s, err := h.c.sell(h.tp, order{price: pid(h.price)})
+	require.NoError(h.w.t, err)
+	hostedPaySessions.Store(h.c.id+"/"+key, s)
+	return s
+}
+
+// pay is the customer paying key's session with a card the page tokenized.
+func (h hostedPay) pay(key, token string) (*sessionPaid, error) {
+	h.w.t.Helper()
+	return h.session(key).buy(h.c, order{rail: "nmi", token: token})
+}
+
+// declinedPay is a pay the issuer declined: nothing charged, the page shows
+// why and takes another card.
+func declinedPay(t *testing.T, paid *sessionPaid, err error) billing.PaymentFailure {
+	t.Helper()
+	require.NoError(t, err)
+	require.Equal(t, "failed", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+	require.NotNil(t, paid.Failure, "a decline explains itself: %+v", paid.CheckoutSessionPayResult)
+	return *paid.Failure
 }
 
 func (h hostedPay) methods() []billing.PaymentMethod {
@@ -63,9 +83,9 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			h := hostedPay{w: w, c: w.newCustomer(), tp: tp, price: w.membership("content:members", 9_990_000).ID.String()}
 			token := w.nmi.Tokenize(visa)
 
-			session, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
+			session, err := h.pay("pay-1", token)
 			require.NoError(t, err)
-			require.Equal(t, "succeeded", string(session.Status))
+			require.Equal(t, "succeeded", session.Status)
 			require.NotNil(t, session.SubscriptionID)
 			w.settle()
 			require.True(t, h.c.entitled("content:members"))
@@ -81,21 +101,26 @@ func TestHostedNewCardSubscription(t *testing.T) {
 			require.Len(t, w.nmi.ledger(""), 1, "one initial charge")
 
 			// A retried or double-submitted pay replays the accepted enrollment.
+			paid := h.session("pay-1")
+			option := paid.optionAt(w.server.URL, "nmi")
+			outcomes := make(chan error, 2)
 			var wg sync.WaitGroup
 			for range 2 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					again, err := h.pay("pay-1", billing.CheckoutPaymentOptions{PaymentToken: token})
-					if err == nil {
-						require.Equal(t, session.ID, again.ID)
-						require.Equal(t, "succeeded", string(again.Status))
-					} else {
-						require.ErrorIs(t, err, billing.ErrConflict, "a concurrent duplicate is refused, never charged")
+				wg.Go(func() {
+					again, err := paid.payAt(t.Context(), w.server.URL, option, h.c, order{token: token})
+					if err == nil && (again.Status != "succeeded" || *again.SubscriptionID != *session.SubscriptionID) {
+						err = fmt.Errorf("replayed as %+v", again.CheckoutSessionPayResult)
 					}
-				}()
+					outcomes <- err
+				})
 			}
 			wg.Wait()
+			close(outcomes)
+			for err := range outcomes {
+				if err != nil {
+					require.ErrorIs(t, err, billing.ErrConflict, "a concurrent duplicate is refused, never charged")
+				}
+			}
 			w.settle()
 			require.Len(t, w.nmi.ledger(""), 1, "no second charge")
 			require.Len(t, h.methods(), 1, "no second saved card")
@@ -112,11 +137,9 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: w.membership("content:members", 9_990_000).ID.String()}
 	vaults := w.vaultCount()
 
-	_, err := h.pay("pay-declined", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})})
-	require.ErrorIs(t, err, billing.ErrPaymentRefused)
-	var status *billing.StatusError
-	require.True(t, errors.As(err, &status))
-	require.Equal(t, billing.CodeCardDeclined, status.Code)
+	paid, err := h.pay("pay-declined", w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"}))
+	failure := declinedPay(t, paid, err)
+	require.Equal(t, "insufficient_funds", failure.Reason)
 	w.settle()
 	require.Empty(t, h.subscriptions())
 	require.Empty(t, h.methods(), "the declined card is not kept")
@@ -124,9 +147,9 @@ func TestHostedNewCardSubscriptionDeclined(t *testing.T) {
 	require.False(t, h.c.entitled("content:members"))
 
 	// The next attempt with another card succeeds.
-	session, err := h.pay("pay-retry", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	session, err := h.pay("pay-retry", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", string(session.Status))
+	require.Equal(t, "succeeded", session.Status)
 	require.Len(t, h.subscriptions(), 1)
 	require.Len(t, h.methods(), 1)
 }
@@ -141,14 +164,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			session, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
-				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "saved-" + uuid.NewString(),
-				PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-				SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-			})
-			require.NoError(t, err)
-			require.Equal(t, "succeeded", string(session.Status))
-			w.settle()
+			c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method, successURL: "https://e2e.test/return"})
 			require.True(t, c.entitled("content:members"))
 		})
 	}
@@ -181,25 +197,24 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	h := hostedPay{w: w, c: w.newCustomer(), tp: embedded, price: price.ID.String()}
-	session, err := h.pay("sale-1", billing.CheckoutPaymentOptions{PaymentToken: w.nmi.Tokenize(visa)})
+	session, err := h.pay("sale-1", w.nmi.Tokenize(visa))
 	require.NoError(t, err)
-	require.Equal(t, "succeeded", string(session.Status))
+	require.Equal(t, "succeeded", session.Status)
 	w.settle()
 	require.True(t, h.c.entitled("content:post"))
 	require.Empty(t, h.subscriptions())
 	require.Len(t, w.nmi.ledger(""), 1)
 }
 
-// A Stripe card setup is a checkout attempt the merchant can read.
-func TestStripeCardSetupReadsAsAnAttempt(t *testing.T) {
+// A Stripe card setup is read back by its customer.
+func TestStripeCardSetupReadsBack(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
 	method := c.saveCard("stripe", visa)
 	var id uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.checkout_attempts WHERE customer_id = $1 AND mode = 'payment_method'`), c.id).Scan(&id))
-	got := w.attempt(billing.CheckoutAttemptID(id))
-	require.Equal(t, "payment_method", got["mode"])
+	got := unwrap(c.must(http.MethodGet, "/payment-method-setups/"+billing.CheckoutAttemptID(id).String(), "", nil))
 	require.Equal(t, "succeeded", got["status"])
 	require.Equal(t, method, got["payment_method_id"])
 }

@@ -5,46 +5,30 @@ package subscriptions_test
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/billing"
 )
 
 // SEC-33: checkout return URLs are an open-redirect vector (a phishing page
-// reached through the merchant's own checkout). Success and cancel URLs must
-// name an exact allowed host origin, on the embedded and the remote Client.
+// reached through the merchant's own checkout). A session's return URL must
+// name an exact allowed host origin, minted through the embedded and the
+// remote Client.
 func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
-	var c *customer
-	var method string
-	create := func(tp topology, success, cancel string) error {
-		payment := billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)}
-		if tp == remote {
-			// Over HTTP the host charges a card the customer just entered.
-			payment = billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Redirect Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}}
-		}
-		_, err := createCheckoutAttempt(t.Context(), w.client[tp], billing.CreateCheckoutAttemptParams{
-			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
-			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: payment,
-			SuccessURL: success, CancelURL: cancel,
-		})
-		return err
-	}
 	for _, tp := range []topology{embedded, remote} {
-		c = w.newCustomer()
-		method = c.saveCard("stripe", visa)
-		for _, bad := range [][2]string{
-			{"https://evil.test/return", "https://e2e.test/return"},
-			{"https://e2e.test/return", "https://e2e.test.evil.test/return"},
-			{"https://evil.test/https://e2e.test/return", "https://e2e.test/return"},
-			{"http://e2e.test/return", "https://e2e.test/return"},
-			{"https://e2e.test:8443/return", "https://e2e.test/return"},
+		c := w.newCustomer()
+		method := c.saveCard("stripe", visa)
+		for _, bad := range []string{
+			"https://evil.test/return",
+			"https://e2e.test.evil.test/return",
+			"https://evil.test/https://e2e.test/return",
+			"http://e2e.test/return",
+			"https://e2e.test:8443/return",
 		} {
-			require.Error(t, create(tp, bad[0], bad[1]), "%s %v", tp, bad)
+			_, err := c.sell(tp, order{price: price.ID, successURL: bad})
+			require.Error(t, err, "%s %s", tp, bad)
 		}
-		require.NoError(t, create(tp, "https://e2e.test/return", "https://e2e.test/return?canceled=1"), tp)
+		c.mustCheckout(tp, order{price: price.ID, successURL: "https://e2e.test/return", rail: "stripe", method: method})
 	}
 }

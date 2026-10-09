@@ -29,7 +29,7 @@ func TestNMIYenReversalsAreReadInYen(t *testing.T) {
 			require.NoError(t, err)
 			c := w.newCustomer()
 			method := c.saveCard("nmi", card{Brand: "visa", Last4: "5100"})
-			c.buyWith("nmi", method, price, billing.OfferFinite, "content:pass")
+			c.buyWith("nmi", method, price)
 			paid := completed(w.payments(embedded, c.id))
 			require.Len(t, paid, 1)
 			require.Equal(t, []any{"JPY", int64(5_000_000)}, []any{paid[0].Currency, paid[0].Amount})

@@ -8,11 +8,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -50,30 +48,24 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 				require.Equal(t, tc.token, price.Currency)
 				require.Equal(t, tc.native, price.UnitAmount)
 				buyer := w.newCustomer()
-				params := billing.CreateCheckoutAttemptParams{
-					Customer: buyer.identity(), PriceID: price.ID, Entitlement: productKey,
-					IdempotencyKey: "native-token-" + uuid.NewString(),
-					PaymentOptions: billing.CheckoutPaymentOptions{PSP: "solana", TokenSymbol: tc.token, Flow: "transfer_request"},
-					SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-				}
-				attempt, err := createCheckoutAttempt(t.Context(), w.client[tp], params)
+				purchase := order{price: price.ID, rail: "solana", successURL: "https://e2e.test/return"}
+				session, err := buyer.sell(tp, purchase)
 				require.NoError(t, err)
-				require.Equal(t, billing.CheckoutAttemptRequiresAction, attempt.Status)
+				attempt, err := session.buy(buyer, purchase)
+				require.NoError(t, err)
+				require.Equal(t, "requires_action", attempt.Status)
 				require.NotNil(t, attempt.NextAction)
 				require.Equal(t, "solana_pay", attempt.NextAction.Type)
-				transfer := chain.sessionTerms(buyer, attempt)
+				transfer := chain.sessionTerms(buyer, session.attemptID())
 				require.Equal(t, uint64(tc.native), transfer.amount, "same-token price is already in atomic chain units")
 				require.Equal(t, tc.mint, transfer.mint)
 				signature := chain.pay(transfer, transfer.amount)
+				chain.until(func() bool { return chain.status(transfer) == "succeeded" }, "the poller credits the transfer")
 				for range 2 {
-					confirmed, err := confirmCheckoutAttempt(t.Context(), w.client[tp], attempt.ID, billing.ConfirmCheckoutAttemptParams{Signature: signature})
+					replayed, err := session.buy(buyer, purchase)
 					require.NoError(t, err)
-					require.Equal(t, billing.CheckoutAttemptSucceeded, confirmed.Status)
+					require.Equal(t, "succeeded", replayed.Status, "a repeated pay answers the paid attempt")
 				}
-				replayed, err := createCheckoutAttempt(t.Context(), w.client[tp], params)
-				require.NoError(t, err)
-				require.Equal(t, attempt.ID, replayed.ID)
-				require.Equal(t, billing.CheckoutAttemptSucceeded, replayed.Status)
 				w.settle()
 				paid := completed(w.payments(tp, buyer.id))
 				require.Len(t, paid, 1, "a chain signature and accepted checkout settle once")

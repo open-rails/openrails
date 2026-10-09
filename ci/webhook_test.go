@@ -129,7 +129,7 @@ func postSignedStripeWebhook(t *testing.T, handler http.Handler, account, secret
 }
 
 // TestStripeWebhookReplayAndReorderingConverges exercises only public seams:
-// the embedded Client creates a hosted Stripe checkout through a host supplied
+// a checkout session pays through Stripe's hosted page over a host supplied
 // transport, then the mounted net/http webhook route receives completion,
 // replay, and a stale provider-closure event. The final public checkout read
 // must remain succeeded and the purchase must remain idempotent.
@@ -168,22 +168,18 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(userID))}})
 	require.NoError(t, err)
-	session, err := createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-		Customer:       billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},
-		PriceID:        price.ID,
-		Entitlement:    "content:webhook",
-		OfferKind:      billing.OfferPermanent,
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
-		IdempotencyKey: "e2e-webhook-" + uuid.NewString(),
-		SuccessURL:     "https://example.test/success",
-		CancelURL:      "https://example.test/cancel",
+	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
+		Customer:   billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},
+		PriceID:    price.ID,
+		SuccessURL: "https://example.test/success",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, session)
+	_, err = session.pay("stripe", nil)
+	require.NoError(t, err)
 	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
 	require.Equal(t, userID, metadataUserID)
 	require.Equal(t, strings.TrimPrefix(price.ID.String(), "price_"), metadataPriceID)
-	require.Equal(t, strings.TrimPrefix(session.ID.String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
+	require.Equal(t, strings.TrimPrefix(session.attempt(f).String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
 
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
@@ -208,9 +204,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	status, body = postSignedStripeWebhook(t, mux, account, secret, expired, now.Add(2*time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
-	got, err := getCheckoutAttempt(t.Context(), client, session.ID)
-	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, got.Status)
+	require.Equal(t, "succeeded", session.read().Status)
 	access, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckEntitlementsParams{Entitlements: []string{"content:webhook"}})
 	require.NoError(t, err)
 	require.True(t, access.Entitlements["content:webhook"])

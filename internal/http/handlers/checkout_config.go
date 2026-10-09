@@ -105,7 +105,7 @@ func ServiceGetCheckoutConfig(r *httprequest.Request) {
 	}
 	options, err := svc.ListCheckoutOptions(r.Request.Context(), priceID, productKey, key)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	advertiseCheckoutOptions(options, body)

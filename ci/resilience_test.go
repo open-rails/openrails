@@ -132,31 +132,31 @@ func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 	return engine.Graph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
-// solanaCheckoutStatus attempts a Solana checkout for a new one-time or
-// recurring price and returns the HTTP status of the refusal (0 on success).
-func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool) int {
+// solanaSession sells a new one-time or recurring price while the Solana rail
+// is armed.
+func solanaSession(t *testing.T, client *openrails.Client, recurring bool) *checkoutSession {
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
 	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
-	kind := billing.OfferPermanent
 	if recurring {
 		hours := 720
-		params.AccessDurationHours, params.BillingIntervalHours, kind = &hours, &hours, billing.OfferRecurring
+		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
-		ProductKey:     product.Key,
-		PriceKey:       price.Key,
-		Entitlement:    "content:sol",
-		OfferKind:      kind,
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "solana", TokenSymbol: "USDC", Flow: "transfer_request"},
-		IdempotencyKey: "sol-" + uuid.NewString(),
-		SuccessURL:     "https://e2e.test/success",
-		CancelURL:      "https://e2e.test/cancel",
+	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"}, ProductKey: product.Key, PriceKey: price.Key, SuccessURL: "https://e2e.test/success",
 	})
+	require.NoError(t, err)
+	return session
+}
+
+// solanaPayStatus pays session's Solana option on client's payment page and
+// returns the HTTP status of the refusal (0 on success).
+func solanaPayStatus(t *testing.T, client *openrails.Client, session *checkoutSession) int {
+	t.Helper()
+	_, err := session.on(client).pay("solana", nil)
 	var status *billing.StatusError
 	if err == nil {
 		return 0
@@ -176,20 +176,14 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
-		ProductKey:     product.Key,
-		PriceKey:       price.Key,
-		Entitlement:    "content:post",
-		OfferKind:      billing.OfferPermanent,
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"},
-		IdempotencyKey: "checkout-" + uuid.NewString(),
-		SuccessURL:     "https://e2e.test/success",
-		CancelURL:      "https://e2e.test/cancel",
+	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
+		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"}, ProductKey: product.Key, PriceKey: price.Key, SuccessURL: "https://e2e.test/success",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, session.NextAction, "%+v", session)
-	require.Equal(t, "redirect_to_url", session.NextAction.Type)
+	paid, err := session.pay("stripe", nil)
+	require.NoError(t, err)
+	require.NotNil(t, paid.NextAction, "%+v", paid)
+	require.Equal(t, "redirect_to_url", paid.NextAction.Type)
 }
 
 // First boot with Vault, Redis and the NMI posture probe all unavailable: the
@@ -325,6 +319,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
+	once, monthly := solanaSession(t, client, false), solanaSession(t, client, true)
 	mid, _, err := hosttools.ResolveMerchant(t.Context(), engine.Graph(first), slug)
 	require.NoError(t, err)
 	require.NoError(t, first.Close(context.Background()))
@@ -345,8 +340,8 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	}
 	require.True(t, logged, "the key change is logged at ERROR with both public keys")
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
-	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, false), "a one-time Solana checkout answers 503")
-	require.Equal(t, http.StatusServiceUnavailable, solanaCheckoutStatus(t, client, true), "a recurring Solana subscribe answers 503")
+	require.Equal(t, http.StatusServiceUnavailable, solanaPayStatus(t, client, once), "a one-time Solana checkout answers 503")
+	require.Equal(t, http.StatusServiceUnavailable, solanaPayStatus(t, client, monthly), "a recurring Solana subscribe answers 503")
 	signer := func(rt *openrails.Client) solanaint.Signer {
 		r := engine.Graph(rt).Runtime
 		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.MerchantSecretBackend.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))

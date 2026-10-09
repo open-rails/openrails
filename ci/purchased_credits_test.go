@@ -86,12 +86,14 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
-	buy := func(key string) {
+	buy := func() {
 		t.Helper()
-		_, err := createCheckoutAttempt(ctx, client, billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"}, SuccessURL: "https://e2e.test/success", CancelURL: "https://e2e.test/cancel"})
+		session, err := sell(t, client, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/success"})
+		require.NoError(t, err)
+		_, err = session.pay("stripe", nil)
 		require.NoError(t, err)
 	}
-	buy("pack-1")
+	buy()
 	face, days := int64(3_000_000), 2
 	_, err = client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{CreditGrant: catalog.Value(catalog.CreditGrantSpec{Currency: "USD", Amount: &face, ExpiresAfterDays: &days})})
 	require.NoError(t, err)
@@ -136,7 +138,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, access[product.ID.String()], "a purchased credit pack is not permanent ownership")
 
-	buy("pack-2")
+	buy()
 	deliver(provider.paid(t, 2, "evt_credit_second"))
 	lots, err = client.ListCreditGrants(ctx, customer, billing.CreditGrantListParams{})
 	require.NoError(t, err)

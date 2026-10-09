@@ -28,7 +28,7 @@ func GetStripePaymentAuthentication(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.StripePaymentAuthentication(r.Request.Context(), id, checkoutVerifiedPrincipal(r), resolver)
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(result)
@@ -47,7 +47,7 @@ func ConfirmStripePaymentAuthentication(r *httprequest.Request) {
 	}
 	result, err := r.State.CheckoutService.ConfirmStripePaymentAuthentication(r.Request.Context(), id, checkoutVerifiedPrincipal(r))
 	if err != nil {
-		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, err)
 		return
 	}
 	r.SuccessJSON(result)

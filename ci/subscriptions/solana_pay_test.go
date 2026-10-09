@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -40,15 +41,19 @@ type solanaPay struct {
 	w     *world
 	fake  *solanafake.Node
 	price string
-	rail  billing.CheckoutOption
+	// prices sell the one-time pass in each token: DUSD, the merchant's
+	// first stablecoin, and PYUSD by the price's own binding.
+	prices map[string]string
+	rail   billing.CheckoutOption
 	// stopWorkers ends the poller loop of each running runtime, by world.
 	stopWorkers map[*world]func()
 }
 
 // transferRequest is what a buyer's wallet reads from the Solana Pay URL.
 type transferRequest struct {
-	buyer     *customer
-	session   *billing.CheckoutAttempt
+	buyer *customer
+	// id is the checkout attempt the session's payment created.
+	id        billing.CheckoutAttemptID
 	recipient string
 	mint      string
 	amount    uint64
@@ -73,9 +78,19 @@ func newSolanaPay(t *testing.T) *solanaPay {
     billing_interval_hours: null
     access_duration_hours: 720
     psps: [solana]
+  "{key}-pyusd":
+    currency: usd
+    unit_amount: 5000000
+    billing_interval_hours: null
+    access_duration_hours: 720
+    psps: [solana]
+    psp_links:
+      solana:
+        token: PYUSD
 `)
 	require.NoError(t, err)
 	p.price = priceID(t, w, key, key+"-once")
+	p.prices = map[string]string{"DUSD": p.price, "PYUSD": priceID(t, w, key, key+"-pyusd")}
 	p.rail = w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-once"})["solana"]
 	require.NotEmpty(t, p.rail.PSPID, "solana is offered")
 	return p
@@ -116,18 +131,18 @@ func (p *solanaPay) checkout(buyer *customer) transferRequest {
 	return p.checkoutIn(buyer, "DUSD")
 }
 
+// checkoutIn is buyer paying a session for the pass in token: the page shows
+// the Solana Pay transfer request its wallet pays.
 func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
 	t := p.w.t
-	session, err := createCheckoutAttempt(t.Context(), p.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: token, Flow: "transfer_request"},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+	price, ok := p.prices[token]
+	require.True(t, ok, "no price in %s", token)
+	paid, err := buyer.checkout(embedded, order{price: pid(price), rail: "solana", successURL: "https://e2e.test/return"})
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptRequiresAction, session.Status)
-	require.NotNil(t, session.NextAction, "%+v", session)
-	require.Equal(t, "solana_pay", session.NextAction.Type)
-	raw := *session.NextAction.URL
+	require.Equal(t, "requires_action", paid.Status)
+	require.NotNil(t, paid.NextAction, "%+v", paid.CheckoutSessionPayResult)
+	require.Equal(t, "solana_pay", paid.NextAction.Type)
+	raw := *paid.NextAction.URL
 	u, err := url.Parse(strings.Replace(raw, "solana:", "solana://", 1))
 	require.NoError(t, err, raw)
 	q := u.Query()
@@ -135,7 +150,7 @@ func (p *solanaPay) checkoutIn(buyer *customer, token string) transferRequest {
 	require.True(t, ok, raw)
 	units := new(big.Rat).Mul(amount, big.NewRat(1_000_000, 1))
 	require.True(t, units.IsInt(), raw)
-	return transferRequest{buyer: buyer, session: session, recipient: u.Host, mint: q.Get("spl-token"), amount: units.Num().Uint64(), reference: q.Get("reference"), memo: q.Get("memo")}
+	return transferRequest{buyer: buyer, id: paid.session.attemptID(), recipient: u.Host, mint: q.Get("spl-token"), amount: units.Num().Uint64(), reference: q.Get("reference"), memo: q.Get("memo")}
 }
 
 // pay lands the wallet's transfer for amount at the engine's current time.
@@ -152,7 +167,7 @@ func (p *solanaPay) sql(query string) string {
 
 func (p *solanaPay) status(req transferRequest) string {
 	var status string
-	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT status FROM $schema.checkout_attempts WHERE id = $1`), uuidOf(p.w.t, req.session.ID)).Scan(&status))
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT status FROM $schema.checkout_attempts WHERE id = $1`), uuidOf(p.w.t, req.id)).Scan(&status))
 	return status
 }
 
@@ -193,7 +208,7 @@ func (p *solanaPay) receiptOn(req transferRequest, sig string) string {
 func (p *solanaPay) payments(req transferRequest) int {
 	var n int
 	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT count(*) FROM $schema.payments WHERE rail = 'solana' AND metadata->>'checkout_attempt_id' = $1 AND deleted_at IS NULL`),
-		uuidOf(p.w.t, req.session.ID).String()).Scan(&n))
+		uuidOf(p.w.t, req.id).String()).Scan(&n))
 	return n
 }
 
@@ -210,7 +225,7 @@ func (p *solanaPay) eventually(cond func() bool, what string) {
 
 func uuidOf(_ *testing.T, id billing.CheckoutAttemptID) uuid.UUID { return id.UUID() }
 
-// Two replicas' pollers and a burst of client confirmations race on one
+// Two replicas' pollers and a burst of relayed confirmations race on one
 // landed signature: the checkout is credited once.
 func TestSolanaPayConcurrentConfirmationsCreditOnce(t *testing.T) {
 	p := newSolanaPay(t)
@@ -221,14 +236,14 @@ func TestSolanaPayConcurrentConfirmationsCreditOnce(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 8 {
-		client := p.w.client[embedded]
+		w := p.w
 		if i%2 == 1 {
-			client = second.client[embedded]
+			w = second
 		}
 		wg.Go(func() {
-			session, err := confirmCheckoutAttempt(t.Context(), client, req.session.ID, billing.ConfirmCheckoutAttemptParams{Signature: sig})
+			confirmed, err := w.engineConfirm(req.id, sig)
 			if assert.NoError(t, err) {
-				assert.Equal(t, billing.CheckoutAttemptSucceeded, session.Status)
+				assert.Equal(t, "succeeded", confirmed.Status)
 			}
 		})
 	}
@@ -264,9 +279,9 @@ func TestSolanaPaySecondTransferIsFlagged(t *testing.T) {
 	require.Equal(t, 1, p.payments(req))
 	require.Equal(t, 1, p.reviewAlerts(second), "operators are told about the money to refund")
 
-	// Submitting the second signature from the page answers with the review,
-	// not a second credit.
-	_, err := confirmCheckoutAttempt(t.Context(), p.w.client[embedded], req.session.ID, billing.ConfirmCheckoutAttemptParams{Signature: second})
+	// Relaying the second signature answers with the review, not a second
+	// credit.
+	_, err := p.w.engineConfirm(req.id, second)
 	require.Error(t, err)
 	require.Equal(t, 1, p.payments(req))
 }
@@ -381,11 +396,7 @@ func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
-	session, err := createCheckoutAttempt(t.Context(), p.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: "DUSD", Flow: "transaction_request"},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+	session, err := p.w.engineCheckout(buyer, p.transactionRequestFor("DUSD"))
 	require.NoError(t, err)
 	wallet := solanago.NewWallet().PublicKey()
 	post := func() (int, string) {
@@ -418,7 +429,7 @@ func TestSolanaPayOffersOneTransactionPerAttempt(t *testing.T) {
 		uuidOf(t, session.ID)).Scan(&recipient, &mint, &reference, &amount))
 	units, err := strconv.ParseUint(amount, 10, 64)
 	require.NoError(t, err)
-	req := transferRequest{buyer: buyer, session: session, recipient: recipient, mint: mint, amount: units, reference: reference, memo: solanaint.PurchaseMemo(uuidOf(t, session.ID))}
+	req := transferRequest{buyer: buyer, id: session.ID, recipient: recipient, mint: mint, amount: units, reference: reference, memo: solanaint.PurchaseMemo(uuidOf(t, session.ID))}
 	sig := p.pay(req, units)
 	p.fake.AdvanceBlocks(200)
 	status, _ = post()
@@ -462,17 +473,21 @@ func TestSolanaPayOneTransferCreditsOneCheckout(t *testing.T) {
 	require.NotEqual(t, p.status(a), p.status(b), "the other checkout is still unpaid")
 }
 
+// transactionRequestFor is a one-off Solana transaction request for the pass
+// in token. No checkout session offers one (a session's Solana option is a
+// transfer request), so it is created straight on the engine.
+func (p *solanaPay) transactionRequestFor(token string) checkout.CheckoutAttemptCreateRequest {
+	return checkout.CheckoutAttemptCreateRequest{PriceID: p.price, SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
+		Payment: checkout.CheckoutAttemptPaymentRequest{Rail: p.rail.PSP, TokenSymbol: token, Flow: "transaction_request"}}
+}
+
 // transactionRequest opens a transaction-request checkout and returns the
 // wallet's POST to its Solana Pay endpoint.
-func (p *solanaPay) transactionRequest(buyer *customer, token string, wallet solanago.PublicKey) (*billing.CheckoutAttempt, func() (int, string)) {
+func (p *solanaPay) transactionRequest(buyer *customer, token string, wallet solanago.PublicKey) (billing.CheckoutAttemptID, func() (int, string)) {
 	t := p.w.t
-	session, err := createCheckoutAttempt(t.Context(), p.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: token, Flow: "transaction_request"},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+	session, err := p.w.engineCheckout(buyer, p.transactionRequestFor(token))
 	require.NoError(t, err)
-	return session, func() (int, string) {
+	return session.ID, func() (int, string) {
 		raw, err := json.Marshal(map[string]string{"account": wallet.String()})
 		require.NoError(t, err)
 		res, err := http.Post(p.w.server.URL+mountPrefix+"/v1/checkout-attempts/"+session.ID.String()+"/solana-pay", "application/json", bytes.NewReader(raw))
@@ -486,14 +501,14 @@ func (p *solanaPay) transactionRequest(buyer *customer, token string, wallet sol
 	}
 }
 
-// sessionTerms reads the quote a transaction-request session was bound to.
-func (p *solanaPay) sessionTerms(buyer *customer, session *billing.CheckoutAttempt) transferRequest {
+// sessionTerms reads the quote a checkout attempt was bound to.
+func (p *solanaPay) sessionTerms(buyer *customer, id billing.CheckoutAttemptID) transferRequest {
 	var recipient, mint, reference, amount string
 	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT rail_state->>'recipient', rail_state->>'token_mint', reference, rail_state->>'token_amount' FROM $schema.checkout_attempts WHERE id = $1`),
-		uuidOf(p.w.t, session.ID)).Scan(&recipient, &mint, &reference, &amount))
+		uuidOf(p.w.t, id)).Scan(&recipient, &mint, &reference, &amount))
 	units, err := strconv.ParseUint(amount, 10, 64)
 	require.NoError(p.w.t, err)
-	return transferRequest{buyer: buyer, session: session, recipient: recipient, mint: mint, amount: units, reference: reference, memo: solanaint.PurchaseMemo(uuidOf(p.w.t, session.ID))}
+	return transferRequest{buyer: buyer, id: id, recipient: recipient, mint: mint, amount: units, reference: reference, memo: solanaint.PurchaseMemo(uuidOf(p.w.t, id))}
 }
 
 func (p *solanaPay) until(cond func() bool, what string) {
@@ -511,13 +526,13 @@ func TestSolanaPayPoisonedReferenceStillCredits(t *testing.T) {
 	p := newSolanaPay(t)
 	victim := p.checkout(p.w.newCustomer())
 	attacker := p.checkout(p.w.newCustomer())
-	// The attacker pays their own checkout, confirming it from their page
+	// The attacker pays their own checkout, confirming it with its signature
 	// before any poller reads the victim's reference.
 	p.stopWorkers[p.w]()
 	attack, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: attacker.recipient, Mint: attacker.mint,
 		Amount: attacker.amount, Reference: attacker.reference, Also: []string{victim.reference}, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
-	_, err = confirmCheckoutAttempt(t.Context(), p.w.client[embedded], attacker.session.ID, billing.ConfirmCheckoutAttemptParams{Signature: attack})
+	_, err = p.w.engineConfirm(attacker.id, attack)
 	require.NoError(t, err)
 	p.runWorkers(p.w)
 	p.until(func() bool { return p.receiptOn(victim, attack) != "" }, "the attack is read on the victim's reference")
@@ -641,26 +656,26 @@ func TestSolanaPayGCKeepsAnUnfinishedWalk(t *testing.T) {
 	require.Equal(t, "confirmed", p.referenceStatus(req), "mid-walk, the reference stays")
 }
 
-// Money is credited only once finalized. The page's confirm waits a bounded
-// time, then answers "processing" (the page polls; the poller credits later);
-// a transfer still at confirmed commitment credits nothing.
+// Money is credited only once finalized. A relayed confirm waits a bounded
+// time, then answers "processing" (the poller credits later); a transfer
+// still at confirmed commitment credits nothing.
 func TestSolanaPayCreditsOnlyFinalized(t *testing.T) {
 	p := newSolanaPay(t)
 	req := p.checkout(p.w.newCustomer())
 	sig, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: req.recipient, Mint: req.mint,
 		Amount: req.amount, Reference: req.reference, Memo: req.memo, Confirmed: true, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
-	session, err := confirmCheckoutAttempt(t.Context(), p.w.client[embedded], req.session.ID, billing.ConfirmCheckoutAttemptParams{Signature: sig})
+	session, err := p.w.engineConfirm(req.id, sig)
 	require.NoError(t, err, "a transfer still confirming is not an error")
-	require.Equal(t, billing.CheckoutAttemptProcessing, session.Status)
+	require.Equal(t, "processing", session.Status)
 	require.Equal(t, "requires_action", p.status(req), "confirmed is not credited")
 	require.Empty(t, p.receiptOn(req, sig))
 
 	p.fake.Finalize(sig)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "the poller credits it once final")
-	session, err = confirmCheckoutAttempt(t.Context(), p.w.client[embedded], req.session.ID, billing.ConfirmCheckoutAttemptParams{Signature: sig})
+	session, err = p.w.engineConfirm(req.id, sig)
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, session.Status)
+	require.Equal(t, "succeeded", session.Status)
 }
 
 // The amount is what the recipient received however it was moved; value in
@@ -742,7 +757,7 @@ func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 	req := p.checkout(p.w.newCustomer())
 	// The session expiry job closes the checkout while its reference can still
 	// be paid within the grace window.
-	_, err := p.w.pool.Exec(t.Context(), p.sql(`UPDATE $schema.checkout_attempts SET status = 'expired' WHERE id = $1`), uuidOf(t, req.session.ID))
+	_, err := p.w.pool.Exec(t.Context(), p.sql(`UPDATE $schema.checkout_attempts SET status = 'expired' WHERE id = $1`), uuidOf(t, req.id))
 	require.NoError(t, err)
 	require.Equal(t, "solana_pay_references", refusedBy(), "a pending reference holds the archive")
 
@@ -765,7 +780,7 @@ func TestSolanaPayToken2022TransferFee(t *testing.T) {
 	p := newSolanaPay(t)
 	p.fake.SetTransferFee(solanafake.DevnetPYUSDMint, 100, 1_000_000_000) // 1%
 	req := p.checkoutIn(p.w.newCustomer(), "PYUSD")
-	net := p.sessionTerms(nil, req.session).amount
+	net := p.sessionTerms(nil, req.id).amount
 	require.Greater(t, req.amount, net, "the wallet is asked for the gross")
 	sig := p.pay(req, req.amount)
 	p.until(func() bool { return p.status(req) == "succeeded" }, "the net received settles the quote")
@@ -802,11 +817,7 @@ func TestSolanaPayToken2022TransferFee(t *testing.T) {
 func TestSolanaPayRefusesTransferHookForTransactionRequest(t *testing.T) {
 	p := newSolanaPay(t)
 	p.fake.SetTransferHook(solanafake.DevnetPYUSDMint, solanago.NewWallet().PublicKey())
-	_, err := createCheckoutAttempt(t.Context(), p.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(p.w.newCustomer().id)}, PriceID: pid(p.price), IdempotencyKey: "sol-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: p.rail.PSP, TokenSymbol: "PYUSD", Flow: "transaction_request"},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+	_, err := p.w.engineCheckout(p.w.newCustomer(), p.transactionRequestFor("PYUSD"))
 	require.ErrorContains(t, err, "transfer hook")
 	req := p.checkoutIn(p.w.newCustomer(), "PYUSD")
 	require.NotEmpty(t, req.reference)

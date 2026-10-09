@@ -76,7 +76,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
 		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+			writeCheckoutAttemptError(r, err)
 		},
 		"tier": writeChangeTierError,
 	}
@@ -223,7 +223,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 	declined := "Your card was declined. Contact your bank or try a different card."
 	surfaces := map[string]func(*httprequest.Request, error){
 		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
+			writeCheckoutAttemptError(r, err)
 		},
 		"tier": writeChangeTierError,
 	}
@@ -260,11 +260,11 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   409,
 	}
 	for err, status := range checkoutStatus {
-		got := render(t, func(r *httprequest.Request) { writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{}) })
+		got := render(t, func(r *httprequest.Request) { writeCheckoutAttemptError(r, err) })
 		require.Equal(t, status, got.Status, "%v", err)
 	}
 	blocked := render(t, func(r *httprequest.Request) {
-		writeCheckoutAttemptError(r, &checkout.CardAttemptsBlockedError{RetryAfter: 90 * time.Second}, checkoutAttemptErrorContext{})
+		writeCheckoutAttemptError(r, &checkout.CardAttemptsBlockedError{RetryAfter: 90 * time.Second})
 	})
 	require.Equal(t, []any{429, "card_attempts_blocked"}, []any{blocked.Status, blocked.Code})
 
@@ -320,13 +320,11 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 
 func TestInsufficientUSDCCarriesFundingMetadata(t *testing.T) {
 	got := render(t, func(r *httprequest.Request) {
-		writeCheckoutAttemptError(r, &recurring.InsufficientUSDCError{HaveBaseUnits: 250_000, NeedBaseUnits: 1_500_000},
-			checkoutAttemptErrorContext{Rail: "solana", Wallet: "11111111111111111111111111111111", CheckoutAttemptID: "chk_123"})
+		writeCheckoutAttemptError(r, &recurring.InsufficientUSDCError{HaveBaseUnits: 250_000, NeedBaseUnits: 1_500_000})
 	})
 	require.Equal(t, []any{402, "insufficient_funds", "usdc_balance"}, []any{got.Status, got.Code, got.param()})
 	require.Equal(t, map[string]any{
-		"asset": "USDC", "network": "solana", "rail": "solana",
-		"wallet": "11111111111111111111111111111111", "checkout_attempt_id": "chk_123",
+		"asset": "USDC", "network": "solana",
 		"amount": "1.5", "balance": "0.25", "shortfall": "1.25",
 		"amount_base_units": "1500000", "balance_base_units": "250000", "shortfall_base_units": "1250000",
 	}, got.Metadata["usdc_funding"])

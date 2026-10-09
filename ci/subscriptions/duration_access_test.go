@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, access *int, autoRenew *bool) (*engineCase, billing.CreateCheckoutAttemptParams) {
+func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, access *int, autoRenew *bool) (*engineCase, hostedSession) {
 	t.Helper()
 	product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "duration-" + uuid.NewString(), DisplayName: "Independent access",
@@ -28,24 +28,20 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 	e := &engineCase{w: w, rail: rail, tp: tp, price: price.ID.String(), amount: 999, ent: "content:duration", started: w.clock.Now()}
 	e.c = w.newCustomer()
 	e.method = e.c.saveCard(rail, visa)
-	params := billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: e.c.identity(), Entitlement: e.ent, PriceID: price.ID,
-		AutoRenew: autoRenew, IdempotencyKey: "duration-" + uuid.NewString(),
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(e.method)},
-		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	}
-	// A saved card is charged in process; over HTTP only on a session its
-	// customer pays.
-	attempt, err := createCheckoutAttempt(t.Context(), w.client[embedded], params)
+	// The merchant hands the order over through tp's Client; its customer
+	// pays it signed in with the saved card.
+	session, err := e.c.sell(tp, order{price: price.ID, autoRenew: autoRenew, successURL: "https://e2e.test/return"})
 	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
-	require.NotNil(t, attempt.SubscriptionID)
-	e.sub = *attempt.SubscriptionID
+	paid, err := session.buy(e.c, order{rail: rail, method: e.method})
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+	require.NotNil(t, paid.SubscriptionID)
+	e.sub = *paid.SubscriptionID
 	w.settle()
 	require.Len(t, e.providerLedger(), 1, "one initial payment")
 	require.True(t, e.c.entitled(e.ent))
 	require.True(t, e.started.Add(720*time.Hour).Equal(e.periodEnd()), "billing uses its interval independently of access")
-	return e, params
+	return e, session
 }
 
 func requireDurationSelfAccess(t *testing.T, e *engineCase, want bool) {
@@ -129,18 +125,17 @@ func TestDurationAccessSurvivesCancellation(t *testing.T) {
 func TestDurationOrderCanDisableRenewalAtCreation(t *testing.T) {
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
-		e, params := enrollAccessDuration(t, w, rail, tp, new(72), new(false))
+		e, session := enrollAccessDuration(t, w, rail, tp, new(72), new(false))
 		sub := w.subscription(tp, e.sub)
 		require.Equal(t, billing.SubscriptionCanceled, sub.Status, "one command records the paid order without a later renewal")
 		require.NotNil(t, sub.CanceledAt)
 		require.Nil(t, sub.NextRetryAt)
-		replayed, err := createCheckoutAttempt(t.Context(), w.client[embedded], params)
+		replayed, err := session.buy(e.c, order{rail: rail, method: e.method})
 		require.NoError(t, err)
 		require.Equal(t, e.sub, *replayed.SubscriptionID)
 		require.Len(t, e.providerLedger(), 1, "same order replay cannot charge twice")
-		params.AutoRenew = new(true)
-		_, err = createCheckoutAttempt(t.Context(), w.client[embedded], params)
-		require.Error(t, err, "an idempotency key cannot change the accepted renewal preference")
+		status, out := session.payAs(e.c, map[string]any{"option_id": session.option(rail), "payment_method_id": e.method, "auto_renew": true})
+		require.Equal(t, http.StatusBadRequest, status, "the page cannot change the accepted renewal preference: %v", out)
 		require.Len(t, e.providerLedger(), 1)
 		w.advance(73 * time.Hour)
 		w.converge()
@@ -163,13 +158,11 @@ func TestDurationOrderWithoutRenewalRefusesUnsupportedTrialBeforeCharge(t *testi
 		e := &engineCase{w: w, rail: rail, tp: tp}
 		e.c = w.newCustomer()
 		e.method = e.c.saveCard(rail, visa)
-		_, err = createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
-			OfferKind: billing.OfferRecurring, Customer: e.c.identity(), Entitlement: "content:trial-order", PriceID: price.ID,
-			AutoRenew: new(false), IdempotencyKey: "trial-order-" + uuid.NewString(),
-			PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(e.method)},
-			SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-		})
-		require.Error(t, err, "engine trial checkout requires supported trial settlement")
+		paid, err := e.c.checkout(tp, order{price: price.ID, autoRenew: new(false), rail: rail, method: e.method, successURL: "https://e2e.test/return"})
+		if err == nil {
+			require.NotEqual(t, "succeeded", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+		}
+		t.Logf("trial order without renewal: %v %+v", err, paid)
 		require.Empty(t, e.providerLedger(), "an unsupported trial cannot turn into a paid recurring purchase")
 		require.Zero(t, e.providerAttempts())
 		w.advance(721 * time.Hour)
