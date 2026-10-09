@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Releases the root module and the server module in lockstep:
+#
+#   scripts/release vX.Y.Z ["note"]
+#
+# On master's head it pins server/go.mod's require of the root to vX.Y.Z (the
+# replace keeps in-repository builds on the root's source), commits that, tags
+# the commit vX.Y.Z and server/vX.Y.Z (signed, annotated) and pushes master and
+# both tags at once. The vX.Y.Z tag runs release.yaml and docker-publish.yaml.
+set -euo pipefail
+
+die() {
+  echo "release: $*" >&2
+  exit 1
+}
+
+version="${1:-}"
+note="${2:-}"
+[[ "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]] ||
+  die "usage: scripts/release vX.Y.Z [note]"
+message="$version${note:+: $note}"
+
+cd "$(git rev-parse --show-toplevel)"
+export GOWORK=off
+[[ "$(git symbolic-ref --quiet --short HEAD)" == master ]] || die "check out master"
+[[ -z "$(git status --porcelain)" ]] || die "the working tree is not clean"
+git fetch --quiet origin master --tags
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || die "master is not origin/master"
+for tag in "$version" "server/$version"; do
+  if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
+    die "$tag already exists"
+  fi
+done
+
+# A failed build leaves master as it was.
+trap 'git checkout --quiet -- server/go.mod' ERR
+(cd server && go mod edit -require="github.com/open-rails/openrails@$version" && go build ./...)
+trap - ERR
+if ! git diff --quiet -- server/go.mod; then
+  git add server/go.mod
+  git commit --quiet -S -m "Release $version: server requires the root at $version"
+fi
+git tag -s -a "$version" -m "$message"
+git tag -s -a "server/$version" -m "server/$message"
+git push --atomic origin master "refs/tags/$version" "refs/tags/server/$version"
+echo "release: $version and server/$version at $(git rev-parse --short HEAD)"

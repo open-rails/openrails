@@ -2,7 +2,8 @@ name: Release
 
 # A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
 # SBOMs, generated notes, the @openrails/billing-ui tarball and build
-# provenance. Cut one with `gh workflow run cut-release.yaml -f bump=minor`.
+# provenance. scripts/release cuts one: vX.Y.Z and server/vX.Y.Z on one master
+# commit. The binary is built from the server module.
 # Pull requests that change the release build run it as a snapshot.
 on:
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - .goreleaser.yaml
       - .github/workflows/release.yaml
+      - server/go.mod
       - scripts/build-admin-console.sh
       - scripts/pack-billing-ui.sh
       - internal/buildinfo/**

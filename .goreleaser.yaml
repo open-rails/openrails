@@ -1,8 +1,14 @@
-# Release build, run by .github/workflows/release.yaml on a v* tag.
+# Release build, run by .github/workflows/release.yaml on a v* tag. The binary
+# is the server module's (server/), released with the root (scripts/release).
 # Dry run: goreleaser release --snapshot --clean --skip=publish,sign
 version: 2
 
 project_name: openrails
+
+# server/vX.Y.Z tags the same commit as vX.Y.Z; the release is the root's tag.
+git:
+  ignore_tags:
+    - "server/*"
 
 before:
   hooks:
@@ -12,6 +18,7 @@ before:
 
 builds:
   - id: openrails
+    dir: server
     main: ./cmd/openrails
     binary: openrails
     env:
@@ -53,7 +60,7 @@ release:
     - glob: build/billing-ui/*.tgz
   footer: |
     **Docker:** `docker.io/openrails/openrails:{{ .Tag }}` · `ghcr.io/open-rails/openrails:{{ .Tag }}`
-    **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}`
+    **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}` (embedded) · `go get github.com/open-rails/openrails/server@{{ .Tag }}` (standalone) · `go install github.com/open-rails/openrails/server/cmd/openrails@{{ .Tag }}`
     **Verify:** `gh attestation verify <file> --repo open-rails/openrails`
 
 # Entries are PR titles (squash merges); conventional prefixes pick the group.
