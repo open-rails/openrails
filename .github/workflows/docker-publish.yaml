@@ -23,6 +23,7 @@ on:
       - Dockerfile
       - .dockerignore
       - .github/workflows/docker-publish.yaml
+      - server/go.mod
   workflow_dispatch:
 
 permissions:

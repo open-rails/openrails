@@ -31,8 +31,10 @@ ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
 ENV GIT_TERMINAL_PROMPT=0
 
-# Copy go mod files first for better caching
+# Copy go mod files first for better caching. The binary is the server
+# module's (server/), which builds against the root's source (its replace).
 COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./server/
 
 # Download dependencies with cache mount for Go modules (with retry).
 # All dependencies are public, so no authentication is required.
@@ -40,7 +42,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eu; \
     for i in 1 2 3; do \
-      go mod download && break || (echo "go mod download failed, retrying" && sleep 5); \
+      (cd server && go mod download) && break || (echo "go mod download failed, retrying" && sleep 5); \
     done
 
 # Copy source code, then the console build into the dir go:embed reads.
@@ -59,9 +61,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     test -f web/admin/dist/index.html && \
     mkdir -p bin && \
+    cd server && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \
-      -o bin/openrails ./cmd/openrails
+      -o ../bin/openrails ./cmd/openrails
 
 
 # Stage 3: production
