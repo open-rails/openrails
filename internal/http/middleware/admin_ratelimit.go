@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 // AdminOperation identifies one security-sensitive merchant-console action.
@@ -264,7 +265,7 @@ func logAdminRateLimitEvent(ctx context.Context, event AdminRateLimitEvent) {
 		"merchant_id":   event.MerchantID,
 		"operation":     event.Operation,
 		"counts":        event.Counts,
-		"retry_after_s": int64(math.Ceil(event.RetryAfter.Seconds())),
+		"retry_after":   cadence.FormatDuration(time.Duration(math.Ceil(event.RetryAfter.Seconds())) * time.Second),
 		"request_id":    event.RequestID,
 	})
 	switch event.Kind {

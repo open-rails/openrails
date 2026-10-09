@@ -55,8 +55,8 @@ products:
     prices:
       novice-monthly:
         amount: 12 USD
-        access_duration_hours: 720
-        billing_interval_hours: 720
+        access_duration: 30 days
+        billing_interval: 30 days
 ```
 
 Catalog prices accept `amount: 9.99 USD`, `amount: 1 SOL`, or `amount: 10 USDC`.
@@ -77,9 +77,9 @@ Price fields worth knowing:
 |---|---|
 | `amount` | decimal plus explicit currency, such as `9.99 USD`; sets amount and currency together |
 | `unit_amount`, `currency` | numeric alternative: integer native units at the registered scale plus a currency code; JSON applications spell `unit_amount` as a decimal string |
-| `access_duration_hours` | positive hour count, or null for indefinite access |
-| `billing_interval_hours` | positive interval between recurring payments, or null for a one-time purchase; independent of access duration |
-| `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together with a billing interval |
+| `access_duration` | how long access lasts, such as `30 days`, or null for indefinite access; `access_duration_hours` is the numeric form |
+| `billing_interval` | time between recurring payments, such as `30 days`, or null for a one-time purchase; independent of access duration; `billing_interval_hours` is the numeric form |
+| `trial_unit_amount`, `trial_duration` | first-phase terms; supply both together with a billing interval; `trial_duration_hours` is the numeric form |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
@@ -87,8 +87,8 @@ Price fields worth knowing:
 Trial terms are supported only on rails with native trial settlement; current
 engine-managed checkout refuses trials before charging.
 
-**A one-time purchase** — null `billing_interval_hours` with a finite duration gives timed
-access; null `access_duration_hours` gives indefinite access:
+**A one-time purchase** — null `billing_interval` with a finite duration gives timed
+access; null `access_duration` gives indefinite access:
 
 ```yaml
 products:
@@ -98,8 +98,8 @@ products:
     prices:
       purchase:
         amount: 4.99 USD
-        access_duration_hours: null
-        billing_interval_hours: null
+        access_duration: null
+        billing_interval: null
 ```
 
 Prepaid balance products use `credit_grant`; see the

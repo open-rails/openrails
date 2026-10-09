@@ -73,19 +73,57 @@ func CurrencyCodes() []string {
 }
 
 // FormatAmount renders native units exactly at the currency's registered scale,
-// trimming trailing zeros down to the rail minor unit: "19.99 USD",
-// "0.000001 USD", "500 JPY". An unregistered currency is named, never scaled.
+// trimming trailing zeros down to a fiat minor unit: "19.99 USD",
+// "0.000001 USD", "500 JPY", "1.5 SOL". An unregistered currency is named,
+// never scaled.
 func FormatAmount(amount int64, currency string) string {
 	cur, ok := LookupCurrency(currency)
 	if !ok {
 		return fmt.Sprintf("%d units of unregistered currency %q", amount, currency)
 	}
 	whole, fraction, _ := strings.Cut(formatDecimal(amount, pow10(cur.Decimals), cur.Decimals), ".")
-	digits := min(max(len(strings.TrimRight(fraction, "0")), cur.MinorDecimals), cur.Decimals)
+	shown := cur.MinorDecimals
+	if cur.Kind == "crypto" {
+		shown = 0
+	}
+	digits := min(max(len(strings.TrimRight(fraction, "0")), shown), cur.Decimals)
 	if digits > 0 {
 		whole += "." + fraction[:digits]
 	}
 	return whole + " " + cur.Code
+}
+
+// FormatAmounts renders per-currency totals in code order: "1.50 EUR, 12.00 USD".
+func FormatAmounts(totals map[string]int64) string {
+	codes := make([]string, 0, len(totals))
+	for code := range totals {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	parts := make([]string, len(codes))
+	for i, code := range codes {
+		parts[i] = FormatAmount(totals[code], code)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// FormatRailMinor renders a provider minor-unit amount (cents, whole yen,
+// lamports) as FormatAmount does.
+func FormatRailMinor(minor Cents, currency string) string {
+	native, err := RailMinorToNative(currency, minor)
+	if err != nil {
+		return fmt.Sprintf("%d minor units of %q", minor, currency)
+	}
+	return FormatAmount(native, currency)
+}
+
+// FormatBaseUnits renders an on-chain token amount (lamports, USDC base units)
+// as FormatAmount does.
+func FormatBaseUnits(units uint64, currency string) string {
+	if units > math.MaxInt64 {
+		return fmt.Sprintf("%d base units of %q", units, currency)
+	}
+	return FormatRailMinor(Cents(units), currency) // #nosec G115 -- bounded above
 }
 
 // DescribeNativeScales lists native units per major unit for prose (LLM

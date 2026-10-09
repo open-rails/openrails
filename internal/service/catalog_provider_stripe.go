@@ -99,7 +99,7 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 		return nil, fmt.Errorf("verify stripe price %q: %w", priceID, err)
 	}
 	if in.UnitAmount > 0 && int64(moneyutil.CentsToMicros(moneyutil.Cents(remote.UnitAmount))) != in.UnitAmount {
-		return nil, fmt.Errorf("stripe price %q unit_amount (%d cents) does not match catalog price (%d micros)", priceID, remote.UnitAmount, in.UnitAmount)
+		return nil, fmt.Errorf("stripe price %q unit_amount (%s) does not match catalog price (%s)", priceID, moneyutil.FormatRailMinor(moneyutil.Cents(remote.UnitAmount), remote.Currency), moneyutil.FormatAmount(in.UnitAmount, in.Currency))
 	}
 	if in.Currency != "" && !strings.EqualFold(strings.TrimSpace(remote.Currency), strings.TrimSpace(in.Currency)) {
 		return nil, fmt.Errorf("stripe price %q currency (%s) does not match catalog price (%s)", priceID, remote.Currency, in.Currency)

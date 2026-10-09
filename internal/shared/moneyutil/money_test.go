@@ -191,6 +191,16 @@ func TestFormatting(t *testing.T) {
 		{FormatAmount(12_345_600, "TST"), "12.3456 TST"},
 		{FormatAmount(math.MinInt64, "WHL"), "-9223372036854775808 WHL"},
 		{FormatAmount(5, "XXX"), `5 units of unregistered currency "XXX"`},
+		{FormatAmount(1_500_000_000, "SOL"), "1.5 SOL"},
+		{FormatAmount(10_000_000, "USDC"), "10 USDC"},
+		{FormatAmount(1, "SOL"), "0.000000001 SOL"},
+		{FormatRailMinor(1999, "USD"), "19.99 USD"},
+		{FormatRailMinor(500, "JPY"), "500 JPY"},
+		{FormatRailMinor(50_000_000, "SOL"), "0.05 SOL"},
+		{FormatRailMinor(5, "XXX"), `5 minor units of "XXX"`},
+		{FormatBaseUnits(2_500_000, "USDC"), "2.5 USDC"},
+		{FormatAmounts(map[string]int64{"USD": 12_000_000, "EUR": 1_500_000}), "1.50 EUR, 12.00 USD"},
+		{FormatBaseUnits(math.MaxUint64, "SOL"), `18446744073709551615 base units of "SOL"`},
 	} {
 		if tt.got != tt.want {
 			t.Errorf("got %q, want %q", tt.got, tt.want)

@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
@@ -535,7 +536,7 @@ func (w *DunningWorker) parkStaleSubscription(
 	}
 	logEntry.WithFields(log.Fields{
 		"period_end": periodEnd,
-		"window":     window.String(),
+		"window":     cadence.FormatDuration(window),
 	}).Warn("Dunning: rebill is older than the staleness window; charge skipped and subscription PARKED as unknown (access intact) for provider verification")
 	return dunningOutcomeWindowExpired
 }

@@ -767,7 +767,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 	amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sess.AmountTotal)))
 	if amountMicros != price.Amount {
-		return fmt.Errorf("stripe checkout amount mismatch: got %d cents (%d micros), want %d micros", sess.AmountTotal, amountMicros, price.Amount)
+		return fmt.Errorf("stripe checkout amount mismatch: got %s, want %s", moneyutil.FormatRailMinor(moneyutil.Cents(sess.AmountTotal), sess.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
 	}
 	if !strings.EqualFold(strings.TrimSpace(sess.Currency), strings.TrimSpace(price.Currency)) {
 		return fmt.Errorf("stripe checkout currency mismatch: got %s, want %s", sess.Currency, price.Currency)

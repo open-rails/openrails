@@ -118,6 +118,9 @@ products:
 		return out.Bytes(), doc
 	}
 	raw, exported := dump(source)
+	for _, readable := range []string{"amount: 90.00 USD", "amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "access_duration: 3 days"} {
+		require.Contains(t, string(raw), readable, "prices dump as a person edits them")
+	}
 	require.False(t, exported.Prune)
 	products := exported.Products
 	for _, product := range products {

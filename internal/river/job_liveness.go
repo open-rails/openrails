@@ -13,6 +13,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -205,8 +206,8 @@ func (m *JobLivenessMiddleware) watch(ctx context.Context, job *rivertype.JobRow
 			"worker_kind": job.Kind,
 			"job_id":      job.ID,
 			"attempt":     job.Attempt,
-			"silence":     silence.Round(time.Second).String(),
-			"threshold":   threshold.String(),
+			"silence":     cadence.FormatDuration(silence.Round(time.Second)),
+			"threshold":   cadence.FormatDuration(threshold),
 			"marks":       reason.Marks,
 			"last_note":   reason.LastNote,
 		}).Error("river: cancelling job — no observed progress")

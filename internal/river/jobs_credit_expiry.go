@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -70,7 +71,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		return fmt.Errorf("credit expiry: list merchants with lapsed credit lots: %w", err)
 	}
 
-	var totalExpired int64
+	expired := map[string]int64{}
 	var customers int
 	for _, merchantID := range merchantIDs {
 		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
@@ -95,11 +96,13 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 				if err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 					gl := grants.New(gen.New(tx), r.MerchantID)
 					gl.SetClock(nowFn)
-					expired, e := gl.ExpireLapsed(ctx, r.CustomerID, currency)
+					amount, e := gl.ExpireLapsed(ctx, r.CustomerID, currency)
 					if e != nil {
 						return e
 					}
-					totalExpired += expired
+					if amount != 0 {
+						expired[currency] += amount
+					}
 					return nil
 				}); err != nil {
 					return fmt.Errorf("expire lapsed lots for customer %s: %w", r.CustomerID, err)
@@ -113,9 +116,9 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			continue
 		}
 	}
-	if totalExpired > 0 {
+	if len(expired) > 0 {
 		logger.WithFields(log.Fields{
-			"merchants": len(merchantIDs), "customers": customers, "expired_amount": totalExpired,
+			"merchants": len(merchantIDs), "customers": customers, "expired": moneyutil.FormatAmounts(expired),
 		}).Info("clawed back lapsed credit-lot remainders")
 	}
 

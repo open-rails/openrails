@@ -70,6 +70,7 @@ func TestDuplicateChargeFindings(t *testing.T) {
 			require.Equal(t, "critical", findings[0].severity)
 			require.Contains(t, findings[0].subject, strings.TrimPrefix(dup.sub.String(), "sub_"))
 			require.Contains(t, findings[0].action, "Refund the later charge pay_"+later, "the refund targets the later charge")
+			require.Regexp(t, `; total [0-9]+\.[0-9]{2} USD; payments `, findings[0].action, "the total reads in its currency")
 			w.dropLatestCharge(dup.c.id)
 			w.converge()
 			require.Empty(t, w.openFindings(duplicateCharge), "the finding closes once the duplicate is gone")

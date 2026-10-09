@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
@@ -17,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -303,7 +306,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	if in.BillingIntervalHours != nil && *in.BillingIntervalHours > 0 {
 		wantPeriod := uint64(*in.BillingIntervalHours)
 		if acct.PeriodHours != wantPeriod {
-			return nil, fmt.Errorf("solana plan %q period (%d hours) does not match catalog price (%d hours)", pda, acct.PeriodHours, wantPeriod)
+			return nil, fmt.Errorf("solana plan %q period (%s) does not match catalog price (%s)", pda, solanaPeriod(acct.PeriodHours), cadence.FormatHours(*in.BillingIntervalHours))
 		}
 	}
 	// Amount + mint + merchant validation requires the plan service (mint
@@ -336,7 +339,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 					return nil, err
 				}
 				if acct.Amount != want {
-					return nil, fmt.Errorf("solana plan %q amount (%d base units) does not match catalog price (%d micros = %d base units)", pda, acct.Amount, in.UnitAmount, want)
+					return nil, fmt.Errorf("solana plan %q amount (%s %s) does not match catalog price (%s = %s %s)", pda, solanamodule.FormatBaseUnits(acct.Amount, decimals), symbol, moneyutil.FormatAmount(in.UnitAmount, in.Currency), solanamodule.FormatBaseUnits(want, decimals), symbol)
 				}
 			}
 		}
@@ -448,4 +451,12 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 // longer purchasable (#357/#358 phase D).
 func (a *solanaAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
 	return nil
+}
+
+// solanaPeriod renders an on-chain plan period readably.
+func solanaPeriod(hours uint64) string {
+	if hours > uint64(math.MaxInt64/int64(time.Hour)) {
+		return fmt.Sprintf("%d hours", hours)
+	}
+	return cadence.FormatHours(int(hours)) // #nosec G115 -- bounded above
 }

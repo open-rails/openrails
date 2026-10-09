@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -982,7 +983,7 @@ func compareStatuses(provider Provider, snap *RemoteSnapshot, s *LocalSubscripti
 					Status:            FindingStatusReconcileRequired,
 					LocalEvidence:     localSubEvidence(s),
 					RemoteEvidence:    remoteSubEvidence(r),
-					RecommendedAction: fmt.Sprintf("period end drifts %.0fh from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", drift.Hours()),
+					RecommendedAction: fmt.Sprintf("period end drifts %s from the rail's next billing date; enforce re-anchors the period END from provider truth (a verified charge renews; adoption never grants access)", cadence.FormatRemaining(drift)),
 					Apply:             decideApply(s, snap, now, opts),
 				}}
 			}

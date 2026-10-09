@@ -1003,7 +1003,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 					"refund_transaction_id":   txnID,
 					"original_payment_id":     originalPayment.ID,
 					"original_transaction_id": originalTxnID,
-					"refund_amount":           refundAmount,
+					"refund_amount":           moneyutil.FormatAmount(refundAmount, originalPayment.Currency),
 				}).Warn("Failed to persist refund payment record")
 				return fmt.Errorf("persist refund payment record: %w", refundErr)
 			}
@@ -1012,7 +1012,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 				"refund_transaction_id": txnID,
 				"original_payment_id":   originalPayment.ID,
 				"subscription_id":       subscription.ID,
-				"refund_amount":         refundAmount,
+				"refund_amount":         moneyutil.FormatAmount(refundAmount, originalPayment.Currency),
 			}).Info("Persisted refund payment record")
 		}
 	}

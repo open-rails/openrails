@@ -146,7 +146,6 @@ const (
 	notHTTPJobArgs          = "not HTTP: River job arguments"
 	notHTTPQueryRow         = "not HTTP: the SQL query's jsonb shape, re-encoded onto the wire type beside it"
 	notHTTPStoredMetadata   = "not HTTP: jsonb metadata or rail state stored on the row, never served"
-	notHTTPLogContext       = "not HTTP: billing-error or webhook log context"
 	notMoneyPurgeInventory  = "not money: the purge inventory's list of uncaptured secret names"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
 	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
@@ -178,8 +177,6 @@ var pendingDynamicMoney = map[string]string{
 	"internal/modules/webhooks/ccbill.go:func handleRenewalSuccessInternal \"amount_cents\"":             notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"billed_amount_cents\"":              notHTTPStoredMetadata,
 	"internal/modules/webhooks/ccbill.go:func handleUpgradeSuccess \"expected_amount_cents\"":            notHTTPStoredMetadata,
-	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"billed_amount_cents\"":        notHTTPLogContext,
-	"internal/modules/webhooks/ccbill.go:func validateCCBillBilledAmount \"expected_amount_cents\"":      notHTTPLogContext,
 	"internal/river/jobs_solana_crank.go:func finalizePull \"solana_token_amount\"":                      notHTTPStoredMetadata,
 }
 

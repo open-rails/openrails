@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -939,12 +940,12 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Evidence: map[string]any{
 				"customer_id": d.UserID, "subscription_id": subID.String(), "period_start": d.PeriodKey,
 				"product_id": billing.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
-				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10),
+				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10), "currency": d.Currency,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 				recommend.EvidenceKey: rec.Map(),
 			},
-			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for the %s period of subscription %s (%q; total %d micros; payments %s). Refund the later charge %s unless an operator action explains it.",
-				d.UserID, d.Count, d.PeriodKey, subID.String(), d.ProductKey, d.TotalAmount, strings.Join(ids, ", "), ids[0]),
+			RecommendedAction: fmt.Sprintf("Customer %s was charged %d times for the %s period of subscription %s (%q; total %s; payments %s). Refund the later charge %s unless an operator action explains it.",
+				d.UserID, d.Count, d.PeriodKey, subID.String(), d.ProductKey, moneyutil.FormatAmount(d.TotalAmount, d.Currency), strings.Join(ids, ", "), ids[0]),
 			// surface-only: a refund/credit is an operator decision, never automatic.
 		})
 	}
@@ -1011,7 +1012,7 @@ func (p ownershipPurchase) describe() string {
 		s += ", payment " + *p.PaymentID
 	}
 	if p.Amount != nil && p.Currency != nil {
-		s += fmt.Sprintf(", %d micros %s", *p.Amount, *p.Currency)
+		s += ", " + moneyutil.FormatAmount(*p.Amount, *p.Currency)
 	}
 	if p.SourceType == "subscription" {
 		s += ", subscription " + p.SourceID

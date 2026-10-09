@@ -12,11 +12,13 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Server struct {
 	server *httptest.Server
 	up     atomic.Bool
+	ttl    atomic.Int64
 	mu     sync.Mutex
 	keys   map[string]ed25519.PrivateKey
 	Token  string
@@ -33,6 +35,9 @@ func New(token string) *Server {
 func (s *Server) URL() string   { return s.server.URL }
 func (s *Server) Close()        { s.server.Close() }
 func (s *Server) SetUp(up bool) { s.up.Store(up) }
+
+// SetTokenTTL makes the token a non-renewable one expiring after ttl.
+func (s *Server) SetTokenTTL(ttl time.Duration) { s.ttl.Store(int64(ttl / time.Second)) }
 
 // PublicKey returns key's public half, creating the key on first use.
 func (s *Server) PublicKey(name string) ed25519.PublicKey {
@@ -73,7 +78,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/v1/")
 	switch {
 	case path == "auth/token/lookup-self":
-		write(w, map[string]any{"renewable": false, "ttl": 0})
+		write(w, map[string]any{"renewable": false, "ttl": s.ttl.Load()})
 	case strings.HasPrefix(path, "transit/keys/"):
 		pub := s.PublicKey(strings.TrimPrefix(path, "transit/keys/"))
 		write(w, map[string]any{"latest_version": 1, "keys": map[string]any{"1": map[string]any{"public_key": base64.StdEncoding.EncodeToString(pub)}}})

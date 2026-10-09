@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -197,8 +198,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		"rail":                 params.Rail,
 		"rail_subscription_id": procSubID,
 		"transaction_id":       params.TransactionID,
-		"amount_cents":         params.Amount,
-		"currency":             params.Currency,
+		"amount":               suppliedAmount(params.Amount, params.Currency),
 	}).Info("Starting membership creation flow")
 
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -699,8 +699,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				"transaction_id":  params.TransactionID,
 				"subscription_id": subscription.ID,
 				"user_id":         subscription.CustomerID.String(),
-				"amount_cents":    amount,
-				"currency":        currency,
+				"amount":          moneyutil.FormatAmount(amount, currency),
 			}).Info("Recorded payment for membership creation")
 		}
 	}
@@ -819,8 +818,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		"rail":                      params.Rail,
 		"rail_subscription_id":      params.RailSubscriptionID,
 		"transaction_id":            params.TransactionID,
-		"amount_cents":              params.Amount,
-		"currency":                  params.Currency,
+		"amount":                    suppliedAmount(params.Amount, params.Currency),
 		"allow_terminal_reactivate": params.AllowTerminalReactivation,
 	}).Info("Starting membership renewal flow")
 
@@ -2316,4 +2314,13 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 		return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)
 	}
 	return nil
+}
+
+// suppliedAmount renders a caller's amount for logs; a missing currency is
+// the price's.
+func suppliedAmount(amount int64, currency string) string {
+	if strings.TrimSpace(currency) == "" {
+		return fmt.Sprintf("%d native units in the price's currency", amount)
+	}
+	return moneyutil.FormatAmount(amount, currency)
 }

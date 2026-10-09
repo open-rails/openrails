@@ -79,9 +79,9 @@ func TestCCBillBilledAmountTolerance(t *testing.T) {
 		var be *BillingError
 		require.True(t, errors.As(err, &be), billed)
 		require.Equal(t, ErrorTypeAmount, be.Type)
-		require.Equal(t, moneyutil.Cents(1999), be.Context["expected_amount_cents"])
-		require.Equal(t, billed, be.Context["billed_amount_cents"])
-		require.Equal(t, moneyutil.Cents(39), be.Context["tolerance_cents"])
+		require.Equal(t, "19.99 USD", be.Context["expected_amount"])
+		require.Equal(t, moneyutil.FormatRailMinor(billed, "USD"), be.Context["billed_amount"])
+		require.Equal(t, "0.39 USD", be.Context["tolerance"])
 		require.Equal(t, "sub_1", be.Context["subscription_id"])
 		require.True(t, shouldTreatCCBillErrorAsNonRetryable(err))
 	}

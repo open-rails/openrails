@@ -7,6 +7,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -74,10 +75,10 @@ func (w *SolanaGasAlertWorker) Work(ctx context.Context, _ *river.Job[SolanaGasA
 		}
 		if bal < threshold {
 			log.WithContext(ctx).WithFields(log.Fields{
-				"tenant_id":          mw.MerchantID,
-				"cranker_wallet":     mw.MerchantAddress,
-				"balance_lamports":   bal,
-				"threshold_lamports": threshold,
+				"tenant_id":      mw.MerchantID,
+				"cranker_wallet": mw.MerchantAddress,
+				"balance":        moneyutil.FormatBaseUnits(bal, "SOL"),
+				"threshold":      moneyutil.FormatBaseUnits(threshold, "SOL"),
 			}).Warn("Solana cranker wallet LOW on SOL gas — top up to avoid pull failures (#258)")
 		}
 	}

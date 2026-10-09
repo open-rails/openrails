@@ -155,14 +155,12 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 	expiresAt := s.now().Add(10 * time.Minute)
 
 	log.WithFields(log.Fields{
-		"user_id":       req.UserID,
-		"price_id":      req.PriceID,
-		"token":         req.TokenSymbol,
-		"amount_native": req.Amount,
-		"currency":      req.Currency,
-		"token_amount":  req.TokenAmount,
-		"from_wallet":   req.UserWallet,
-		"to_wallet":     req.Recipient,
+		"user_id":      req.UserID,
+		"price_id":     req.PriceID,
+		"amount":       moneyutil.FormatAmount(req.Amount, req.Currency),
+		"token_amount": moneyutil.FormatBaseUnits(req.TokenAmount, req.TokenSymbol),
+		"from_wallet":  req.UserWallet,
+		"to_wallet":    req.Recipient,
 	}).Info("Built Solana payment transaction from checkout quote")
 
 	return &TransactionBuildResponse{

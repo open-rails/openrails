@@ -77,6 +77,34 @@ func FormatRemaining(d time.Duration) string {
 	}
 }
 
+// FormatDuration renders an exact duration in its largest whole unit: "1 week",
+// "30 days", "36 hours", "90 minutes", "45 seconds". Whole hours, days and
+// weeks read back through the catalog's duration parser. A fractional second
+// keeps Go's notation.
+func FormatDuration(d time.Duration) string {
+	sign := ""
+	if d < 0 {
+		sign, d = "-", -d
+	}
+	for _, u := range []struct {
+		size time.Duration
+		name string
+	}{{7 * 24 * time.Hour, "week"}, {24 * time.Hour, "day"}, {time.Hour, "hour"}, {time.Minute, "minute"}, {time.Second, "second"}} {
+		if d >= u.size && d%u.size == 0 {
+			return sign + plural(int(d/u.size), u.name)
+		}
+	}
+	if d == 0 {
+		return "0 seconds"
+	}
+	return sign + d.String()
+}
+
+// FormatHours is FormatDuration for a whole-hour count.
+func FormatHours(hours int) string {
+	return FormatDuration(time.Duration(hours) * time.Hour)
+}
+
 func plural(n int, unit string) string {
 	if n == 1 {
 		return "1 " + unit

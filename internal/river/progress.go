@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 // #895: the progress detector must NOT be a River job.
@@ -216,7 +217,7 @@ func (m *ProgressMonitor) Run(ctx context.Context) {
 		ticker = clockwork.NewRealClock().NewTicker(m.interval())
 	}
 	defer ticker.Stop()
-	log.WithField("interval", m.interval()).Info("river progress monitor started (#895: out-of-River detector)")
+	log.WithField("interval", cadence.FormatDuration(m.interval())).Info("river progress monitor started (#895: out-of-River detector)")
 	for {
 		select {
 		case <-ctx.Done():

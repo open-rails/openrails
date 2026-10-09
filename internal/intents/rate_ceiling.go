@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 // #732 anti-credential-compromise rate ceiling — the ULTIMATE hardcoded
@@ -299,7 +300,7 @@ func (c *RateCeiling) trip(ctx context.Context, p CheckParams, which ceilingKind
 		"per_actor_max":         PerActorHourlyCeiling,
 		"per_merchant_max":      PerMerchantHourlyCeiling,
 		"system_merchant_max":   PerMerchantSystemHourlyCeiling,
-		"window":                RateCeilingWindow.String(),
+		"window":                cadence.FormatDuration(RateCeilingWindow),
 	}
 	log.WithContext(ctx).WithFields(fields).Error(
 		"destructive-operation rate ceiling TRIPPED — refusing op; possible credential compromise or runaway automation, verify before resuming")

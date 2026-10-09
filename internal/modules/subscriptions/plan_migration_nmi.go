@@ -143,7 +143,7 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 		return fmt.Errorf("nmi push: verify %s: %w", railID, err)
 	}
 	if gotCents != cents {
-		return fmt.Errorf("nmi push: update did not converge: remote amount %d rail units, want %d %s", gotCents, cents, currency)
+		return fmt.Errorf("nmi push: update did not converge: remote amount %s, want %s", moneyutil.FormatRailMinor(gotCents, currency), moneyutil.FormatRailMinor(cents, currency))
 	}
 	return nil
 }

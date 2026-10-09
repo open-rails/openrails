@@ -1,11 +1,15 @@
 package subscriptions
 
 import (
+	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // #789: access-ended mail goes to often long-lapsed users, so its copy stays
@@ -69,3 +73,41 @@ func TestParsePremiumEndReasonRoundTrips(t *testing.T) {
 	require.Equal(t, PremiumEndReasonUnknown, ParsePremiumEndReason("bogus"))
 	require.Equal(t, PremiumEndReasonUnknown, ParsePremiumEndReason(""))
 }
+
+// Emails show an amount at its currency's own scale: cents for a six-decimal
+// currency, whole yen for a zero-decimal one, never native units.
+func TestEmailAmountsUseTheCurrencyScale(t *testing.T) {
+	start := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		amount          int64
+		currency, shown string
+	}{
+		{19_990_000, "USD", "19.99 USD"},
+		{5_000_000, "JPY", "500 JPY"},
+	} {
+		data := SubscriptionEmailData{Username: "alice", Amount: tc.amount, Currency: tc.currency, PeriodStart: start, PeriodEnd: start.Add(720 * time.Hour)}
+		mail := &sentMail{}
+		require.NoError(t, NewEmailService(mail, nil).SendOneOffPurchaseReceipt(context.Background(), OneOffPurchaseEmailData{UserEmail: "alice@example.com", AmountMicros: tc.amount, Currency: tc.currency}))
+		require.Len(t, mail.sent, 1)
+		for name, c := range map[string]EmailContent{
+			"confirmation":   RenderSubscriptionConfirmationEmail("Store", data),
+			"renewal":        RenderSubscriptionRenewalEmail("Store", data),
+			"payment failed": RenderPaymentFailedEmail("Store", "", data),
+			"receipt":        {HTML: mail.sent[0].HTML, Plain: mail.sent[0].Text},
+		} {
+			for _, body := range []string{c.HTML, c.Plain} {
+				require.Contains(t, body, tc.shown, name)
+				require.NotContains(t, body, strconv.FormatInt(tc.amount, 10), name)
+			}
+		}
+	}
+}
+
+type sentMail struct{ sent []config.Email }
+
+func (m *sentMail) Send(_ context.Context, e config.Email) error {
+	m.sent = append(m.sent, e)
+	return nil
+}
+
+func (*sentMail) CheckHealth(context.Context) error { return nil }

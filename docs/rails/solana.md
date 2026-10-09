@@ -134,8 +134,8 @@ checkout only, across every merchant and PSP.
   prices:
     premium-monthly:
       amount: 23 USD
-      access_duration_hours: 720
-      billing_interval_hours: 720
+      access_duration: 30 days
+      billing_interval: 30 days
       psps: [solana]
       # Optional:
       # psp_links:

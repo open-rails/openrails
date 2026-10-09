@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/retry"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
 // Config configures the Vault client + auth for a managed deployment. It is kept
@@ -328,7 +329,7 @@ func (s *Supervisor) authenticate(ctx context.Context) (*vaultapi.Secret, error)
 	case renewable:
 		return &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, Renewable: true, LeaseDuration: int(ttl.Seconds())}}, nil
 	case ttl > 0:
-		log.Warnf("vault: token auth uses a NON-RENEWABLE token expiring at %s (in %s); rotate vault.token/VAULT_TOKEN before then", time.Now().Add(ttl).Format(time.RFC3339), ttl.Round(time.Second))
+		log.Warnf("vault: token auth uses a NON-RENEWABLE token expiring at %s (in %s); rotate vault.token/VAULT_TOKEN before then", time.Now().Add(ttl).Format(time.RFC3339), cadence.FormatRemaining(ttl))
 		return &vaultapi.Secret{Auth: &vaultapi.SecretAuth{ClientToken: token, LeaseDuration: int(ttl.Seconds())}}, nil
 	default:
 		return nil, nil

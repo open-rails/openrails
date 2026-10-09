@@ -14,7 +14,7 @@ import (
 
 const conDuplicateChargesSamePeriod = `-- name: ConDuplicateChargesSamePeriod :many
 WITH charges AS (
-    SELECT purch.id, purch.customer_id, purch.subscription_id, purch.price_id, purch.amount, purch.purchased_at,
+    SELECT purch.id, purch.customer_id, purch.subscription_id, purch.price_id, purch.amount, purch.currency, purch.purchased_at,
            price.product_id, prod.key AS product_key,
            purch.metadata->>'period_start' AS period_start,
            LEAST(price.billing_interval_hours, COALESCE(price.trial_duration_hours, price.billing_interval_hours)) AS cycle_hours
@@ -33,20 +33,20 @@ WITH charges AS (
       AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
 ),
 unstamped AS (
-    SELECT c.id, c.customer_id, c.subscription_id, c.price_id, c.amount, c.purchased_at, c.product_id, c.product_key, c.period_start, c.cycle_hours, LAG(c.id) OVER w AS prev_id, LAG(c.purchased_at) OVER w AS prev_at
+    SELECT c.id, c.customer_id, c.subscription_id, c.price_id, c.amount, c.currency, c.purchased_at, c.product_id, c.product_key, c.period_start, c.cycle_hours, LAG(c.id) OVER w AS prev_id, LAG(c.purchased_at) OVER w AS prev_at
     FROM charges c
     WHERE c.period_start IS NULL
     WINDOW w AS (PARTITION BY c.subscription_id, c.price_id ORDER BY c.purchased_at, c.id)
 ),
 groups AS (
-    SELECT subscription_id, period_start AS period_key, id, customer_id, product_id, product_key, amount, purchased_at
+    SELECT subscription_id, period_start AS period_key, id, customer_id, product_id, product_key, amount, currency, purchased_at
     FROM charges
     WHERE period_start IS NOT NULL
       AND (subscription_id, period_start) IN (
           SELECT subscription_id, period_start FROM charges WHERE period_start IS NOT NULL
           GROUP BY subscription_id, period_start HAVING COUNT(*) > 1)
     UNION ALL
-    SELECT u.subscription_id, to_char(p.purchased_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), x.id, x.customer_id, x.product_id, x.product_key, x.amount, x.purchased_at
+    SELECT u.subscription_id, to_char(p.purchased_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), x.id, x.customer_id, x.product_id, x.product_key, x.amount, x.currency, x.purchased_at
     FROM unstamped u
     JOIN charges p ON p.id = u.prev_id
     JOIN charges x ON x.id IN (u.id, u.prev_id)
@@ -62,6 +62,7 @@ SELECT
     COUNT(*)::int AS count,
     ARRAY_AGG(id ORDER BY purchased_at DESC)::uuid[] AS payment_ids,
     SUM(amount)::bigint AS total_amount,
+    MIN(currency)::text AS currency,
     MIN(purchased_at)::timestamptz AS first_date,
     MAX(purchased_at)::timestamptz AS last_date
 FROM groups
@@ -82,6 +83,7 @@ type ConDuplicateChargesSamePeriodRow struct {
 	Count          int32
 	PaymentIds     []uuid.UUID
 	TotalAmount    int64
+	Currency       string
 	FirstDate      time.Time
 	LastDate       time.Time
 }
@@ -111,6 +113,7 @@ func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDupl
 			&i.Count,
 			&i.PaymentIds,
 			&i.TotalAmount,
+			&i.Currency,
 			&i.FirstDate,
 			&i.LastDate,
 		); err != nil {

@@ -247,7 +247,7 @@ func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, p
 		if rec.LatestInvoiceAmountPaid == 0 {
 			return nil // settled zero-amount invoice (trial / no_payment_required)
 		}
-		return fmt.Errorf("fetched invoice amount mismatch: got %d cents (%d micros), want %d micros", rec.LatestInvoiceAmountPaid, amountPaidMicros, price.Amount)
+		return fmt.Errorf("fetched invoice amount mismatch: got %s, want %s", moneyutil.FormatAmount(amountPaidMicros, price.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
 	}
 	return nil
 }

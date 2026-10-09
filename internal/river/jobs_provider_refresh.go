@@ -32,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -249,7 +250,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 		"skipped_no_accounts": skipped,
 		"enqueue_errors":      failed,
 		"queue":               w.merchantQueue(),
-		"stagger":             w.stagger().String(),
+		"stagger":             cadence.FormatDuration(w.stagger()),
 	}).Info("Provider Refresh: scheduled merchant refresh jobs")
 	if failed > 0 {
 		// Retry the scheduler; per-merchant unique keys make the rerun idempotent.

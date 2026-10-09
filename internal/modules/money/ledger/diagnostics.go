@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // #833 ledger integrity diagnostics. Two invariants hold the double-entry
@@ -42,8 +43,8 @@ type ConservationBreach struct {
 }
 
 func (b ConservationBreach) String() string {
-	return fmt.Sprintf("conservation: merchant=%s currency=%s net=%d across %d accounts (must be 0)",
-		b.MerchantID, b.Currency, b.Net, b.Accounts)
+	return fmt.Sprintf("conservation: merchant=%s net=%s across %d accounts (must be 0)",
+		b.MerchantID, moneyutil.FormatAmount(b.Net, b.Currency), b.Accounts)
 }
 
 // CounterDrift is one account whose maintained counters disagree with the sum
@@ -61,8 +62,9 @@ type CounterDrift struct {
 }
 
 func (d CounterDrift) String() string {
-	return fmt.Sprintf("counter drift: account=%s (%s/%s) credits stored=%d logged=%d, debits stored=%d logged=%d",
-		d.AccountID, d.AccountType, d.Currency, d.StoredCredits, d.LoggedCredits, d.StoredDebits, d.LoggedDebits)
+	return fmt.Sprintf("counter drift: account=%s (%s) credits stored=%s logged=%s, debits stored=%s logged=%s",
+		d.AccountID, d.AccountType, moneyutil.FormatAmount(d.StoredCredits, d.Currency), moneyutil.FormatAmount(d.LoggedCredits, d.Currency),
+		moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
 }
 
 // IntegrityReport is the combined result. Empty means both invariants hold.

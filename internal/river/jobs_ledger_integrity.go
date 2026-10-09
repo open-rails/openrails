@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
@@ -111,8 +112,8 @@ func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid bill
 			"currency": b.Currency, "net": b.Net, "accounts": b.Accounts, "detail": b.String(),
 		})
 		action := fmt.Sprintf(
-			"the %s ledger does not net to zero (%d micros across %d accounts). Double entry means every transfer credits and debits the same amount, so a non-zero sum is money created or destroyed inside the ledger — a one-sided counter write, or a transfer applied to only one leg. Do NOT settle or invoice off these balances until it is explained; `openrails ledger-audit --merchant=id:%s` reproduces it",
-			b.Currency, b.Net, b.Accounts, mid.String())
+			"the %s ledger does not net to zero (%s across %d accounts). Double entry means every transfer credits and debits the same amount, so a non-zero sum is money created or destroyed inside the ledger — a one-sided counter write, or a transfer applied to only one leg. Do NOT settle or invoice off these balances until it is explained; `openrails ledger-audit --merchant=id:%s` reproduces it",
+			b.Currency, moneyutil.FormatAmount(b.Net, b.Currency), b.Accounts, mid.String())
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID:        mid.UUID(),
 			FindingType:       FindingLedgerConservation,
@@ -133,9 +134,10 @@ func (w LedgerIntegrityWorker) raiseLedgerFindings(ctx context.Context, mid bill
 			"detail": d.String(),
 		})
 		action := fmt.Sprintf(
-			"account %s (%s/%s) disagrees with the transfer log: credits stored=%d logged=%d, debits stored=%d logged=%d. The counters are a trigger-maintained projection, so this means a write bypassed the trigger (superuser session, COPY, restore, a migration that disabled triggers) — the append-only log is the truth and every balance read on this account is wrong. Reconcile from ledger_transfers before trusting it",
-			d.AccountID, d.AccountType, d.Currency,
-			d.StoredCredits, d.LoggedCredits, d.StoredDebits, d.LoggedDebits)
+			"account %s (%s) disagrees with the transfer log: credits stored=%s logged=%s, debits stored=%s logged=%s. The counters are a trigger-maintained projection, so this means a write bypassed the trigger (superuser session, COPY, restore, a migration that disabled triggers) — the append-only log is the truth and every balance read on this account is wrong. Reconcile from ledger_transfers before trusting it",
+			d.AccountID, d.AccountType,
+			moneyutil.FormatAmount(d.StoredCredits, d.Currency), moneyutil.FormatAmount(d.LoggedCredits, d.Currency),
+			moneyutil.FormatAmount(d.StoredDebits, d.Currency), moneyutil.FormatAmount(d.LoggedDebits, d.Currency))
 		if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 			MerchantID:        mid.UUID(),
 			FindingType:       FindingLedgerCounterDrift,

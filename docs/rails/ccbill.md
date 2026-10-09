@@ -65,8 +65,8 @@ maps to:
 prices:
   premium-monthly:
     amount: 9.99 USD
-    access_duration_hours: 720
-    billing_interval_hours: 720
+    access_duration: 30 days
+    billing_interval: 30 days
     psps: [ccbill]
     psp_links:
       ccbill:

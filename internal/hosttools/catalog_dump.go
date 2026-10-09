@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -19,6 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/shared/cadence"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // CatalogDumpOptions exports current, unarchived offers as an editable catalog
@@ -72,16 +75,83 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	}); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(manifest)
-	if err != nil {
-		return err
-	}
-	raw, err := yaml.JSONToYAML(encoded)
+	raw, err := readableCatalogYAML(manifest)
 	if err != nil {
 		return fmt.Errorf("marshal catalog manifest: %w", err)
 	}
 	_, err = out.Write(raw)
 	return err
+}
+
+// readableCatalogYAML writes prices in the forms a person edits: "amount:
+// 9.99 USD" and "billing_interval: 30 days". Apply reads both back exactly.
+func readableCatalogYAML(manifest *catalog.Application) ([]byte, error) {
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, err
+	}
+	var doc any
+	if err := yaml.UnmarshalWithOptions(encoded, &doc, yaml.UseOrderedMap()); err != nil {
+		return nil, err
+	}
+	products, _ := yamlValue(doc, "products").(yaml.MapSlice)
+	for _, product := range products {
+		prices, _ := yamlValue(product.Value, "prices").(yaml.MapSlice)
+		for i, price := range prices {
+			if fields, ok := price.Value.(yaml.MapSlice); ok {
+				prices[i].Value = readablePrice(fields)
+			}
+		}
+	}
+	return yaml.Marshal(doc)
+}
+
+var readableDurations = map[string]string{
+	"access_duration_hours":  "access_duration",
+	"billing_interval_hours": "billing_interval",
+	"trial_duration_hours":   "trial_duration",
+}
+
+func readablePrice(price yaml.MapSlice) yaml.MapSlice {
+	units, _ := yamlValue(price, "unit_amount").(string)
+	code, _ := yamlValue(price, "currency").(string)
+	amount, err := strconv.ParseInt(units, 10, 64)
+	_, known := moneyutil.LookupCurrency(code)
+	out := make(yaml.MapSlice, 0, len(price))
+	for _, item := range price {
+		key, _ := item.Key.(string)
+		switch {
+		case err == nil && known && key == "unit_amount":
+			continue
+		case err == nil && known && key == "currency":
+			item = yaml.MapItem{Key: "amount", Value: moneyutil.FormatAmount(amount, code)}
+		case readableDurations[key] != "":
+			item.Key = readableDurations[key]
+			if hours, ok := yamlInt(item.Value); ok {
+				item.Value = cadence.FormatHours(hours)
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func yamlValue(node any, key string) any {
+	fields, _ := node.(yaml.MapSlice)
+	for _, item := range fields {
+		if item.Key == key {
+			return item.Value
+		}
+	}
+	return nil
+}
+
+func yamlInt(value any) (int, bool) {
+	if value == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(fmt.Sprint(value))
+	return n, err == nil
 }
 
 func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Application, error) {

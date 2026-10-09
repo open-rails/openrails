@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -103,12 +104,12 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 				return nil, err
 			}
 			if in.UnitAmount > 0 && remoteAmount != in.UnitAmount {
-				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d micros)", planID, detail.AmountCents, in.UnitAmount)
+				return nil, fmt.Errorf("NMI recurring plan %q amount (%s) does not match catalog price (%s)", planID, moneyutil.FormatAmount(remoteAmount, in.Currency), moneyutil.FormatAmount(in.UnitAmount, in.Currency))
 			}
 			// day_frequency is only reported for day-based plans; validate it only
 			// when NMI returns one (month-based plans report 0 -> unverifiable here).
 			if in.BillingCycleDays != nil && *in.BillingCycleDays > 0 && detail.DayFrequency > 0 && detail.DayFrequency != *in.BillingCycleDays {
-				return nil, fmt.Errorf("NMI recurring plan %q billing cycle (%d days) does not match catalog price (%d days)", planID, detail.DayFrequency, *in.BillingCycleDays)
+				return nil, fmt.Errorf("NMI recurring plan %q billing cycle (%s) does not match catalog price (%s)", planID, cadence.FormatHours(detail.DayFrequency*24), cadence.FormatHours(*in.BillingCycleDays*24))
 			}
 		} else {
 			if in.RemoteWritesDisabled {

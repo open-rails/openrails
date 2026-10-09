@@ -106,3 +106,30 @@ func TestProviderLinksDumpRefusesInvalidJSON(t *testing.T) {
 	_, err := providerLinks([]byte(`not json`))
 	require.Error(t, err)
 }
+
+// The dump writes prices the way a person edits them, and apply reads them
+// back to the same exact terms.
+func TestCatalogDumpIsReadable(t *testing.T) {
+	source := []byte(`schema_version: 1
+products:
+  premium:
+    display_name: Premium
+    prices:
+      monthly: {currency: USD, unit_amount: 9990000, access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: 0, trial_duration_hours: 24}
+      lifetime: {currency: JPY, unit_amount: 5000000, access_duration_hours: null, billing_interval_hours: null}
+      gas: {currency: SOL, unit_amount: 1500000000, access_duration_hours: 168}
+`)
+	manifest, err := catalog.ParseApplicationYAML(source)
+	require.NoError(t, err)
+	raw, err := readableCatalogYAML(manifest)
+	require.NoError(t, err)
+	for _, line := range []string{"amount: 9.99 USD", "billing_interval: 30 days", "trial_duration: 1 day", "amount: 500 JPY", "access_duration: null", "amount: 1.5 SOL", "access_duration: 1 week"} {
+		require.Contains(t, string(raw), line)
+	}
+	for _, numeric := range []string{"unit_amount: \"9990000\"", "_hours", "currency:"} {
+		require.NotContains(t, string(raw), numeric)
+	}
+	back, err := catalog.ParseApplicationYAML(raw)
+	require.NoError(t, err)
+	require.Equal(t, manifest, back)
+}

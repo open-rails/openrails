@@ -184,9 +184,9 @@ func validateCCBillBilledAmount(ctx context.Context, svc *CCBillWebhookService, 
 	billingErr := newBillingError(ErrorTypeAmount,
 		"Billed amount does not match expected price",
 		map[string]interface{}{
-			"expected_amount_cents": expectedAmountCents,
-			"billed_amount_cents":   billedAmountCents,
-			"tolerance_cents":       tolerance,
+			"expected_amount": moneyutil.FormatRailMinor(expectedAmountCents, currency),
+			"billed_amount":   moneyutil.FormatRailMinor(billedAmountCents, currency),
+			"tolerance":       moneyutil.FormatRailMinor(tolerance, currency),
 		}, nil)
 	for key, value := range contextFields {
 		billingErr.Context[key] = value
@@ -901,7 +901,7 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			"userID":                 subscription.CustomerID.String(),
 			"oldPriceID":             oldPriceID,
 			"newPriceID":             newPrice.ID,
-			"billedAmountCents":      billedAmountCents,
+			"billedAmount":           moneyutil.FormatRailMinor(billedAmountCents, currencyValue),
 			"transactionID":          transactionID,
 			"newFlexID":              flexID,
 			"originalSubscriptionID": originalSubscriptionID,
@@ -1288,7 +1288,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		} else {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscriptionID":      sub.ID,
-				"refundAmountCents":   refundAmountCents,
+				"refundAmount":        moneyutil.FormatRailMinor(refundAmountCents, currency),
 				"refundTransactionID": refundTransactionID,
 			}).Info("Partial refund processed - subscription remains active")
 		}
@@ -1296,7 +1296,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":         sub.ID,
 			"userID":                 sub.CustomerID.String(),
-			"refundAmountCents":      refundAmountCents,
+			"refundAmount":           moneyutil.FormatRailMinor(refundAmountCents, currency),
 			"refundType":             "auto_detected",
 			"refundTransactionID":    refundTransactionID,
 			"subscriptionTerminated": shouldTerminate,
@@ -1355,7 +1355,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 				// sale create entitlements for an already-voided charge.
 				log.WithContext(ctx).WithFields(log.Fields{
 					"rail_subscription_id": pSubscriptionID,
-					"void_amount_cents":    voidAmountCents,
+					"void_amount":          moneyutil.FormatRailMinor(voidAmountCents, currency),
 					"void_transaction_id":  voidTransactionID,
 				}).Warn("Void event for unknown subscription; retrying until the sale materializes")
 				return fmt.Errorf("subscription %q not found for CCBill void: %w", pSubscriptionID, err)
@@ -1366,7 +1366,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":        sub.ID,
 			"userID":                sub.CustomerID.String(),
-			"voidAmountCents":       voidAmountCents,
+			"voidAmount":            moneyutil.FormatRailMinor(voidAmountCents, currency),
 			"voidTransactionID":     voidTransactionID,
 			"originalTransactionID": voidTransactionID,
 		}).Info("Void event for existing subscription")
@@ -1419,7 +1419,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":    sub.ID,
 			"userID":            sub.CustomerID.String(),
-			"voidAmountCents":   voidAmountCents,
+			"voidAmount":        moneyutil.FormatRailMinor(voidAmountCents, currency),
 			"voidTransactionID": voidTransactionID,
 		}).Info("Processed void successfully")
 
@@ -1470,8 +1470,8 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				// subscription once the sale materializes; a plain ACK left the
 				// charged-back access standing.
 				log.WithContext(ctx).WithFields(log.Fields{
-					"rail_subscription_id":    pSubscriptionID,
-					"chargeback_amount_cents": chargebackAmountCents,
+					"rail_subscription_id": pSubscriptionID,
+					"chargeback_amount":    moneyutil.FormatRailMinor(chargebackAmountCents, currency),
 				}).Error("Chargeback event for unknown subscription; retrying until the sale materializes")
 				return fmt.Errorf("subscription %q not found for CCBill chargeback: %w", pSubscriptionID, err)
 			}
@@ -1555,15 +1555,15 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 		}
 
 		log.WithContext(ctx).WithFields(log.Fields{
-			"user_id":                 sub.CustomerID.String(),
-			"chargeback_amount_cents": chargebackAmountCents,
-			"dispute_id":              "unknown",
+			"user_id":           sub.CustomerID.String(),
+			"chargeback_amount": moneyutil.FormatRailMinor(chargebackAmountCents, currency),
+			"dispute_id":        "unknown",
 		}).Warn("User account involved in chargeback - consider fraud review")
 
 		log.WithContext(ctx).WithFields(log.Fields{
 			"subscriptionID":          sub.ID,
 			"userID":                  sub.CustomerID.String(),
-			"chargebackAmountCents":   chargebackAmountCents,
+			"chargebackAmount":        moneyutil.FormatRailMinor(chargebackAmountCents, currency),
 			"chargebackTransactionID": chargebackTransactionID,
 			"chargebackReasonCode":    "unknown",
 			"disputeID":               "unknown",
