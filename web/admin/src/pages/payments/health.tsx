@@ -1,5 +1,6 @@
 // Payments → Health (#1117): decline and rebill-failure health from the
 // metrics API. Every tile and cell opens the matching attempt or cycle list.
+import { useMerchantConfig } from "@/lib/capabilities"
 import * as React from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
@@ -69,7 +70,8 @@ const metrics = adminQueries.widgetMetrics
 
 export function PaymentHealthPage() {
   const [params, setParams] = useSearchParams()
-  const psps = useQuery(adminQueries.psps()).data?.data
+  const config = useMerchantConfig()
+  const psps = useQuery({ ...adminQueries.psps(), enabled: config }).data?.data
   const pspId = params.get("psp_id") ?? ""
   const psp = psps?.find((p) => p.id === pspId)
   const scope: Scope = {
@@ -666,18 +668,12 @@ function Coverage({
               <TableRow key={r.psp}>
                 <TableCell className="text-xs">{pspKey(r.psp)}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  <Link
-                    className="hover:underline"
-                    to={link(r.psp, "webhook")}
-                  >
+                  <Link className="hover:underline" to={link(r.psp, "webhook")}>
                     {r.webhook}
                   </Link>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  <Link
-                    className="hover:underline"
-                    to={link(r.psp, "pull")}
-                  >
+                  <Link className="hover:underline" to={link(r.psp, "pull")}>
                     {r.pull}
                   </Link>
                 </TableCell>
@@ -710,12 +706,12 @@ function NMIHistory({ scope }: { scope: Scope }) {
           NMI history (before OpenRails recorded attempts)
         </h2>
         <p className="max-w-4xl text-sm text-muted-foreground">
-          NMI&apos;s own transaction history, read daily and kept 25 months.
-          It counts every sender, OpenRails too once it started. One-off sales
-          mix initial sales, upgrades and retries of declined rebills: the
-          history cannot tell them apart. Scheduled rebills are NMI&apos;s own
-          charges, each the first try of its period. Rates count
-          authorizations, not buyers.{" "}
+          NMI&apos;s own transaction history, read daily and kept 25 months. It
+          counts every sender, OpenRails too once it started. One-off sales mix
+          initial sales, upgrades and retries of declined rebills: the history
+          cannot tell them apart. Scheduled rebills are NMI&apos;s own charges,
+          each the first try of its period. Rates count authorizations, not
+          buyers.{" "}
           {since
             ? `OpenRails recorded its own attempts from ${formatBucket(since, "month")}; from then on the panels above measure them.`
             : "OpenRails recorded no NMI attempt in this range."}

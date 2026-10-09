@@ -26,7 +26,7 @@ for its holders.
 
 ## Reading access
 
-Merchant API (`merchant:customer-settings:read`):
+Merchant API (staff reads, `openrails.StaffReads`; resource group `openrails.Access`):
 
 - `POST /v1/merchant/customers/{customer_id}/entitlements/check` —
   `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
@@ -53,7 +53,9 @@ list is `{data, next_cursor}` with keyset cursors.
 - **Free grants**: `POST /v1/merchant/product-access` (`Client.CreateProductAccess`)
   grants up to 100 products across customers, all or none, each with `hours` (extends
   after the customer's latest live window of the product), `ends_at`, or neither
-  (indefinite: needs `merchant:access:grant-permanent`), a `reason` and a `note`. The
+  (indefinite), a `reason` and a `note`. A host that keeps indefinite grants from
+everyone who can grant access guards `openrails.CreateProductAccess` with a
+stricter permission. The
   grant records who granted it. A retry with the same `Idempotency-Key` header answers
   the first grants.
 - **Revoke** one window with `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}`

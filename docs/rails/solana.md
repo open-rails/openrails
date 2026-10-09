@@ -108,12 +108,6 @@ the accepted tokens with current pricing.
 3. OpenRails watches the reference on chain and settles the payment; the session
    then reads `succeeded`.
 
-A merchant checkout attempt (`CreateCheckoutAttempt` with `payment: {psp:
-"solana", token_symbol, flow}`) may instead use `flow: transaction_request`: its
-`solana_pay` link points at `/v1/checkout-attempts/{id}/solana-pay`, where the
-wallet POSTs its account and receives a server-built transaction to sign.
-`ConfirmCheckoutAttempt` with the signature verifies the transaction on chain.
-
 ### Recurring subscriptions
 
 Recurring billing runs on the Subscriptions Delegation Program (`De1eg…`), a
@@ -197,8 +191,8 @@ To exercise the flows on devnet:
 - For recurring, the subscriber wallet needs **real devnet USDC** (e.g. the
   Circle faucet at faucet.circle.com) plus a little SOL — the recurring
   allowlist resolves the configured USDC mint, so a self-minted token won't work.
-- Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; the
-  merchant checkout attempt returns `next_action: solana_sign_transactions` and the wallet
+- Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; a
+  subscription's wallet action returns `next_action: solana_sign_transactions` and the wallet
   approves one transaction (a first-timer's bundle folds
   `initialize_subscription_authority` in front of subscribe + first pull, using
   the program's `UNKNOWN_INIT_ID` same-slot check).

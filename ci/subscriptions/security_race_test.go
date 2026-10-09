@@ -97,7 +97,7 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			outcomes := make(chan error, 8)
 			send := func(wg *sync.WaitGroup, client *openrails.Client) {
 				defer wg.Done()
-				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), request)
+				_, err := createCheckoutAttempt(context.WithoutCancel(t.Context()), client, request)
 				outcomes <- err
 			}
 			first.Add(1)

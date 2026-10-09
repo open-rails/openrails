@@ -79,8 +79,8 @@ func TestRoutesValidation(t *testing.T) {
 		{"merchant without Auth", config.Routes{Merchant: true}, false},
 		{"merchant with a typed nil Auth", config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil)}, false},
 		{"merchant", config.Routes{Merchant: true, Auth: auth}, true},
-		{"catalog edits without merchant", config.Routes{CatalogEdits: true, Auth: auth}, false},
-		{"catalog edits", config.Routes{Merchant: true, CatalogEdits: true, Auth: auth}, true},
+		{"merchant configuration without Auth", config.Routes{MerchantConfig: true}, false},
+		{"merchant configuration alone", config.Routes{MerchantConfig: true, Auth: auth}, true},
 		{"customer without Auth", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), false},
 		{"customer with the mount's Auth", config.Routes{Auth: auth, CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}, true},
 		{"customer with its own Auth", customer(config.CustomerRoutes{Scope: config.CustomerSelfService, Auth: auth}), true},
@@ -105,7 +105,9 @@ func TestNewRoutes(t *testing.T) {
 
 	asm := &Assembler{Runtime: &app.Runtime{Config: &config.Config{}}, Auth: &authtest.Fake{}}
 	noWebhooks := routesurface.ProviderRoutes{}
-	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchant, RouteSetWebhooks}, ProviderRoutes: &noWebhooks})
+	guard, err := StaffGuard(asm.Runtime, config.Routes{Merchant: true, Guards: authtest.StaffGuards()})
+	require.NoError(t, err)
+	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchant, RouteSetWebhooks}, ProviderRoutes: &noWebhooks, Guard: guard})
 	var keys []string
 	for _, e := range table.Entries {
 		key := e.Method + " " + e.Path

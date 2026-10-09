@@ -13,9 +13,9 @@ import (
 type Routes struct {
 	// Auth is the host's auth middleware. OpenRails stacks it on its own
 	// routes by tier: Required on /v1/me (and to show a checkout session's
-	// buyer their saved cards); RequirePermission, and Sensitive for a user
-	// in person moving money, on the merchant API. A selection whose groups
-	// need it refuses to mount without it.
+	// buyer their saved cards); RequirePermission with each staff route's
+	// guard, and Sensitive for a user in person moving money, on the merchant
+	// API. A selection whose groups need it refuses to mount without it.
 	Auth billingauth.Auth
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
 	// Empty is the root.
@@ -27,15 +27,26 @@ type Routes struct {
 	// Customers mounts signed-in customers' own billing at /v1/me/*, behind
 	// Auth.Required. CustomersNone, the zero value, mounts none.
 	Customers CustomerHTTPScope
-	// Merchant mounts the merchant API (/v1/merchant/*) for staff and
-	// machines, each route behind Auth.RequirePermission for its exact
-	// merchant permission, and Auth.Sensitive for a user in person on one
-	// that moves money or removes access.
+	// Merchant mounts staff work on customers (/v1/merchant/*): payments and
+	// refunds, subscriptions, invoices, credits, access, usage, metrics and
+	// operations, each route behind Auth.RequirePermission with its guard
+	// (StaffReads, StaffWrites or a narrower one), and Auth.Sensitive for a
+	// user in person on one that moves money or removes access.
 	Merchant bool
-	// CatalogEdits adds the merchant API's catalog-write routes; it needs
-	// Merchant. The Go client edits the catalog either way. Every mount of the
-	// merchant API in one process must agree.
-	CatalogEdits bool
+	// MerchantConfig mounts the merchant's own configuration: PSPs, settings,
+	// catalog edits, billing import and export, the dashboard layout, each
+	// route behind its guard (MerchantConfig or a narrower one). Catalog
+	// edits are refused while Config.Catalog is the catalog's truth. The Go
+	// client configures the merchant either way. Every mount in one process
+	// must agree.
+	MerchantConfig bool
+	// Guards are the host's permissions for the staff routes Merchant and
+	// MerchantConfig mount: a level group (StaffReads, StaffWrites,
+	// MerchantConfig), a resource group (Refunds) or one route (RefundPayment),
+	// the most specific winning. Mounting fails when a mounted staff route has
+	// no guard, two guards of one tier cover a route, or a guard covers no
+	// mounted route.
+	Guards Guards
 	// CustomerProfiles mount further customer surfaces: another prefix,
 	// another merchant, or their own Auth.
 	CustomerProfiles []CustomerRoutes
@@ -48,6 +59,15 @@ type Routes struct {
 	// console routes at all.
 	AdminConsole *AdminConsole
 }
+
+// RouteSet names staff routes a guard covers: a level group, a resource group
+// or one route (openrails' generated constants).
+type RouteSet string
+
+// Guards maps route sets to the host's permissions, such as AuthKit's
+// iam.Perm. Mount reads each String() once and passes it to
+// Auth.RequirePermission.
+type Guards map[RouteSet]fmt.Stringer
 
 // AdminConsole is Routes.AdminConsole. The console is a static app that
 // calls the merchant API at Routes.Prefix and AuthKit on its own origin.

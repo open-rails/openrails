@@ -51,20 +51,19 @@ access, err := client.CheckProductAccess(ctx, customerID, billing.CheckProductAc
 if err != nil { return err }
 _ = access[productID]
 
-attempt, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
-    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
-    PriceID: price.ID,
-    PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: methodID},
-    IdempotencyKey: checkoutAttemptKey,
+session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
+    Customer:   billing.CheckoutCustomerIdentity{ID: customerID},
+    PriceID:    price.ID,
     SuccessURL: successURL,
-    CancelURL: cancelURL,
 })
 ```
 
-The server derives one-off or recurring checkout from the selected price.
-`PaymentOptions` names the PSP by its key and carries its applicable collection
-inputs; left empty, the merchant's routing picks one. It does not set the price's product or merchant. Browser return URLs
-provide navigation; verified provider events establish payment and access.
+Usually the customer's browser mints the session itself with the customer's
+own credential (`POST /v1/me/checkout-sessions`); `CreateCheckoutSession` mints
+it with the merchant's credential. Either way the customer pays it on the
+payment page, and a saved card needs the customer's own proof. The server
+derives one-off or recurring checkout from the selected price. Browser return
+URLs provide navigation; verified provider events establish payment and access.
 
 ## What a host declares
 

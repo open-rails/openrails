@@ -26,7 +26,7 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 			// Over HTTP the host charges a card the customer just entered.
 			payment = billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Redirect Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}}
 		}
-		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		_, err := createCheckoutAttempt(t.Context(), w.client[tp], billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: payment,
 			SuccessURL: success, CancelURL: cancel,

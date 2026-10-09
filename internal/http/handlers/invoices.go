@@ -72,9 +72,9 @@ func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 			writeInvoiceError(r, err)
 			return
 		}
-		update, collect := invoicePermission(r, gate, billing.MerchantInvoicesUpdate), invoicePermission(r, gate, billing.MerchantInvoicesCollect)
+		allowed := permittedInvoiceActions(r, gate)
 		for i := range out.Items {
-			permittedInvoiceActions(&out.Items[i], update, collect)
+			keepInvoiceActions(&out.Items[i], allowed)
 		}
 		r.SuccessJSON(out)
 	}
@@ -88,7 +88,7 @@ func GetInvoice(gate StaffCan) func(*httprequest.Request) {
 		if !ok {
 			return
 		}
-		permittedInvoiceActions(invoice, invoicePermission(r, gate, billing.MerchantInvoicesUpdate), invoicePermission(r, gate, billing.MerchantInvoicesCollect))
+		keepInvoiceActions(invoice, permittedInvoiceActions(r, gate))
 		r.SuccessJSON(invoice)
 	}
 }
@@ -364,19 +364,27 @@ func loadMerchantInvoice(r *httprequest.Request) (*billingservice.Service, *bill
 	return svc, invoice, true
 }
 
-func invoicePermission(r *httprequest.Request, gate StaffCan, permission string) bool {
-	return gate != nil && gate(r.Request, permission) == nil
+// invoiceActionRoutes are the routes that perform an invoice's actions.
+var invoiceActionRoutes = map[billing.InvoiceAction]string{
+	billing.InvoiceActionVoid:            "POST /v1/merchant/invoices/{id}/void",
+	billing.InvoiceActionUncollectible:   "POST /v1/merchant/invoices/{id}/uncollectible",
+	billing.InvoiceActionRecordPayment:   "POST /v1/merchant/invoices/{id}/payments",
+	billing.InvoiceActionRetryCollection: "POST /v1/merchant/invoices/{id}/retry-collection",
 }
 
-// permittedInvoiceActions keeps the actions the caller holds the permission
-// for.
-func permittedInvoiceActions(invoice *billing.Invoice, update, collect bool) {
-	invoice.AvailableActions = slices.DeleteFunc(invoice.AvailableActions, func(action billing.InvoiceAction) bool {
-		if action == billing.InvoiceActionRetryCollection {
-			return !collect
-		}
-		return !update
-	})
+// permittedInvoiceActions are the actions whose routes' guards admit the
+// caller.
+func permittedInvoiceActions(r *httprequest.Request, gate StaffCan) map[billing.InvoiceAction]bool {
+	out := map[billing.InvoiceAction]bool{}
+	for action, route := range invoiceActionRoutes {
+		out[action] = gate != nil && gate(r.Request, route) == nil
+	}
+	return out
+}
+
+// keepInvoiceActions keeps the invoice's actions the caller may take.
+func keepInvoiceActions(invoice *billing.Invoice, allowed map[billing.InvoiceAction]bool) {
+	invoice.AvailableActions = slices.DeleteFunc(invoice.AvailableActions, func(action billing.InvoiceAction) bool { return !allowed[action] })
 }
 
 func invoiceProfileCustomer(r *httprequest.Request) (identity.CustomerID, bool) {

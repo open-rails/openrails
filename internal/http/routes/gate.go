@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
-	"sort"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -301,26 +300,38 @@ func (discard) Write(b []byte) (int, error) { return len(b), nil }
 func (discard) WriteHeader(int)             {}
 
 // staffGates gates a merchant route: the mount's merchant, then the host's
-// RequirePermission for the route's permission (and Also) and, for an
-// operation that moves money or removes access by a user in person,
-// Sensitive.
+// RequirePermission for the route's guard and, for an operation that moves
+// money or removes access by a user in person, Sensitive.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a merchant route needs Routes.Auth"})
 	}
+	perm := e.guard(route)
+	if strings.TrimSpace(perm) == "" {
+		panic(MountError{Route: route.Key(), Reason: "no guard names a permission for it (Routes.Guards)"})
+	}
 	var out []router.Middleware
 	if !e.AuthBindsMerchant {
 		out = append(out, e.mountedMerchant())
 	}
-	out = append(out, through(route, "RequirePermission", a.RequirePermission(route.Perm)))
-	if route.Also != "" {
-		out = append(out, through(route, "RequirePermission", a.RequirePermission(route.Also)))
-	}
+	out = append(out, through(route, "RequirePermission", a.RequirePermission(perm)))
 	if Sensitive(route) {
 		out = append(out, inPerson(route, a))
 	}
 	return append(out, e.staffCheck(route, a))
+}
+
+// guard is the permission a merchant route checks: a control-plane route's
+// own, a staff route's guard.
+func (e *Env) guard(route Route) string {
+	if !route.Staff() {
+		return route.Perm
+	}
+	if e.Guard == nil {
+		return ""
+	}
+	return e.Guard(route)
 }
 
 // inPerson stacks the host's Sensitive for a user acting in person. A key or
@@ -346,7 +357,7 @@ func inPerson(route Route, a billingauth.Auth) router.Middleware {
 // Sensitive reports a merchant route whose operation moves money or removes
 // access: the host's Sensitive stacks on it.
 func Sensitive(route Route) bool {
-	return route.Auth == AuthMerchant && (billing.RequiresRecentSignIn(route.Perm) || route.Also != "" && billing.RequiresRecentSignIn(route.Also))
+	return route.Auth == AuthMerchant && route.Sensitive
 }
 
 // mountedMerchant pins the configured merchant, the one the host's
@@ -395,12 +406,6 @@ func (e *Env) staffCheck(route Route, a billingauth.Auth) router.Middleware {
 				refuse(r, route, a, billing.CodePermissionRequired, "Auth.Identity names a subject that is neither a user nor an application")
 				return
 			}
-			// A machine-only permission is automation's: never a user in
-			// person, whatever their roles grant.
-			if billingauth.Interactive(c) && (billing.MachineOnly(route.Perm) || billing.MachineOnly(route.Also)) {
-				refuse(r, route, a, billing.CodePermissionRequired, "")
-				return
-			}
 			target := gateTarget(r.Request)
 			if target.MerchantID.IsZero() {
 				refuse(r, route, a, billing.CodeMerchantUnresolved, "a merchant route admitted an identity at no merchant")
@@ -409,20 +414,28 @@ func (e *Env) staffCheck(route Route, a billingauth.Auth) router.Middleware {
 			if !pin(r, target) {
 				return
 			}
-			r.Request = r.Request.WithContext(billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Permission: route.Perm, Merchant: target.MerchantID}))
+			r.Request = r.Request.WithContext(billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Route: route.Key(), Merchant: target.MerchantID}))
 			next(r)
 		}
 	}
 }
 
-// staffCan answers a handler that asks one more permission of the host's
-// RequirePermission, on the merchant the route already resolved.
-func (e *Env) staffCan(r *http.Request, perm string) error {
+// staffCan answers a handler that asks whether its caller would pass the
+// guard of another route, by key, on the merchant the route already resolved.
+func (e *Env) staffCan(r *http.Request, routeKey string) error {
 	if IsNilAuth(e.Auth) {
 		return billingauth.ErrUnauthenticated
 	}
 	if _, ok := billingauth.StaffFromContext(r.Context()); !ok {
 		return billingauth.ErrUnauthenticated
+	}
+	route, ok := routeByKey(routeKey)
+	perm := ""
+	if ok {
+		perm = e.guard(route)
+	}
+	if perm == "" {
+		return billingauth.ErrForbidden
 	}
 	mw, err := e.permission(perm)
 	if err != nil {
@@ -450,33 +463,15 @@ func (e *Env) permission(perm string) (mw func(http.Handler) http.Handler, err e
 	return mw, nil
 }
 
-// staffAsks are the permissions merchant handlers ask of RequirePermission
-// beyond their route's (StaffCan).
-var staffAsks = []string{billing.MerchantAccessGrantPermanent, billing.MerchantInvoicesUpdate, billing.MerchantInvoicesCollect}
+// routeByKey reads the catalog at request time: the catalog's declarations
+// refer to staffCan, so it cannot read the index statically.
+var routeByKey func(key string) (Route, bool)
 
-// Permissions is every merchant permission the merchant API asks of
-// RequirePermission, sorted: its routes' and its handlers' further asks.
-func Permissions() []string {
-	seen := map[string]bool{}
-	for _, p := range staffAsks {
-		seen[p] = true
+func init() {
+	routeByKey = func(key string) (Route, bool) {
+		r, ok := index[key]
+		return r, ok
 	}
-	for _, r := range Catalog() {
-		if r.Group != Merchant {
-			continue
-		}
-		for _, p := range []string{r.Perm, r.Also} {
-			if p != "" {
-				seen[p] = true
-			}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for p := range seen {
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // recheck is each gated handler's own check, wrapped directly around it: a
@@ -501,7 +496,7 @@ func recheck(route Route, h router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			staff, ok := billingauth.StaffFromContext(r.Request.Context())
 			mid, pinned := merchant.FromContext(r.Request.Context())
-			if !ok || staff.Permission != route.Perm || !pinned || mid != staff.Merchant {
+			if !ok || staff.Route != route.Key() || !pinned || mid != staff.Merchant {
 				refuse(r, route, nil, billing.CodeAuthenticationRequired, "a merchant handler ran without the route gate's staff member")
 				return
 			}

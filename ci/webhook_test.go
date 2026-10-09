@@ -168,7 +168,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	userID := uuid.NewString()
 	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(userID))}})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	session, err := createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},
 		PriceID:        price.ID,
 		Entitlement:    "content:webhook",
@@ -208,7 +208,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	status, body = postSignedStripeWebhook(t, mux, account, secret, expired, now.Add(2*time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
-	got, err := client.GetCheckoutAttempt(t.Context(), session.ID)
+	got, err := getCheckoutAttempt(t.Context(), client, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutAttemptSucceeded, got.Status)
 	access, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckEntitlementsParams{Entitlements: []string{"content:webhook"}})

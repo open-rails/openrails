@@ -193,7 +193,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 - **Backends**: `secret_backend: db` (envelope-encrypted in Postgres under
   `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). Managed DB storage requires encryption even in sandbox. Snapshot custody keeps
   host-owned values in memory. Declared, never auto-detected, never inferred from
-  `vault.enabled`, never silently falls back. Vault setup + minimal
+  a Vault connection, never silently falls back. Vault setup + minimal
   policies: [vault.md](vault.md); per-merchant secret ops, canonical names,
   and the DB→Vault migration runbook:
   [vault.md](vault.md).

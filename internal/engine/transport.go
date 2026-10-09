@@ -38,7 +38,7 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 // methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
-	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, httproutes.HostOptions())
+	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, httproutes.HostOptions(), httproutes.Merchant, httproutes.MerchantConfig)
 	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})

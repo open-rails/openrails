@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -18,43 +19,54 @@ import (
 // function returning a fresh request, since a credential's proof (DPoP) may
 // be spent once.
 type AuthCases struct {
-	// Permission is a merchant permission Staff holds on the mounted merchant
-	// and Customer does not.
-	Permission string
+	// Guards are the permissions the host mounts its staff routes with
+	// (Routes.Guards).
+	Guards openrails.Guards
 	// Customer is a signed-in user who is not staff.
 	Customer func() *http.Request
-	// Staff is a person holding Permission on the mounted merchant, signed in
-	// recently.
+	// Staff is a person holding every guard's permission on the mounted
+	// merchant, signed in recently.
 	Staff func() *http.Request
+	// Holders are people each holding only one guard's permission: CheckAuth
+	// checks the guard admits them and every guard with another permission
+	// refuses them. Nil skips the case.
+	Holders map[openrails.RouteSet]func() *http.Request
 	// Refused are credentials Required must refuse, by name: an expired
 	// token, a forged one, a banned or deleted user's, a signed-out session.
 	Refused map[string]func() *http.Request
-	// OtherMerchantStaff holds Permission only on another merchant; nil
-	// skips the case.
+	// OtherMerchantStaff holds every guard's permission only on another
+	// merchant; nil skips the case.
 	OtherMerchantStaff func() *http.Request
-	// StaleStaff holds Permission but signed in too long ago to move money;
-	// nil skips the case.
+	// StaleStaff holds every guard's permission but signed in too long ago to
+	// move money; nil skips the case.
 	StaleStaff func() *http.Request
-	// Machine is a machine credential (an API key) holding Permission; nil
-	// skips the case. RequirePermission must admit it, and it must never
-	// read as a user acting in person, who would buy as a customer.
+	// Machine is a machine credential (an API key) holding every guard's
+	// permission; nil skips the case. RequirePermission must admit it, and it
+	// must never read as a user acting in person, who would buy as a customer.
 	Machine func() *http.Request
 }
 
 // CheckAuth fails t when a's middleware admits what it must refuse:
 // anonymous and refused credentials, a customer or another merchant's staff
-// on a merchant permission, a stale sign-in on an operation that moves money,
-// or a machine reading as a user. It also fails when a refuses the customer
-// or staff it must admit, so a check cannot pass vacuously.
+// on a guard's permission, one guard's holder on another's, a stale sign-in on
+// an operation that moves money, or a machine reading as a user. It also fails
+// when a refuses the customer or staff it must admit, so a check cannot pass
+// vacuously.
 func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 	t.Helper()
-	if a == nil || c.Permission == "" || c.Customer == nil || c.Staff == nil {
-		t.Fatal("openrailstest: CheckAuth needs an Auth, a Permission, and Customer and Staff requests")
+	if a == nil || len(c.Guards) == 0 || c.Customer == nil || c.Staff == nil {
+		t.Fatal("openrailstest: CheckAuth needs an Auth, Guards, and Customer and Staff requests")
+		return
+	}
+	perms := map[string]bool{}
+	for set, guard := range c.Guards {
+		if guard == nil || guard.String() == "" {
+			t.Errorf("openrailstest: %s guards with no permission", set)
+			continue
+		}
+		perms[guard.String()] = true
 	}
 	required := chain(a.Required())
-	permission := chain(a.RequirePermission(c.Permission))
-	sensitive := chain(a.RequirePermission(c.Permission), a.Sensitive())
-
 	anonymous := func() *http.Request {
 		r := c.Customer()
 		r.Header.Del("Authorization")
@@ -63,12 +75,9 @@ func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 		return r
 	}
 	refuses(t, "Required admitted an anonymous request", required, anonymous)
-	refuses(t, "RequirePermission admitted an anonymous request", permission, anonymous)
 	for name, req := range c.Refused {
 		refuses(t, fmt.Sprintf("Required admitted the %s credential", name), required, req)
-		refuses(t, fmt.Sprintf("RequirePermission admitted the %s credential", name), permission, req)
 	}
-
 	if who, ok := admits(t, "Required refused the customer", a, required, c.Customer); ok {
 		if who.SubjectKind != openrails.SubjectUser {
 			t.Errorf("openrailstest: the customer's Identity is SubjectKind %q; a customer is a user", who.SubjectKind)
@@ -83,26 +92,57 @@ func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 			t.Errorf("openrailstest: the customer's Identity Subject %q is not a canonical UUID", who.Subject)
 		}
 	}
-	refuses(t, "RequirePermission admitted the customer, who does not hold "+c.Permission, permission, c.Customer)
-
 	admits(t, "Required refused the staff member", a, required, c.Staff)
-	admits(t, "RequirePermission refused the staff member holding "+c.Permission, a, permission, c.Staff)
-	admits(t, "Sensitive refused the staff member, recently signed in", a, sensitive, c.Staff)
 
-	if c.OtherMerchantStaff != nil {
-		refuses(t, "RequirePermission admitted another merchant's staff", permission, c.OtherMerchantStaff)
-	}
-	if c.StaleStaff != nil {
-		refuses(t, "Sensitive admitted a stale sign-in", sensitive, c.StaleStaff)
+	for _, perm := range sortedKeys(perms) {
+		permission := chain(a.RequirePermission(perm))
+		sensitive := chain(a.RequirePermission(perm), a.Sensitive())
+		refuses(t, "RequirePermission("+perm+") admitted an anonymous request", permission, anonymous)
+		for name, req := range c.Refused {
+			refuses(t, fmt.Sprintf("RequirePermission(%s) admitted the %s credential", perm, name), permission, req)
+		}
+		refuses(t, "RequirePermission admitted the customer, who does not hold "+perm, permission, c.Customer)
+		admits(t, "RequirePermission refused the staff member holding "+perm, a, permission, c.Staff)
+		admits(t, "Sensitive refused the staff member holding "+perm+", recently signed in", a, sensitive, c.Staff)
+		if c.OtherMerchantStaff != nil {
+			refuses(t, "RequirePermission("+perm+") admitted another merchant's staff", permission, c.OtherMerchantStaff)
+		}
+		if c.StaleStaff != nil {
+			refuses(t, "Sensitive admitted a stale sign-in holding "+perm, sensitive, c.StaleStaff)
+		}
+		if c.Machine != nil {
+			if who, ok := admits(t, "RequirePermission refused the machine credential holding "+perm, a, permission, c.Machine); ok && billingauth.Interactive(who) {
+				t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
+			}
+		}
 	}
 	if c.Machine != nil {
-		if who, ok := admits(t, "RequirePermission refused the machine credential holding "+c.Permission, a, permission, c.Machine); ok && billingauth.Interactive(who) {
-			t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
-		}
 		if who, ok := admitted(a, required, c.Machine); ok && billingauth.Interactive(who) {
 			t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
 		}
 	}
+	for set, holder := range c.Holders {
+		own := c.Guards[set]
+		if own == nil {
+			t.Errorf("openrailstest: Holders names %s, which Guards does not", set)
+			continue
+		}
+		admits(t, fmt.Sprintf("RequirePermission(%s) refused its holder", own), a, chain(a.RequirePermission(own.String())), holder)
+		for _, perm := range sortedKeys(perms) {
+			if perm != own.String() {
+				refuses(t, fmt.Sprintf("RequirePermission(%s) admitted a holder of only %s", perm, own), chain(a.RequirePermission(perm)), holder)
+			}
+		}
+	}
+}
+
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func chain(mw ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {

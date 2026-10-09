@@ -58,9 +58,22 @@ const (
 	remote   topology = "remote"
 )
 
+// The harness host's own permissions, guarding the staff routes it mounts.
+type perm string
+
+func (p perm) String() string { return string(p) }
+
+const (
+	staffReads  perm = "e2e:billing:read"
+	staffWrites perm = "e2e:billing:write"
+	staffConfig perm = "e2e:billing:admin"
+)
+
+var guards = openrails.Guards{openrails.StaffReads: staffReads, openrails.StaffWrites: staffWrites, openrails.MerchantConfig: staffConfig}
+
 // verifier is a neutral host's Auth: HS256 tokens. "staff" is a user holding
-// every merchant permission (machine-only ones too, as a wildcard grant
-// would), "support" all but permanent grants, "host" the host's own backend
+// every permission, "support" the staff reads and writes but not the
+// merchant's configuration, "reader" the reads, "host" the host's own backend
 // (an application with an API key) all of them; UUID subjects are native
 // customers. Like AuthKit, its checks are live: a session revoked after its
 // token was minted is refused as a revoked credential. A sign-in (auth_time)
@@ -151,7 +164,11 @@ func (v *verifier) RequirePermission(permission string) func(http.Handler) http.
 		case "staff", hostApp:
 			return nil
 		case "support":
-			if permission != billing.MerchantAccessGrantPermanent {
+			if permission == staffReads.String() || permission == staffWrites.String() {
+				return nil
+			}
+		case "reader":
+			if permission == staffReads.String() {
 				return nil
 			}
 		}
@@ -356,7 +373,7 @@ func (w *world) start() {
 	if w.selfService {
 		scope = openrails.CustomerSelfService
 	}
-	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, Customers: scope}
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Storefront: true, Merchant: true, MerchantConfig: true, Guards: guards, Customers: scope}
 	if w.mount != nil {
 		w.mount(&routes)
 	}
@@ -387,6 +404,7 @@ func (w *world) start() {
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return host, nil }))
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
+	enginesOf.Store(over, local)
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
 	config, err := local.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
 	require.NoError(t, err)
@@ -826,7 +844,7 @@ func (c *customer) enrollOnce(_ topology, rail, priceID, entitlement, method str
 	c.w.t.Helper()
 	// The host charges a saved card in process. Over HTTP it may only mint a
 	// session its customer pays signed in (identity_test.go).
-	attempt, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
+	attempt, err := createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
 		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -862,12 +880,12 @@ func pid(id string) billing.PriceID {
 	return parsed
 }
 
-// attempt reads a checkout attempt through the merchant route, as JSON.
+// attempt reads a checkout attempt from the engine, as its JSON.
 func (w *world) attempt(id billing.CheckoutAttemptID) map[string]any {
 	w.t.Helper()
-	status, body := w.staffJSON(http.MethodGet, "/v1/merchant/checkout-attempts/"+id.String(), nil)
-	require.Equal(w.t, http.StatusOK, status, "%v", body)
-	return body
+	got, err := getCheckoutAttempt(w.t.Context(), w.client[embedded], id)
+	require.NoError(w.t, err)
+	return asJSON(w.t, got)
 }
 
 // latestAttempt reads the customer's newest purchase attempt (card setups
@@ -879,10 +897,29 @@ func (w *world) latestAttempt(customerID string) map[string]any {
 	return w.attempt(billing.CheckoutAttemptID(id))
 }
 
-// confirmAttempt confirms a Solana attempt through the merchant route.
+// confirmAttempt confirms a Solana attempt with the engine, as the host
+// relaying its buyer's wallet: the status and body the API would answer.
 func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (int, map[string]any) {
 	w.t.Helper()
-	return w.hostJSON(http.MethodPost, "/v1/merchant/checkout-attempts/"+id.String()+"/confirm", map[string]string{"signature": signature})
+	got, err := confirmCheckoutAttempt(w.t.Context(), w.client[embedded], id, billing.ConfirmCheckoutAttemptParams{Signature: signature})
+	if err != nil {
+		status, code := checkoutErrorStatus(err)
+		return status, map[string]any{"error": map[string]any{"code": code, "message": err.Error()}}
+	}
+	if got.Status == billing.CheckoutAttemptProcessing {
+		return http.StatusAccepted, asJSON(w.t, got)
+	}
+	return http.StatusOK, asJSON(w.t, got)
+}
+
+// asJSON is v as its wire JSON object.
+func asJSON(t testing.TB, v any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(raw, &out))
+	return out
 }
 
 func (c *customer) entitled(entitlement string) bool {

@@ -168,43 +168,51 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 
 #### Guard its routes with your auth
 
-OpenRails has no logins of its own. When you mount its routes you pass your
-auth as `Routes.Auth`, and OpenRails stacks its middleware on each route:
-`Required` (signed in) on your customers' routes; `RequirePermission` (one
-exact merchant permission, checked live) on the merchant API, then
-`Sensitive` (a recent sign-in) when a person moves money or removes access.
-`Identity` says who it admitted. Each user is their own customer. Your
-`*authkit.Client` is that auth as it is: pass `Auth: ak`.
+OpenRails has no auth of its own; when you mount its routes you pass in your own auth middleware, which OpenRails uses to protect its routes. Authkit's client satisfies this interface.
 
-Your staff hold OpenRails' merchant permissions like any other permission in
-your RBAC. Declare them under a `merchant` persona, grant them to roles, and
-name the group they apply in as `authkit.Config.Merchant`:
+First let's define admin permissions; this will allow users we give the admin role to read the billing history of our customers, and make modificiations, such as canceling recuring memberships.
 
 ```go
 rbac := authkit.NewRoles()
-merchant := rbac.Persona("merchant")
-var staff []iam.Grant
-for _, p := range merchant.Declare(openrails.Permissions()...) {
-	staff = append(staff, p)
-}
-merchant.Declare(openrails.MachinePermissions()...) // your automation's API keys, never a person's
-rbac.Root.Role("billing-staff", staff...)
-// authkit.Config{Roles: rbac, Merchant: authkit.MerchantConfig{Root: true}, ...}
+customersRead := rbac.Root.Permission("customers", "read") 
+customersUpdate := rbac.Root.Permission("customers", "update")
+rbac.Root.Role("admin", customersRead, customersUpdate)  
 ```
 
-`openrails.MachinePermissions()` are never a person's: OpenRails refuses them
-to anyone signed in, whatever their roles say, so staff cannot start a
-purchase for someone else. Grant them to your automation only.
+Then build AuthKit with those roles. AuthKit signs your users in, and its
+client is the auth OpenRails' routes use. The rest of its config (email, SMS,
+rate limits) is in AuthKit's README:
 
-The identity `Identity` returns has three parts, kept apart:
+```go
+ak, err := authkit.New(ctx, authkit.Config{
+	Database: authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
+	Token:    authkit.TokenConfig{Issuer: "https://myapp.com", IssuedAudiences: []string{"myapp"}},
+	Keys:     authkit.KeysConfig{Path: "/vault/auth"}, // its signing keys
+	Roles:    rbac,
+}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
+if err != nil {
+	return err
+}
+```
 
-- **Subject**: the native account acted as, whose money and authority are
-  used. On `/billing/v1/me` it is the customer.
-- **Invoker**: the party actually acting. It is the subject itself, or someone
-  acting on its behalf, possibly from another issuer; spend limits and staff
-  rate limits key on it.
-- **Credential**: how it was proven (a session, a device key, an API key...).
-  A user is the same customer in a browser and on a device key.
+Finally, mount OpenRails' routes with AuthKit guarding them:
+
+```go
+err = openrailsgin.Mount(r, bill, openrails.Routes{
+	Auth:     ak,
+	Prefix:   "/billing",
+	Merchant: true,
+	Guards: openrails.Guards{
+		openrails.StaffReads:  customersRead,   // every staff read
+		openrails.StaffWrites: customersUpdate, // every staff write
+	},
+})
+```
+
+A guard can also name one resource or one route, which overrides its group;
+for example `openrails.Refunds: refundsCreate` makes refunds need a stricter
+permission. `Mount` refuses to build a staff route no guard covers, so nothing
+is left open by omission.
 
 #### Using your own auth
 
@@ -212,25 +220,25 @@ Without AuthKit, implement the same four methods over your own sessions,
 then run `openrailstest.CheckAuth` against them in your CI:
 
 ```go
-type shopAuth struct{ sessions *Sessions }
+type appAuth struct{ sessions *Sessions }
 
 type sessionKey struct{}
 
-func (a shopAuth) Required() func(http.Handler) http.Handler {
+func (a appAuth) Required() func(http.Handler) http.Handler {
 	return a.check(func(*Session) bool { return true })
 }
 
-func (a shopAuth) RequirePermission(permission string) func(http.Handler) http.Handler {
+func (a appAuth) RequirePermission(permission string) func(http.Handler) http.Handler {
 	return a.check(func(s *Session) bool { return s.Can(permission) }) // exactly this permission
 }
 
-func (a shopAuth) Sensitive() func(http.Handler) http.Handler {
+func (a appAuth) Sensitive() func(http.Handler) http.Handler {
 	return a.check(func(s *Session) bool { return time.Since(s.SignedInAt) < 15*time.Minute })
 }
 
 // check signs the request in once (your session cookie, checked live, bans
 // included), then admits it when ok.
-func (a shopAuth) check(ok func(*Session) bool) func(http.Handler) http.Handler {
+func (a appAuth) check(ok func(*Session) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			s, found := r.Context().Value(sessionKey{}).(*Session)
@@ -249,7 +257,7 @@ func (a shopAuth) check(ok func(*Session) bool) func(http.Handler) http.Handler 
 	}
 }
 
-func (a shopAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
+func (a appAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
 	s, ok := ctx.Value(sessionKey{}).(*Session)
 	if !ok {
 		return openrails.Identity{}, false
@@ -284,6 +292,33 @@ merchant := openrails.MerchantDeclaration{
 }
 ```
 
+#### Manage merchant config at runtime (Vault)
+
+Instead of declaring your PSPs in a file, let your staff manage them: declare
+only the merchant's slug, connect OpenRails to HashiCorp Vault, and mount the
+merchant-config API (`MerchantConfig: true`, guarded by `openrails.MerchantConfig`). Staff
+then add and rotate PSP credentials over HTTP or in the admin dashboard, and
+OpenRails writes the credentials to Vault, never to Postgres:
+
+```go
+cfg := openrails.Config{
+	Database:          openrails.DatabaseConfig{Schema: "billing"},
+	TestMode:          openrails.Sandbox,
+	ProviderWriteMode: openrails.ProviderWritesFull,
+	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // no PSPs here: staff manage them
+	SecretBackend:     openrails.SecretBackendVault,
+	Vault: &openrails.VaultConfig{
+		Address:    "https://vault.internal:8200",
+		AuthMethod: "kubernetes", // or "approle", "token"
+		K8sRole:    "onlydemo-billing",
+		KVMount:    "onlydemo/kv", // the KV-v2 mount credentials are written under
+	},
+}
+```
+
+If your app already has an authenticated Vault client, pass it as
+`Deps.Vault` instead of `Config.Vault`.
+
 #### Integrate OpenRails into your server
 
 Start OpenRails' background work, mount the billing routes next to AuthKit's,
@@ -299,7 +334,12 @@ func run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	ak, err := newAuth(ctx, db) // see AuthKit's README
+	rbac := authkit.NewRoles()
+	customersRead := rbac.Root.Permission("customers", "read")
+	customersUpdate := rbac.Root.Permission("customers", "update")
+	rbac.Root.Role("admin", customersRead, customersUpdate)
+
+	ak, err := newAuth(ctx, db, rbac) // authkit.New, as above
 	if err != nil {
 		return err
 	}
@@ -325,12 +365,15 @@ func run(ctx context.Context) error {
 	}
 	// Billing. Processor webhooks are always mounted; pick the rest.
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:         ak,                            // AuthKit guards each route: OpenRails asks it, by route
-		Prefix:       "/billing",                    // the API is served at /billing/v1/*
-		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
-		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
-		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog)
-		CatalogEdits: false,                         // with Merchant, also let that API change the catalog; your Go code always can
+		Auth:       ak,                            // AuthKit guards each route: OpenRails asks it, by route
+		Prefix:     "/billing",                    // the API is served at /billing/v1/*
+		Storefront: true,                          // anyone can browse products and prices, and pay a checkout
+		Customers:  openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
+		Merchant:   true,                          // your staff's API at /merchant: refunds, subscriptions, customers' billing
+		Guards: openrails.Guards{
+			openrails.StaffReads:  customersRead,   // every staff read
+			openrails.StaffWrites: customersUpdate, // every staff write
+		},
 	})
 	if err != nil {
 		return err
@@ -376,7 +419,7 @@ func run(ctx context.Context) error {
 routes:
 
 - `Auth`: your auth, applied to every route by its tier. A mount that selects
-  customer or merchant routes without it fails, so nothing is ever served open.
+  customer or staff routes without it fails, so nothing is ever served open.
 - `Prefix`: where the API lives; `/billing` serves `/billing/v1/*`.
 - `Storefront`: what a shopper's browser needs before signing in: products,
   prices, checkout configuration, and reading and paying a checkout.
@@ -384,12 +427,19 @@ routes:
   entitlements, subscriptions, saved cards and invoices.
   `openrails.CustomerSelfService` is all of it; the zero value serves none.
 - `Merchant`: the API your staff and back office call at
-  `/billing/v1/merchant`: customers, refunds, catalog, settings. Every route asks
-  `Auth.RequirePermission` for its exact merchant permission, and one that moves
-  money or removes access also `Auth.Sensitive`. It serves `Config.Merchant`.
-- `CatalogEdits`: lets that merchant API create and change products and prices.
-  Leave it off when the catalog lives in `catalog.yaml`; your Go code can edit
-  the catalog either way.
+  `/billing/v1/merchant` to work on customers: payments and refunds,
+  subscriptions, invoices, credits, access, usage and metrics. It serves
+  `Config.Merchant`.
+- `MerchantConfig`: the merchant's own configuration: PSPs, settings, catalog
+  edits, billing import and export, the dashboard layout. Catalog edits are
+  refused while `Config.Catalog` is the catalog's truth; your Go code can
+  configure the merchant either way.
+- `Guards`: your permission for each staff route: `openrails.StaffReads` and
+  `openrails.StaffWrites` cover `Merchant`'s reads and writes,
+  `openrails.MerchantConfig` every `MerchantConfig` route. A resource group
+  (`openrails.Refunds`) or one route (`openrails.RefundPayment`) overrides its
+  group. Every route asks `Auth.RequirePermission` with its guard, and one that
+  moves money or removes access also `Auth.Sensitive`.
 - `AdminConsole`: the staff dashboard (below). Leaving it out, the default,
   mounts no dashboard routes at all.
 
@@ -409,11 +459,12 @@ the merchant API it drives; to turn it off, leave `AdminConsole` out:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:         ak,
-	Prefix:       "/billing",
-	Storefront:   true,
-	Customers:    openrails.CustomerSelfService,
-	Merchant:     true, // the dashboard drives the merchant API
+	Auth:       ak,
+	Prefix:     "/billing",
+	Storefront: true,
+	Customers:  openrails.CustomerSelfService,
+	Merchant:   true, // the dashboard drives the merchant API
+	Guards:     openrails.Guards{openrails.StaffReads: customersRead, openrails.StaffWrites: customersUpdate},
 	// Omit AdminConsole and no dashboard route exists. AuthBaseURL is your AuthKit's JSON API.
 	AdminConsole: &openrails.AdminConsole{Path: "/billing-admin", AuthBaseURL: "/api/v1"},
 })
@@ -421,11 +472,12 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 - **Who signs in**: your staff, with their AuthKit accounts at
   `AuthBaseURL` (your AuthKit's `/api/v1`). Every page calls the merchant API,
-  which asks your `Auth` for each staff member's merchant permission, and a
-  write after a stale sign-in asks them to confirm it is them.
+  which asks your `Auth` whether each staff member holds the route's guard, and
+  a write after a stale sign-in asks them to confirm it is them.
 - **Requirements**: `Merchant: true`, and a console build passed as
   `Deps.ConsoleAssets` ([admin console](docs/admin-console.md)); `Mount` fails
-  without either.
+  without either. The PSP, settings and notification pages, and dashboard
+  editing, appear only with `MerchantConfig: true`.
 - **Its own host**: the dashboard calls `/billing/v1` and `/api/v1` on its own
   origin, and the merchant API answers no cross-origin requests. To serve it at
   `billing.example.com`, send that host to this server, or to a router that
@@ -629,14 +681,14 @@ Mounting gives your users these routes under `/billing`:
 |---|---|
 | `POST /billing/v1/webhooks/{rail}/{account_id}` | processor notifications (Stripe, NMI, CCBill), verified per account |
 
-`Routes.Merchant` publishes the merchant API (`/billing/v1/merchant/*`) for your staff and machines rather than your users: customers, refunds, catalog, settings, PSPs, alerts. Each route is gated by its merchant permission, and each has one method on the Go `Client`. Every route is in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
+`Routes.Merchant` publishes the merchant API (`/billing/v1/merchant/*`) for your staff and machines rather than your users: customers, payments and refunds, subscriptions, invoices, credits. `Routes.MerchantConfig` adds the merchant's own configuration: PSPs, settings, alerts, catalog edits. Each route is behind your permission for its guard (`Routes.Guards`), and each has one method on the Go `Client`. Every route and its guards are in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
 
 What you will set next:
 
 | To | Set |
 |---|---|
 | Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.Email`; without one OpenRails sends no email |
-| Publish the merchant API | `Routes.Merchant` with `Routes.Auth`; grant your staff the `openrails.Permissions()` they need |
+| Publish the merchant API | `Routes.Merchant` (and `Routes.MerchantConfig`) with `Routes.Auth` and `Routes.Guards`: your permissions for staff reads, writes and configuration |
 | Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomers` whenever it changes |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
@@ -913,29 +965,36 @@ hash replay, so this workflow does not roll back later edits.
 
 ### Turning catalog HTTP writes on and off
 
-`Routes.CatalogEdits` decides whether the merchant API can change the catalog;
-choose it when you mount:
+Catalog writes over HTTP are part of the merchant's configuration: mount
+`MerchantConfig` to offer them, guarded by your admin permission:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:         ak,
-	Prefix:       "/billing",
-	Merchant:     true,  // the merchant API, for your staff
-	CatalogEdits: false, // without its catalog-write routes
+	Auth:           ak,
+	Prefix:         "/billing",
+	Merchant:       true, // the merchant API, for your staff
+	MerchantConfig: true, // and its configuration: PSPs, settings, catalog edits
+	Guards: openrails.Guards{
+		openrails.StaffReads:     customersRead,
+		openrails.StaffWrites:    customersUpdate,
+		openrails.MerchantConfig: billingAdmin, // a stricter permission of your own
+	},
 })
-// Set CatalogEdits to true and restart to let authorized staff edit the catalog over HTTP.
 ```
 
-| `Routes.CatalogEdits` | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
+| Mount | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
 |---|---|---|
-| `false` | Unavailable | Available |
-| `true` | Available to authorized callers | Available |
+| without `MerchantConfig` | Not mounted | Available |
+| `MerchantConfig`, with `Config.Catalog` | Refused (`catalog_updates_disabled`): the file is the truth | Available |
+| `MerchantConfig`, without `Config.Catalog` | Available to staff your `openrails.MerchantConfig` (or `openrails.Catalog`) guard admits | Available |
 
-Catalog reads remain available on the merchant API. Turning HTTP writes off does
-not make the database read-only or prevent later client edits. `CatalogEdits`
-needs `Merchant`, and every mount of the merchant API in one process must agree
-on it; a conflicting mount fails. The startup example above leaves them off and
-applies `catalog.yaml` through `Config.Catalog` on every boot.
+Catalog reads stay on the merchant API at `openrails.StaffReads`. Turning HTTP
+writes off does not make the database read-only or prevent later client edits.
+Every mount of the merchant API in one process must agree on `MerchantConfig`;
+a conflicting mount fails. The startup example above mounts no
+`MerchantConfig` and applies `catalog.yaml` through `Config.Catalog` on every
+boot. On the standalone server catalog writes follow `secret_backend`: a
+`vault` or `db` backend edits over HTTP, a `snapshot` one is read-only.
 
 ---
 
@@ -1002,7 +1061,9 @@ changes affect new checkouts, preserving existing lots.
 
 The deposit is also a product: it names what is bought, its currency, limits, and
 expiry policy. The amount is selected for each checkout without creating a new
-price revision. For a $100 deposit, your trusted server mints the session with:
+price revision. For a $100 deposit, the customer's browser mints its own session
+with `"amount": "100000000"` on `POST /billing/v1/me/checkout-sessions`. With
+the merchant's credential, the Go client mints it instead:
 
 ```go
 amount := int64(100_000_000) // $100 in USD micros
@@ -1015,8 +1076,8 @@ session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionP
 })
 ```
 
-Hand the session to that customer's browser. Its amount cannot be changed after
-minting. Fixed-price packs reject an amount override. Customer-selected deposits
+Hand the session to that customer's browser; paying with a saved card needs the
+customer's own proof. Its amount cannot be changed after minting. Fixed-price packs reject an amount override. Customer-selected deposits
 currently support Stripe and NMI checkout; recurring credit benefits are not yet
 supported. These are monetary API balances, consumed by priced usage, rather than
 a separate request-count or token-count wallet. A voluntary refund requires the
@@ -1050,7 +1111,8 @@ Operator side (you, the merchant):
 - Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
-- Apps with channel/content purchase rules route checkout through their own server: verify those rules, then call `Client.CreateCheckoutSession` and hand the session to the buyer's browser. Catalog-only apps can expose the built-in customer mint route.
+- The customer starts a purchase with their own credential: their browser creates a checkout session (`POST /v1/me/checkout-sessions`, billing-ui) and pays it.
+- Apps with purchase rules of their own can create the session with the merchant's credential instead: `Client.CreateCheckoutSession`, in process or remote with a merchant API key the route's guard admits, then hand it to the buyer's browser. Paying with a saved card always needs the customer's own proof.
 - Your frontend calls `/v1/me/*` self-service routes with a short-lived token.
 - Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
@@ -1066,7 +1128,6 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | Operation | Reference contract |
 | --- | --- |
 | `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
-| `CreateCheckoutAttempt` | Either `PriceID` or the pair `ProductKey` + `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
 | `CheckEntitlements` / `ListCustomerEntitlements` | Keys derived from the products a customer holds; `CheckEntitlements` checks up to 100 keys and 10 prefixes of one customer, `ListCustomerEntitlements` pages their keys |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |

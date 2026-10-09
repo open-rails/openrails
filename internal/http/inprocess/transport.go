@@ -20,34 +20,27 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// hostPermissions is the embedded host's authority over its own merchant: the
-// full merchant owner grant, identical to what a merchant-owner API key
-// resolves to on the standalone wire path.
-func hostPermissions() []string {
-	return []string{"merchant:*"}
-}
-
 // NewTransport uses the same host authority and context isolation for embedded
 // clients and database-only operator commands. configuredMerchant is read on
 // each call so a runtime may be bound after constructing its client.
 func NewTransport(handler http.Handler, configuredMerchant func() billing.MerchantID) (http.RoundTripper, string) {
-	return newTransport(handler, configuredMerchant, "", hostPermissions())
+	return newTransport(handler, configuredMerchant, "")
 }
 
 // NewTransportWithResolver supports explicit per-operation merchant selectors.
 // Resolution does not grant authority; only the private capability creates a
 // host principal, and all other credentials retain normal verification.
 func NewTransportWithResolver(handler http.Handler, configuredMerchant func() billing.MerchantID, resolve func(context.Context, *http.Request) (billingauth.Target, error)) (http.RoundTripper, string) {
-	transport, capability := newTransport(handler, configuredMerchant, "", hostPermissions())
+	transport, capability := newTransport(handler, configuredMerchant, "")
 	transport.(*inprocessTransport).resolveTarget = resolve
 	return transport, capability
 }
 
-func newTransport(handler http.Handler, configuredMerchant func() billing.MerchantID, subject string, grants []string) (http.RoundTripper, string) {
+func newTransport(handler http.Handler, configuredMerchant func() billing.MerchantID, subject string) (http.RoundTripper, string) {
 	// Only the constructor's private default token provider receives this
 	// per-client capability. A forwarded caller credential cannot name a mode.
 	capability := rand.Text()
-	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability, subject: subject, permissions: grants}, capability
+	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability, subject: subject}, capability
 }
 
 // inprocessTransport dispatches SDK requests directly into the in-process
@@ -61,7 +54,6 @@ type inprocessTransport struct {
 	configuredMerchant func() billing.MerchantID
 	hostCredential     string
 	subject            string
-	permissions        []string
 }
 
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -113,7 +105,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
 	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
-		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, MerchantSlug: slug, Subject: t.subject, Permissions: append([]string(nil), t.permissions...)})
+		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, MerchantSlug: slug, Subject: t.subject})
 	}
 
 	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the

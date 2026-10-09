@@ -9,7 +9,7 @@ import (
 )
 
 // IsMerchantBillingArchive recognizes the fixed archive route beneath an
-// optional host mount prefix. The route still requires its merchant permission;
+// optional host mount prefix. The route still requires its guard;
 // matching here grants no authority and exempts no other route from body caps.
 func IsMerchantBillingArchive(r *http.Request) bool {
 	return r != nil && r.URL != nil && r.URL.Path == path.Clean(r.URL.Path) && r.URL.RawPath == "" && strings.HasSuffix(r.URL.Path, "/v1/merchant/billing-archive")

@@ -52,7 +52,6 @@ func TestClientRequestShapes(t *testing.T) {
 		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
 		"/v1/merchant/customers/" + customer + "/entitlements/check":   `{"entitlements":{"pro":true,"team":false}}`,
 	})
-	key := "operation-key"
 	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
 	expires := time.Now().Add(time.Hour)
 	window := []billing.BudgetWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}}
@@ -65,14 +64,6 @@ func TestClientRequestShapes(t *testing.T) {
 		query  string
 		check  func(t *testing.T, body map[string]any)
 	}{
-		{"checkout attempt", func() error {
-			_, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{Customer: who, PriceID: billing.PriceID(uuid.New()), IdempotencyKey: key})
-			return err
-		}, http.MethodPost, "/v1/merchant/checkout-attempts", "", func(t *testing.T, b map[string]any) {
-			require.Contains(t, b, "price_id")
-			require.NotContains(t, b, "subscription_id")
-			require.NotContains(t, b, "mode", "the price selects the operation")
-		}},
 		{"checkout session", func() error {
 			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
@@ -336,13 +327,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
 			return err
 		},
-		"checkout attempt": func() error { _, err := c.GetCheckoutAttempt(ctx, billing.CheckoutAttemptID{}); return err },
-		"confirm checkout": func() error {
-			_, err := c.ConfirmCheckoutAttempt(ctx, billing.CheckoutAttemptID{}, billing.ConfirmCheckoutAttemptParams{})
-			return err
-		},
 		"checkout customer": func() error {
-			_, err := c.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{PriceKey: "k", IdempotencyKey: "k"})
+			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{PriceKey: "k"})
 			return err
 		},
 		"checkout price": func() error {

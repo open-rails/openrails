@@ -146,7 +146,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 		return client
 	}
 	console := &openrails.AdminConsole{AuthBaseURL: "/api/v1"}
-	routes := openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, AdminConsole: console}
+	routes := openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites, AdminConsole: console}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
 	require.ErrorContains(t, err, "needs a console build")
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
@@ -156,7 +156,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: console})
 	require.ErrorContains(t, err, "set Routes.Merchant")
 	for _, path := range []string{"/", "admin", "/billing/admin/", "/a/../b", "/a b", `/x"><script>`} {
-		_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
+		_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
 		require.ErrorContains(t, err, "invalid Routes.AdminConsole.Path", path)
 	}
 
@@ -175,12 +175,12 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	// The host keeps its own /admin pages and mounts the console elsewhere.
 	moved := http.NewServeMux()
 	moved.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
-	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true,
+	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites,
 		AdminConsole: &openrails.AdminConsole{Path: "/billing/admin", AuthBaseURL: "/api/v1"}}))
 	requireConsoleAt(t, moved, "/billing/admin", "host")
 	require.Equal(t, "host admin", get(moved, "/admin/").Body.String())
 
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true}))
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites}))
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "not selected, not mounted")
 }

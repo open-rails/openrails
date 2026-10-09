@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 const (
@@ -120,7 +121,7 @@ func runStaff(t *testing.T, a billingauth.Auth, perm string, header map[string]s
 // own verified merchant and an explicit permission; failures keep distinct,
 // stable codes.
 func TestStandaloneAuthEachCredentialKind(t *testing.T) {
-	read := billing.MerchantSettingsRead
+	read := staffperm.Admin
 	for _, tc := range []struct {
 		name    string
 		auth    *StandaloneAuth
@@ -199,7 +200,7 @@ func TestStandaloneUserSessionMerchantSelection(t *testing.T) {
 			if tc.selector != "" {
 				header[merchant.SelectorHeader] = tc.selector
 			}
-			got := runStaff(t, a, billing.MerchantSettingsRead, header, tc.ctx)
+			got := runStaff(t, a, staffperm.Admin, header, tc.ctx)
 			require.Equal(t, tc.status, got.status, got.code)
 			if tc.code != "" {
 				require.Equal(t, tc.code, got.code)
@@ -223,12 +224,11 @@ func TestHostAuth(t *testing.T) {
 		code   string
 	}{
 		{name: "no host principal", status: 401, code: "authentication_required"},
-		{name: "host principal without merchant", host: &requestauth.HostPrincipal{Permissions: []string{"merchant:*"}}, status: 401, code: "host_principal_invalid"},
-		{name: "host principal lacking permission", host: &requestauth.HostPrincipal{MerchantID: merchantA, Permissions: []string{billing.MerchantCatalogRead}}, status: 403, code: "permission_required"},
-		{name: "host principal", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc", Permissions: []string{"merchant:*"}}, status: 204},
+		{name: "host principal without merchant", host: &requestauth.HostPrincipal{}, status: 401, code: "host_principal_invalid"},
+		{name: "host principal", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc"}, status: 204},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := runStaff(t, HostAuth{}, billing.MerchantSettingsRead, nil, func(ctx context.Context) context.Context {
+			got := runStaff(t, HostAuth{}, staffperm.Admin, nil, func(ctx context.Context) context.Context {
 				if tc.host == nil {
 					return ctx
 				}
@@ -245,9 +245,9 @@ func TestHostAuth(t *testing.T) {
 			}
 		})
 	}
-	got := runStaff(t, HostAuth{}, billing.MerchantSettingsRead, nil, func(ctx context.Context) context.Context {
+	got := runStaff(t, HostAuth{}, staffperm.Admin, nil, func(ctx context.Context) context.Context {
 		ctx = merchanttarget.WithResolved(ctx, billingauth.Target{MerchantID: merchantB})
-		return requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: merchantA, Permissions: []string{"merchant:*"}})
+		return requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: merchantA})
 	})
 	require.Equal(t, http.StatusConflict, got.status, "a selector for another merchant never re-scopes the host")
 }
@@ -303,7 +303,7 @@ func TestStandaloneCustomers(t *testing.T) {
 		require.Equal(t, tc.status, code, name)
 	}
 	refused := httptest.NewRecorder()
-	StandaloneCustomers{}.RequirePermission(billing.MerchantPaymentsRead)(http.NotFoundHandler()).ServeHTTP(refused, httptest.NewRequest(http.MethodGet, "/", nil))
+	StandaloneCustomers{}.RequirePermission(staffperm.Read)(http.NotFoundHandler()).ServeHTTP(refused, httptest.NewRequest(http.MethodGet, "/", nil))
 	require.Equal(t, http.StatusForbidden, refused.Code, "a customer token holds no merchant permission")
 }
 

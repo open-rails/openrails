@@ -50,7 +50,7 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		}, ""},
 		"alert db without key":  {func(c *Config) { c.AlertSecretBackend = SecretBackendDB }, "encryption.master_key"},
 		"alert snapshot":        {func(c *Config) { c.AlertSecretBackend = SecretBackendSnapshot }, "alert_secret_backend must be db or vault"},
-		"vault custody":         {func(c *Config) { c.SecretBackend, c.Vault = SecretBackendVault, &VaultConfig{Enabled: true} }, ""},
+		"vault custody":         {func(c *Config) { c.SecretBackend, c.Vault = SecretBackendVault, &VaultConfig{} }, ""},
 		"snapshot id canonical": {func(c *Config) { c.CredentialSnapshotID = "4b1c9f0e-2a3d-4e5f-8a9b-0c1d2e3f4a5b" }, ""},
 		"snapshot id uppercase": {func(c *Config) { c.CredentialSnapshotID = "4B1C9F0E-2A3D-4E5F-8A9B-0C1D2E3F4A5B" }, "canonical nonzero UUID"},
 		"snapshot id nil":       {func(c *Config) { c.CredentialSnapshotID = "00000000-0000-0000-0000-000000000000" }, "canonical nonzero UUID"},

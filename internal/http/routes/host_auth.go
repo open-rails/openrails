@@ -6,7 +6,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
@@ -40,18 +39,14 @@ func (HostAuth) Required() func(http.Handler) http.Handler {
 	}
 }
 
-// RequirePermission admits the host for its own merchant's permission and
-// binds that merchant.
-func (HostAuth) RequirePermission(perm string) func(http.Handler) http.Handler {
+// RequirePermission admits the host, its merchant's owner, whatever the
+// permission, and binds that merchant.
+func (HostAuth) RequirePermission(string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			hp, ok := requestauth.HostPrincipalFromContext(r.Context())
 			if !ok {
 				refuseWith(w, r, billingauth.ErrUnauthenticated)
-				return
-			}
-			if !(&credential.ResolvedServiceCredential{MerchantID: hp.MerchantID, Permissions: hp.Permissions}).HasPermission(perm) {
-				refuseWith(w, r, billingauth.ErrForbidden)
 				return
 			}
 			target, err := hostTarget(r, hp)
@@ -102,7 +97,7 @@ func hostTarget(r *http.Request, hp *requestauth.HostPrincipal) (billingauth.Tar
 	return target, nil
 }
 
-// HostOptions mounts the merchant routes for the in-process transport.
+// HostOptions mounts the staff routes for the in-process transport.
 func HostOptions() Options {
-	return Options{Auth: HostAuth{}, AuthBindsMerchant: true, CatalogWrites: true}
+	return Options{Auth: HostAuth{}, AuthBindsMerchant: true, Guard: func(Route) string { return "host" }}
 }

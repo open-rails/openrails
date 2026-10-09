@@ -389,25 +389,6 @@ export type CheckProductAccessParams = {
   product_keys?: string[]
 }
 
-export type CheckoutAttempt = {
-  id: string
-  customer_id: string
-  status: "canceled" | "created" | "expired" | "failed" | "processing" | "requires_action" | "succeeded"
-  mode: string
-  price_id: string | null
-  amount: string | null
-  currency: string | null
-  payment_id: string | null
-  subscription_id: string | null
-  payment_method_id: string | null
-  next_action: NextAction | null
-  operation: PaymentOperation | null
-  failure: PaymentFailure | null
-  expires_at: string | null
-  created_at: string
-  metadata: Record<string, string> | null
-}
-
 export type CheckoutConfig = {
   psps: CheckoutPSPConfig[]
   solana?: SolanaCheckoutConfig
@@ -443,16 +424,6 @@ export type CheckoutPSPConfig = {
   config?: Record<string, string>
   status?: string
   retry_after?: number
-}
-
-export type CheckoutPaymentOptions = {
-  psp?: string
-  payment_method_id?: string
-  payment_token?: string
-  billing_details?: BillingDetails
-  token_symbol?: string
-  flow?: string
-  wallet?: string
 }
 
 export type CheckoutRoutingMatch = {
@@ -546,11 +517,6 @@ export type CollectionPaymentMethod = {
   payment_method_id: string
 }
 
-export type ConfirmCheckoutAttemptParams = {
-  signature?: string
-  wallet?: string
-}
-
 export type CreateAPIKeyParams = {
   name?: string
   role?: string
@@ -561,21 +527,6 @@ export type CreateAlertWebhookParams = {
   url?: string
   format?: "discord" | "generic" | "slack"
   enabled?: boolean | null
-}
-
-export type CreateCheckoutAttemptParams = {
-  customer?: CheckoutCustomerIdentity
-  price_id?: string
-  price_key?: string
-  product_key?: string
-  amount?: string
-  auto_renew?: boolean
-  entitlement?: string
-  offer_kind?: "finite" | "permanent" | "recurring"
-  payment?: CheckoutPaymentOptions
-  metadata?: Record<string, string> | null
-  success_url?: string
-  cancel_url?: string
 }
 
 export type CreateCheckoutSessionParams = {

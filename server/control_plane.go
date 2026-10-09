@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 // Control-plane operations, for hosted products: merchant provisioning and
@@ -83,9 +84,19 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 	return operator.ListActiveMerchantIDs(ctx, s.cp, page)
 }
 
+// The permissions the server's merchant persona declares: its staff routes'
+// guards (openrails.StaffReads, StaffWrites, MerchantConfig). Owners hold all
+// three, support MerchantRead and MerchantWrite, viewers MerchantRead.
+const (
+	MerchantRead  = staffperm.Read
+	MerchantWrite = staffperm.Write
+	MerchantAdmin = staffperm.Admin
+)
+
 // ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole
 // merchant when empty), then checks live that the user r authenticates as
-// holds permission on it. The slug is display metadata; carry the ID.
+// holds permission on it (MerchantRead, MerchantWrite or MerchantAdmin). The
+// slug is display metadata; carry the ID.
 func (s *Server) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, ref, permission string) (billing.MerchantID, string, error) {
 	return s.cp.ResolveAuthorizedMerchant(ctx, r, ref, permission)
 }

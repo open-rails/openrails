@@ -27,7 +27,7 @@ type hostKey struct{}
 // session user, a host principal of another merchant, and a merchant pin.
 func hostContext(t *testing.T, pin billing.MerchantID) context.Context {
 	ctx := context.WithValue(t.Context(), hostKey{}, "host-private")
-	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: billing.MerchantID(uuid.New()), Permissions: []string{"platform:*"}})
+	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: billing.MerchantID(uuid.New())})
 	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: uuid.NewString()})
 	if !pin.IsZero() {
 		ctx = merchant.WithID(ctx, pin)
@@ -102,7 +102,6 @@ func TestTransportAuthority(t *testing.T) {
 		if auth == "Bearer "+capability {
 			require.NotNil(t, got.host)
 			require.Equal(t, bound, got.host.MerchantID)
-			require.Equal(t, []string{"merchant:*"}, got.host.Permissions)
 		} else {
 			require.Nil(t, got.host)
 		}

@@ -6,7 +6,10 @@ A React SPA (`web/admin`, Vite), the staff dashboard, driving the
 `/v1/merchant/*` API. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, team, API keys. It holds no state and no privileges of its own; every
-action is a merchant-API call under the caller's own permissions.
+action is a merchant-API call its guard admits the caller for. Its PSP,
+settings and notification pages, and dashboard editing, appear only where the
+merchant's configuration is mounted (`Routes.MerchantConfig`; always on the
+standalone server).
 
 ### Turning it on and off
 
@@ -22,6 +25,7 @@ On is one switch, where the HTTP surface is chosen:
 err := openrailsgin.Mount(r, client, openrails.Routes{
     Prefix:       "/billing",                                     // the API at /billing/v1/*
     Merchant:     true,                                           // the console drives the merchant API
+    Guards:       openrails.Guards{openrails.StaffReads: customersRead, openrails.StaffWrites: customersUpdate},
     AdminConsole: &openrails.AdminConsole{Path: "/billing-admin"}, // nil: no console
 })
 ```
@@ -204,7 +208,7 @@ What the engine enforces:
   feature flags; no secrets, no data).
 - All **data and actions** go through `/v1/merchant/*` with a Bearer token
   (AuthKit user session or merchant API key) and are enforced server-side by
-  the merchant permission catalog plus per-query merchant scoping. The console
+  each route's guard plus per-query merchant scoping. The console
   has no client-side privilege of its own; a 403 renders as a
   "role lacks permission" toast.
 - Core OpenRails imposes **no environment restriction**: a mounted console
@@ -220,7 +224,7 @@ their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
 Who may sign in is decided by the merchant API, not the console: embedded, the
-mount's `Auth.RequirePermission` decides each merchant permission.
+mount's `Auth.RequirePermission` decides each route's guard (`Routes.Guards`).
 
 ### Viewing it
 

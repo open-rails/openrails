@@ -119,7 +119,6 @@ catalog.
   - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
     network and accepted tokens, and `GET /v1/solana/tokens?wallet=` adds a
     wallet's balances.
-- `key` is what a merchant checkout attempt sends as `payment.psp`.
 - Which of these can sell a given price is answered by the checkout session's
   `options`, or for the merchant by `GetCheckoutConfig` with a price
   (`GET /v1/merchant/checkout-config?price_id=`), see below.
@@ -189,8 +188,7 @@ payable for 30 minutes.
 
 Billing details travel in one object, `billing_details`: `name`, `email`,
 `phone` and `address` (`line1`, `line2`, `city`, `state`, `postal_code`,
-`country`), the same on the pay body, a card save and a merchant checkout
-attempt. Collect the cardholder's name in one visible input with
+`country`), the same on the pay body and a card save. Collect the cardholder's name in one visible input with
 `autocomplete="cc-name"`; OpenRails projects it onto provider-specific first and
 last name fields only at the rail boundary. A field the route does not declare
 is refused (`unknown_field`).
@@ -240,11 +238,10 @@ sequenceDiagram
 (Embedded mode: drop the token exchange — the browser mints at
 `/billing/v1/me/checkout-sessions` with its normal session credential.)
 
-A merchant's server can charge without a browser session: `CreateCheckoutAttempt`
-(`POST /v1/merchant/checkout-attempts`) relays the customer's pay click with a saved
-method, an NMI `payment_token` or a Solana wallet, and answers the same statuses
-(see [the checkout API](api/commerce.md)). `CreateCheckoutSession`
-(`POST /v1/merchant/checkout-sessions`) hands a price to a customer's browser.
+With the merchant's credential instead, `CreateCheckoutSession`
+(`POST /v1/merchant/checkout-sessions`) mints a session for a customer and hands
+it to their browser; the customer pays it the same way, and a saved card needs
+their own credential on the pay (see [the checkout API](api/commerce.md)).
 
 CCBill uses the authenticated account's verified email; do not treat a browser
 `email` value as identity. Its hosted-card API requires name, country,

@@ -72,31 +72,22 @@ func TestCreditDepositAttemptIdempotency(t *testing.T) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "deposit", Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}})
 	require.NoError(t, err)
-	for _, tp := range []topology{embedded, remote} {
-		buyer := w.newCustomer()
-		method := buyer.saveCard("nmi", visa)
-		request := billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price.ID, Amount: new(int64(100_000_000)), IdempotencyKey: "chosen-deposit", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}}
-		if tp == remote {
-			// Over HTTP a saved card is charged only on a session its
-			// customer pays.
-			_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), request)
-			requireCode(t, err, http.StatusForbidden, "customer_proof_required")
-			continue
-		}
-		result, err := w.client[tp].CreateCheckoutAttempt(t.Context(), request)
-		require.NoError(t, err, tp)
-		require.Equal(t, billing.CheckoutAttemptSucceeded, result.Status)
-		require.Equal(t, int64(100_000_000), *result.Amount)
-		replay, err := w.client[tp].CreateCheckoutAttempt(t.Context(), request)
-		require.NoError(t, err, tp)
-		require.Equal(t, result.ID, replay.ID)
-		request.Amount = new(int64(200_000_000))
-		_, err = w.client[tp].CreateCheckoutAttempt(t.Context(), request)
-		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused, tp)
-		request.Amount = nil
-		_, err = w.client[tp].CreateCheckoutAttempt(t.Context(), request)
-		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused, tp)
-	}
+	buyer := w.newCustomer()
+	method := buyer.saveCard("nmi", visa)
+	request := billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price.ID, Amount: new(int64(100_000_000)), IdempotencyKey: "chosen-deposit", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}}
+	result, err := createCheckoutAttempt(t.Context(), client, request)
+	require.NoError(t, err)
+	require.Equal(t, billing.CheckoutAttemptSucceeded, result.Status)
+	require.Equal(t, int64(100_000_000), *result.Amount)
+	replay, err := createCheckoutAttempt(t.Context(), client, request)
+	require.NoError(t, err)
+	require.Equal(t, result.ID, replay.ID)
+	request.Amount = new(int64(200_000_000))
+	_, err = createCheckoutAttempt(t.Context(), client, request)
+	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
+	request.Amount = nil
+	_, err = createCheckoutAttempt(t.Context(), client, request)
+	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	w.settle()
 	require.Len(t, w.nmi.Sales(), 1, "only the original deposit was charged")
 }

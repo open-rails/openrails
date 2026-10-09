@@ -56,7 +56,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 					PaymentOptions: billing.CheckoutPaymentOptions{PSP: "solana", TokenSymbol: tc.token, Flow: "transfer_request"},
 					SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 				}
-				attempt, err := w.client[tp].CreateCheckoutAttempt(t.Context(), params)
+				attempt, err := createCheckoutAttempt(t.Context(), w.client[tp], params)
 				require.NoError(t, err)
 				require.Equal(t, billing.CheckoutAttemptRequiresAction, attempt.Status)
 				require.NotNil(t, attempt.NextAction)
@@ -66,11 +66,11 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 				require.Equal(t, tc.mint, transfer.mint)
 				signature := chain.pay(transfer, transfer.amount)
 				for range 2 {
-					confirmed, err := w.client[tp].ConfirmCheckoutAttempt(t.Context(), attempt.ID, billing.ConfirmCheckoutAttemptParams{Signature: signature})
+					confirmed, err := confirmCheckoutAttempt(t.Context(), w.client[tp], attempt.ID, billing.ConfirmCheckoutAttemptParams{Signature: signature})
 					require.NoError(t, err)
 					require.Equal(t, billing.CheckoutAttemptSucceeded, confirmed.Status)
 				}
-				replayed, err := w.client[tp].CreateCheckoutAttempt(t.Context(), params)
+				replayed, err := createCheckoutAttempt(t.Context(), w.client[tp], params)
 				require.NoError(t, err)
 				require.Equal(t, attempt.ID, replayed.ID)
 				require.Equal(t, billing.CheckoutAttemptSucceeded, replayed.Status)

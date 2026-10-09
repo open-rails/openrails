@@ -52,8 +52,8 @@ type Options struct {
 	ProviderRoutes     *routesurface.ProviderRoutes
 	// Capabilities includes separately mounted customer exposure profiles.
 	Capabilities *Capabilities
-	// CatalogWrites mounts the merchant API's catalog-write routes.
-	CatalogWrites bool
+	// Guard is each staff route's permission (httproutes.ResolveGuards).
+	Guard func(httproutes.Route) string
 }
 
 // Assembler builds the embedded billing surface from the application graph.
@@ -148,12 +148,12 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			},
 		})
 	}
-	if routeSets[RouteSetMerchant] {
+	if groups := staffGroups(routeSets); len(groups) > 0 {
 		httproutes.RegisterMerchantRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
-			Auth:          s.Auth,
-			AdminLimiter:  s.AdminLimiter,
-			CatalogWrites: opts.CatalogWrites,
-		})
+			Auth:         s.Auth,
+			AdminLimiter: s.AdminLimiter,
+			Guard:        opts.Guard,
+		}, groups...)
 	}
 	if routeSets[RouteSetWebhooks] {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
@@ -217,10 +217,22 @@ func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
 }
 
 func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
-	if routeSets[RouteSetMerchant] && (s == nil || httproutes.IsNilAuth(s.Auth)) {
+	if len(staffGroups(routeSets)) > 0 && (s == nil || httproutes.IsNilAuth(s.Auth)) {
 		return httproutes.MountError{Route: "merchant API", Reason: "needs Routes.Auth"}
 	}
 	return nil
+}
+
+// staffGroups are the catalog groups of the staff route sets selected.
+func staffGroups(routeSets map[RouteSet]bool) []httproutes.Group {
+	var out []httproutes.Group
+	if routeSets[RouteSetMerchant] {
+		out = append(out, httproutes.Merchant)
+	}
+	if routeSets[RouteSetMerchantConfig] {
+		out = append(out, httproutes.MerchantConfig)
+	}
+	return out
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).

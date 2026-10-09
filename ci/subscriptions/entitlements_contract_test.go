@@ -122,7 +122,7 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 				IdempotencyKey: "opaque-purchase-" + uuid.NewString(),
 				PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
 			}
-			initial, err := charge.CreateCheckoutAttempt(t.Context(), request)
+			initial, err := createCheckoutAttempt(t.Context(), charge, request)
 			require.NoError(t, err)
 			require.Equal(t, billing.CheckoutAttemptSucceeded, initial.Status)
 			w.settle()
@@ -148,7 +148,7 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			require.False(t, customer.entitled(product.Key), "the product key is not an implicit entitlement")
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"post:202"})})
 			require.NoError(t, err)
-			replayed, err := charge.CreateCheckoutAttempt(t.Context(), request)
+			replayed, err := createCheckoutAttempt(t.Context(), charge, request)
 			require.NoError(t, err, "an accepted purchase must replay after its live product changes")
 			require.Equal(t, initial.ID, replayed.ID)
 			require.True(t, customer.entitled("post:202"), "a key added to the product reaches its holder")
@@ -160,7 +160,7 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			request.Customer, request.Entitlement = next.identity(), "post:202"
 			request.IdempotencyKey = "next-opaque-purchase-" + uuid.NewString()
 			request.PaymentOptions.PaymentMethodID = pmid(nextMethod)
-			purchased, err := charge.CreateCheckoutAttempt(t.Context(), request)
+			purchased, err := createCheckoutAttempt(t.Context(), charge, request)
 			require.NoError(t, err)
 			require.Equal(t, billing.CheckoutAttemptSucceeded, purchased.Status)
 			w.settle()

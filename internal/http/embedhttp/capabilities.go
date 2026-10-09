@@ -25,16 +25,16 @@ func buildCapabilities(rt *app.Runtime, active []RouteSet, providerRoutes routes
 	for _, rs := range AllRouteSets {
 		groups[string(rs)] = on[rs]
 	}
-	merchant := groups[string(RouteSetMerchant)]
+	merchant, config := groups[string(RouteSetMerchant)], groups[string(RouteSetMerchantConfig)]
 	return Capabilities{RouteGroups: groups, Features: map[string]bool{
 		"stripe_billing_portal":          groups[string(RouteSetCustomer)] && providerRoutes.StripePortal,
 		"solana_one_time_payments":       groups[string(RouteSetCheckout)] && providerRoutes.Solana,
 		"solana_subscription_management": groups[string(RouteSetCustomer)] && providerRoutes.SolanaSigning,
-		"provider_credential_writes":     merchant && providerRoutes.SecretWrite,
-		"api_host":                       merchant && rt != nil && rt.Merchants != nil,
+		"provider_credential_writes":     config && providerRoutes.SecretWrite,
+		"api_host":                       config && rt != nil && rt.Merchants != nil,
 		"catalog_copilot":                merchant && rt != nil && rt.CopilotService.Configured(),
 		"metrics_ask":                    merchant && rt != nil && rt.DashboardService.AskConfigured(),
-		"dashboard_generation":           merchant && rt != nil && rt.DashboardService.NLConfigured(),
+		"dashboard_generation":           config && rt != nil && rt.DashboardService.NLConfigured(),
 	}}
 }
 

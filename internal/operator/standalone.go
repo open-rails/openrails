@@ -10,7 +10,6 @@ import (
 // Surface is what a standalone server's HTTP surface serves beside the
 // engine's routes and the control plane's.
 type Surface struct {
-	CatalogEdits   bool
 	AdminConsole   *config.AdminConsole
 	ConsoleIssuer  *config.ConsoleIssuer
 	ResourceServer *config.ResourceServerConfig
@@ -32,7 +31,6 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ResourceServer: s.ResourceServer,
 		ConsoleIssuer:  s.ConsoleIssuer,
 		ConsoleAssets:  a.ConsoleAssets,
-		CatalogEdits:   s.CatalogEdits,
 		AdminConsole:   s.AdminConsole,
 	})
 }

@@ -9,8 +9,9 @@
 // route.
 //
 // Merchant-local authority is evaluated in the caller's merchant permission
-// group using OpenRails' `merchant:` permissions. Cross-merchant directory
-// authority belongs to root/platform control, not merchant groups.
+// group using the server's own `merchant:` permissions (staffperm), which
+// guard the merchant API's routes. Cross-merchant directory authority belongs
+// to root/platform control, not merchant groups.
 package controlplane
 
 import (
@@ -21,13 +22,14 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
-// Roles is OpenRails' permission model (#567): two flat personas beside root.
-// A merchant IS a merchant group; a customer group is explicit hosted
-// portal membership, keyed by the customer's user id. Every permission
-// OpenRails checks is registered here, because AuthKit refuses a check on an
-// unregistered one. The strings are package permissions' public vocabulary.
+// Roles is the standalone server's permission model: two flat personas beside
+// root. A merchant IS a merchant group; a customer group is explicit hosted
+// portal membership, keyed by the customer's user id. Every permission the
+// server checks is registered here, because AuthKit refuses a check on an
+// unregistered one.
 var (
 	Roles           = authkit.NewRoles()
 	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications)
@@ -40,6 +42,8 @@ var (
 	MerchantOwner = merchantPersona.Owner
 	CustomerOwner = customerPersona.Owner
 
+	// MerchantSupport reads and acts on customers' billing; the merchant's
+	// configuration is the owner's.
 	MerchantSupport = merchantRole("support", supportGrants...)
 	// MerchantViewer is read-only: finance, audit, analysts and LLM agents.
 	MerchantViewer = merchantRole("viewer", viewerGrants...)
@@ -62,20 +66,7 @@ var catalogPerms = func() map[string]iam.Perm {
 			out[perm] = p.Permission(resource, action)
 		}
 	}
-	declare(merchantPersona,
-		billing.MerchantHostEventsRead, billing.MerchantHostEventsAcknowledge,
-		billing.MerchantSettingsRead, billing.MerchantSettingsUpdate,
-		billing.MerchantPSPsRead, billing.MerchantPSPsUpdate,
-		billing.MerchantCatalogRead, billing.MerchantCatalogUpdate,
-		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
-		billing.MerchantInvoicesRead, billing.MerchantInvoicesUpdate, billing.MerchantInvoicesCollect,
-		billing.MerchantCheckoutCreate,
-		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
-		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
-		billing.MerchantAdmissionsCreate, billing.MerchantUsageRead, billing.MerchantOperationsRead,
-		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate, billing.MerchantFindingsResolve,
-		billing.MerchantBillingImport, billing.MerchantBillingExport,
-		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantAccessGrantPermanent)
+	declare(merchantPersona, staffperm.Read, staffperm.Write, staffperm.Admin)
 	declare(Roles.Root.PersonaDef,
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
 		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)
@@ -85,21 +76,8 @@ var catalogPerms = func() map[string]iam.Perm {
 func declared(perm string) iam.Perm { return catalogPerms[perm] }
 
 var (
-	supportGrants = []string{
-		billing.MerchantCustomerSettingsRead, billing.MerchantCustomerSettingsUpdate,
-		billing.MerchantPaymentsRead, billing.MerchantPaymentsRefund,
-		billing.MerchantInvoicesRead, billing.MerchantInvoicesCollect,
-		billing.MerchantSubscriptionsRead, billing.MerchantSubscriptionsUpdate,
-		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantOperationsRead,
-		billing.MerchantMetricsRead, billing.MerchantDashboardUpdate,
-	}
-	viewerGrants = []string{
-		billing.MerchantSettingsRead, billing.MerchantPSPsRead,
-		billing.MerchantCatalogRead, billing.MerchantCustomerSettingsRead,
-		billing.MerchantPaymentsRead, billing.MerchantInvoicesRead, billing.MerchantSubscriptionsRead,
-		billing.MerchantUsageRead, billing.MerchantHostEventsRead, billing.MerchantOperationsRead,
-		billing.MerchantMetricsRead,
-	}
+	supportGrants = []string{staffperm.Read, staffperm.Write}
+	viewerGrants  = []string{staffperm.Read}
 )
 
 // merchantRoleGrants are a merchant role's permissions as wire strings, for
@@ -107,7 +85,7 @@ var (
 func merchantRoleGrants(name string) ([]string, bool) {
 	switch name {
 	case MerchantOwner.Name():
-		return []string{billing.MerchantGroupPersona + ":*"}, true
+		return []string{staffperm.All}, true
 	case MerchantSupport.Name():
 		return supportGrants, true
 	case MerchantViewer.Name():

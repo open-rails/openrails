@@ -133,30 +133,6 @@ func (s *Service) lookupCheckoutAttempt(ctx context.Context, req billing.CreateC
 	return checkoutAttemptFromResponse(resp, req.Customer.ID), nil
 }
 
-// CheckoutAttemptOwner is the customer an attempt charges, for scoping the
-// caller before the attempt is read or confirmed.
-func (s *Service) CheckoutAttemptOwner(ctx context.Context, id billing.CheckoutAttemptID) (billing.CustomerID, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return billing.CustomerID{}, err
-	}
-	defer release()
-	engine, err := s.requireCheckoutAttemptService()
-	if err != nil {
-		return billing.CustomerID{}, err
-	}
-	rt, err := s.runtime()
-	if err != nil {
-		return billing.CustomerID{}, err
-	}
-	var owner checkout.AttemptOwner
-	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
-		owner, err = engine.Owner(scoped, id.UUID())
-		return err
-	})
-	return billing.CustomerID(owner.CustomerID), err
-}
-
 // GetCheckoutAttempt reads one attempt.
 func (s *Service) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID) (*billing.CheckoutAttempt, error) {
 	ctx, release, err := s.pin(ctx)

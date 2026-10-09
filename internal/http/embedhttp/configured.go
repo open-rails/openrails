@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -37,13 +38,45 @@ func CustomerProfiles(sel config.Routes) []config.CustomerRoutes {
 // ValidateRoutes refuses a selection whose groups lack the Auth they need,
 // before anything mounts: nothing is ever mounted open.
 func ValidateRoutes(sel config.Routes, profiles []config.CustomerRoutes, rt *app.Runtime) error {
-	if sel.CatalogEdits && !sel.Merchant {
-		return fmt.Errorf("openrails: Routes.CatalogEdits adds the merchant API's catalog writes; set Routes.Merchant")
-	}
-	if sel.Merchant && httproutes.IsNilAuth(sel.Auth) {
-		return fmt.Errorf("openrails: Routes.Merchant needs Routes.Auth (its Staff and RecentSignIn gate every merchant route)")
+	if (sel.Merchant || sel.MerchantConfig) && httproutes.IsNilAuth(sel.Auth) {
+		return fmt.Errorf("openrails: Routes.Merchant and Routes.MerchantConfig need Routes.Auth (its RequirePermission and Sensitive gate every staff route)")
 	}
 	return validateCustomerRoutes(profiles, rt)
+}
+
+// StaffGuard resolves sel.Guards over the staff routes sel mounts on rt:
+// each route's permission. It fails when a mounted staff route has no guard
+// or a guard is wrong (httproutes.ResolveGuards).
+func StaffGuard(rt *app.Runtime, sel config.Routes) (func(httproutes.Route) string, error) {
+	guards := make(map[httproutes.GuardKey]string, len(sel.Guards))
+	for key, perm := range sel.Guards {
+		guards[httproutes.GuardKey(key)] = permissionText(perm)
+	}
+	var groups []httproutes.Group
+	if sel.Merchant {
+		groups = append(groups, httproutes.Merchant)
+	}
+	if sel.MerchantConfig {
+		groups = append(groups, httproutes.MerchantConfig)
+	}
+	if len(groups) == 0 {
+		if len(guards) > 0 {
+			return nil, fmt.Errorf("openrails: Routes.Guards guard staff routes; set Routes.Merchant or Routes.MerchantConfig")
+		}
+		return nil, nil
+	}
+	return httproutes.ResolveGuards(httproutes.PlanStaffRoutes(rt, httproutes.Options{}, groups...), guards)
+}
+
+// permissionText is a guard's permission, "" for a nil one.
+func permissionText(perm fmt.Stringer) (text string) {
+	if perm == nil {
+		return ""
+	}
+	if v := reflect.ValueOf(perm); v.Kind() == reflect.Pointer && v.IsNil() {
+		return ""
+	}
+	return perm.String()
 }
 
 func routeSets(sel config.Routes) []RouteSet {
@@ -53,6 +86,9 @@ func routeSets(sel config.Routes) []RouteSet {
 	}
 	if sel.Merchant {
 		sets = append(sets, RouteSetMerchant)
+	}
+	if sel.MerchantConfig {
+		sets = append(sets, RouteSetMerchantConfig)
 	}
 	return sets
 }
@@ -77,7 +113,11 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
 	capabilities := configuredCapabilities(a.Runtime, active, profiles, providers)
-	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, CatalogWrites: sel.CatalogEdits})
+	guard, err := StaffGuard(a.Runtime, sel)
+	if err != nil {
+		return nil, err
+	}
+	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, Guard: guard})
 	extra, err := BuildCustomerRoutes(a, profiles, nil)
 	if err != nil {
 		return nil, err

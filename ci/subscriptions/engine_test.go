@@ -675,7 +675,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
-			_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+			_, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
 				OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 				IdempotencyKey: "enroll-declined", PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(declined)},
 				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -703,7 +703,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	price := w.membership("content:members", 9_990_000)
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	session, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 		IdempotencyKey: "enroll-3ds", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(challenged)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -777,7 +777,7 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		c := w.newCustomer()
 		method := c.saveCard("nmi", visa)
 		w.nmi.RefuseDuplicates(1)
-		_, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		_, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 			IdempotencyKey: "enroll-dup", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -1034,7 +1034,7 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	require.NoError(t, err)
 	c := w.newCustomer()
 	buy := func(method, key string) *billing.CheckoutAttempt {
-		session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		session, err := createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 			IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)},
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",

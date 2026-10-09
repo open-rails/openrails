@@ -21,15 +21,11 @@ func TestClientCheckoutRetainsOrderRenewalChoice(t *testing.T) {
 			client, seen := recordingRemote(t, nil)
 			customer := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}
 			price := billing.PriceID(uuid.New())
-			_, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
-				Customer: customer, PriceID: price, AutoRenew: choice.value, IdempotencyKey: "order",
-			})
-			require.NoError(t, err)
-			_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
+			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
 				Customer: customer, PriceID: price, AutoRenew: choice.value,
 			})
 			require.NoError(t, err)
-			for range 2 {
+			for range 1 {
 				request := <-seen
 				if choice.value == nil {
 					require.NotContains(t, request.body, "auto_renew", "omitted choice must retain the server default")

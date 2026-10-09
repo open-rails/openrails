@@ -17,7 +17,7 @@ import (
 )
 
 // AdminChangeTier changes a subscription's tier on the customer's behalf. The
-// merchant permission gate authorizes the operator; CheckoutService still runs
+// staff route's guard authorizes the operator; CheckoutService still runs
 // as the subscription customer so ownership and rail behavior stay identical
 // to self-service tier changes.
 func AdminChangeTier(r *httprequest.Request) {

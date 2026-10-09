@@ -8,9 +8,12 @@ const (
 	RouteSetCheckout RouteSet = "checkout"
 	// RouteSetCustomer mounts customer-facing billing routes.
 	RouteSetCustomer RouteSet = "customer"
-	// RouteSetMerchant mounts the merchant API and creator-owned catalogs,
-	// each route gated by its merchant permission.
+	// RouteSetMerchant mounts staff work on customers, each route behind its
+	// guard.
 	RouteSetMerchant RouteSet = "merchant"
+	// RouteSetMerchantConfig mounts the merchant's own configuration, each
+	// route behind its guard.
+	RouteSetMerchantConfig RouteSet = "merchant_config"
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
 	RouteSetWebhooks RouteSet = "webhooks"
 )
@@ -22,6 +25,7 @@ var AllRouteSets = []RouteSet{
 	RouteSetCheckout,
 	RouteSetCustomer,
 	RouteSetMerchant,
+	RouteSetMerchantConfig,
 	RouteSetWebhooks,
 }
 

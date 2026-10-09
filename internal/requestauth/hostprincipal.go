@@ -11,13 +11,11 @@ import (
 // client (#685). It is deliberately a CONTEXT VALUE, not a header: context
 // values cannot arrive on a network request, so a gate that finds one can trust
 // it without any shared secret — unforgeable from the wire by construction.
-// Permissions are authoritative; the in-process host is trusted for its own
-// merchant (same trust stance as billingauth.Payer, #339).
+// The in-process host is its merchant's owner: trusted for its own merchant.
 type HostPrincipal struct {
 	MerchantID   billing.MerchantID
 	MerchantSlug string
 	Subject      string
-	Permissions  []string
 }
 
 type hostPrincipalCtxKey struct{}

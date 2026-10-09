@@ -9,10 +9,12 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CreateCheckoutSession hands a purchase to a customer: one price, paid on the
-// payment page. The returned ID reads and pays the session with no other
+// CreateCheckoutSession hands a customer a purchase with the merchant's
+// credential: one price, paid on the payment page. Usually the customer
+// creates their own with their own credential (POST /v1/me/checkout-sessions,
+// billing-ui). The returned ID reads and pays the session with no other
 // credential (billing-ui's checkoutSource), so it goes to that customer's
-// browser only.
+// browser only; paying with a saved card needs the customer's own proof.
 func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionParams, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error) {
 	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
 		return nil, err
@@ -22,55 +24,6 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 	}
 	var out billing.CheckoutSessionLink
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-sessions", request, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CreateCheckoutAttempt charges one price for a customer now, relaying that
-// customer's pay action; a recurring price is enrolled. Retries with the same
-// IdempotencyKey never charge twice. A step the buyer must take (a redirect, a
-// Solana Pay link) is the attempt's NextAction.
-func (c *Client) CreateCheckoutAttempt(ctx context.Context, request billing.CreateCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
-	if _, err := requireTypedID("customer.id", request.Customer.ID); err != nil {
-		return nil, err
-	}
-	if request.PriceID.IsZero() == (strings.TrimSpace(request.PriceKey) == "") {
-		return nil, invalidErr("exactly one of price_id or price_key is required")
-	}
-	if strings.TrimSpace(request.IdempotencyKey) == "" {
-		return nil, invalidErr("IdempotencyKey is required")
-	}
-	var out billing.CheckoutAttempt
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-attempts", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetCheckoutAttempt reads one checkout attempt.
-func (c *Client) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
-	attempt, err := requireTypedID("id", id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CheckoutAttempt
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-attempts/"+attempt, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ConfirmCheckoutAttempt completes a Solana attempt with the signature of the
-// transaction the buyer's wallet signed (next action
-// solana_sign_transactions).
-func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, request billing.ConfirmCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error) {
-	attempt, err := requireTypedID("id", id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CheckoutAttempt
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-attempts/"+attempt+"/confirm", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

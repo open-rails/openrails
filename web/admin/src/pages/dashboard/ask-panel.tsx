@@ -39,7 +39,8 @@ export function AskPanel({
   onAddWidget,
 }: {
   enabled: boolean
-  onAddWidget: (draft: {
+  // onAddWidget is absent when the layout is read-only.
+  onAddWidget?: (draft: {
     title: string
     viz: WidgetViz
     query: MetricsQuery
@@ -63,7 +64,7 @@ export function AskPanel({
   }
 
   const addAsWidget = (ev: AskEvidence) => {
-    onAddWidget({
+    onAddWidget?.({
       title: asked.length > 60 ? asked.slice(0, 57) + "…" : asked,
       viz: suggestViz(ev.query),
       query: ev.query,
@@ -144,14 +145,19 @@ export function AskPanel({
                       <span className="text-xs font-medium text-muted-foreground uppercase">
                         Query {i + 1} result
                       </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => addAsWidget(ev)}
-                      >
-                        <HugeiconsIcon icon={Add01Icon} className="size-3.5" />{" "}
-                        Add as widget
-                      </Button>
+                      {onAddWidget && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => addAsWidget(ev)}
+                        >
+                          <HugeiconsIcon
+                            icon={Add01Icon}
+                            className="size-3.5"
+                          />{" "}
+                          Add as widget
+                        </Button>
+                      )}
                     </div>
                     <div className="max-h-64 overflow-auto">
                       <WidgetVizView viz="table" result={ev} />

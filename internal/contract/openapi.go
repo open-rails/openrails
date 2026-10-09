@@ -237,8 +237,11 @@ func (m *model) operation(r routes.Route) *obj {
 	if r.Perm != "" {
 		op.set("x-openrails-permission", r.Perm)
 	}
-	if r.Also != "" {
-		op.set("x-openrails-also-permission", r.Also)
+	if guards := r.Guards(); len(guards) > 0 {
+		op.set("x-openrails-guards", guards)
+	}
+	if r.Sensitive {
+		op.set("x-openrails-sensitive", true)
 	}
 	if r.When != routes.Always {
 		op.set("x-openrails-mounted-when", string(r.When))

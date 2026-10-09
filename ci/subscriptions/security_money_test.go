@@ -40,7 +40,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 				}
 			}
 
-			_, err := client.CreateCheckoutAttempt(ctx, request(cheap.ID, "content:vip"))
+			_, err := createCheckoutAttempt(ctx, client, request(cheap.ID, "content:vip"))
 			require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
 			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
@@ -51,18 +51,18 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			archived := w.membership("content:archived", 1_000_000)
 			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, PurchaseAction: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
 			require.NoError(t, err)
-			_, err = client.CreateCheckoutAttempt(ctx, request(archived.ID, "content:archived"))
+			_, err = createCheckoutAttempt(ctx, client, request(archived.ID, "content:archived"))
 			require.Error(t, err, "an archived price is not purchasable")
 
-			// The caller cannot name an amount, a currency or a quantity.
-			status, body := w.hostJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{
-				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "payment": map[string]any{"psp": rail}, "amount": "1", "currency": "JPY", "quantity": 0,
+			// The caller cannot name a currency or a quantity.
+			status, body := w.hostJSON(http.MethodPost, "/v1/merchant/checkout-sessions", map[string]any{
+				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "currency": "JPY", "quantity": 0,
 			})
 			require.Equal(t, http.StatusBadRequest, status, "%v", body)
 			code, _ := errorOf(body)
 			require.Equal(t, billing.CodeUnknownField, code)
 
-			_, err = client.CreateCheckoutAttempt(ctx, request(member.ID, "content:vip"))
+			_, err = createCheckoutAttempt(ctx, client, request(member.ID, "content:vip"))
 			require.NoError(t, err)
 			w.settle()
 			ledger := w.railLedger(rail)
@@ -93,7 +93,7 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			buy := func(client *openrails.Client) error {
-				_, err := client.CreateCheckoutAttempt(context.WithoutCancel(t.Context()), billing.CreateCheckoutAttemptParams{
+				_, err := createCheckoutAttempt(context.WithoutCancel(t.Context()), client, billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferPermanent, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:post", PriceID: price.ID,
 					IdempotencyKey: "post-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",

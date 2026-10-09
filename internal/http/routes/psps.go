@@ -13,28 +13,28 @@ func pspWriteErrors(own ...string) []string {
 // pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be
 // armed on, and the callbacks providers send.
 var pspsRoutes = []Route{
-	{Method: GET, Path: "/v1/merchant/psps", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+	{Method: GET, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListPSPs", Level: LevelAdmin, Resources: res(ResPSPs),
 		Query: params(queryOf(handlers.PSPListQuery{}), integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
-	{Method: POST, Path: "/v1/merchant/psps", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+	{Method: POST, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", Level: LevelAdmin, Resources: res(ResPSPs), Sensitive: true,
 		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
-	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetPSP", Level: LevelAdmin, Resources: res(ResPSPs),
 		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
 	// Credentials rotate here; settings changes work with a read-only
 	// credential backend.
-	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdatePSP", Level: LevelAdmin, Resources: res(ResPSPs), Sensitive: true,
 		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_not_found"), Handler: h(handlers.UpdatePSP)},
 	// Archiving writes only the PSP row, never a secret, never the provider:
 	// a terminated account archives from any deployment.
-	{Method: POST, Path: "/v1/merchant/psps/{id}/archive", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsUpdate,
+	{Method: POST, Path: "/v1/merchant/psps/{id}/archive", Group: MerchantConfig, Auth: AuthMerchant, Name: "ArchivePSP", Level: LevelAdmin, Resources: res(ResPSPs), Sensitive: true,
 		Request: billing.ArchivePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_last_active", "psp_not_found", "service_unavailable"), Handler: h(handlers.ArchivePSP)},
 	// or#288: which PSP a checkout would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
-	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+	{Method: POST, Path: "/v1/merchant/psps/routing-preview", Group: MerchantConfig, Auth: AuthMerchant, Name: "PreviewPSPRouting", Level: LevelAdmin, Resources: res(ResPSPs),
 		Request: billing.PreviewPSPRoutingParams{}, Responses: []Reply{{200, billing.PSPRoutingPreview{}}}, Errors: codes("invalid_param"), Handler: h(handlers.PreviewPSPRouting)},
 	// A refresh rewrites the subscription mirrors from provider truth.
-	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantSubscriptionsUpdate,
+	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: MerchantConfig, Auth: AuthMerchant, Name: "RefreshPSPs", Level: LevelAdmin, Resources: res(ResPSPs), Sensitive: true,
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
-	{Method: GET, Path: "/v1/merchant/rails", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantPSPsRead,
+	{Method: GET, Path: "/v1/merchant/rails", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListRails", Level: LevelAdmin, Resources: res(ResPSPs),
 		Responses: []Reply{{200, billing.ListPage[billing.RailDefinition]{}}}, Handler: h(handlers.ListRails)},
 
 	// The provider callback surface. The provider's account identity resolves

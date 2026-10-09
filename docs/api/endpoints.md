@@ -4,7 +4,7 @@ The API is served on one port under `/v1`. A standalone server serves it at the
 root; an embedded host mounts the same routes beneath its prefix (usually
 `/billing`), so `/v1/me/balance` there is `/billing/v1/me/balance`.
 
-- **Every route**, with its tier, permission, request and response:
+- **Every route**, with its tier, guard, request and response:
   [routes.md](routes.md).
 - **Every shape and each route's error codes**:
   [`api/openapi.json`](../../api/openapi.json).
@@ -42,7 +42,9 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   groups a deployment mounts and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
   `provider_credential_writes`, `api_host`, `catalog_copilot`, `metrics_ask`,
-  `dashboard_generation`, `team_invites`). A route the deployment cannot serve
+  `dashboard_generation`, `team_invites`). Its route groups include `merchant`
+  (staff work on customers) and `merchant_config` (the merchant's own
+  configuration). A route the deployment cannot serve
   is not registered: it answers `404 route_not_found`.
 - **Health.** `/health/live` and `/health/ready` on the standalone server; a
   failing dependency is logged, never answered.
@@ -54,17 +56,20 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Public: `/v1/products`, `/v1/prices`, `/v1/currencies`, `/v1/checkout-config`, `/v1/capabilities` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
-| Merchant: `/v1/merchant/*` | an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
+| Merchant and merchant configuration: `/v1/merchant/*` | embedded: the host's credential its guard admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
 | Control plane: `/v1/merchants`, the team and API-key routes | a signed-in user, or a trusted issuer's access token (standalone) |
 | Platform: `/v1/platform/*` | an operator session holding the root permission (standalone) |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
-Every merchant route is gated by one `merchant:` permission, whatever the
-credential: an API key carries the permissions it was minted with, a service
-JWT the `permissions` it asserts within its issuer's merchant, and a user
-session the user's role in the merchant's group. A user session also needs a
-recent sign-in for writes: otherwise `403 step_up_required`, with the step-up
-methods in `metadata`.
+Every staff route is gated by the host's permission for its guard
+(`Routes.Guards`; each route's guards are in [routes.md](routes.md)), whatever
+the credential. On the standalone server the guards are its merchant
+persona's `server.MerchantRead`, `server.MerchantWrite` and
+`server.MerchantAdmin`: an API key carries its role's, a trusted issuer's token
+the `permissions` it asserts within its ceiling, and a user session the user's
+role in the merchant's group. A user in person also needs a recent sign-in on
+a `sensitive` route: otherwise `403 step_up_required`, with the step-up methods
+in `metadata`.
 
 A `/v1/me` route acts on the credential's own customer; no path names a user.
 The merchant a request acts on comes from its credential, or from the
@@ -76,8 +81,8 @@ sends no CORS headers.
 
 ## Checkout
 
-A browser buys through a checkout session; a merchant's server can also charge
-directly with a checkout attempt. See [checkout](commerce.md).
+A browser buys through a checkout session: the customer mints it with their own
+credential, or the merchant with its own. See [checkout](commerce.md).
 
 `GET /v1/checkout-config` is public and cacheable for a minute. It lists the
 merchant's armed PSPs as `{psp_id, key, rail, custodian, display_name, flow,
@@ -206,11 +211,13 @@ one-time); `access_duration_hours` independently determines access (`null`: no
 scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
-Reads need `merchant:catalog:read`. Writes need `merchant:catalog:update` and
-`Routes.CatalogEdits` (standalone: `catalog_edits: true`): without it the write
-routes are not mounted (the in-process Client is not gated). `Config.Catalog` is an optional startup batch
-and does not restrict later edits. JSON/YAML batches are deduplicated permanently
-by content hash, even after intervening edits.
+Reads are `Routes.Merchant`'s (guard `openrails.StaffReads`, or
+`openrails.Catalog`). Writes are `Routes.MerchantConfig`'s (guard
+`openrails.MerchantConfig`, or `openrails.Catalog`): without it they are not
+mounted, and they are refused while `Config.Catalog` is the catalog's truth
+(standalone: unless `secret_backend` is `vault` or `db`). The in-process Client
+is not gated. JSON/YAML batches are deduplicated permanently by content hash,
+even after intervening edits.
 
 A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has

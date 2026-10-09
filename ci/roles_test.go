@@ -3,15 +3,14 @@
 package ci_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 // The merchant roles' authority is AuthKit's running catalog, not a copy:
@@ -32,19 +31,12 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		}
 		return out
 	}
-	require.Equal(t, []string{billing.MerchantAll}, held(controlplane.MerchantOwner))
-	for _, p := range held(controlplane.MerchantViewer) {
-		require.True(t, strings.HasSuffix(p, ":read"), "viewer is read-only: %s", p)
-	}
-	ownerOnly := []string{
-		billing.MerchantSettingsUpdate, billing.MerchantPSPsUpdate, billing.MerchantCatalogUpdate,
-		billing.MerchantCreditsGrant, billing.MerchantCreditsRevoke, billing.MerchantCredentialsManage,
-		billing.MerchantMembersRead, billing.MerchantMembersManage, billing.MerchantBillingImport,
-		billing.MerchantBillingExport, billing.MerchantAdmissionsCreate, billing.MerchantCheckoutCreate,
-	}
+	require.Equal(t, []string{staffperm.All}, held(controlplane.MerchantOwner))
+	require.ElementsMatch(t, []string{staffperm.Read, staffperm.Write}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
+	require.Equal(t, []string{staffperm.Read}, held(controlplane.MerchantViewer), "viewer is read-only")
 	for _, role := range []iam.Role{controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)
-		for _, p := range ownerOnly {
+		for _, p := range []string{staffperm.Admin, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage} {
 			require.False(t, (&controlplane.ResolvedServiceCredential{Permissions: grants}).HasPermission(p), "%s must not hold %s", role, p)
 		}
 	}
@@ -60,7 +52,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		{controlplane.MerchantViewer, []string{"merchant:*:read"}, true},
 		{controlplane.MerchantSupport, []string{"merchant:*:read"}, false},
 		{controlplane.MerchantOwner, support, false},
-		{controlplane.MerchantViewer, support, false},
+		{controlplane.MerchantViewer, support, true},
 		{controlplane.MerchantSupport, viewer, false},
 		{controlplane.MerchantViewer, viewer, true},
 		{controlplane.MerchantOwner, []string{"root:*"}, false},

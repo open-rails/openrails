@@ -37,7 +37,7 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	require.NoError(t, err)
 	first, err := c.GetPriceByKey(t.Context(), "retained-video", "buy")
 	require.NoError(t, err)
-	paid, err := c.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: first.ID, IdempotencyKey: "snapshot-video", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}})
+	paid, err := createCheckoutAttempt(t.Context(), c, billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: first.ID, IdempotencyKey: "snapshot-video", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}})
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutAttemptSucceeded, paid.Status)
 	_, err = c.ApplyCatalog(t.Context(), declaration(7000000))

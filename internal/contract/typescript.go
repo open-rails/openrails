@@ -124,7 +124,11 @@ export type OpenRailsRoute = {
   path: string
   group: string
   auth: string
+  // A staff route's guards, most specific first; another route's own permission.
+  guards: readonly string[]
   permission: string | null
+  // A user in person also needs a recent sign-in.
+  sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null
   // The narrowest customer exposure serving a customer route.
@@ -163,8 +167,8 @@ export const OPENRAILS_ROUTES = [
 			seen[reply.Status] = true
 			replies = append(replies, fmt.Sprintf("%d: %s", reply.Status, m.bodyTS(reply.Body)))
 		}
-		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, permission: %s, mountedWhen: %s, scope: %s, request: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
-			r.Method, r.Path, r.Group, r.Auth, perm, when, scope, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
+		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, guards: [%s], permission: %s, sensitive: %t, mountedWhen: %s, scope: %s, request: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
+			r.Method, r.Path, r.Group, r.Auth, quoted(r.Guards()), perm, r.Sensitive, when, scope, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
 		for _, name := range r.ErrorSets() {
 			sets[name] = routes.ErrorSet(name)
 		}

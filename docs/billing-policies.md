@@ -133,9 +133,9 @@ Both operations return `{"customer_id":"…","policy_name":"cloud_monthly"}`;
 an unassigned customer returns an explicit `null` policy name. This reads the
 explicit assignment, not the effective tier or default policy.
 
-GET requires `merchant:customer-settings:read`; PUT requires
-`merchant:customer-settings:update`. Customer self-service permissions cannot
-change this resource. The customer and policy must already exist under the
+GET is a staff read (`openrails.StaffReads`); PUT a staff write
+(`openrails.StaffWrites`); both are in `openrails.Customers`. Customer
+self-service cannot change this resource. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer
 is implicitly created. Missing, blank, non-string policy names and unknown

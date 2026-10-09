@@ -207,13 +207,8 @@ func CheckProductAccess(r *httprequest.Request) {
 }
 
 // CreateProductAccess grants a batch of products free, across any customers,
-// all or none in one transaction. A grant with no end also needs
-// merchant:access:grant-permanent.
-func CreateProductAccess(gate StaffCan) func(*httprequest.Request) {
-	return func(r *httprequest.Request) { createProductAccess(r, gate) }
-}
-
-func createProductAccess(r *httprequest.Request, gate StaffCan) {
+// all or none in one transaction.
+func CreateProductAccess(r *httprequest.Request) {
 	var req billing.CreateProductAccessBatchParams
 	if !r.BindJSON(&req) {
 		return
@@ -235,7 +230,6 @@ func createProductAccess(r *httprequest.Request, gate StaffCan) {
 	}
 	now := r.Clock.Now()
 	batch := make([]productaccess.Grant, len(req.Items))
-	indefinite := false
 	for i, item := range req.Items {
 		param := func(field string) string { return apperr.ItemParam(i, field) }
 		switch {
@@ -278,10 +272,6 @@ func createProductAccess(r *httprequest.Request, gate StaffCan) {
 			end := item.EndsAt.UTC()
 			batch[i].EndsAt = &end
 		}
-		indefinite = indefinite || (item.Hours == nil && item.EndsAt == nil)
-	}
-	if indefinite && !permitPermanentGrant(r, gate) {
-		return
 	}
 	svc := productAccessService(r)
 	if svc == nil {

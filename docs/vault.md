@@ -23,12 +23,13 @@ Credential custody is independent of merchant metadata and HTTP publication:
   bytes) is required in both sandbox and live posture. A per-merchant DEK encrypts
   values; the configured master key wraps that DEK.
 - **`secret_backend: vault`** — managed credentials use exact published KV-v2
-  references. Set `vault.enabled` and the server-owned connection/auth settings.
+  references. Declare the `vault:` connection and auth settings (declaring them
+  connects to Vault; there is no separate switch).
 
 `credential_read_only: true` narrows a managed backend to reads. Vault policy
-can narrow it further. The merchant configuration routes are part of the
-merchant API (embedded `Routes.Merchant`; always on the standalone server), each
-gated by its permission. Authorized local Client operations do not require
+can narrow it further. The merchant configuration routes are the merchant's
+configuration (embedded `Routes.MerchantConfig`; always on the standalone
+server), each behind its guard. Authorized local Client operations do not require
 those HTTP routes. Remote Clients connect to the remote server and need no local Vault
 or database configuration.
 
@@ -57,8 +58,7 @@ Pick one `auth_method`. In-cluster, prefer `kubernetes` (no stored secret — th
 ServiceAccount is the credential).
 
 ```yaml
-vault:
-  enabled: true
+vault:                                   # declaring it connects; embedded: a non-nil Config.Vault or Deps.Vault
   address: https://vault.internal:8200   # env VAULT_ADDR
   # namespace: billing                  # optional Vault namespace
   # scope_prefix: openrails              # optional server-owned path prefix

@@ -107,13 +107,12 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 Cards the provider refused are counted in PostgreSQL
 (`billing.card_attempt_failures`), so blocks hold on every replica without
 Redis or captcha. A request refused before any provider call (a
-missing field, an unconfigured PSP) is not a decline. Card saves, checkout
-creation and confirmation (browser routes and the embedded or remote Client)
-check it before any provider call and answer `429` `card_attempts_blocked`
+missing field, an unconfigured PSP) is not a decline. Card saves and checkout
+payments check it before any provider call and answer `429` `card_attempts_blocked`
 with `Retry-After`:
 
-- per customer and per client address (an IPv6 client is its /64; through the
-  Client, the `customer.client_ip` the host supplies): 6 declines in 15
+- per customer and per client address (an IPv6 client is its /64; the address
+  of the browser paying a checkout session): 6 declines in 15
   minutes block for the window; 10 in 24 hours block for the day;
 - per merchant: 100 declines in the last 24 hours from at least 25 customers
   and 25 addresses is attack mode, where any subject with a decline in the

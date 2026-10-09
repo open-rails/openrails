@@ -29,8 +29,6 @@ type Config struct {
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
 	MerchantManifestOverlays []string
-	// CatalogEdits mounts the merchant API's catalog-write routes.
-	CatalogEdits bool
 	// AdminConsole serves the merchant admin console; nil, the default,
 	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
 	// at a trusted issuer.
@@ -85,7 +83,6 @@ type fileConfig struct {
 	CredentialSnapshotID string `koanf:"credential_snapshot_id"`
 	CredentialReadOnly   bool   `koanf:"credential_read_only"`
 	AlertSecretBackend   string `koanf:"alert_secret_backend"`
-	CatalogEdits         bool   `koanf:"catalog_edits"`
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
@@ -210,7 +207,6 @@ func (f *fileConfig) config() (*Config, error) {
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
-		CatalogEdits:             f.CatalogEdits,
 		AdminConsole:             f.AdminConsole.mount(),
 		ConsoleIssuer:            f.AdminConsole.issuer(),
 	}, nil

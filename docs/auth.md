@@ -18,7 +18,7 @@ same contract, and the in-process Go client its own host authority.
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | checkout session | the session id; `Required` only to show saved cards | the session's own customer sees and pays with its saved cards |
 | customer (`/v1/me`) | `Required` | a user subject, the customer; an invoker acting for someone else, or an application, only on its own spend limits |
-| merchant (`/v1/merchant`) | `RequirePermission(permission)`, then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that exact permission on the mounted merchant |
+| merchant (`/v1/merchant`) | `RequirePermission(permission)` with the host's permission for the route's guard (`Routes.Guards`), then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that permission on the mounted merchant |
 
 OpenRails binds the merchant a customer route serves before `Required` runs;
 the middleware reads it with `openrails.RequestMerchant` rather than resolving
@@ -33,16 +33,15 @@ one.
 An identity has three parts:
 
 - the **subject**: the native account acted as, a user or an application.
-  Its money and authority are used: a customer route's customer, a merchant
+  Its money and authority are used: a customer route's customer, a staff
   permission's holder. A user is the same subject on every credential.
 - the **invoker**: the party actually acting, the subject itself or someone
   acting on its behalf, possibly another issuer's user. Spend limits, spend
   delegations, staff rate limits and the destructive-operation ceiling key on
   it: its id, as `issuer|id` when another issuer vouches for it.
 - the **credential**: how it was proven (session, device key, API key, signed
-  token or access token). Only a user acting in person starts a payment for
-  itself; `merchant:checkout:create` is refused to one, and only one is asked
-  for a recent sign-in.
+  token or access token). Only a user acting in person pays with their own
+  saved card, and only one is asked for a recent sign-in.
 
 Provider writes record all three: the subject, the invoker and the
 credential (`kind:id`).
@@ -72,7 +71,10 @@ API and a user's own merchant list, `openrails:self` for a customer's own
 billing (`/v1/me`). A token never names its merchant; the request does
 (`OpenRails-Merchant` or the merchant's API host), and it must be one the
 issuer is trusted for. Permissions are the token's `permissions`, the issuer's
-group roles and the user's accepted federated grants, within the ceiling. A
+group roles and the user's accepted federated grants, within the ceiling: the
+server's merchant persona permissions `server.MerchantRead`,
+`server.MerchantWrite` and `server.MerchantAdmin`, which guard the merchant
+API's reads, writes and configuration. A
 token whose `sub` equals its `client_id` is a client acting for itself.
 
 A token bound to a key (`cnf.jkt`) is accepted only as `Authorization: DPoP`

@@ -2,17 +2,19 @@
 
 # Routes
 
-Every route of the HTTP API (228), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (225), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
-**Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `catalog write` a route mounted only where the deployment allows catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
+**Guard** is, for a staff route, the `openrails.RouteSet` names covering it, most specific first (the route, its resource groups, its level group): the host guards it with the permission of the most specific one in `Routes.Guards`. Other routes name their own permission.
+
+**Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
 ## Process
 
 Health, metrics and capability discovery. Only the standalone server serves the root paths.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/health/live` | public | — | — | 200 `Health` |  |
 | GET | `/health/ready` | public | — | — | 200 `Health` |  |
@@ -23,7 +25,7 @@ Health, metrics and capability discovery. Only the standalone server serves the 
 
 What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/currencies` | public | — | — | 200 `CurrencyRegistry` |  |
 | GET | `/v1/checkout-config` | public | — | — | 200 `CheckoutConfig` |  |
@@ -41,7 +43,7 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 
 A customer acting on its own account.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
 | GET | `/v1/me/checkout-sessions/{id}` | customer | — | — | 200 `CheckoutSession` | scope `billing_management` |
@@ -81,194 +83,198 @@ A customer acting on its own account.
 
 ## Merchant
 
-The merchant API: staff, machines and the Go client alike, each route gated by its merchant permission.
+Staff work on customers (`Routes.Merchant`): staff, machines and the Go client alike, each route behind the host's permission for its most specific guard.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/merchant/checkout-sessions` | merchant | `merchant:checkout:create` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
-| POST | `/v1/merchant/checkout-attempts` | merchant | `merchant:checkout:create` | `CreateCheckoutAttemptParams` | 200 `CheckoutAttempt` | `Idempotency-Key` |
-| GET | `/v1/merchant/checkout-attempts/{id}` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutAttempt` |  |
-| POST | `/v1/merchant/checkout-attempts/{id}/confirm` | merchant | `merchant:checkout:create` | `ConfirmCheckoutAttemptParams` | 200 `CheckoutAttempt`<br>202 `CheckoutAttempt` |  |
-| GET | `/v1/merchant/checkout-config` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutConfig` |  |
-| GET | `/v1/merchant/catalog/revision` | merchant | `merchant:catalog:read` | — | 200 `CatalogRevision` |  |
-| POST | `/v1/merchant/catalog/applications` | merchant | `merchant:catalog:update` | `Application` | 200 `CatalogApplicationReceipt` | catalog write |
-| POST | `/v1/merchant/catalog/entitlement-replacements` | merchant | `merchant:catalog:update` | `ReplaceEntitlementsParams` | 200 `CatalogApplicationReceipt` | catalog write |
-| GET | `/v1/merchant/catalog/drift` | merchant | `merchant:catalog:read` | — | 200 `ListPage<CatalogDrift>` |  |
-| POST | `/v1/merchant/catalog/drift/refresh` | merchant | `merchant:catalog:update` | — | 200 `CatalogDriftRefresh` | catalog write |
-| GET | `/v1/merchant/catalog/meters` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:read` | — | 200 `Meter` |  |
-| PUT | `/v1/merchant/catalog/meters/{key}` | merchant | `merchant:catalog:update` | `SetMeterParams` | 200 `Meter` | catalog write |
-| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | `SetMeterRateCardParams` | 200 `Meter` | catalog write |
-| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `merchant:catalog:update` | — | 204 — | catalog write |
-| GET | `/v1/merchant/catalog/meters/{key}/rate-overrides` | merchant | `merchant:catalog:read` | — | 200 `ListPage<RateOverride>` |  |
-| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<RateOverride>` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | `SetRateOverrideParams` | 200 `RateOverride` | catalog write; limit `grant` |
-| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `merchant:customer-settings:update` | — | 204 — | catalog write; limit `destructive` |
-| POST | `/v1/merchant/catalog/product-archives` | merchant | `merchant:catalog:update` + `merchant:payments:refund` | `ArchiveProductParams` | 200 `ProductArchive` | catalog write; `Idempotency-Key` |
-| GET | `/v1/merchant/catalog/product-archives/{id}` | merchant | `merchant:catalog:read` + `merchant:payments:read` | — | 200 `ProductArchive` |  |
-| POST | `/v1/merchant/catalog/ask` | merchant | `merchant:catalog:read` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
-| POST | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:update` | `CreateProductParams` | 201 `Product` | catalog write |
-| GET | `/v1/merchant/catalog/products` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
-| PATCH | `/v1/merchant/catalog/products/{id}` | merchant | `merchant:catalog:update` | `UpdateProductParams` | 200 `Product` | catalog write |
-| GET | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `merchant:catalog:read` | — | 200 `Product` |  |
-| PUT | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `merchant:catalog:update` | `CreateProductParams` | 200 `Product` | catalog write |
-| POST | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:update` | `CreatePriceParams` | 201 `Price` | catalog write |
-| GET | `/v1/merchant/catalog/prices` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
-| PATCH | `/v1/merchant/catalog/prices/{id}` | merchant | `merchant:catalog:update` | `UpdatePriceParams` | 200 `Price` | catalog write |
-| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}` | merchant | `merchant:catalog:read` | — | 200 `Price` |  |
-| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}/history` | merchant | `merchant:catalog:read` | — | 200 `ListPage<PriceKeyMovement>` |  |
-| POST | `/v1/merchant/catalog/offers/lookup` | merchant | `merchant:catalog:read` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
-| GET | `/v1/merchant/subscriptions` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Subscription>` |  |
-| GET | `/v1/merchant/subscriptions/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Subscription` |  |
-| POST | `/v1/merchant/subscriptions/{id}/cancel` | merchant | `merchant:subscriptions:update` | `CancelSubscriptionParams` | 200 `Subscription` | limit `destructive` |
-| POST | `/v1/merchant/subscriptions/{id}/resume` | merchant | `merchant:subscriptions:update` | — | 200 `Subscription` |  |
-| POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | limit `off_channel`; `Idempotency-Key` |
-| POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `merchant:subscriptions:update` | `ChangeTierParams` | 200 `TierChangePreview` |  |
-| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `merchant:subscriptions:update` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
-| POST | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:update` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` |  |
-| POST | `/v1/merchant/reprice-batches/preview` | merchant | `merchant:subscriptions:read` | `PreviewRepriceBatchParams` | 200 `RepriceBatchPreview` |  |
-| GET | `/v1/merchant/reprice-batches` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<RepriceBatch>` |  |
-| GET | `/v1/merchant/reprice-batches/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `RepriceBatch` |  |
-| POST | `/v1/merchant/reprice-batches/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `RepriceBatchCancel` |  |
-| POST | `/v1/merchant/plan-migrations` | merchant | `merchant:subscriptions:update` | `CreatePlanMigrationParams` | 201 `PlanMigrationResult` |  |
-| POST | `/v1/merchant/plan-migrations/preview` | merchant | `merchant:subscriptions:read` | `CreatePlanMigrationParams` | 200 `PlanMigrationResult` |  |
-| GET | `/v1/merchant/reprices` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Reprice>` |  |
-| GET | `/v1/merchant/reprices/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Reprice` |  |
-| POST | `/v1/merchant/reprices/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `Reprice` |  |
-| GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
-| GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<string>` |  |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
-| GET | `/v1/merchant/customers/{customer_id}/tier` | merchant | `merchant:customer-settings:read` | — | 200 `EffectiveTier` |  |
-| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `merchant:customer-settings:read` | `CheckProductAccessParams` | 200 `ProductAccessCheck` |  |
-| GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
-| POST | `/v1/merchant/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant`; `Idempotency-Key` |
-| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
-| GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Customer>` |  |
-| POST | `/v1/merchant/customers/lookup` | merchant | `merchant:customer-settings:read` | `CustomerLookupParams` | 200 `CustomerLookup` |  |
-| POST | `/v1/merchant/customers/ensure` | merchant | `merchant:customer-settings:update` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` |  |
-| GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingProfile` |  |
-| GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingPolicy` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:update` | `SetCustomerBillingPolicyParams` | 200 `CustomerBillingPolicy` |  |
-| GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Delinquency>` |  |
-| GET | `/v1/merchant/delinquency` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Delinquency>` |  |
-| POST | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `merchant:credits:grant` | `CreateCreditGrantParams` | 201 `CreditGrant`<br>200 `CreditGrant` | limit `grant` |
-| GET | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CreditGrant>` |  |
-| GET | `/v1/merchant/customers/{customer_id}/credit-grants/{id}` | merchant | `merchant:customer-settings:read` | — | 200 `CreditGrant` |  |
-| POST | `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `merchant:credits:revoke` | `RevokeCreditGrantParams` | 200 `CreditGrant` | limit `destructive` |
-| GET | `/v1/merchant/customers/{customer_id}/transactions` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CreditTransaction>` |  |
-| GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `merchant:customer-settings:read` | — | 200 `Balance` |  |
-| GET | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `merchant:customer-settings:read` | — | 200 `CreditLimit` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `merchant:credits:grant` | `SetCreditLimitParams` | 200 `CreditLimit` |  |
-| GET | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `merchant:customer-settings:read` | — | 200 `TrustLevel` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `merchant:customer-settings:update` | `SetTrustLevelParams` | 200 `TrustLevel` |  |
-| GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<SpendDelegation>` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `merchant:customer-settings:update` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `merchant:customer-settings:update` | `SetSpendDelegationParams` | 200 `SpendDelegation` |  |
-| DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `merchant:customer-settings:update` | — | 204 — |  |
-| POST | `/v1/merchant/admissions` | merchant | `merchant:admissions:create` | `AdmitBatchParams` | 200 `AdmitBatchResult` |  |
-| GET | `/v1/merchant/admissions/{request_id}` | merchant | `merchant:usage:read` | — | 200 `Admission` |  |
-| POST | `/v1/merchant/admissions/{request_id}/capture` | merchant | `merchant:admissions:create` | `CaptureAdmissionParams` | 200 `CaptureReceipt` |  |
-| POST | `/v1/merchant/admissions/{request_id}/release` | merchant | `merchant:admissions:create` | — | 200 `Admission` |  |
-| POST | `/v1/merchant/admissions/{request_id}/extend` | merchant | `merchant:admissions:create` | `ExtendAdmissionParams` | 200 `Admission` |  |
-| POST | `/v1/merchant/wasted-spend` | merchant | `merchant:admissions:create` | `ReportWastedSpendParams` | 200 `WastedSpendReport` |  |
-| POST | `/v1/merchant/usage-events` | merchant | `merchant:admissions:create` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` |  |
-| GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `merchant:usage:read` | — | 200 `Usage` |  |
-| POST | `/v1/merchant/provider-operations` | merchant | `merchant:admissions:create` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` |  |
-| GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `merchant:usage:read` | — | 200 `OperationAuthorization` |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/extend` | merchant | `merchant:admissions:create` | `ExtendOperationAuthorizationParams` | 200 `OperationAuthorizationExtension` |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `merchant:admissions:create` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `merchant:admissions:create` | `RecordProviderBillingObservationParams` | 200 `ProviderBillingQualification` |  |
-| GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `merchant:usage:read` | — | 200 `ProviderBillingQualification` |  |
-| POST | `/v1/merchant/provider-operations/{operation_id}/resolution` | merchant | `merchant:admissions:create` | `ResolveProviderBillingQualificationParams` | 200 `ProviderBillingQualification` |  |
-| GET | `/v1/merchant/provider-qualifications` | merchant | `merchant:usage:read` | — | 200 `ListPage<ProviderBillingQualification>` |  |
-| GET | `/v1/merchant/invoices` | merchant | `merchant:invoices:read` | — | 200 `ListPage<Invoice>` |  |
-| GET | `/v1/merchant/invoices/{id}` | merchant | `merchant:invoices:read` | — | 200 `Invoice` |  |
-| GET | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:read` | — | 200 `ListPage<InvoicePayment>` |  |
-| POST | `/v1/merchant/invoices/{id}/payments` | merchant | `merchant:invoices:update` | `CreateInvoicePaymentParams` | 200 `Invoice` | limit `off_channel` |
-| POST | `/v1/merchant/invoices/{id}/void` | merchant | `merchant:invoices:update` | — | 200 `Invoice` | limit `destructive` |
-| POST | `/v1/merchant/invoices/{id}/uncollectible` | merchant | `merchant:invoices:update` | — | 200 `Invoice` | limit `destructive` |
-| POST | `/v1/merchant/invoices/{id}/retry-collection` | merchant | `merchant:invoices:collect` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | limit `off_channel`; `Idempotency-Key` |
-| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:read` | — | 200 `InvoiceProfile` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `merchant:customer-settings:update` | `InvoiceProfile` | 200 `InvoiceProfile`<br>201 `InvoiceProfile` | limit `grant` |
-| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | merchant | `merchant:payments:read` | — | 200 `PaymentSettlementStatus` |  |
-| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | merchant | `merchant:customer-settings:update` | `CreateOffChannelPaymentParams` | 200 `Payment`<br>201 `Payment` | limit `off_channel` |
-| GET | `/v1/merchant/payments` | merchant | `merchant:payments:read` | — | 200 `ListPage<Payment>` |  |
-| GET | `/v1/merchant/payments/{id}` | merchant | `merchant:payments:read` | — | 200 `Payment` |  |
-| POST | `/v1/merchant/payments/{id}/refunds` | merchant | `merchant:payments:refund` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | limit `destructive`; `Idempotency-Key` |
-| GET | `/v1/merchant/payment-attempts` | merchant | `merchant:payments:read` | — | 200 `ListPage<PaymentAttempt>` |  |
-| GET | `/v1/merchant/payment-attempts/{id}` | merchant | `merchant:payments:read` | — | 200 `PaymentAttempt` |  |
-| GET | `/v1/merchant/rebill-cycles` | merchant | `merchant:payments:read` | — | 200 `ListPage<RebillCycle>` |  |
-| GET | `/v1/merchant/rebill-cycles/{id}` | merchant | `merchant:payments:read` | — | 200 `RebillCycle` |  |
-| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<PaymentMethod>` |  |
-| DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | merchant | `merchant:customer-settings:update` | — | 202 —<br>204 — | limit `destructive` |
-| GET | `/v1/merchant/psps` | merchant | `merchant:psps:read` | — | 200 `ListPage<PSP>` |  |
-| POST | `/v1/merchant/psps` | merchant | `merchant:psps:update` | `CreatePSPParams` | 201 `PSP` |  |
-| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:psps:read` | — | 200 `PSP` |  |
-| PATCH | `/v1/merchant/psps/{id}` | merchant | `merchant:psps:update` | `UpdatePSPParams` | 200 `PSP` |  |
-| POST | `/v1/merchant/psps/{id}/archive` | merchant | `merchant:psps:update` | `ArchivePSPParams` | 200 `PSP` |  |
-| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:psps:read` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
-| POST | `/v1/merchant/psps/refresh` | merchant | `merchant:subscriptions:update` | — | 202 `PSPRefresh` |  |
-| GET | `/v1/merchant/rails` | merchant | `merchant:psps:read` | — | 200 `ListPage<RailDefinition>` |  |
-| GET | `/v1/merchant/configuration` | merchant | `merchant:settings:read` | — | 200 `MerchantConfigurationState` |  |
-| POST | `/v1/merchant/configuration/applications` | merchant | `merchant:settings:update` | `ApplyMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` |  |
-| GET | `/v1/merchant/api-host` | merchant | `merchant:settings:read` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
-| PUT | `/v1/merchant/api-host` | merchant | `merchant:settings:update` | `SetAPIHostParams` | 200 `MerchantAPIHost`<br>202 `MerchantAPIHost` | when `merchant_directory` |
-| POST | `/v1/merchant/api-host/verify` | merchant | `merchant:settings:update` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
-| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:settings:read` | — | 200 `ListPage<AlertWebhook>` |  |
-| POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:settings:update` | `CreateAlertWebhookParams` | 201 `AlertWebhook` |  |
-| DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:settings:update` | — | 204 — |  |
-| PUT | `/v1/merchant/alert-webhooks/{id}/url` | merchant | `merchant:settings:update` | `SetAlertWebhookURLParams` | 200 `AlertWebhook` |  |
-| GET | `/v1/merchant/billing-archive` | merchant | `merchant:billing:export` | — | 200 `application/x-ndjson` |  |
-| POST | `/v1/merchant/billing-archive` | merchant | `merchant:billing:import` | `application/x-ndjson` | 200 `BillingArchiveImport` |  |
-| POST | `/v1/merchant/billing-import` | merchant | `merchant:billing:import` | `DeclaredBilling` | 200 `BillingImportResult` |  |
-| GET | `/v1/merchant/host-events` | merchant | `merchant:host-events:read` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/merchant/host-events/acknowledge` | merchant | `merchant:host-events:acknowledge` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
-| POST | `/v1/merchant/metrics/query` | merchant | `merchant:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
-| GET | `/v1/merchant/metrics/schema` | merchant | `merchant:metrics:read` | — | 200 `MetricsSchema` |  |
-| GET | `/v1/merchant/dashboard` | merchant | `merchant:metrics:read` | — | 200 `Dashboard` |  |
-| PUT | `/v1/merchant/dashboard` | merchant | `merchant:dashboard:update` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/merchant/notifications` | merchant | `merchant:operations:read` | — | 200 `ListPage<MerchantNotification>` |  |
-| GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:operations:read` | — | 200 `UnreadCount` |  |
-| POST | `/v1/merchant/notifications/read` | merchant | `merchant:operations:read` | `MarkNotificationsReadParams` | 200 `NotificationLookup` |  |
-| GET | `/v1/merchant/worker-health` | merchant | `merchant:operations:read` | — | 200 `ListPage<WorkerHealth>` |  |
-| GET | `/v1/merchant/findings` | merchant | `merchant:operations:read` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/merchant/findings/summary` | merchant | `merchant:operations:read` | — | 200 `FindingSummary` |  |
-| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:operations:read` | — | 200 `Finding` |  |
-| POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:findings:resolve` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| POST | `/v1/merchant/metrics/ask` | merchant | `merchant:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
-| POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `merchant:dashboard:update` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
+| POST | `/v1/merchant/checkout-sessions` | merchant | `CreateCheckoutSession` · `CheckoutSessions` · `StaffWrites` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
+| GET | `/v1/merchant/checkout-config` | merchant | `GetCheckoutConfig` · `Checkout` · `StaffReads` | — | 200 `CheckoutConfig` |  |
+| GET | `/v1/merchant/catalog/revision` | merchant | `GetCatalogRevision` · `Catalog` · `StaffReads` | — | 200 `CatalogRevision` |  |
+| GET | `/v1/merchant/catalog/drift` | merchant | `ListCatalogDrift` · `Catalog` · `StaffReads` | — | 200 `ListPage<CatalogDrift>` |  |
+| GET | `/v1/merchant/catalog/meters` | merchant | `ListMeters` · `Catalog` · `StaffReads` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/merchant/catalog/meters/{key}` | merchant | `GetMeter` · `Catalog` · `StaffReads` | — | 200 `Meter` |  |
+| GET | `/v1/merchant/catalog/meters/{key}/rate-overrides` | merchant | `ListMeterRateOverrides` · `Catalog` · `StaffReads` | — | 200 `ListPage<RateOverride>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | merchant | `ListRateOverrides` · `Catalog` · `StaffReads` | — | 200 `ListPage<RateOverride>` |  |
+| GET | `/v1/merchant/catalog/product-archives/{id}` | merchant | `GetProductArchive` · `Catalog` · `Payments` · `StaffReads` | — | 200 `ProductArchive` |  |
+| POST | `/v1/merchant/catalog/ask` | merchant | `AskCatalog` · `Catalog` · `StaffReads` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| GET | `/v1/merchant/catalog/products` | merchant | `ListProducts` · `Catalog` · `StaffReads` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/merchant/catalog/products/{id}` | merchant | `GetProduct` · `Catalog` · `StaffReads` | — | 200 `Product` |  |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `GetProductByKey` · `Catalog` · `StaffReads` | — | 200 `Product` |  |
+| GET | `/v1/merchant/catalog/prices` | merchant | `ListPrices` · `Catalog` · `StaffReads` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/merchant/catalog/prices/{id}` | merchant | `GetPrice` · `Catalog` · `StaffReads` | — | 200 `Price` |  |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}` | merchant | `GetPriceByKey` · `Catalog` · `StaffReads` | — | 200 `Price` |  |
+| GET | `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}/history` | merchant | `ListPriceKeyHistory` · `Catalog` · `StaffReads` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| POST | `/v1/merchant/catalog/offers/lookup` | merchant | `ListOffers` · `Catalog` · `StaffReads` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
+| GET | `/v1/merchant/subscriptions` | merchant | `ListSubscriptions` · `Subscriptions` · `StaffReads` | — | 200 `ListPage<Subscription>` |  |
+| GET | `/v1/merchant/subscriptions/{id}` | merchant | `GetSubscription` · `Subscriptions` · `StaffReads` | — | 200 `Subscription` |  |
+| POST | `/v1/merchant/subscriptions/{id}/cancel` | merchant | `CancelSubscription` · `Subscriptions` · `StaffWrites` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
+| POST | `/v1/merchant/subscriptions/{id}/resume` | merchant | `ResumeSubscription` · `Subscriptions` · `StaffWrites` | — | 200 `Subscription` | sensitive |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier` | merchant | `ChangeTier` · `Subscriptions` · `StaffWrites` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | merchant | `PreviewTierChange` · `Subscriptions` · `StaffWrites` | `ChangeTierParams` | 200 `TierChangePreview` | sensitive |
+| PUT | `/v1/merchant/subscriptions/{id}/payment-method` | merchant | `SetSubscriptionPaymentMethod` · `Subscriptions` · `StaffWrites` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
+| POST | `/v1/merchant/reprice-batches` | merchant | `CreateRepriceBatch` · `Subscriptions` · `StaffWrites` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` | sensitive |
+| POST | `/v1/merchant/reprice-batches/preview` | merchant | `PreviewRepriceBatch` · `Subscriptions` · `StaffReads` | `PreviewRepriceBatchParams` | 200 `RepriceBatchPreview` |  |
+| GET | `/v1/merchant/reprice-batches` | merchant | `ListRepriceBatches` · `Subscriptions` · `StaffReads` | — | 200 `ListPage<RepriceBatch>` |  |
+| GET | `/v1/merchant/reprice-batches/{id}` | merchant | `GetRepriceBatch` · `Subscriptions` · `StaffReads` | — | 200 `RepriceBatch` |  |
+| POST | `/v1/merchant/reprice-batches/{id}/cancel` | merchant | `CancelRepriceBatch` · `Subscriptions` · `StaffWrites` | — | 200 `RepriceBatchCancel` | sensitive |
+| POST | `/v1/merchant/plan-migrations` | merchant | `CreatePlanMigration` · `Subscriptions` · `StaffWrites` | `CreatePlanMigrationParams` | 201 `PlanMigrationResult` | sensitive |
+| POST | `/v1/merchant/plan-migrations/preview` | merchant | `PreviewPlanMigration` · `Subscriptions` · `StaffReads` | `CreatePlanMigrationParams` | 200 `PlanMigrationResult` |  |
+| GET | `/v1/merchant/reprices` | merchant | `ListReprices` · `Subscriptions` · `StaffReads` | — | 200 `ListPage<Reprice>` |  |
+| GET | `/v1/merchant/reprices/{id}` | merchant | `GetReprice` · `Subscriptions` · `StaffReads` | — | 200 `Reprice` |  |
+| POST | `/v1/merchant/reprices/{id}/cancel` | merchant | `CancelReprice` · `Subscriptions` · `StaffWrites` | — | 200 `Reprice` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `ListCustomerEntitlements` · `Access` · `StaffReads` | — | 200 `ListPage<CustomerEntitlement>` |  |
+| GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `ListEntitlementCustomers` · `Access` · `StaffReads` | — | 200 `ListPage<string>` |  |
+| POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `CheckEntitlements` · `Access` · `StaffReads` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
+| GET | `/v1/merchant/customers/{customer_id}/tier` | merchant | `GetEffectiveTier` · `Access` · `StaffReads` | — | 200 `EffectiveTier` |  |
+| POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `CheckProductAccess` · `Access` · `StaffReads` | `CheckProductAccessParams` | 200 `ProductAccessCheck` |  |
+| GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `ListProductAccess` · `Access` · `StaffReads` | — | 200 `ListPage<ProductAccessGrant>` |  |
+| POST | `/v1/merchant/product-access` | merchant | `CreateProductAccess` · `Access` · `StaffWrites` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
+| DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `DeleteProductAccess` · `Access` · `StaffWrites` | — | 204 — | sensitive; limit `destructive` |
+| GET | `/v1/merchant/customers` | merchant | `ListCustomers` · `Customers` · `StaffReads` | — | 200 `ListPage<Customer>` |  |
+| POST | `/v1/merchant/customers/lookup` | merchant | `GetCustomers` · `Customers` · `StaffReads` | `CustomerLookupParams` | 200 `CustomerLookup` |  |
+| POST | `/v1/merchant/customers/ensure` | merchant | `EnsureCustomers` · `Customers` · `StaffWrites` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `GetCustomerBillingProfile` · `Customers` · `StaffReads` | — | 200 `CustomerBillingProfile` |  |
+| GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `GetCustomerBillingPolicy` · `Customers` · `StaffReads` | — | 200 `CustomerBillingPolicy` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `SetCustomerBillingPolicy` · `Customers` · `StaffWrites` | `SetCustomerBillingPolicyParams` | 200 `CustomerBillingPolicy` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `ListCustomerDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
+| GET | `/v1/merchant/delinquency` | merchant | `ListDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `CreateCreditGrant` · `Credits` · `StaffWrites` | `CreateCreditGrantParams` | 201 `CreditGrant`<br>200 `CreditGrant` | sensitive; limit `grant` |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `ListCreditGrants` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditGrant>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/credit-grants/{id}` | merchant | `GetCreditGrant` · `Credits` · `StaffReads` | — | 200 `CreditGrant` |  |
+| POST | `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `RevokeCreditGrant` · `Credits` · `StaffWrites` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
+| GET | `/v1/merchant/customers/{customer_id}/transactions` | merchant | `ListCreditTransactions` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditTransaction>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `GetBalance` · `Credits` · `StaffReads` | — | 200 `Balance` |  |
+| GET | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `GetCreditLimit` · `Credits` · `StaffReads` | — | 200 `CreditLimit` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `SetCreditLimit` · `Credits` · `StaffWrites` | `SetCreditLimitParams` | 200 `CreditLimit` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `GetTrustLevel` · `Credits` · `StaffReads` | — | 200 `TrustLevel` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `SetTrustLevel` · `Credits` · `StaffWrites` | `SetTrustLevelParams` | 200 `TrustLevel` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `ListSpendDelegations` · `Credits` · `StaffReads` | — | 200 `ListPage<SpendDelegation>` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `SetSpendDelegations` · `Credits` · `StaffWrites` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` | sensitive |
+| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `SetSpendDelegation` · `Credits` · `StaffWrites` | `SetSpendDelegationParams` | 200 `SpendDelegation` | sensitive |
+| DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `DeleteSpendDelegation` · `Credits` · `StaffWrites` | — | 204 — | sensitive |
+| POST | `/v1/merchant/admissions` | merchant | `Admit` · `Usage` · `StaffWrites` | `AdmitBatchParams` | 200 `AdmitBatchResult` | sensitive |
+| GET | `/v1/merchant/admissions/{request_id}` | merchant | `GetAdmission` · `Usage` · `StaffReads` | — | 200 `Admission` |  |
+| POST | `/v1/merchant/admissions/{request_id}/capture` | merchant | `CaptureAdmission` · `Usage` · `StaffWrites` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | sensitive |
+| POST | `/v1/merchant/admissions/{request_id}/release` | merchant | `ReleaseAdmission` · `Usage` · `StaffWrites` | — | 200 `Admission` | sensitive |
+| POST | `/v1/merchant/admissions/{request_id}/extend` | merchant | `ExtendAdmission` · `Usage` · `StaffWrites` | `ExtendAdmissionParams` | 200 `Admission` | sensitive |
+| POST | `/v1/merchant/wasted-spend` | merchant | `ReportWastedSpend` · `Usage` · `StaffWrites` | `ReportWastedSpendParams` | 200 `WastedSpendReport` | sensitive |
+| POST | `/v1/merchant/usage-events` | merchant | `RecordUsage` · `Usage` · `StaffWrites` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | sensitive |
+| GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `GetUsage` · `Usage` · `StaffReads` | — | 200 `Usage` |  |
+| POST | `/v1/merchant/provider-operations` | merchant | `OpenOperationAuthorization` · `Usage` · `StaffWrites` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
+| GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `GetOperationAuthorization` · `Usage` · `StaffReads` | — | 200 `OperationAuthorization` |  |
+| POST | `/v1/merchant/provider-operations/{operation_id}/extend` | merchant | `ExtendOperationAuthorization` · `Usage` · `StaffWrites` | `ExtendOperationAuthorizationParams` | 200 `OperationAuthorizationExtension` | sensitive |
+| POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `ReleaseOperationAuthorization` · `Usage` · `StaffWrites` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
+| POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `RecordProviderBillingObservation` · `Usage` · `StaffWrites` | `RecordProviderBillingObservationParams` | 200 `ProviderBillingQualification` | sensitive |
+| GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `GetProviderBillingQualification` · `Usage` · `StaffReads` | — | 200 `ProviderBillingQualification` |  |
+| POST | `/v1/merchant/provider-operations/{operation_id}/resolution` | merchant | `ResolveProviderBillingQualification` · `Usage` · `StaffWrites` | `ResolveProviderBillingQualificationParams` | 200 `ProviderBillingQualification` | sensitive |
+| GET | `/v1/merchant/provider-qualifications` | merchant | `ListProviderBillingQualifications` · `Usage` · `StaffReads` | — | 200 `ListPage<ProviderBillingQualification>` |  |
+| GET | `/v1/merchant/invoices` | merchant | `ListInvoices` · `Invoices` · `StaffReads` | — | 200 `ListPage<Invoice>` |  |
+| GET | `/v1/merchant/invoices/{id}` | merchant | `GetInvoice` · `Invoices` · `StaffReads` | — | 200 `Invoice` |  |
+| GET | `/v1/merchant/invoices/{id}/payments` | merchant | `ListInvoicePayments` · `Invoices` · `StaffReads` | — | 200 `ListPage<InvoicePayment>` |  |
+| POST | `/v1/merchant/invoices/{id}/payments` | merchant | `CreateInvoicePayment` · `Invoices` · `StaffWrites` | `CreateInvoicePaymentParams` | 200 `Invoice` | sensitive; limit `off_channel` |
+| POST | `/v1/merchant/invoices/{id}/void` | merchant | `VoidInvoice` · `Invoices` · `StaffWrites` | — | 200 `Invoice` | sensitive; limit `destructive` |
+| POST | `/v1/merchant/invoices/{id}/uncollectible` | merchant | `MarkInvoiceUncollectible` · `Invoices` · `StaffWrites` | — | 200 `Invoice` | sensitive; limit `destructive` |
+| POST | `/v1/merchant/invoices/{id}/retry-collection` | merchant | `RetryInvoiceCollection` · `Invoices` · `StaffWrites` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `GetInvoiceProfile` · `Invoices` · `StaffReads` | — | 200 `InvoiceProfile` |  |
+| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `SetInvoiceProfile` · `Invoices` · `StaffWrites` | `InvoiceProfile` | 200 `InvoiceProfile`<br>201 `InvoiceProfile` | sensitive; limit `grant` |
+| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | merchant | `GetPaymentSettlementStatus` · `Payments` · `StaffReads` | — | 200 `PaymentSettlementStatus` |  |
+| POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | merchant | `CreateOffChannelPayment` · `Payments` · `StaffWrites` | `CreateOffChannelPaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
+| GET | `/v1/merchant/payments` | merchant | `ListPayments` · `Payments` · `StaffReads` | — | 200 `ListPage<Payment>` |  |
+| GET | `/v1/merchant/payments/{id}` | merchant | `GetPayment` · `Payments` · `StaffReads` | — | 200 `Payment` |  |
+| POST | `/v1/merchant/payments/{id}/refunds` | merchant | `RefundPayment` · `Refunds` · `StaffWrites` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |
+| GET | `/v1/merchant/payment-attempts` | merchant | `ListPaymentAttempts` · `Payments` · `StaffReads` | — | 200 `ListPage<PaymentAttempt>` |  |
+| GET | `/v1/merchant/payment-attempts/{id}` | merchant | `GetPaymentAttempt` · `Payments` · `StaffReads` | — | 200 `PaymentAttempt` |  |
+| GET | `/v1/merchant/rebill-cycles` | merchant | `ListRebillCycles` · `Payments` · `StaffReads` | — | 200 `ListPage<RebillCycle>` |  |
+| GET | `/v1/merchant/rebill-cycles/{id}` | merchant | `GetRebillCycle` · `Payments` · `StaffReads` | — | 200 `RebillCycle` |  |
+| GET | `/v1/merchant/customers/{customer_id}/payment-methods` | merchant | `ListPaymentMethods` · `Customers` · `StaffReads` | — | 200 `ListPage<PaymentMethod>` |  |
+| DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | merchant | `DeletePaymentMethod` · `Customers` · `StaffWrites` | — | 202 —<br>204 — | sensitive; limit `destructive` |
+| GET | `/v1/merchant/host-events` | merchant | `ListHostEvents` · `HostEvents` · `StaffReads` | — | 200 `ListPage<HostEvent>` |  |
+| POST | `/v1/merchant/host-events/acknowledge` | merchant | `AcknowledgeHostEvents` · `HostEvents` · `StaffWrites` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
+| POST | `/v1/merchant/metrics/query` | merchant | `QueryMetrics` · `Metrics` · `StaffReads` | `MetricsQuery` | 200 `MetricsResult` |  |
+| GET | `/v1/merchant/metrics/schema` | merchant | `GetMetricsSchema` · `Metrics` · `StaffReads` | — | 200 `MetricsSchema` |  |
+| GET | `/v1/merchant/dashboard` | merchant | `GetDashboard` · `Metrics` · `StaffReads` | — | 200 `Dashboard` |  |
+| GET | `/v1/merchant/notifications` | merchant | `ListMerchantNotifications` · `Operations` · `StaffReads` | — | 200 `ListPage<MerchantNotification>` |  |
+| GET | `/v1/merchant/notifications/unread-count` | merchant | `GetUnreadNotificationCount` · `Operations` · `StaffReads` | — | 200 `UnreadCount` |  |
+| POST | `/v1/merchant/notifications/read` | merchant | `MarkNotificationsRead` · `Operations` · `StaffReads` | `MarkNotificationsReadParams` | 200 `NotificationLookup` |  |
+| GET | `/v1/merchant/worker-health` | merchant | `ListWorkerHealth` · `Operations` · `StaffReads` | — | 200 `ListPage<WorkerHealth>` |  |
+| GET | `/v1/merchant/findings` | merchant | `ListFindings` · `Findings` · `StaffReads` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/summary` | merchant | `GetFindingSummary` · `Findings` · `StaffReads` | — | 200 `FindingSummary` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `GetFinding` · `Findings` · `StaffReads` | — | 200 `Finding` |  |
+| POST | `/v1/merchant/findings/{id}/resolve` | merchant | `ResolveFinding` · `Findings` · `StaffWrites` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
+| POST | `/v1/merchant/metrics/ask` | merchant | `AskMetrics` · `Metrics` · `StaffReads` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
+
+## Merchant configuration
+
+The merchant's own configuration (`Routes.MerchantConfig`), each route behind the host's permission for its most specific guard.
+
+| Method | Path | Tier | Guard | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| POST | `/v1/merchant/catalog/applications` | merchant | `ApplyCatalog` · `Catalog` · `MerchantConfig` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog write |
+| POST | `/v1/merchant/catalog/entitlement-replacements` | merchant | `ReplaceEntitlements` · `Catalog` · `MerchantConfig` | `ReplaceEntitlementsParams` | 200 `CatalogApplicationReceipt` | sensitive; catalog write |
+| POST | `/v1/merchant/catalog/drift/refresh` | merchant | `RefreshCatalogDrift` · `Catalog` · `MerchantConfig` | — | 200 `CatalogDriftRefresh` | sensitive; catalog write |
+| PUT | `/v1/merchant/catalog/meters/{key}` | merchant | `SetMeter` · `Catalog` · `MerchantConfig` | `SetMeterParams` | 200 `Meter` | sensitive; catalog write |
+| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `SetMeterRateCard` · `Catalog` · `MerchantConfig` | `SetMeterRateCardParams` | 200 `Meter` | sensitive; catalog write |
+| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | merchant | `DeleteMeterRateCard` · `Catalog` · `MerchantConfig` | — | 204 — | sensitive; catalog write |
+| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `SetRateOverride` · `Catalog` · `MerchantConfig` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; catalog write; limit `grant` |
+| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `DeleteRateOverride` · `Catalog` · `MerchantConfig` | — | 204 — | sensitive; catalog write; limit `destructive` |
+| POST | `/v1/merchant/catalog/product-archives` | merchant | `ArchiveProduct` · `Catalog` · `Refunds` · `MerchantConfig` | `ArchiveProductParams` | 200 `ProductArchive` | sensitive; catalog write; `Idempotency-Key` |
+| POST | `/v1/merchant/catalog/products` | merchant | `CreateProduct` · `Catalog` · `MerchantConfig` | `CreateProductParams` | 201 `Product` | sensitive; catalog write |
+| PATCH | `/v1/merchant/catalog/products/{id}` | merchant | `UpdateProduct` · `Catalog` · `MerchantConfig` | `UpdateProductParams` | 200 `Product` | sensitive; catalog write |
+| PUT | `/v1/merchant/catalog/products/by-key/{product_key}` | merchant | `EnsureProduct` · `Catalog` · `MerchantConfig` | `CreateProductParams` | 200 `Product` | sensitive; catalog write |
+| POST | `/v1/merchant/catalog/prices` | merchant | `CreatePrice` · `Catalog` · `MerchantConfig` | `CreatePriceParams` | 201 `Price` | sensitive; catalog write |
+| PATCH | `/v1/merchant/catalog/prices/{id}` | merchant | `UpdatePrice` · `Catalog` · `MerchantConfig` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog write |
+| GET | `/v1/merchant/psps` | merchant | `ListPSPs` · `PSPs` · `MerchantConfig` | — | 200 `ListPage<PSP>` |  |
+| POST | `/v1/merchant/psps` | merchant | `CreatePSP` · `PSPs` · `MerchantConfig` | `CreatePSPParams` | 201 `PSP` | sensitive |
+| GET | `/v1/merchant/psps/{id}` | merchant | `GetPSP` · `PSPs` · `MerchantConfig` | — | 200 `PSP` |  |
+| PATCH | `/v1/merchant/psps/{id}` | merchant | `UpdatePSP` · `PSPs` · `MerchantConfig` | `UpdatePSPParams` | 200 `PSP` | sensitive |
+| POST | `/v1/merchant/psps/{id}/archive` | merchant | `ArchivePSP` · `PSPs` · `MerchantConfig` | `ArchivePSPParams` | 200 `PSP` | sensitive |
+| POST | `/v1/merchant/psps/routing-preview` | merchant | `PreviewPSPRouting` · `PSPs` · `MerchantConfig` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/merchant/psps/refresh` | merchant | `RefreshPSPs` · `PSPs` · `MerchantConfig` | — | 202 `PSPRefresh` | sensitive |
+| GET | `/v1/merchant/rails` | merchant | `ListRails` · `PSPs` · `MerchantConfig` | — | 200 `ListPage<RailDefinition>` |  |
+| GET | `/v1/merchant/configuration` | merchant | `GetMerchantConfiguration` · `Settings` · `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
+| POST | `/v1/merchant/configuration/applications` | merchant | `ApplyMerchantConfiguration` · `Settings` · `MerchantConfig` | `ApplyMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive |
+| GET | `/v1/merchant/api-host` | merchant | `GetAPIHost` · `Settings` · `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
+| PUT | `/v1/merchant/api-host` | merchant | `SetAPIHost` · `Settings` · `MerchantConfig` | `SetAPIHostParams` | 200 `MerchantAPIHost`<br>202 `MerchantAPIHost` | when `merchant_directory`; sensitive |
+| POST | `/v1/merchant/api-host/verify` | merchant | `VerifyAPIHost` · `Settings` · `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory`; sensitive |
+| GET | `/v1/merchant/alert-webhooks` | merchant | `ListAlertWebhooks` · `Settings` · `MerchantConfig` | — | 200 `ListPage<AlertWebhook>` |  |
+| POST | `/v1/merchant/alert-webhooks` | merchant | `CreateAlertWebhook` · `Settings` · `MerchantConfig` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | sensitive |
+| DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `DeleteAlertWebhook` · `Settings` · `MerchantConfig` | — | 204 — | sensitive |
+| PUT | `/v1/merchant/alert-webhooks/{id}/url` | merchant | `SetAlertWebhookURL` · `Settings` · `MerchantConfig` | `SetAlertWebhookURLParams` | 200 `AlertWebhook` | sensitive |
+| GET | `/v1/merchant/billing-archive` | merchant | `ExportBillingArchive` · `BillingData` · `MerchantConfig` | — | 200 `application/x-ndjson` | sensitive |
+| POST | `/v1/merchant/billing-archive` | merchant | `ImportBillingArchive` · `BillingData` · `MerchantConfig` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
+| POST | `/v1/merchant/billing-import` | merchant | `ImportBilling` · `BillingData` · `MerchantConfig` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
+| PUT | `/v1/merchant/dashboard` | merchant | `SetDashboard` · `Dashboard` · `MerchantConfig` | `SetDashboardParams` | 200 `Dashboard` |  |
+| POST | `/v1/merchant/dashboard/widgets/generate` | merchant | `GenerateDashboardWidget` · `Dashboard` · `MerchantConfig` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
 
 ## Control plane (standalone)
 
 Merchant accounts, API keys and the team.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/merchants` | user | — | — | 200 `ListPage<UserMerchant>` |  |
 | POST | `/v1/merchants` | user | — | `CreateMerchantParams` | 200 `UserMerchant`<br>201 `UserMerchant` | when `merchant_creation` |
-| PUT | `/v1/merchant/name` | merchant | `merchant:settings:update` | `RenameMerchantParams` | 200 `MerchantName` |  |
-| POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | `CreateAPIKeyParams` | 201 `CreatedAPIKey` |  |
-| GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 `ListPage<APIKey>` |  |
-| DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 204 — |  |
+| PUT | `/v1/merchant/name` | merchant | `merchant:billing:admin` | `RenameMerchantParams` | 200 `MerchantName` | sensitive |
+| POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | `CreateAPIKeyParams` | 201 `CreatedAPIKey` | sensitive |
+| GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 `ListPage<APIKey>` | sensitive |
+| DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 204 — | sensitive |
 | GET | `/v1/merchant/federated-grants` | merchant | `merchant:members:read` | — | 200 `ListPage<FederatedGrant>` |  |
-| POST | `/v1/merchant/federated-grants` | merchant | `merchant:members:manage` | `CreateFederatedGrantParams` | 201 `FederatedGrant` |  |
-| DELETE | `/v1/merchant/federated-grants/{id}` | merchant | `merchant:members:manage` | — | 204 — |  |
+| POST | `/v1/merchant/federated-grants` | merchant | `merchant:members:manage` | `CreateFederatedGrantParams` | 201 `FederatedGrant` | sensitive |
+| DELETE | `/v1/merchant/federated-grants/{id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
 | GET | `/v1/merchants/invites` | user | — | — | 200 `ListPage<FederatedInvite>` |  |
 | POST | `/v1/merchants/invites/{id}/accept` | user | — | — | 200 `UserMerchant` |  |
 | GET | `/v1/merchant/team` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamMember>` |  |
 | GET | `/v1/merchant/team/invites` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamInvite>` |  |
-| POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | `InviteTeamMemberParams` | 201 `TeamInviteResult` |  |
-| DELETE | `/v1/merchant/team/invites/{id}` | merchant | `merchant:members:manage` | — | 204 — |  |
-| PATCH | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | `SetTeamRoleParams` | 200 `TeamMember` |  |
-| DELETE | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | — | 204 — |  |
+| POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | `InviteTeamMemberParams` | 201 `TeamInviteResult` | sensitive |
+| DELETE | `/v1/merchant/team/invites/{id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
+| PATCH | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | `SetTeamRoleParams` | 200 `TeamMember` | sensitive |
+| DELETE | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
 
 ## Platform (standalone)
 
 The operator tier.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/platform/worker-health` | operator | `root:worker-health:read` | — | 200 `ListPage<WorkerHealth>` |  |
 | GET | `/v1/platform/merchants` | operator | `root:merchants:read` | — | 200 `ListPage<PlatformMerchant>` |  |
@@ -281,6 +287,6 @@ The operator tier.
 
 Inbound provider callbacks.
 
-| Method | Path | Tier | Permission | Request | Response | Notes |
+| Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | `application/json` | 200 `WebhookReceipt` |  |

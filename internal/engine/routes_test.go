@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	pkgcatalog "github.com/open-rails/openrails/catalog"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -131,7 +132,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 
 	fake := &authtest.Fake{}
 	full := profiles(fake, config.CustomerSelfService, "/v1/me")
-	full.Storefront, full.Merchant, full.Auth = true, true, fake
+	full.Storefront, full.Merchant, full.MerchantConfig, full.Auth, full.Guards = true, true, true, fake, authtest.Guards()
 	rt := httpRuntime()
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
 	mux := mountAt(t, rt, full, "/api/pay")
@@ -152,10 +153,9 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 
 // The capability document reports what this mount serves.
 func TestCapabilitiesReportTheMount(t *testing.T) {
-	rt := httpRuntime()
 	fake := &authtest.Fake{}
 	read := func(sel config.Routes) map[string]bool {
-		rec := serve(mountAt(t, rt, sel, ""), http.MethodGet, "/v1/capabilities", "")
+		rec := serve(mountAt(t, httpRuntime(), sel, ""), http.MethodGet, "/v1/capabilities", "")
 		require.Equal(t, http.StatusOK, rec.Code)
 		var capabilities struct {
 			RouteGroups map[string]bool `json:"route_groups"`
@@ -163,12 +163,13 @@ func TestCapabilitiesReportTheMount(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &capabilities))
 		return capabilities.RouteGroups
 	}
-	require.Equal(t, map[string]bool{"checkout": true, "customer": false, "merchant": false, "webhooks": true}, read(config.Routes{Storefront: true}))
-	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": true, "webhooks": true}, read(config.Routes{Merchant: true, Auth: fake}))
-	require.Equal(t, map[string]bool{"checkout": false, "customer": true, "merchant": false, "webhooks": true}, read(profiles(fake, config.CustomerBillingManagement, "/v1/me")))
+	require.Equal(t, map[string]bool{"checkout": true, "customer": false, "merchant": false, "merchant_config": false, "webhooks": true}, read(config.Routes{Storefront: true}))
+	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": true, "merchant_config": false, "webhooks": true}, read(config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}))
+	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": false, "merchant_config": true, "webhooks": true}, read(config.Routes{MerchantConfig: true, Auth: fake, Guards: config.Guards{"merchant_config": authtest.Perm(authtest.StaffAdmin)}}))
+	require.Equal(t, map[string]bool{"checkout": false, "customer": true, "merchant": false, "merchant_config": false, "webhooks": true}, read(profiles(fake, config.CustomerBillingManagement, "/v1/me")))
 }
 
-func TestCatalogEditsFollowTheMerchantMount(t *testing.T) {
+func TestCatalogEditsFollowTheMerchantConfigMount(t *testing.T) {
 	writes := func(rt *Engine, sel config.Routes) (reads, writes int) {
 		routes, err := rt.Routes(sel)
 		require.NoError(t, err)
@@ -187,34 +188,62 @@ func TestCatalogEditsFollowTheMerchantMount(t *testing.T) {
 	}
 	fake := &authtest.Fake{}
 	closed := httpRuntime()
-	reads, n := writes(closed, config.Routes{Merchant: true, Auth: fake})
+	reads, n := writes(closed, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()})
 	require.Positive(t, reads)
-	require.Zero(t, n, "catalog writes stay unmounted without CatalogEdits")
+	require.Zero(t, n, "catalog writes are MerchantConfig's")
 	require.False(t, closed.App.Runtime.CatalogEdits.Enabled())
-	mux := mountAt(t, closed, config.Routes{Merchant: true, Auth: fake}, "/api/pay")
+	mux := mountAt(t, closed, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}, "/api/pay")
 	for _, path := range []string{"/api/pay/v1/merchant/catalog/products", "/api/pay/v1/merchant/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
-	_, err := closed.Routes(config.Routes{Merchant: true, CatalogEdits: true, Auth: fake})
+	_, err := closed.Routes(config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.Guards()})
 	require.ErrorContains(t, err, "every mount must agree")
 	_, err = closed.Routes(config.Routes{Storefront: true})
 	require.NoError(t, err, "a mount without the merchant API decides nothing")
 
 	open := httpRuntime()
-	_, n = writes(open, config.Routes{Merchant: true, CatalogEdits: true, Auth: fake})
+	_, n = writes(open, config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.Guards()})
 	require.Positive(t, n)
 	require.True(t, open.App.Runtime.CatalogEdits.Enabled(), "the service guard follows the mount")
 
-	_, err = httpRuntime().Routes(config.Routes{CatalogEdits: true})
-	require.ErrorContains(t, err, "set Routes.Merchant")
-	_, err = httpRuntime().Routes(config.Routes{Merchant: true})
-	require.ErrorContains(t, err, "needs Routes.Auth", "the merchant API never mounts open")
-	_, err = httpRuntime().Routes(config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil)})
-	require.ErrorContains(t, err, "needs Routes.Auth", "a typed nil is no Auth")
+	// A host whose catalog document is the truth serves the writes refused.
+	declared := httpRuntime()
+	declared.App.Config.Catalog = &pkgcatalog.Application{}
+	_, n = writes(declared, config.Routes{MerchantConfig: true, Auth: fake, Guards: config.Guards{"merchant_config": authtest.Perm(authtest.StaffAdmin)}})
+	require.Positive(t, n)
+	require.False(t, declared.App.Runtime.CatalogEdits.Enabled(), "Config.Catalog is the truth")
+
+	_, err = httpRuntime().Routes(config.Routes{Merchant: true, Guards: authtest.StaffGuards()})
+	require.ErrorContains(t, err, "need Routes.Auth", "the merchant API never mounts open")
+	_, err = httpRuntime().Routes(config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil), Guards: authtest.StaffGuards()})
+	require.ErrorContains(t, err, "need Routes.Auth", "a typed nil is no Auth")
 }
 
-// A host's Required may check signatures over the exact request, so the
-// adapter must hand it the original URI, raw path and unread body.
+// Mounting fails when a mounted staff route has no guard, a guard names
+// routes not mounted, or two guards of one tier cover a route.
+func TestGuardsFailClosed(t *testing.T) {
+	fake := &authtest.Fake{}
+	for name, tc := range map[string]struct {
+		sel config.Routes
+		err string
+	}{
+		"no guards":                     {config.Routes{Merchant: true, Auth: fake}, "guards none of"},
+		"writes uncovered":              {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r")}}, "openrails.StaffWrites"},
+		"configuration uncovered":       {config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.StaffGuards()}, "openrails.MerchantConfig"},
+		"a guard for a group unmounted": {config.Routes{Merchant: true, Auth: fake, Guards: authtest.Guards()}, "openrails.MerchantConfig covers no mounted route"},
+		"guards without staff routes":   {config.Routes{Storefront: true, Auth: fake, Guards: authtest.StaffGuards()}, "set Routes.Merchant or Routes.MerchantConfig"},
+		"a nil guard":                   {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r"), "staff_writes": nil}}, "openrails.StaffWrites guards with an empty permission"},
+		"a typed nil guard":             {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r"), "staff_writes": (*nilPerm)(nil)}}, "openrails.StaffWrites guards with an empty permission"},
+	} {
+		_, err := httpRuntime().Routes(tc.sel)
+		require.ErrorContains(t, err, tc.err, name)
+	}
+}
+
+type nilPerm struct{}
+
+func (*nilPerm) String() string { panic("never called") }
+
 func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 	const target = "/api/pay/v1/tenants/a%2Fb/me/invoices/invoice-1?view=raw"
 	const body = "{ \"signed\" : \"unaltered\" }\n"
@@ -407,7 +436,7 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	console := &config.AdminConsole{Path: "/billing-admin"}
 	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: console, Auth: fake})
 	require.ErrorContains(t, err, "set Routes.Merchant")
-	sel := config.Routes{Prefix: "/billing", Merchant: true, AdminConsole: console, Auth: fake}
+	sel := config.Routes{Prefix: "/billing", Merchant: true, AdminConsole: console, Auth: fake, Guards: authtest.StaffGuards()}
 	_, err = rt.Routes(sel)
 	require.ErrorContains(t, err, "needs a console build")
 	rt.App.ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
@@ -415,9 +444,9 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	require.ErrorContains(t, err, "AuthBaseURL")
 	console.AuthBaseURL = "/api/v1"
 	for _, bad := range []config.Routes{
-		{Prefix: "billing", Merchant: true, Auth: fake},
-		{Prefix: "/billing", Merchant: true, Auth: fake, AdminConsole: &config.AdminConsole{Path: "/admin/", AuthBaseURL: "/api/v1"}},
-		{Prefix: "/billing", Merchant: true, Auth: fake, AdminConsole: &config.AdminConsole{Path: "/billing/v1/admin", AuthBaseURL: "/api/v1"}},
+		{Prefix: "billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards()},
+		{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{Path: "/admin/", AuthBaseURL: "/api/v1"}},
+		{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{Path: "/billing/v1/admin", AuthBaseURL: "/api/v1"}},
 	} {
 		_, err = rt.Routes(bad)
 		require.Error(t, err, "%+v", bad)
@@ -434,12 +463,12 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	// config.json, verbatim and keyed by extension id.
 	hosted := httpRuntime()
 	hosted.App.ConsoleAssets = rt.App.ConsoleAssets
-	_, err = hosted.Routes(config.Routes{Merchant: true, Auth: fake, AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"Hosted": true}}})
+	_, err = hosted.Routes(config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"Hosted": true}}})
 	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
-	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, Auth: fake, AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
+	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
 	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/capabilities", "").Code)
 
-	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Merchant: true, Auth: fake}, "")
+	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}, "")
 	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/admin/", "").Code, "no console unless selected")
 }

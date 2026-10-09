@@ -220,7 +220,7 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, option
 		vaultAuth *vault.Supervisor
 	)
 	kvMount := DefaultVaultKVMount
-	if opts.VaultClient != nil || (cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled) {
+	if opts.VaultClient != nil || (cfg != nil && cfg.Vault != nil) {
 		vc := cfg.Vault
 		if vc == nil {
 			vc = &config.VaultConfig{}
@@ -362,12 +362,12 @@ func BuildManifest(ctx context.Context, cfg *config.Config, snapshot *merchants.
 	return Build(ctx, &copy, pool, BuildOptions{Snapshot: snapshot})
 }
 
-// BuildTransit opens the Vault Transit signing client when Vault is enabled
-// (a zero-value *Store, SolanaTransit nil, otherwise). MODE 1 uses it for
+// BuildTransit opens the Vault Transit signing client when Vault is
+// configured (a zero-value *Store, SolanaTransit nil, otherwise). MODE 1 uses it for
 // Solana vault_transit signers with no KV backend. Login runs in the
 // background; Transit answers vault.ErrNotAuthenticated until it succeeds.
 func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
-	if cfg == nil || cfg.Vault == nil || !cfg.Vault.Enabled {
+	if cfg == nil || cfg.Vault == nil {
 		return &Store{}, nil
 	}
 	authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))

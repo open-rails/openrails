@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -19,9 +18,10 @@ import (
 // SEC (secaudit round 2, D1): an operation that moves money or grants access
 // needs a recent sign-in on every route that serves it. A staff token whose
 // sign-in is stale, as a stolen one's is, reaches none of them (merchant
-// chosen by header): the import door, the catalog or the merchant API. The same staff signed in recently passes the gate. Reads and the
-// host's in-process client need no step-up, and a grant with no end needs its
-// own authority.
+// chosen by header): the import door, the catalog or the merchant API. The
+// same staff signed in recently passes the gate. Reads and the host's
+// in-process client need no step-up, and a grant with no end is a staff write
+// like any other.
 func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -94,33 +94,15 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	member.grant(host, nil, nil)
 	require.True(t, member.entitled("content:host"))
 
-	// A grant with no end needs merchant:access:grant-permanent, which the
-	// support member lacks; staff hold it. Hours past time.Duration are refused.
+	// A grant with no end is a staff write like any other: the support member
+	// holds it. Hours past time.Duration are refused.
 	permanent := grant(forever, nil)
 	support := w.auth.token(t, "support")
 	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", timed)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", permanent)
-	require.Equal(t, http.StatusForbidden, status, "%v", body)
-	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", grant(price.ProductID, nil))
-	require.Equal(t, http.StatusForbidden, status, "%v", body)
-	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
-	other := w.newCustomer()
-	until := w.clock.Now().Add(24 * time.Hour)
-	mixed := map[string]any{"items": []any{
-		map[string]any{"customer_id": other.id, "product_id": price.ProductID, "ends_at": until},
-		map[string]any{"customer_id": member.id, "product_id": price.ProductID},
-	}}
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", mixed)
-	require.Equal(t, http.StatusForbidden, status, "one indefinite item needs the permission for the batch: %v", body)
-	held, err := w.client[embedded].CheckProductAccess(t.Context(), other.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{price.ProductID}})
-	require.NoError(t, err)
-	require.False(t, held[price.ProductID.String()], "a refused batch grants nothing")
-	require.False(t, member.entitled("content:forever"))
 	status, body = call(fresh, http.MethodPost, "/v1/merchant/product-access", grant(comp, 2562048))
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	status, body = call(fresh, http.MethodPost, "/v1/merchant/product-access", permanent)
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", permanent)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
 	require.True(t, member.entitled("content:forever"))
 }

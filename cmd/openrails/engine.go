@@ -27,7 +27,7 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	}
 	return server.Config{
 		Engine: *h.Config, Auth: *h.Auth, ResourceServer: h.ResourceServer, LocalSignIn: h.LocalSignIn,
-		CatalogEdits: h.CatalogEdits, AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
+		AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
 		Addr: net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 	}, nil
 }

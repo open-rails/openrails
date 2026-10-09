@@ -32,30 +32,19 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// newAuth is a development AuthKit: open registration, ephemeral signing keys,
-// and its own River client (ak.Start runs it). Its roles hold OpenRails'
-// merchant permissions like any other: billing-staff, on the site's root
-// group, holds every one a person may.
-func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
-	rbac := authkit.NewRoles()
-	merchant := rbac.Persona("merchant")
-	var staff []iam.Grant
-	for _, p := range merchant.Declare(openrails.Permissions()...) {
-		staff = append(staff, p)
-	}
-	merchant.Declare(openrails.MachinePermissions()...) // your automation's API keys, never a person's
-	rbac.Root.Role("billing-staff", staff...)
-	cfg := authkit.Config{
-		Roles:        rbac,
-		Merchant:     authkit.MerchantConfig{Root: true}, // staff hold merchant permissions on the root group
-		Database:     authkit.DatabaseConfig{Schema: "profiles"},
+// newAuth is a development AuthKit with the README's roles: open
+// registration, ephemeral signing keys, and its own River client (ak.Start
+// runs it).
+func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authkit.Client, error) {
+	return authkit.New(ctx, authkit.Config{
+		Database:     authkit.DatabaseConfig{Schema: "profiles"}, // AuthKit's tables, beside OpenRails' "billing"
 		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
-		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
+		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
+		Roles:        rbac,
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-	}
-	return authkit.New(ctx, cfg, authkit.Deps{Postgres: db}) // creates or upgrades its own tables
+	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
 }
 
 func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error) {
@@ -100,7 +89,12 @@ func run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	ak, err := newAuth(ctx, db) // see AuthKit's README
+	rbac := authkit.NewRoles()
+	customersRead := rbac.Root.Permission("customers", "read")
+	customersUpdate := rbac.Root.Permission("customers", "update")
+	rbac.Root.Role("admin", customersRead, customersUpdate)
+
+	ak, err := newAuth(ctx, db, rbac) // see AuthKit's README
 	if err != nil {
 		return err
 	}
@@ -126,12 +120,15 @@ func run(ctx context.Context) error {
 	}
 	// Billing. Processor webhooks are always mounted; pick the rest.
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:         ak,                            // AuthKit guards each route: OpenRails asks it, by route
-		Prefix:       "/billing",                    // the API is served at /billing/v1/*
-		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
-		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
-		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog)
-		CatalogEdits: false,                         // with Merchant, also let that API change the catalog; your Go code always can
+		Auth:       ak,                            // AuthKit guards each route: OpenRails asks it, by route
+		Prefix:     "/billing",                    // the API is served at /billing/v1/*
+		Storefront: true,                          // anyone can browse products and prices, and pay a checkout
+		Customers:  openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
+		Merchant:   true,                          // your staff's API at /merchant: refunds, subscriptions, customers' billing
+		Guards: openrails.Guards{
+			openrails.StaffReads:  customersRead,   // every staff read
+			openrails.StaffWrites: customersUpdate, // every staff write
+		},
 	})
 	if err != nil {
 		return err

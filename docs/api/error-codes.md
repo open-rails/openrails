@@ -152,7 +152,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
-| `permanent_grant_forbidden` | 403 | `authorization_error` | A grant with no end needs merchant:access:grant-permanent. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
 | `price_key_cadence_conflict` | 409 | `invalid_request_error` | The product's default price key is held by a price on another cadence. |
 | `price_key_not_found` | 404 | `invalid_request_error` | No price holds this key. |

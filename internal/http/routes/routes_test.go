@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -76,16 +75,17 @@ func doBody(h http.Handler, method, path, body string, header map[string]string)
 // standalone server does.
 func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 	table := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(table, "/v1", rt), rt, opts)
+	RegisterMerchantRoutes(router.NewMux(table, "/v1", rt), rt, opts, Merchant, MerchantConfig)
 	return table
 }
 
-// Every merchant route asks the gate before its handler, and asks for the
-// permission that matches its blast radius.
+// Every staff route asks the gate before its handler, for the guard of the
+// level its blast radius sets: a read, a write on customers, or the merchant's
+// own configuration.
 func TestMerchantRouteAuthorization(t *testing.T) {
 	gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}}
 	rt := gatedRuntime(t)
-	table := merchantSurface(rt, Options{Auth: gate, CatalogWrites: true})
+	table := merchantSurface(rt, Options{Auth: gate, Guard: levelGuard(t)})
 	h := table.Handler()
 	asked := map[string]string{}
 	for _, key := range routeKeys(table) {
@@ -93,94 +93,105 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		gate.asked = nil
 		rec := do(h, method, wildcard.ReplaceAllString(path, "x"), nil)
 		require.Equal(t, http.StatusForbidden, rec.Code, key)
-		require.NotEmpty(t, gate.asked, "%s reached its handler without authorization", key)
+		require.Len(t, gate.asked, 1, "%s reached its handler without authorization, or asked twice", key)
 		asked[key] = gate.asked[0]
 	}
 
-	p := billing.MerchantCustomerSettingsRead
-	w := billing.MerchantCustomerSettingsUpdate
+	read, write, admin := staffGuards[StaffReadsKey], staffGuards[StaffWritesKey], staffGuards[MerchantConfigKey]
 	for key, perm := range map[string]string{
-		"GET /v1/merchant/billing-archive":                                                  billing.MerchantBillingExport,
-		"POST /v1/merchant/billing-archive":                                                 billing.MerchantBillingImport,
-		"POST /v1/merchant/billing-import":                                                  billing.MerchantBillingImport,
-		"GET /v1/merchant/host-events":                                                      billing.MerchantHostEventsRead,
-		"POST /v1/merchant/host-events/acknowledge":                                         billing.MerchantHostEventsAcknowledge,
-		"GET /v1/merchant/customers/{customer_id}/entitlements":                             p,
-		"POST /v1/merchant/customers/ensure":                                                w,
-		"POST /v1/merchant/customers/lookup":                                                p,
-		"GET /v1/merchant/customers/{customer_id}/delinquency":                              p,
-		"GET /v1/merchant/delinquency":                                                      p,
-		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                billing.MerchantPaymentsRead,
-		"PUT /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}":    w,
-		"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": w,
-		"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}":                  w,
-		"POST /v1/merchant/customers/{customer_id}/payments/off-channel":                    w,
-		"POST /v1/merchant/product-access":                                                  w,
-		"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}":               w,
-		"PUT /v1/merchant/customers/{customer_id}/invoice-profile":                          w,
-		"POST /v1/merchant/customers/{customer_id}/credit-grants":                           billing.MerchantCreditsGrant,
-		"POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke":               billing.MerchantCreditsRevoke,
-		"GET /v1/merchant/customers/{customer_id}/credit-grants":                            p,
-		"PUT /v1/merchant/customers/{customer_id}/credit-limit":                             billing.MerchantCreditsGrant,
-		"PUT /v1/merchant/customers/{customer_id}/trust-level":                              w,
-		"POST /v1/merchant/checkout-sessions":                                               billing.MerchantCheckoutCreate,
-		"POST /v1/merchant/checkout-attempts":                                               billing.MerchantCheckoutCreate,
-		"GET /v1/merchant/checkout-attempts/{id}":                                           p,
-		"POST /v1/merchant/admissions":                                                      billing.MerchantAdmissionsCreate,
-		"POST /v1/merchant/admissions/{request_id}/capture":                                 billing.MerchantAdmissionsCreate,
-		"GET /v1/merchant/admissions/{request_id}":                                          billing.MerchantUsageRead,
-		"POST /v1/merchant/provider-operations":                                             billing.MerchantAdmissionsCreate,
-		"GET /v1/merchant/provider-operations/{operation_id}":                               billing.MerchantUsageRead,
-		"POST /v1/merchant/usage-events":                                                    billing.MerchantAdmissionsCreate,
-		"GET /v1/merchant/customers/{customer_id}/usage":                                    billing.MerchantUsageRead,
-		"GET /v1/merchant/payments":                                                         billing.MerchantPaymentsRead,
-		"POST /v1/merchant/payments/{id}/refunds":                                           billing.MerchantPaymentsRefund,
-		"GET /v1/merchant/subscriptions":                                                    billing.MerchantSubscriptionsRead,
-		"POST /v1/merchant/subscriptions/{id}/cancel":                                       billing.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  billing.MerchantSubscriptionsUpdate,
-		"POST /v1/merchant/reprice-batches":                                                 billing.MerchantSubscriptionsUpdate,
-		"GET /v1/merchant/invoices":                                                         billing.MerchantInvoicesRead,
-		"POST /v1/merchant/invoices/{id}/void":                                              billing.MerchantInvoicesUpdate,
-		"POST /v1/merchant/invoices/{id}/payments":                                          billing.MerchantInvoicesUpdate,
-		"POST /v1/merchant/invoices/{id}/retry-collection":                                  billing.MerchantInvoicesCollect,
-		"POST /v1/merchant/metrics/query":                                                   billing.MerchantMetricsRead,
-		"PUT /v1/merchant/dashboard":                                                        billing.MerchantDashboardUpdate,
-		"GET /v1/merchant/notifications":                                                    billing.MerchantOperationsRead,
-		"POST /v1/merchant/notifications/read":                                              billing.MerchantOperationsRead,
-		"GET /v1/merchant/worker-health":                                                    billing.MerchantOperationsRead,
-		"GET /v1/merchant/findings/{id}":                                                    billing.MerchantOperationsRead,
-		"POST /v1/merchant/findings/{id}/resolve":                                           billing.MerchantFindingsResolve,
-		"GET /v1/merchant/configuration":                                                    billing.MerchantSettingsRead,
-		"POST /v1/merchant/configuration/applications":                                      billing.MerchantSettingsUpdate,
-		"PUT /v1/merchant/alert-webhooks/{id}/url":                                          billing.MerchantSettingsUpdate,
-		"GET /v1/merchant/psps":                                                             billing.MerchantPSPsRead,
-		"POST /v1/merchant/psps":                                                            billing.MerchantPSPsUpdate,
-		"GET /v1/merchant/psps/{id}":                                                        billing.MerchantPSPsRead,
-		"PATCH /v1/merchant/psps/{id}":                                                      billing.MerchantPSPsUpdate,
-		"POST /v1/merchant/psps/{id}/archive":                                               billing.MerchantPSPsUpdate,
-		"POST /v1/merchant/psps/routing-preview":                                            billing.MerchantPSPsRead,
-		"POST /v1/merchant/psps/refresh":                                                    billing.MerchantSubscriptionsUpdate,
-		"GET /v1/merchant/rails":                                                            billing.MerchantPSPsRead,
-		"GET /v1/merchant/catalog/products":                                                 billing.MerchantCatalogRead,
-		"POST /v1/merchant/catalog/offers/lookup":                                           billing.MerchantCatalogRead,
-		"POST /v1/merchant/catalog/applications":                                            billing.MerchantCatalogUpdate,
-		"PUT /v1/merchant/catalog/meters/{key}":                                             billing.MerchantCatalogUpdate,
-		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                billing.MerchantCatalogUpdate,
-		"POST /v1/merchant/catalog/product-archives":                                        billing.MerchantCatalogUpdate,
+		"GET /v1/merchant/billing-archive":                                                  admin,
+		"POST /v1/merchant/billing-archive":                                                 admin,
+		"POST /v1/merchant/billing-import":                                                  admin,
+		"GET /v1/merchant/host-events":                                                      read,
+		"POST /v1/merchant/host-events/acknowledge":                                         write,
+		"GET /v1/merchant/customers/{customer_id}/entitlements":                             read,
+		"POST /v1/merchant/customers/ensure":                                                write,
+		"POST /v1/merchant/customers/lookup":                                                read,
+		"GET /v1/merchant/customers/{customer_id}/delinquency":                              read,
+		"GET /v1/merchant/delinquency":                                                      read,
+		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                read,
+		"PUT /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}":    write,
+		"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": write,
+		"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}":                  write,
+		"POST /v1/merchant/customers/{customer_id}/payments/off-channel":                    write,
+		"POST /v1/merchant/product-access":                                                  write,
+		"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}":               admin,
+		"PUT /v1/merchant/customers/{customer_id}/invoice-profile":                          write,
+		"POST /v1/merchant/customers/{customer_id}/credit-grants":                           write,
+		"POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke":               write,
+		"GET /v1/merchant/customers/{customer_id}/credit-grants":                            read,
+		"PUT /v1/merchant/customers/{customer_id}/credit-limit":                             write,
+		"PUT /v1/merchant/customers/{customer_id}/trust-level":                              write,
+		"POST /v1/merchant/checkout-sessions":                                               write,
+		"POST /v1/merchant/admissions":                                                      write,
+		"POST /v1/merchant/admissions/{request_id}/capture":                                 write,
+		"GET /v1/merchant/admissions/{request_id}":                                          read,
+		"POST /v1/merchant/provider-operations":                                             write,
+		"GET /v1/merchant/provider-operations/{operation_id}":                               read,
+		"POST /v1/merchant/usage-events":                                                    write,
+		"GET /v1/merchant/customers/{customer_id}/usage":                                    read,
+		"GET /v1/merchant/payments":                                                         read,
+		"POST /v1/merchant/payments/{id}/refunds":                                           write,
+		"GET /v1/merchant/subscriptions":                                                    read,
+		"POST /v1/merchant/subscriptions/{id}/cancel":                                       write,
+		"POST /v1/merchant/subscriptions/{id}/change-tier":                                  write,
+		"POST /v1/merchant/reprice-batches":                                                 write,
+		"GET /v1/merchant/invoices":                                                         read,
+		"POST /v1/merchant/invoices/{id}/void":                                              write,
+		"POST /v1/merchant/invoices/{id}/payments":                                          write,
+		"POST /v1/merchant/invoices/{id}/retry-collection":                                  write,
+		"POST /v1/merchant/metrics/query":                                                   read,
+		"PUT /v1/merchant/dashboard":                                                        admin,
+		"GET /v1/merchant/notifications":                                                    read,
+		"POST /v1/merchant/notifications/read":                                              read,
+		"GET /v1/merchant/worker-health":                                                    read,
+		"GET /v1/merchant/findings/{id}":                                                    read,
+		"POST /v1/merchant/findings/{id}/resolve":                                           write,
+		"GET /v1/merchant/configuration":                                                    admin,
+		"POST /v1/merchant/configuration/applications":                                      admin,
+		"PUT /v1/merchant/alert-webhooks/{id}/url":                                          admin,
+		"GET /v1/merchant/psps":                                                             admin,
+		"POST /v1/merchant/psps":                                                            admin,
+		"GET /v1/merchant/psps/{id}":                                                        admin,
+		"PATCH /v1/merchant/psps/{id}":                                                      admin,
+		"POST /v1/merchant/psps/{id}/archive":                                               admin,
+		"POST /v1/merchant/psps/routing-preview":                                            admin,
+		"POST /v1/merchant/psps/refresh":                                                    admin,
+		"GET /v1/merchant/rails":                                                            admin,
+		"GET /v1/merchant/catalog/products":                                                 read,
+		"POST /v1/merchant/catalog/offers/lookup":                                           read,
+		"POST /v1/merchant/catalog/applications":                                            admin,
+		"PUT /v1/merchant/catalog/meters/{key}":                                             admin,
+		"DELETE /v1/merchant/catalog/meters/{key}/rate-card":                                admin,
+		"POST /v1/merchant/catalog/product-archives":                                        admin,
 	} {
 		require.Contains(t, asked, key)
 		require.Equal(t, perm, asked[key], key)
 	}
 
-	// Money-moving catalog archives need both catalog and refund authority.
-	allowCatalog := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}, allowed: map[string]bool{billing.MerchantCatalogUpdate: true}}
-	rec := do(merchantSurface(rt, Options{Auth: allowCatalog, CatalogWrites: true}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
-	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Equal(t, []string{billing.MerchantCatalogUpdate, billing.MerchantPaymentsRefund}, allowCatalog.asked)
+	// A guard on the refund resource, or on the one route, overrides the
+	// level: the product archive refunds, so it is the refunds' too.
+	guard, err := ResolveGuards(PlanStaffRoutes(rt, Options{}, Merchant, MerchantConfig), map[GuardKey]string{
+		StaffReadsKey: read, StaffWritesKey: write, MerchantConfigKey: admin,
+		ResourceKey(ResRefunds): "refunds", RouteKey("CancelSubscription"): "cancel",
+	})
+	require.NoError(t, err)
+	strict := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}}
+	h = merchantSurface(rt, Options{Auth: strict, Guard: guard}).Handler()
+	for path, want := range map[string]string{
+		"/v1/merchant/payments/x/refunds":       "refunds",
+		"/v1/merchant/subscriptions/x/cancel":   "cancel",
+		"/v1/merchant/subscriptions/x/resume":   write,
+		"/v1/merchant/catalog/product-archives": "refunds",
+	} {
+		strict.asked = nil
+		require.Equal(t, http.StatusForbidden, do(h, http.MethodPost, path, nil).Code, path)
+		require.Equal(t, []string{want}, strict.asked, path)
+	}
 
 	// Retired and control-plane-only management routes are not mounted.
 	for _, key := range routeKeys(table) {
-		for _, retired := range []string{"/api-keys", "/team", "/orphans", "/reconcile", "/merchant-configuration", "/api-host"} {
+		for _, retired := range []string{"/api-keys", "/team", "/orphans", "/reconcile", "/merchant-configuration", "/checkout-attempts"} {
 			require.NotContains(t, key, retired)
 		}
 	}
@@ -193,7 +204,7 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 		for _, writable := range []bool{false, true} {
 			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
 			table := &router.Table{}
-			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}})
+			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, MerchantConfig)
 			keys := routeKeys(table)
 			for _, key := range []string{
 				"GET /merchant/configuration", "POST /merchant/configuration/applications",
@@ -206,45 +217,24 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 	}
 }
 
-// Without CatalogWrites every catalog mutation registration is gone — not
-// merely rejected — while reads, batch lookups and credit grants remain.
+// The catalog's writes are MerchantConfig's; its reads and lookups, and
+// customers' credit grants, are Merchant's.
 func TestCatalogWritePolicy(t *testing.T) {
-	reads := []string{"POST /merchant/catalog/offers/lookup"}
-	for _, allow := range []bool{false, true} {
-		rt := &app.Runtime{Config: &config.Config{}}
-		merchant := &router.Table{}
-		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{Auth: authtest.Deny{}, CatalogWrites: allow})
-		all := routeKeys(merchant)
-		var keys []string
-		for _, key := range all {
-			_, path, _ := strings.Cut(key, " ")
-			if strings.HasPrefix(path, "/merchant/catalog") {
-				keys = append(keys, key)
-			}
-		}
-		for _, key := range append([]string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /merchant/catalog/products"}, reads...) {
-			require.Contains(t, keys, key)
-		}
-		mutations := 0
-		for _, key := range keys {
-			if !strings.HasPrefix(key, "GET ") && !slices.Contains(reads, key) {
-				mutations++
-				require.True(t, allow, "disabled catalog mutation registered: %s", key)
-			}
-		}
-		require.Equal(t, allow, mutations > 0)
-		if allow {
-			for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{product_key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /merchant/catalog/prices"} {
-				require.Contains(t, keys, key)
-			}
-		}
-
-		keys = all
-		require.Contains(t, keys, "GET /merchant/customers/{customer_id}/rate-overrides")
-		require.Contains(t, keys, "POST /merchant/customers/{customer_id}/credit-grants", "credit grants are not catalog authoring")
-		for _, method := range []string{http.MethodPut, http.MethodDelete} {
-			require.Equal(t, allow, slices.Contains(keys, method+" /merchant/customers/{customer_id}/rate-overrides/{meter_key}"))
-		}
+	rt := &app.Runtime{Config: &config.Config{}}
+	staff, configuration := &router.Table{}, &router.Table{}
+	RegisterMerchantRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, Merchant)
+	RegisterMerchantRoutes(router.NewMux(configuration, "", rt), rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, MerchantConfig)
+	for _, key := range []string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /merchant/catalog/products", "POST /merchant/catalog/offers/lookup", "GET /merchant/customers/{customer_id}/rate-overrides", "POST /merchant/customers/{customer_id}/credit-grants"} {
+		require.Contains(t, routeKeys(staff), key)
+	}
+	for _, key := range routeKeys(staff) {
+		_, path, _ := strings.Cut(key, " ")
+		route, ok := Lookup(strings.Fields(key)[0], "/v1"+path)
+		require.True(t, ok, key)
+		require.False(t, route.CatalogWrite, "%s: a catalog write is MerchantConfig's", key)
+	}
+	for _, key := range []string{"POST /merchant/catalog/applications", "PUT /merchant/catalog/products/by-key/{product_key}", "PATCH /merchant/catalog/prices/{id}", "DELETE /merchant/catalog/meters/{key}/rate-card", "POST /merchant/catalog/product-archives", "POST /merchant/catalog/prices", "PUT /merchant/customers/{customer_id}/rate-overrides/{meter_key}", "DELETE /merchant/customers/{customer_id}/rate-overrides/{meter_key}"} {
+		require.Contains(t, routeKeys(configuration), key)
 	}
 
 	called := false
@@ -259,7 +249,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	// publishing them, and the guard admits only its host principal: the
 	// process owner.
 	inProcess := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(inProcess, "", closed), closed, HostOptions())
+	RegisterMerchantRoutes(router.NewMux(inProcess, "", closed), closed, HostOptions(), Merchant, MerchantConfig)
 	require.Contains(t, routeKeys(inProcess), "POST /merchant/catalog/applications")
 	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
 	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
@@ -280,7 +270,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil)})
+	RegisterMerchantRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil), Guard: levelGuard(t)}, Merchant)
 	h := table.Handler()
 	preview := "/m/merchant/subscriptions/" + userA + "/change-tier/preview"
 	// A malformed body answers from the handler without a runtime.

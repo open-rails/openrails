@@ -147,7 +147,6 @@ export type OpenRailsErrorCode =
   | "payment_not_refundable"
   | "payment_not_retryable"
   | "payment_provider_rejected"
-  | "permanent_grant_forbidden"
   | "permission_required"
   | "price_key_cadence_conflict"
   | "price_key_not_found"
@@ -387,7 +386,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
-  permanent_grant_forbidden: { status: 403, type: "authorization_error", meaning: "A grant with no end needs merchant:access:grant-permanent." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
   price_key_cadence_conflict: { status: 409, type: "invalid_request_error", meaning: "The product's default price key is held by a price on another cadence." },
   price_key_not_found: { status: 404, type: "invalid_request_error", meaning: "No price holds this key." },

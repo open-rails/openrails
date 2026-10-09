@@ -36,11 +36,14 @@ import { WidgetVizView } from "./widget-viz"
 export function WidgetTile({
   widget,
   range,
+  editable = true,
   onEdit,
   onDelete,
 }: {
   widget: Widget
   range: MetricsRange
+  // editable shows the drag handle and the edit and remove menu.
+  editable?: boolean
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -59,11 +62,13 @@ export function WidgetTile({
   return (
     <Card className="group/tile relative h-full gap-2">
       <div className="absolute top-2 right-2 z-10 flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-card opacity-0 shadow-sm transition-opacity group-hover/tile:opacity-100 focus-within:opacity-100">
-        <HugeiconsIcon
-          icon={DragDropVerticalIcon}
-          aria-hidden
-          className="widget-drag-handle size-6 shrink-0 cursor-grab p-1.5 text-muted-foreground active:cursor-grabbing"
-        />
+        {editable && (
+          <HugeiconsIcon
+            icon={DragDropVerticalIcon}
+            aria-hidden
+            className="widget-drag-handle size-6 shrink-0 cursor-grab p-1.5 text-muted-foreground active:cursor-grabbing"
+          />
+        )}
         {link ? (
           <Link
             to={link}
@@ -87,29 +92,32 @@ export function WidgetTile({
             className={cn("size-3.5", isFetching && "animate-spin")}
           />
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-6"
-                aria-label="Widget menu"
-              >
-                <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onEdit}>
-              <HugeiconsIcon icon={PencilIcon} className="size-3.5" /> Edit
-              widget
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onDelete} variant="destructive">
-              <HugeiconsIcon icon={Delete02Icon} className="size-3.5" /> Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {editable && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6"
+                  aria-label="Widget menu"
+                >
+                  <HugeiconsIcon icon={MoreVerticalIcon} className="size-3.5" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={onEdit}>
+                <HugeiconsIcon icon={PencilIcon} className="size-3.5" /> Edit
+                widget
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onDelete} variant="destructive">
+                <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />{" "}
+                Remove
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-2">
         <span

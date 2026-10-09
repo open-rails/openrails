@@ -14,10 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SEC: minting money is owner authority. A credit grant and the credit-limit
-// write need merchant:credits:grant. A support member or support API key edits customers but mints no
-// balance and opens no credit line.
-func TestSecuritySupportCannotMintCredit(t *testing.T) {
+// SEC: minting money is a staff write on the standalone server: a support
+// member or API key, holding merchant:billing:write, grants credit and opens a
+// credit line as an owner does; a viewer key, holding only the reads, does
+// neither and edits no customer.
+func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
 	ctx := t.Context()
@@ -52,18 +53,21 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 		"support API key": {apiKey("support"), ""},
 		"owner member":    {ownerSession, shop},
 		"owner API key":   {apiKey("owner"), ""},
+		"viewer API key":  {apiKey("viewer"), ""},
 	}
 
 	for name, c := range callers {
-		owner := name == "owner member" || name == "owner API key"
+		writer := name != "viewer API key"
 		customer := uuid.NewString()
-		w := call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/ensure", c.selector, map[string]any{"items": []any{map[string]any{"id": customer}}})
-		require.Equal(t, http.StatusOK, w.Code, "%s edits customers: %s", name, w.Body.String())
+		w := call(t, handler, ownerSession, http.MethodPost, "/v1/merchant/customers/ensure", shop, map[string]any{"items": []any{map[string]any{"id": customer}}})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/ensure", c.selector, map[string]any{"items": []any{map[string]any{"id": customer}}})
+		require.Equal(t, writer, w.Code == http.StatusOK, "%s edits customers: %s", name, w.Body.String())
 
 		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/"+customer+"/credit-grants", c.selector, map[string]any{
 			"invoker": "staff", "currency": "USD", "amount": "1000000000", "source": "manual", "source_id": uuid.NewString(),
 		})
-		if !owner {
+		if !writer {
 			require.Equal(t, http.StatusForbidden, w.Code, "%s grants credit: %s", name, w.Body.String())
 			require.Contains(t, w.Body.String(), "permission_required")
 		} else {
@@ -76,7 +80,7 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 		w = call(t, handler, c.token, http.MethodPut, "/v1/merchant/customers/"+customer+"/credit-limit", c.selector, map[string]any{
 			"currency": "USD", "amount": "1000000000000",
 		})
-		if !owner {
+		if !writer {
 			require.Equal(t, http.StatusForbidden, w.Code, "%s opens a credit line: %s", name, w.Body.String())
 			require.Contains(t, w.Body.String(), "permission_required")
 		} else {
@@ -86,6 +90,6 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		limit := map[string]any{}
 		require.NoError(t, json.NewDecoder(w.Body).Decode(&limit))
-		require.Equal(t, owner, limit["amount"] == "1000000000000", "%s: %v", name, limit)
+		require.Equal(t, writer, limit["amount"] == "1000000000000", "%s: %v", name, limit)
 	}
 }

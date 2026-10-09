@@ -60,7 +60,7 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 
 func (c *customer) buyWith(rail, method string, price *billing.Price, kind billing.OfferKind, entitlement string) {
 	c.w.t.Helper()
-	_, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
+	_, err := createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
 		OfferKind: kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: entitlement, PriceID: price.ID,
 		IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
@@ -301,7 +301,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, Entitlement: "content:live",
 			OfferKind: billing.OfferPermanent, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"}, IdempotencyKey: "live-" + uuid.NewString(),
 			SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",

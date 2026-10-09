@@ -128,7 +128,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	// The advertised Solana option is sellable: a subscription session opens
 	// a Solana Pay request for the published plan.
 	buyer := w.newCustomer()
-	session, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	session, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id)}, PriceID: pid(priceID(t, w, key, key+"-monthly")),
 		IdempotencyKey: "sol-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{PSP: solana.PSP, TokenSymbol: solana.PublicConfig["token_symbol"]},
@@ -186,7 +186,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	require.Contains(t, options, "nmi")
 
 	buyer := w.newCustomer()
-	_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	_, err = createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
 		Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer.id), VerifiedEmail: "buyer@e2e.test"}, PriceID: pid(priceID(t, w, key, key+"-monthly")),
 		IdempotencyKey: "ccbill-" + uuid.NewString(),
 		PaymentOptions: billing.CheckoutPaymentOptions{PSP: "ccbill", BillingDetails: &billing.BillingDetails{Name: new("E2E Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},

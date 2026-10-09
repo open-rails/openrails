@@ -59,7 +59,6 @@ var embeddedMethods = map[string]string{
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
 	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
-	"CreateCheckoutAttempt": {billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly", IdempotencyKey: "k"}},
 	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"GetCheckoutConfig":     {billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "monthly"}},
@@ -236,9 +235,12 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			continue
 		}
 		route, ok := catalogRoutes[seen[0]]
-		if !ok || route.Group != routes.Merchant {
+		if !ok || !route.Staff() {
 			t.Errorf("%s calls %s, which is not a merchant route", m.Name, seen[0])
 			continue
+		}
+		if route.Name != m.Name {
+			t.Errorf("%s calls %s, which the catalog names %s (its RouteSet)", m.Name, seen[0], route.Name)
 		}
 		methodsOf[seen[0]] = append(methodsOf[seen[0]], m.Name)
 
@@ -274,8 +276,8 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 	}
 
 	for _, r := range routes.Catalog() {
-		switch r.Group {
-		case routes.Merchant:
+		switch {
+		case r.Staff():
 			methods := methodsOf[r.Key()]
 			sort.Strings(methods)
 			if len(methods) != 1 {

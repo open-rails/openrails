@@ -12,9 +12,9 @@ var cardSetupErrors = codes("card_attempts_blocked", "card_declined", "card_not_
 // paymentMethodsRoutes is saved cards, for the customer and merchant staff,
 // and which card collects which currency's invoices.
 var paymentMethodsRoutes = []Route{
-	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/payment-methods", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/payment-methods", Group: Merchant, Auth: AuthMerchant, Name: "ListPaymentMethods", Level: LevelRead, Resources: res(ResCustomers),
 		Query: cursorPage, Responses: []Reply{{200, billing.ListPage[billing.PaymentMethod]{}}}, Errors: codes("invalid_cursor", "invalid_param"), Handler: h(handlers.ListCustomerPaymentMethods)},
-	{Method: DELETE, Path: "/v1/merchant/customers/{customer_id}/payment-methods/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsUpdate, Limit: middleware.AdminOperationDestructive,
+	{Method: DELETE, Path: "/v1/merchant/customers/{customer_id}/payment-methods/{id}", Group: Merchant, Auth: AuthMerchant, Name: "DeletePaymentMethod", Level: LevelWrite, Resources: res(ResCustomers), Sensitive: true, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{202, nil}, {204, nil}}, Errors: codes("invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeleteCustomerPaymentMethod)},
 	{Method: PUT, Path: "/v1/me/collection-payment-method", Group: Customer, Auth: AuthCustomer, Scope: ScopeSubscriptionManagement,
 		Request: billing.CollectionPaymentMethod{}, Responses: []Reply{{200, billing.CollectionPaymentMethod{}}}, Errors: codes("collection_payment_method_invalid", "invalid_param"), Handler: h(handlers.SetCollectionPaymentMethod)},

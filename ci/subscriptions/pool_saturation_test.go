@@ -49,7 +49,7 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 					return
 				}
 			}
-			session, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{
+			session, err := createCheckoutAttempt(ctx, client, billing.CreateCheckoutAttemptParams{
 				Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, PriceID: price.ID, IdempotencyKey: "checkout:" + uuid.NewString() + ":1",
 				PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Pool Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 			})

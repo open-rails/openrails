@@ -37,9 +37,12 @@ const (
 	Checkout Group = "checkout"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
-	// Merchant is the merchant API: staff, machines and the Go client alike,
-	// each route gated by its merchant permission.
+	// Merchant is staff work on customers: staff, machines and the Go client
+	// alike, each route behind the host's guard for it (Routes.Guards).
 	Merchant Group = "merchant"
+	// MerchantConfig is the merchant's own configuration: PSPs, settings,
+	// catalog edits, billing import and export, the dashboard layout.
+	MerchantConfig Group = "merchant_config"
 	// ControlPlane is the standalone server's merchant accounts, team and
 	// API keys.
 	ControlPlane Group = "control_plane"
@@ -64,9 +67,9 @@ const (
 	AuthUser Tier = "user"
 	// AuthCustomer: the mount's Auth.Required, then the customer gate.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: the mount's Auth.RequirePermission for Perm, a merchant:
-	// permission, on the request's merchant; Auth.Sensitive too for a user
-	// in person when the permission moves money or removes access.
+	// AuthMerchant: the mount's Auth.RequirePermission for the route's guard
+	// (a control-plane route's Perm), on the request's merchant; Auth.Sensitive
+	// too for a user in person on a Sensitive route.
 	AuthMerchant Tier = "merchant"
 	// AuthOperator: a human session holding Perm, a root: grant.
 	AuthOperator Tier = "operator"
@@ -110,6 +113,53 @@ const (
 	// ScopeSubscriptionManagement: cancel, resume and pick the paying card.
 	ScopeSubscriptionManagement CustomerScope = "subscription_management"
 )
+
+// Level is a staff route's level group: StaffReads and StaffWrites cover
+// Merchant's reads and writes, MerchantConfig every MerchantConfig route.
+type Level string
+
+const (
+	LevelRead  Level = "read"
+	LevelWrite Level = "write"
+	LevelAdmin Level = "admin"
+)
+
+// Resource is a resource group of staff routes: a guard on it overrides the
+// routes' level group.
+type Resource string
+
+const (
+	ResAccess           Resource = "access"
+	ResBillingData      Resource = "billing_data"
+	ResCatalog          Resource = "catalog"
+	ResCheckout         Resource = "checkout"
+	ResCheckoutSessions Resource = "checkout_sessions"
+	ResCredits          Resource = "credits"
+	ResCustomers        Resource = "customers"
+	ResDashboard        Resource = "dashboard"
+	ResFindings         Resource = "findings"
+	ResHostEvents       Resource = "host_events"
+	ResInvoices         Resource = "invoices"
+	ResMetrics          Resource = "metrics"
+	ResOperations       Resource = "operations"
+	ResPayments         Resource = "payments"
+	ResPSPs             Resource = "psps"
+	ResRefunds          Resource = "refunds"
+	ResSettings         Resource = "settings"
+	ResSubscriptions    Resource = "subscriptions"
+	ResUsage            Resource = "usage"
+)
+
+// Resources is every resource group, with its Go name (openrails.<Name>).
+var Resources = map[Resource]string{
+	ResAccess: "Access", ResBillingData: "BillingData", ResCatalog: "Catalog", ResCheckout: "Checkout", ResCheckoutSessions: "CheckoutSessions",
+	ResCredits: "Credits", ResCustomers: "Customers", ResDashboard: "Dashboard", ResFindings: "Findings",
+	ResHostEvents: "HostEvents", ResInvoices: "Invoices", ResMetrics: "Metrics", ResOperations: "Operations",
+	ResPayments: "Payments", ResPSPs: "PSPs", ResRefunds: "Refunds", ResSettings: "Settings",
+	ResSubscriptions: "Subscriptions", ResUsage: "Usage",
+}
+
+func res(list ...Resource) []Resource { return list }
 
 // Throttle is a route's own limiter, beside the deployment's rate limits.
 type Throttle string
@@ -230,11 +280,18 @@ type Route struct {
 	Group Group
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
-	// Perm is the permission Auth checks: a merchant: permission
-	// (AuthMerchant) or a root: grant (AuthOperator).
+	// Name is a staff route's Go client method, and its route guard's name
+	// (openrails.<Name>).
+	Name string
+	// Level and Resources are the guard groups a staff route belongs to.
+	Level     Level
+	Resources []Resource
+	// Sensitive: the route moves money or removes access; the host's
+	// Sensitive stacks on it for a user in person.
+	Sensitive bool
+	// Perm is the permission a standalone control-plane route (AuthMerchant)
+	// or operator route (a root: grant, AuthOperator) checks.
 	Perm string
-	// Also is a second merchant permission the route needs.
-	Also string
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
 	// Throttle is the route's own limiter.
@@ -246,8 +303,8 @@ type Route struct {
 	// InvokerScoped: an invoker-scoped credential, which spends a customer's
 	// balance without being the customer, may call this Customer route.
 	InvokerScoped bool
-	// CatalogWrite: the route changes the catalog over HTTP; it is mounted
-	// only where the mount enables catalog edits (Routes.CatalogEdits).
+	// CatalogWrite: the route changes the catalog; it refuses unless the
+	// deployment's catalog is edited over HTTP (catalogpolicy).
 	CatalogWrite bool
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool
@@ -271,6 +328,9 @@ type Route struct {
 
 // Key is the route's identity: "GET /v1/merchant/payments/{id}".
 func (r Route) Key() string { return r.Method + " " + r.Path }
+
+// Staff reports a route behind a guard: Merchant's and MerchantConfig's.
+func (r Route) Staff() bool { return r.Group == Merchant || r.Group == MerchantConfig }
 
 // h adapts a handler func to the neutral router.Handler type.
 func h(fn func(r *httprequest.Request)) router.Handler { return router.Handler(fn) }

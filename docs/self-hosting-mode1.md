@@ -20,7 +20,7 @@ writes require a writable managed backend.
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`, `catalog_edits`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, settings, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchant` |
 | catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
 
@@ -86,8 +86,10 @@ manifest and secret files before it can use those providers.
   edits and provider archive decisions retain their ordinary authorization checks.
 - External configuration routes require explicit publication; exposing a route
   does not make the credential backend writable.
-- Catalog writes independently require `catalog_edits: true`. Trusted
-  operator catalog applications are declarative or guarded by their document.
+- Catalog writes over HTTP are refused (`403 catalog_updates_disabled`): with
+  snapshot custody the files are the truth, and a change is a new document and
+  a restart. Trusted operator catalog applications are declarative or guarded
+  by their document.
 - `openrails dump-merchant-config` exports redacted metadata with snapshot or
   managed credentials. Plaintext credential export is not supported.
 - Managed DB secrets require encryption in sandbox and live deployments.

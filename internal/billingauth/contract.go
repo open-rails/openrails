@@ -55,8 +55,7 @@ const (
 
 // Interactive reports a user acting in person: not an application, and not
 // a key or signed token automating the account. Only an interactive subject
-// starts a payment for itself; only a non-interactive one may hold a
-// machine-only permission.
+// starts a payment for itself.
 func Interactive(who Identity) bool {
 	return who.SubjectKind == SubjectUser && SelfActing(who) &&
 		who.Credential.Kind != CredentialAPIKey && who.Credential.Kind != CredentialSignedToken
@@ -96,13 +95,14 @@ var (
 	ErrForbidden       = auth.ErrForbidden
 )
 
-// Staff is a merchant route's admitted identity, with the permission it was
+// Staff is a merchant route's admitted identity, with the route it was
 // admitted for and the merchant it acts on. Limits and audit key on
 // (Issuer, Subject).
 type Staff struct {
 	Identity
-	Permission string
-	Merchant   billing.MerchantID
+	// Route is the key of the route the gate admitted it for.
+	Route    string
+	Merchant billing.MerchantID
 }
 
 type identityKey struct{}

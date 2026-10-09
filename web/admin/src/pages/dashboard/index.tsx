@@ -2,6 +2,7 @@
 // API. Tile registry + serialized Layout[] on react-grid-layout v2 — drag,
 // resize, add, edit, remove; the layout persists via PUT (debounced). First
 // load with no saved row shows the seeded default template.
+import { useMerchantConfig } from "@/lib/capabilities"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
@@ -111,6 +112,8 @@ function defaultSize(viz: WidgetViz): { w: number; h: number } {
 
 export function DashboardPage() {
   const queryClient = useQueryClient()
+  // The layout is the merchant's configuration: read-only unless mounted.
+  const editable = useMerchantConfig()
   const { mutate: saveDashboard } = useMutation(
     adminMutations.saveDashboard(queryClient)
   )
@@ -160,7 +163,7 @@ export function DashboardPage() {
   )
 
   const onLayoutChange = (layout: Layout) => {
-    if (!widgets) return
+    if (!widgets || !editable) return
     const byId = new Map(layout.map((l) => [l.i, l]))
     let changed = false
     const next = widgets.map((w) => {
@@ -250,9 +253,11 @@ export function DashboardPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button size="sm" onClick={openAdd}>
-          <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
-        </Button>
+        {editable && (
+          <Button size="sm" onClick={openAdd}>
+            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -288,20 +293,26 @@ export function DashboardPage() {
       {header}
       <AskPanel
         enabled={askEnabled()}
-        onAddWidget={(draft) => {
-          setEditing(null)
-          setSeed(draft)
-          setEditorOpen(true)
-        }}
+        onAddWidget={
+          editable
+            ? (draft) => {
+                setEditing(null)
+                setSeed(draft)
+                setEditorOpen(true)
+              }
+            : undefined
+        }
       />
 
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed">
             <p className="text-sm text-muted-foreground">No widgets yet</p>
-            <Button size="sm" variant="outline" onClick={openAdd}>
-              <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
-            </Button>
+            {editable && (
+              <Button size="sm" variant="outline" onClick={openAdd}>
+                <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
+              </Button>
+            )}
           </div>
         ) : (
           <>
@@ -314,6 +325,7 @@ export function DashboardPage() {
                   <WidgetTile
                     widget={w}
                     range={range}
+                    editable={editable}
                     onEdit={() => {
                       setEditing(w)
                       setSeed(null)
@@ -342,6 +354,7 @@ export function DashboardPage() {
                       <WidgetTile
                         widget={w}
                         range={range}
+                        editable={editable}
                         onEdit={() => {
                           setEditing(w)
                           setSeed(null)

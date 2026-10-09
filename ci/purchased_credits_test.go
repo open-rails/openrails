@@ -88,7 +88,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	require.NoError(t, err)
 	buy := func(key string) {
 		t.Helper()
-		_, err := client.CreateCheckoutAttempt(ctx, billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"}, SuccessURL: "https://e2e.test/success", CancelURL: "https://e2e.test/cancel"})
+		_, err := createCheckoutAttempt(ctx, client, billing.CreateCheckoutAttemptParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, IdempotencyKey: key, PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe"}, SuccessURL: "https://e2e.test/success", CancelURL: "https://e2e.test/cancel"})
 		require.NoError(t, err)
 	}
 	buy("pack-1")

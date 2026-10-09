@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"math"
-	"net/http"
 	"strings"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
@@ -177,23 +175,6 @@ func ServiceGetEffectiveTier(r *httprequest.Request) {
 
 // maxGrantHours is the longest hours value a time.Duration holds.
 const maxGrantHours = math.MaxInt64 / int64(time.Hour)
-
-// permitPermanentGrant requires merchant:access:grant-permanent for a manual
-// grant with no end, on top of the route's own permission.
-func permitPermanentGrant(r *httprequest.Request, gate StaffCan) bool {
-	if gate != nil {
-		err := gate(r.Request, billing.MerchantAccessGrantPermanent)
-		if err == nil {
-			return true
-		}
-		if refusal := billingauth.AsRefusal(err); refusal.Status != http.StatusForbidden {
-			r.AbortGate(refusal)
-			return false
-		}
-	}
-	r.ErrorCode("permanent_grant_forbidden", "a grant with no end needs "+billing.MerchantAccessGrantPermanent)
-	return false
-}
 
 // parseAtQuery reads an optional RFC3339 `at` query param. When absent, returns a
 // zero time (defaulted to now by the caller).

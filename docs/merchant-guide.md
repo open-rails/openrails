@@ -14,9 +14,11 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 ### The mental model
 
 The database is the catalog. The authorized in-process client can always edit
-individual records or apply a JSON/YAML batch. `Routes.CatalogEdits` (the
-standalone server's `catalog_edits`) controls whether catalog-write HTTP routes
-are exposed; it defaults false.
+individual records or apply a JSON/YAML batch. Catalog writes over HTTP are
+part of the merchant's configuration: an embedded host exposes them by
+mounting `Routes.MerchantConfig` (refused while `Config.Catalog` is the
+catalog's truth); the standalone server exposes them when its
+`secret_backend` is `vault` or `db`.
 
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
@@ -206,7 +208,9 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 ### Managing customers day-to-day
 
 All merchant-admin operations live under `/v1/merchant/*` (same public port; each
-route gated by a `merchant:*` permission). Auth is a merchant API key
+route behind its guard: on the standalone server `server.MerchantRead` for
+reads, `server.MerchantWrite` for actions on customers, `server.MerchantAdmin`
+for the merchant's configuration). Auth is a merchant API key
 (`Bearer openrails_st_...`), a user session, or a trusted issuer's access token. Full
 reference: [api/routes.md](api/routes.md).
 
@@ -229,10 +233,9 @@ reference: [api/routes.md](api/routes.md).
 | Operational alerts / findings | `GET /v1/merchant/notifications`, `GET /v1/merchant/findings` | Ops |
 
 A user session needs a recent sign-in for every write here (403
-`step_up_required` otherwise); API keys and access tokens do not. A manual grant
-with no end (no `hours` or `ends_at`) also needs
-`merchant:access:grant-permanent`, owner-level by default; `hours` is at most
-2562047.
+`step_up_required` otherwise); API keys and access tokens do not. A manual
+grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
+end.
 
 Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
@@ -284,11 +287,10 @@ grandfathered). A purchase under review is a finding
 resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
 and ends access, `ignore` keeps both.
 
-Granting credits is money-in and carries its own permission,
-`merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the
-fixed support role, unlike the entitlement/product-access grants (which ride
-`merchant:customer-settings:update`). The grant body's `source_id` is the
-caller's reproducible idempotency key: retrying it can never double-credit
+Granting credits is money-in: a host that keeps it from everyone who can grant
+access guards `openrails.Credits` (or `openrails.CreateCreditGrant`) with a
+stricter permission than `openrails.StaffWrites`. The grant body's `source_id`
+is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 
 ### The admin console

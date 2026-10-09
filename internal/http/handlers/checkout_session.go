@@ -53,7 +53,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 }
 
 // ServiceCreateCheckoutSession handles POST /v1/merchant/checkout-sessions:
-// the merchant hands a purchase to its customer.
+// the merchant's credential hands a purchase to its customer, who pays it.
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	var body billing.CreateCheckoutSessionParams
 	if !r.BindJSON(&body) {

@@ -18,8 +18,9 @@ var ErrUpdatesDisabled = apperr.New(http.StatusForbidden, "catalog_updates_disab
 
 // Exposure is whether catalog writes reach callers other than the process
 // owner: HTTP and delegated credentials. Mounting the merchant API decides it
-// (Routes.CatalogEdits); until then, and without that mount, only the owner
-// writes. The zero value is undecided and closed.
+// (Routes.MerchantConfig, unless Config.Catalog is the truth; on a standalone
+// server, a writable secret backend); until then, and without that mount,
+// only the owner writes. The zero value is undecided and closed.
 type Exposure struct {
 	mu      sync.Mutex
 	decided bool
@@ -35,7 +36,7 @@ func (e *Exposure) Decide(enabled bool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.decided && e.enabled != enabled {
-		return fmt.Errorf("openrails: the merchant API is already mounted with CatalogEdits %t; every mount must agree", e.enabled)
+		return fmt.Errorf("openrails: the merchant API is already mounted with catalog edits %t; every mount must agree on Routes.MerchantConfig", e.enabled)
 	}
 	e.decided, e.enabled = true, enabled
 	return nil

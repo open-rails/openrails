@@ -35,10 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type {
-  PSP,
-  RailDefinition,
-} from "@/lib/api/types"
+import type { PSP, RailDefinition } from "@/lib/api/types"
 import {
   amountFromInput,
   currencyScale,
@@ -52,6 +49,7 @@ import { toastApiError } from "@/lib/toast"
 import { PSPPublicationAttempts } from "@/lib/psp-publication"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
+import { settingsTab, useMerchantConfig } from "@/lib/capabilities"
 import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
 import { FederatedTeamTab } from "./federated-team"
@@ -64,7 +62,9 @@ export function SettingsPage() {
   // The tab lives in the URL so a settings page can be linked to, and so the
   // back button steps through tabs the way it looks like it should.
   const [params, setParams] = useSearchParams()
-  const tab = params.get("tab") || "merchant"
+  const config = useMerchantConfig()
+  const first = settingsTab(null, config)
+  const tab = settingsTab(params.get("tab"), config)
   const { federated } = useAuth()
 
   return (
@@ -72,7 +72,7 @@ export function SettingsPage() {
       value={tab}
       onValueChange={(next) => {
         const updated = new URLSearchParams(params)
-        if (!next || next === "merchant") updated.delete("tab")
+        if (!next || next === first) updated.delete("tab")
         else updated.set("tab", next)
         setParams(updated)
       }}
@@ -83,18 +83,24 @@ export function SettingsPage() {
           variant="line"
           className="w-max min-w-full justify-start gap-6 rounded-none p-0"
         >
-          <TabsTrigger value="merchant" className={LINE_TAB}>
-            Merchant
-          </TabsTrigger>
+          {config && (
+            <TabsTrigger value="merchant" className={LINE_TAB}>
+              Merchant
+            </TabsTrigger>
+          )}
           <TabsTrigger value="team" className={LINE_TAB}>
             Team
           </TabsTrigger>
-          <TabsTrigger value="notifications" className={LINE_TAB}>
-            Notifications
-          </TabsTrigger>
-          <TabsTrigger value="psps" className={LINE_TAB}>
-            PSPs
-          </TabsTrigger>
+          {config && (
+            <TabsTrigger value="notifications" className={LINE_TAB}>
+              Notifications
+            </TabsTrigger>
+          )}
+          {config && (
+            <TabsTrigger value="psps" className={LINE_TAB}>
+              PSPs
+            </TabsTrigger>
+          )}
           <TabsTrigger value="api-keys" className={LINE_TAB}>
             API keys
           </TabsTrigger>
@@ -103,18 +109,24 @@ export function SettingsPage() {
           </TabsTrigger>
         </TabsList>
       </div>
-      <TabsContent value="merchant">
-        <MerchantSettingsTab />
-      </TabsContent>
+      {config && (
+        <TabsContent value="merchant">
+          <MerchantSettingsTab />
+        </TabsContent>
+      )}
       <TabsContent value="team">
         {federated ? <FederatedTeamTab /> : <TeamTab />}
       </TabsContent>
-      <TabsContent value="notifications">
-        <NotificationsTab />
-      </TabsContent>
-      <TabsContent value="psps">
-        <PSPsTab />
-      </TabsContent>
+      {config && (
+        <TabsContent value="notifications">
+          <NotificationsTab />
+        </TabsContent>
+      )}
+      {config && (
+        <TabsContent value="psps">
+          <PSPsTab />
+        </TabsContent>
+      )}
       <TabsContent value="api-keys">
         <ApiKeysTab />
       </TabsContent>
@@ -133,7 +145,10 @@ function MerchantSettingsTab() {
     return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
     <div className="grid gap-10">
-      <MerchantProfileForm revision={data.revision} initial={data.settings.profile} />
+      <MerchantProfileForm
+        revision={data.revision}
+        initial={data.settings.profile}
+      />
       <RepriceNoticeWindowForm
         revision={data.revision}
         initial={data.settings.reprice_notice_window_days}
@@ -472,11 +487,14 @@ function PSPsTab() {
           <div className="grid gap-1">
             <h2 className="text-base font-semibold">PSPs</h2>
             <p className="text-sm text-muted-foreground">
-              The accounts this merchant takes payments through, one or more
-              per rail.
+              The accounts this merchant takes payments through, one or more per
+              rail.
             </p>
           </div>
-          <PSPDialog key={selectedMerchant() ?? ""} railDefinitions={railDefinitions} />
+          <PSPDialog
+            key={selectedMerchant() ?? ""}
+            railDefinitions={railDefinitions}
+          />
         </div>
         {!psps.data?.data?.length ? (
           <p className="py-2 text-sm text-muted-foreground">
@@ -501,7 +519,11 @@ function PSPsTab() {
             </TableHeader>
             <TableBody>
               {psps.data.data.map((psp) => (
-                <PSPRow key={psp.id} psp={psp} railDefinitions={railDefinitions} />
+                <PSPRow
+                  key={psp.id}
+                  psp={psp}
+                  railDefinitions={railDefinitions}
+                />
               ))}
             </TableBody>
           </Table>
@@ -614,7 +636,10 @@ function PSPRow({
                 try {
                   await archive(false)
                 } catch (err) {
-                  if (err instanceof ApiError && err.code === "psp_last_active") {
+                  if (
+                    err instanceof ApiError &&
+                    err.code === "psp_last_active"
+                  ) {
                     setConfirmLastOpen(true)
                     return
                   }
@@ -681,7 +706,8 @@ export function RotateCredentialsDialog({
           expected_revision: reviewedRevision.current,
           credentials: supplied,
         })
-        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this form")
+        if ((selectedMerchant() ?? "") !== merchant)
+          throw new Error("Merchant changed; reopen this form")
         await updatePSP.mutateAsync({ id: psp.id, psp: request })
         attempts.current.complete(request.operation_id)
         form.reset()
@@ -744,11 +770,7 @@ export function RotateCredentialsDialog({
                 {credentialKeys.map((name) => {
                   const current = psp.credentials[name]
                   return (
-                    <Field
-                      key={name}
-                      label={name}
-                      id={`rot-${psp.id}-${name}`}
-                    >
+                    <Field key={name} label={name} id={`rot-${psp.id}-${name}`}>
                       <Input
                         id={`rot-${psp.id}-${name}`}
                         type="password"
@@ -776,8 +798,9 @@ export function RotateCredentialsDialog({
                 })}
                 <p className="text-xs text-muted-foreground">
                   Once this succeeds, the new credential is used for the next
-                  charge and every one after it. Previous webhook signing secrets
-                  remain accepted while their required overlap is active.
+                  charge and every one after it. Previous webhook signing
+                  secrets remain accepted while their required overlap is
+                  active.
                 </p>
               </div>
             )}
@@ -862,11 +885,7 @@ function credentialLabel(name: string): string {
     .join(" ")
 }
 
-function PSPDialog({
-  railDefinitions,
-}: {
-  railDefinitions: RailDefinition[]
-}) {
+function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
   const [open, setOpen] = React.useState(false)
   const [merchant] = React.useState(() => selectedMerchant() ?? "")
   const attempts = React.useRef(new PSPPublicationAttempts())
@@ -890,16 +909,20 @@ function PSPDialog({
           account_id: value.accountID.trim(),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
-        if ((selectedMerchant() ?? "") !== merchant) throw new Error("Merchant changed; reopen this form")
+        if ((selectedMerchant() ?? "") !== merchant)
+          throw new Error("Merchant changed; reopen this form")
         await createPSP.mutateAsync(request)
         attempts.current.complete(request.operation_id)
         form.reset()
         toast.success("PSP added")
         setOpen(false)
       } catch (err) {
-        toastApiError(err, err instanceof ApiError && err.status === 409
-          ? "This account or key is already in use. Review the PSP list before submitting a new change."
-          : "Save outcome unconfirmed. Retry the same submission to recover its result.")
+        toastApiError(
+          err,
+          err instanceof ApiError && err.status === 409
+            ? "This account or key is already in use. Review the PSP list before submitting a new change."
+            : "Save outcome unconfirmed. Retry the same submission to recover its result."
+        )
       } finally {
         createPSP.reset()
       }
@@ -965,7 +988,10 @@ function PSPDialog({
                     </SelectTrigger>
                     <SelectContent>
                       {railDefinitions.map((definition) => (
-                        <SelectItem key={definition.rail} value={definition.rail}>
+                        <SelectItem
+                          key={definition.rail}
+                          value={definition.rail}
+                        >
                           {railProviderLabel(
                             definition.rail,
                             definition.display_name
@@ -1096,7 +1122,11 @@ function PSPDialog({
                   <Button
                     type="submit"
                     disabled={
-                      !rail || !key.trim() || !accountID.trim() || !canSubmit || isSubmitting
+                      !rail ||
+                      !key.trim() ||
+                      !accountID.trim() ||
+                      !canSubmit ||
+                      isSubmitting
                     }
                   >
                     {isSubmitting ? "Saving…" : "Add PSP"}

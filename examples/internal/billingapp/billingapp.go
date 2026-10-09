@@ -16,18 +16,16 @@ import (
 )
 
 // Inputs are facts established by merchant setup or earlier customer activity:
-// an armed checkout price and saved method, an existing subscriber and a closed invoice.
+// an armed checkout price, an existing subscriber and a closed invoice.
 type Inputs struct {
-	Currency                string
-	Run                     string
-	CheckoutProductKey      string
-	CheckoutPriceKey        string
-	CheckoutRail            string
-	CheckoutCustomerID      billing.CustomerID
-	CheckoutPaymentMethodID billing.PaymentMethodID
-	SubscriberID            billing.CustomerID
-	SubscriptionID          billing.SubscriptionID
-	InvoiceID               uuid.UUID
+	Currency           string
+	Run                string
+	CheckoutProductKey string
+	CheckoutPriceKey   string
+	CheckoutCustomerID billing.CustomerID
+	SubscriberID       billing.CustomerID
+	SubscriptionID     billing.SubscriptionID
+	InvoiceID          uuid.UUID
 }
 
 // Report is what the application observed. Identifiers created per run are
@@ -43,8 +41,7 @@ type Report struct {
 	Balance             int64
 	UsageEvents         int64
 	CheckoutRails       int
-	CheckoutReplayed    bool
-	CheckoutAmount      int64
+	CheckoutSession     bool
 	SubscriptionStatus  string
 	CancelScheduled     bool
 	Resumed             bool
@@ -155,31 +152,17 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
 	r.CheckoutRails = len(checkoutConfig.Options)
-	buyer := in.CheckoutCustomerID
-	request := billing.CreateCheckoutAttemptParams{
-		Customer:       billing.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
-		ProductKey:     in.CheckoutProductKey,
-		PriceKey:       in.CheckoutPriceKey,
-		IdempotencyKey: in.Run + ":checkout",
-		PaymentOptions: billing.CheckoutPaymentOptions{PSP: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID, BillingDetails: &billing.BillingDetails{Name: new("Example Buyer"), Address: &billing.BillingAddress{PostalCode: new("90210"), Country: new("US")}}},
-	}
-	session, err := client.CreateCheckoutAttempt(ctx, request)
+	// The buyer pays the session on the payment page; a saved card needs the
+	// buyer's own proof there.
+	link, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
+		Customer:   billing.CheckoutCustomerIdentity{ID: in.CheckoutCustomerID, VerifiedEmail: "buyer@example.test"},
+		ProductKey: in.CheckoutProductKey,
+		PriceKey:   in.CheckoutPriceKey,
+	})
 	if err != nil {
-		return r, fmt.Errorf("create checkout: %w", err)
+		return r, fmt.Errorf("create checkout session: %w", err)
 	}
-	replayed, err := client.CreateCheckoutAttempt(ctx, request)
-	if err != nil {
-		return r, fmt.Errorf("replay checkout: %w", err)
-	}
-	read, err := client.GetCheckoutAttempt(ctx, session.ID)
-	if err != nil {
-		return r, fmt.Errorf("read checkout: %w", err)
-	}
-	r.CheckoutReplayed = replayed.ID == session.ID && read.ID == session.ID
-	if read.Amount == nil {
-		return r, fmt.Errorf("priced checkout returned no amount")
-	}
-	r.CheckoutAmount = *read.Amount
+	r.CheckoutSession = link.ID != ""
 
 	if _, err := client.CancelSubscription(ctx, in.SubscriptionID, billing.CancelSubscriptionParams{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)

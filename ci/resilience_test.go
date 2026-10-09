@@ -90,7 +90,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 	}
 	cfg := f.config()
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
-	cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: b.vault.URL(), Token: b.vault.Token}
+	cfg.Vault = &openrails.VaultConfig{Address: b.vault.URL(), Token: b.vault.Token}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
@@ -146,7 +146,7 @@ func solanaCheckoutStatus(t *testing.T, client *openrails.Client, recurring bool
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		ProductKey:     product.Key,
 		PriceKey:       price.Key,
@@ -176,7 +176,7 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+	session, err := createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"},
 		ProductKey:     product.Key,
 		PriceKey:       price.Key,

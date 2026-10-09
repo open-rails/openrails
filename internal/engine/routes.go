@@ -20,7 +20,7 @@ import (
 // router, and fails before anything mounts when a selected group lacks the
 // Auth it needs: nothing is ever mounted open. It is sel's groups under
 // sel.Prefix, and the admin console at its own path. Every mount of the
-// merchant API in one process must agree on CatalogEdits. A standalone
+// merchant API in one process must agree on MerchantConfig. A standalone
 // server's engine refuses: its surface is the server's.
 func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err error) {
 	e.mu.Lock()
@@ -100,8 +100,10 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err
 	}
-	if sel.Merchant {
-		if err := a.Runtime.CatalogEdits.Decide(sel.CatalogEdits); err != nil {
+	if sel.Merchant || sel.MerchantConfig {
+		// Catalog edits reach staff when the configuration routes are mounted
+		// and the host's catalog document is not the truth.
+		if err := a.Runtime.CatalogEdits.Decide(sel.MerchantConfig && a.Config.Catalog == nil); err != nil {
 			return nil, err
 		}
 	}
@@ -113,8 +115,9 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 // WARN, since it moves money.
 func logMount(sel config.Routes, routes int) {
 	fields := log.Fields{"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth), "storefront": sel.Storefront, "customers": sel.Customers != config.CustomersNone, "customer_profiles": len(sel.CustomerProfiles)}
-	if sel.Merchant {
-		log.WithFields(fields).Warn("openrails: merchant API mounted; Auth.RequirePermission gates each route")
+	if sel.Merchant || sel.MerchantConfig {
+		fields["merchant_config"] = sel.MerchantConfig
+		log.WithFields(fields).Warn("openrails: merchant API mounted; Auth.RequirePermission gates each route with its guard")
 		return
 	}
 	log.WithFields(fields).Info("openrails: routes mounted")

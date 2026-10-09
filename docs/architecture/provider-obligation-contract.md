@@ -11,16 +11,19 @@ Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
 error classes; the embedded Client dispatches to the same handlers.
 
-| Command | Route | Permission |
+| Command | Route | Level group |
 |---|---|---|
-| `OpenOperationAuthorization` | `POST /v1/merchant/provider-operations` | `merchant:admissions:create` |
-| `GetOperationAuthorization` | `GET /v1/merchant/provider-operations/{operation_id}` | `merchant:usage:read` |
-| `ExtendOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/extend` | `merchant:admissions:create` |
-| `ReleaseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` |
-| `RecordProviderBillingObservation` | `POST /v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` |
-| `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` |
-| `ListProviderBillingQualifications` | `GET /v1/merchant/provider-qualifications` | `merchant:usage:read` |
-| `ResolveProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/resolution` | `merchant:admissions:create` |
+| `OpenOperationAuthorization` | `POST /v1/merchant/provider-operations` | `openrails.StaffWrites` |
+| `GetOperationAuthorization` | `GET /v1/merchant/provider-operations/{operation_id}` | `openrails.StaffReads` |
+| `ExtendOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/extend` | `openrails.StaffWrites` |
+| `ReleaseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/release` | `openrails.StaffWrites` |
+| `RecordProviderBillingObservation` | `POST /v1/merchant/provider-operations/{operation_id}/observations` | `openrails.StaffWrites` |
+| `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `openrails.StaffReads` |
+| `ListProviderBillingQualifications` | `GET /v1/merchant/provider-qualifications` | `openrails.StaffReads` |
+| `ResolveProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/resolution` | `openrails.StaffWrites` |
+
+All eight are in the `openrails.Usage` resource group, which a guard may cover
+instead.
 
 An authorization binds an immutable operation id, customer, record owner, claim
 reference, the exact body bytes with their SHA-256, and an `amount` in `USD`.

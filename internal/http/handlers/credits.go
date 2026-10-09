@@ -35,10 +35,10 @@ func serviceCustomerScopeAllows(r *httprequest.Request, _ billing.CustomerID) bo
 	return ok
 }
 
-// StaffCan asks the route's staff gate one more permission on the merchant
-// it already authorized; nil grants it. A handler whose answer depends on it
-// (a permanent grant, which invoice actions to offer) takes one.
-type StaffCan func(r *http.Request, permission string) error
+// StaffCan asks whether the caller would pass the guard of another staff
+// route (its key), on the merchant the route already authorized; nil is yes.
+// A handler that offers actions (an invoice's) takes one.
+type StaffCan func(r *http.Request, routeKey string) error
 
 // requireMerchantRoutePrincipal is a merchant handler's own check that the
 // staff gate authorized the request.

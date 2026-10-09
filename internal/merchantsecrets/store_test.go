@@ -85,7 +85,7 @@ func TestBuildGuardsAndDefaults(t *testing.T) {
 	_, err = BuildManifest(ctx, nil, nil, nil)
 	require.ErrorContains(t, err, "credential config is required")
 
-	for _, cfg := range []*config.Config{nil, {}, {Vault: &config.VaultConfig{Enabled: false, Token: "t"}}} {
+	for _, cfg := range []*config.Config{nil, {}, {SecretBackend: config.SecretBackendDB}} {
 		s, err := BuildTransit(ctx, cfg)
 		require.NoError(t, err)
 		require.Nil(t, s.SolanaTransit, "disabled vault opens no transit client")

@@ -24,9 +24,12 @@ Before the code:
 
 | Before | After |
 |---|---|
-| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Merchant` mounts the one merchant group; each route's permission gates it |
-| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Prefix`, `Storefront`, `Customers`, `CustomerProfiles`, `Merchant`, `CatalogEdits`, `CookieOrigin`, `AdminConsole`. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Merchant` mounts staff work on customers, `Routes.MerchantConfig` the merchant's own configuration (catalog writes included); `Routes.Guards` names your permission for each |
+| `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Guard its staff routes with your own in `Routes.Guards` (`openrails.StaffReads`, `openrails.StaffWrites`, `openrails.MerchantConfig`, a resource group or one route); AuthKit checks a `root:` permission on root with no configuration |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Prefix`, `Storefront`, `Customers`, `CustomerProfiles`, `Merchant`, `MerchantConfig`, `Guards`, `CookieOrigin`, `AdminConsole`. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
+| `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
+| `catalog_edits` (env `CATALOG_EDITS`) on the standalone server | Removed: catalog edits over HTTP follow `secret_backend` (`vault` or `db`: on; `snapshot`: read-only), and `catalog_edits` refuses boot |
 | `Config.Schema`, `Config.RiverSchema` | `Config.Database` (`openrails.DatabaseConfig`) with `Schema` and `RiverSchema`; in `config.yaml`, `database.schema` and `database.river_schema` (env `DATABASE_SCHEMA`, `DATABASE_RIVER_SCHEMA`) |
 | `Config.River` (`RiverManaged`, `RiverHostOwned`) | `New` always creates River's tables in `Config.Database.RiverSchema` (default: the schema plus `_river`). `client.Start(ctx)` runs OpenRails' own River there; `client.Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with `client.RiverJobs()` in that schema. `New` starts nothing |
 | `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
@@ -56,8 +59,8 @@ Before the code:
 |---|---|
 | `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `checkout`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
 | `GET /`, `/healthz`, `/readyz`, `/health/ready?verbose=1`, 503 `not_ready` | `/health/live` and `/health/ready`; a failed readiness check is 503 `service_unavailable` and the failing dependency is logged, not answered |
-| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/capabilities` lists the groups `checkout`, `customer`, `merchant`, `webhooks` |
-| Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | `merchant:psps:read`, `merchant:psps:update` |
+| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/capabilities` lists the groups `checkout`, `customer`, `merchant`, `merchant_config`, `webhooks` |
+| Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are `Routes.MerchantConfig`'s, behind your guard (`openrails.PSPs` or `openrails.MerchantConfig`) |
 | CLI flag `--provider-account` | `--psp` |
 
 ## 2. YAML manifests
@@ -173,7 +176,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Before | After |
 |---|---|
 | `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `ProductKey` + `PriceKey`, `AutoRenew`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
-| `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | `client.CreateCheckoutAttempt(` (creating it accepts the terms), `client.GetCheckoutAttempt(`, `client.ConfirmCheckoutAttempt(` (Solana) |
+| `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | Removed: the customer pays a checkout session (`POST /v1/checkout-sessions/{id}/pay`) they minted themselves or `client.CreateCheckoutSession(` minted for them |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
 | `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey`; `GetCheckoutConfig(ctx)` | `client.GetCheckoutConfig(` with `billing.GetCheckoutConfigParams`; a price in the query fills `options` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
@@ -242,7 +245,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical entries of `client.ListMerchantNotifications(` |
 | `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
-| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | `merchant:operations:read` gates the inbox, findings and worker health |
+| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox, findings and worker health are staff reads (`openrails.Operations`, `openrails.Findings`) |
 | Permissions `merchant:catalog:read-own`, `merchant:catalog:update-own`; the control plane's `creator` role | Removed with creator-owned catalogs; a teammate or API key holds `viewer`, `support` or `owner` |
 
 ## 4. HTTP routes and shapes
@@ -284,7 +287,7 @@ fields (`400 unknown_field`), and every error code is in
 |---|---|
 | `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`), `/v1/merchant/psps/{id}/archive`, `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; `/v1/merchant/rails` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/merchant/checkout-sessions`, `POST /v1/me/checkout-sessions` |
-| `/v1/merchant/checkout-sessions…` (engine checkout) | `/v1/merchant/checkout-attempts`, `/v1/merchant/checkout-attempts/{id}`, `/v1/merchant/checkout-attempts/{id}/confirm` |
+| `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`, `/v1/merchant/customers/{customer_id}/credit-limit`, `/v1/merchant/customers/{customer_id}/trust-level` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/transactions` |
@@ -308,10 +311,9 @@ fields (`400 unknown_field`), and every error code is in
 
 ### Shapes
 
-- **Checkout payment.** A merchant checkout attempt names its PSP as
-  `payment.psp` (the PSP key; `payment.rail` is gone and a rail kind is
-  refused), and a checkout option carries `psp` in place of `selector`. Billing
-  details are one object on the session pay body, the attempt and a card save:
+- **Checkout payment.** A checkout option carries `psp` (the PSP key) in place
+  of `selector`; `payment.rail` is gone. Billing details are one object on the
+  session pay body and a card save:
   `billing_details` with `name`, `email`, `phone` and `address` (`line1`,
   `line2`, `city`, `state`, `postal_code`, `country`). The flat `name_on_card`,
   `address1`, `zip`, `last_four`, `card_type` and `expiry_date` are gone.
@@ -479,7 +481,7 @@ Catalog documents carry `schema_version` and their changes. Remove `application_
 `expected_revision`, and `catalog_version`: the server remembers the canonical
 content hash per merchant. Replays remain no-ops after later edits. A new hash
 applies atomically; hashes do not determine which unseen batch is newer.
-`Routes.CatalogEdits` controls HTTP catalog-write route exposure only; authorized
+`Routes.MerchantConfig` controls HTTP catalog-write route exposure only; authorized
 in-process client calls always work. `Config.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 

@@ -86,8 +86,11 @@ openrails run-server --config /etc/openrails/config.yaml \
 ### Credential custody and configuration publication
 
 Merchant metadata lives in PostgreSQL. `secret_backend` selects snapshot, Vault
-or encrypted DB credential custody. The configuration routes are part of the
-merchant API, each gated by its permission; credential mutation additionally
+or encrypted DB credential custody. The server mounts the merchant API and the
+merchant's configuration, guarded by its merchant persona's permissions:
+`server.MerchantRead` for reads, `server.MerchantWrite` for actions on
+customers, `server.MerchantAdmin` for the configuration (PSPs, settings,
+catalog edits, billing import and export). Credential mutation additionally
 requires a writable backend.
 
 Startup initializes missing identities and metadata and reloads snapshot values.
@@ -95,9 +98,11 @@ It preserves subsequent API edits and archived providers. Explicit metadata
 applications carry a stable ID and revision precondition; managed credentials use
 separate publication operations. See [metadata applications](merchant-configuration-applications.md).
 
-Catalogs always use database state. `catalog_edits` independently controls
-catalog mutations over HTTP (the remote Client included) and defaults to false in both credential
-modes. Disabled mutations are absent from the route bundle; reads remain available.
+Catalogs always use database state. Catalog mutations over HTTP (the remote
+Client included) follow the merchant's source: with `secret_backend: vault` or
+`db` (managed through the API) they are allowed; with `snapshot` (the files are
+the truth) they are refused read-only (`403 catalog_updates_disabled`). Reads
+remain available.
 Trusted operator application is still permitted and uses durable application IDs
 so an unchanged artifact does not overwrite later edits. This does not change
 provider permissions, sandbox/live posture, or `provider_write_mode`.
@@ -144,8 +149,10 @@ Use metadata applications for deliberate versioned configuration changes.
 POST /v1/merchant/api-keys   {"name": "backend", "role": "owner"}
 ```
 
-Roles are fixed: `viewer` (read-only — right for LLM agents), `support`,
-`owner`. Requires `merchant:credentials:manage` (owner-only), so authenticate
+Roles are fixed: `viewer` (reads, `server.MerchantRead` — right for LLM agents),
+`support` (also acts on customers, `server.MerchantWrite`), `owner` (also the
+merchant's configuration, `server.MerchantAdmin`). Minting needs AuthKit's
+credentials-manage permission on the merchant (owner-only), so authenticate
 the mint with an access token from the issuer you registered in step 2
 (issuer-as-owner: its tokens administer exactly that one merchant), an
 operator session from the bootstrap user, or the admin console
@@ -232,8 +239,8 @@ curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \
 ```
 
 The `/v1/merchant/*` surface (admissions, credits, entitlements, usage,
-settings, customers, payments, subscriptions) is permission-gated per route —
-see [api/routes.md](api/routes.md) for every route with its permission and
+settings, customers, payments, subscriptions) is gated per route by its guard —
+see [api/routes.md](api/routes.md) for every route with its guards and
 [api/endpoints.md](api/endpoints.md) for the conventions. Keys are bound to their merchant and can never act on
 another merchant's data.
 
@@ -310,8 +317,7 @@ These tokens, merchant API keys and the control plane's own sessions answer the
 same `openrails.Auth` contract an embedded host implements, through the same
 route gate: a token's `sub` is the subject (a user), and its invoker; a client
 acting for itself and an API key are an application subject. Customer routes
-take the customer only from the subject, and `merchant:checkout:create` is
-refused to a user acting in person. A trusted issuer's user token is vouched
+take the customer only from the subject. A trusted issuer's user token is vouched
 for by its issuer: the standalone server asks it for no recent sign-in.
 
 ### Webhooks
@@ -378,7 +384,7 @@ each acts for.
 | `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
 | `MerchantCreation` | Lets signed-in users create merchants: reserved names, a pattern and a free allowance. |
 | `ResourceServer` | The trusted issuers whose access tokens the merchant API accepts (above). |
-| `CatalogEdits`, `AdminConsole`, `ConsoleIssuer` | The catalog-write routes and the admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
+| `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
 | `Addr` | Where `Run` listens; default `:3053`. |
 
 `server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's

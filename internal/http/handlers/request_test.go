@@ -32,24 +32,6 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// A checkout attempt sells a price: an operation selector is an unknown
-// field, and a malformed saved method is refused before any service runs.
-func TestPricedCheckoutRejectsBeforeEngine(t *testing.T) {
-	for _, tc := range []struct{ body, want string }{
-		{`{"mode":"one_off"}`, billing.CodeUnknownField},
-		{`{"subscription_id":"x"}`, billing.CodeUnknownField},
-		{`{"new_price_id":"x"}`, billing.CodeUnknownField},
-		{`{"payment":{"card":{"number":"4111111111111111"}}}`, billing.CodeUnknownField},
-		{`{"payment":{"payment_method_id":"550e8400-e29b-41d4-a716-446655440000"}}`, billing.CodeInvalidParam},
-		{`{"payment":{"payment_method_id":"price_550e8400-e29b-41d4-a716-446655440000"}}`, billing.CodeInvalidParam},
-	} {
-		r, rec := newTestRequest(http.MethodPost, "/v1/merchant/checkout-attempts", strings.NewReader(tc.body), nil)
-		ServiceCreateCheckoutAttempt(r)
-		require.Equal(t, http.StatusBadRequest, rec.Code, tc.body)
-		require.Contains(t, rec.Body.String(), tc.want)
-	}
-}
-
 // A payment action is the admitted customer's own, from the route gate's
 // scope only.
 func TestCustomerActionRequiresTheAdmittedCustomer(t *testing.T) {

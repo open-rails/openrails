@@ -1,64 +1,47 @@
 # Checkout
 
-A browser buys only through a **checkout session** (`ocs_`): the signed-in
-customer or the merchant's server mints one, and the payment page reads and pays
-it by its id. A **checkout attempt** (`chk_`) is one charge of one price on one
-PSP. Each pay on a session creates one; merchant automation creates them
-directly.
+A browser buys only through a **checkout session** (`ocs_`), and the payment
+page reads and pays it by its id. The customer usually mints their own with
+their own credential (`POST /v1/me/checkout-sessions`, billing-ui); the merchant
+may mint one for them with the merchant's credential (`CreateCheckoutSession`).
+Either way only the customer pays it, and a saved card needs the customer's own
+proof. A **checkout attempt** (`chk_`) is one charge of one price on one PSP;
+each pay on a session creates one.
 
 ## Merchant client
 
-These operations run through the same merchant-authenticated handlers in the
-embedded and remote clients:
+These operations run through the same merchant routes in the embedded and
+remote clients, each behind the host's guard for it (`Routes.Guards`):
 
-| Client method | HTTP operation | Required permission |
+| Client method | HTTP operation | Guards |
 | --- | --- | --- |
-| CreateCheckoutSession | POST /v1/merchant/checkout-sessions | merchant:checkout:create |
-| CreateCheckoutAttempt | POST /v1/merchant/checkout-attempts | merchant:checkout:create |
-| GetCheckoutAttempt | GET /v1/merchant/checkout-attempts/{id} | merchant:customer-settings:read |
-| ConfirmCheckoutAttempt | POST /v1/merchant/checkout-attempts/{id}/confirm | merchant:checkout:create |
-| GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|product_key=…&price_key=… | merchant:customer-settings:read |
+| CreateCheckoutSession | POST /v1/merchant/checkout-sessions | `openrails.CreateCheckoutSession`, `CheckoutSessions`, `StaffWrites` |
+| GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|product_key=…&price_key=… | `openrails.GetCheckoutConfig`, `Checkout`, `StaffReads` |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
-host assertions made under merchant checkout authority.
-
-`merchant:checkout:create` is machine-only (`openrails.MachinePermissions()`):
-staff never start a purchase for someone else. Over HTTP OpenRails refuses it
-to a user acting in person (`403 permission_required`) whatever the host's
-roles grant, an owner's `merchant:*` included; an application, or a user's own
-API key automating the account, may hold it. Editing a customer profile does
-not grant it, and the attempt routes enforce ownership of the addressed
-attempt.
+host assertions made with the merchant's credential.
 
 `CreateCheckoutSession` hands a price to a customer's browser: the answer is the
 session id and, when `Config.Checkout.PageURL` is set, the payment page URL.
+Whoever mints it, the customer pays it: a saved method (`payment_method_id`) is
+refused with `403 customer_proof_required` unless the customer presents their
+own credential on the pay.
 
-`CreateCheckoutAttempt` charges now, on the customer's behalf: the host relays
-the customer's pay click, and creating the attempt accepts the price's terms.
-`IdempotencyKey` (sent as `Idempotency-Key`) is required; an identical retry
-returns the same attempt. Pay with an NMI `payment_token` (saved as the
-customer's card) or Solana (`token_symbol` and `flow`: `transfer_request` or
-`transaction_request`). A saved method (`payment_method_id`) is the customer's
-to spend: over HTTP it is refused with `403 customer_proof_required`, and the
-merchant mints a checkout session the customer pays, signed in, instead. The
-embedding host's own Go client, acting while its customer is signed in to it,
-may still charge one. A Client
-never carries a card number; cards are entered on a checkout session. The
-answer's `status` is `succeeded`, `failed` (with `failure`), `processing` (read
-it again) or `requires_action` with a `next_action`:
+`GetCheckoutConfig` with a price lists the `options` that can sell it, in
+routing order; options report local readiness and never probe a gateway.
+
+A pay answers `status` `succeeded`, `failed` (with `failure`), `processing`
+(read it again) or `requires_action` with a `next_action`:
 
 | `next_action.type` | The buyer |
 | --- | --- |
 | `redirect_to_url` | opens `url` (a Stripe or CCBill page) in the top window; it returns to `success_url` |
 | `solana_pay` | scans or opens `url`, a `solana:` Solana Pay link |
-| `solana_sign_transactions` | signs and sends `transactions` in order; confirm the attempt with each signature |
 
 A card that needs 3-D Secure carries `operation` instead. A declined card leaves
 no subscription and no saved card. A provider refusal is a coded 402/502 (see
 [errors](errors.md#payment-refusals)); the attempt is recorded as failed and a
-new one may be made with another instrument. `GetCheckoutConfig` with a price
-lists the `options` that can sell it, in routing order; options report local
-readiness and never probe a gateway.
+new one may be made with another instrument.
 
 Amounts use native currency units (micros for fiat) as decimal strings in JSON
 and `int64` in Go. `created_at`/`expires_at` are RFC3339 instants
@@ -81,8 +64,8 @@ database share it, so one of them can serve the payment page for all.
 | POST | `/v1/checkout-sessions/{id}/pay` | the id (a saved card: and its customer) | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
 | GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
-| GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind a merchant attempt's `solana_pay` link (`flow: transaction_request`) |
-| POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Mint for a customer server-side (`Client.CreateCheckoutSession`) |
+| GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link (`flow: transaction_request`) |
+| POST | `/v1/merchant/checkout-sessions` | the merchant's credential, its guard | Mint for a customer (`Client.CreateCheckoutSession`) |
 
 - A host whose customer surface defines who the customer is (its own
   `CustomerRoutes` with an `Auth` that maps the signed-in user) has the

@@ -67,7 +67,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Merchant: true})
+		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Merchant: true, MerchantConfig: true, Guards: staffGuards})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {

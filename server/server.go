@@ -113,8 +113,6 @@ type Config struct {
 	// without the server holding their accounts. Nil accepts none.
 	ResourceServer *ResourceServerConfig
 
-	// CatalogEdits mounts the merchant API's catalog-write routes.
-	CatalogEdits bool
 	// AdminConsole serves the merchant admin console; nil serves none. Its
 	// AuthBaseURL defaults to this server's AuthKit with LocalSignIn.
 	AdminConsole *openrails.AdminConsole
@@ -241,7 +239,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return fail(err)
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		CatalogEdits: cfg.CatalogEdits, AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer,
+		AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer,
 		ResourceServer: cfg.ResourceServer, Issuer: cfg.Auth.Issuer,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))

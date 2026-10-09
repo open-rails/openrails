@@ -25,11 +25,12 @@ var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$
 
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
-	Merchant:     {"/v1/merchant/"},
-	Customer:     {"/v1/me/"},
-	ControlPlane: {"/v1/merchant/", "/v1/merchants"},
-	Platform:     {"/v1/platform/"},
-	Webhooks:     {"/v1/webhooks/"},
+	Merchant:       {"/v1/merchant/"},
+	MerchantConfig: {"/v1/merchant/"},
+	Customer:       {"/v1/me/"},
+	ControlPlane:   {"/v1/merchant/", "/v1/merchants"},
+	Platform:       {"/v1/platform/"},
+	Webhooks:       {"/v1/webhooks/"},
 }
 
 // pathParams are the names a path parameter takes: a resource's own id is
@@ -46,7 +47,7 @@ var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "Me
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 228)
+	require.Len(t, Catalog(), 225)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -59,16 +60,15 @@ func TestCatalogDeclarations(t *testing.T) {
 		for _, param := range pathParam.FindAllStringSubmatch(r.Path, -1) {
 			require.Contains(t, pathParams, param[1], "%s: name the path parameter {id}, or add what it is to pathParams", key)
 		}
-		switch r.Auth {
-		case AuthMerchant:
-			require.True(t, strings.HasPrefix(r.Perm, "merchant:"), "%s: a merchant route checks a merchant: permission, not %q", key, r.Perm)
-		case AuthOperator:
+		switch {
+		case r.Staff():
+			require.Empty(t, r.Perm, "%s: a staff route checks its guard", key)
+		case r.Auth == AuthMerchant:
+			require.True(t, strings.HasPrefix(r.Perm, "merchant:"), "%s: a control-plane route checks the server's merchant: permission, not %q", key, r.Perm)
+		case r.Auth == AuthOperator:
 			require.True(t, strings.HasPrefix(r.Perm, "root:"), "%s: %q", key, r.Perm)
 		default:
 			require.Empty(t, r.Perm, "%s: tier %s checks no permission", key, r.Auth)
-		}
-		if r.Also != "" {
-			require.Equal(t, AuthMerchant, r.Auth, key)
 		}
 		if r.Limit != "" {
 			require.Equal(t, AuthMerchant, r.Auth, "%s: the operation limiter keys the authorized principal", key)
@@ -129,7 +129,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, CatalogWrites: true, External: External{
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Guard: levelGuard(t), External: External{
 		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
@@ -140,7 +140,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 
 	RegisterMetaRoutes(at(""), opts)
 	RegisterUserRoutes(at("/v1"), rt, opts)
-	RegisterMerchantRoutes(at("/v1"), rt, opts)
+	RegisterMerchantRoutes(at("/v1"), rt, opts, Merchant, MerchantConfig)
 	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
 	RegisterSelfServiceRoutes(at("/v1/me"), rt, customers)
@@ -192,8 +192,8 @@ func sorted(list []string) []string {
 	return out
 }
 
-// A route without its handler or its feature is not mounted, and a catalog
-// write is mounted only where the deployment allows it.
+// A route without its handler or its feature is not mounted, and a staff
+// route only with its group.
 func TestMountHonorsConfiguration(t *testing.T) {
 	seen := map[string]int{}
 	RegisterMetaRoutes(recorder{seen: seen}, Options{External: External{Capabilities: http.NotFoundHandler()}})
@@ -206,13 +206,15 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.NotContains(t, seen, "GET /v1/captcha/status")
 	require.Contains(t, seen, "GET /v1/products")
 
-	closed, open := map[string]int{}, map[string]int{}
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}})
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, CatalogWrites: true})
-	require.NotContains(t, closed, "POST /v1/merchant/catalog/products")
-	require.Contains(t, closed, "GET /v1/merchant/catalog/products")
-	require.Contains(t, closed, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")
-	require.Contains(t, open, "POST /v1/merchant/catalog/products")
+	staff, configuration := map[string]int{}, map[string]int{}
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: staff}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, Merchant)
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: configuration}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, MerchantConfig)
+	require.NotContains(t, staff, "POST /v1/merchant/catalog/products")
+	require.Contains(t, staff, "GET /v1/merchant/catalog/products")
+	require.Contains(t, staff, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")
+	require.Contains(t, configuration, "POST /v1/merchant/catalog/products")
+	require.NotContains(t, configuration, "GET /v1/merchant/catalog/products")
+	require.Contains(t, configuration, "GET /v1/merchant/psps", "a configuration read is MerchantConfig's")
 }
 
 // A declared integer query parameter that is not a non-negative integer is

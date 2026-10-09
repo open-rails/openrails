@@ -1,6 +1,9 @@
 {
   "go_api": {
     ".": [
+      "const (\n\tAccess RouteSet = \"resource:access\"\n\n\tBillingData RouteSet = \"resource:billing_data\"\n\n\tCatalog RouteSet = \"resource:catalog\"\n\n\tCheckout RouteSet = \"resource:checkout\"\n\n\tCheckoutSessions RouteSet = \"resource:checkout_sessions\"\n\n\tCredits RouteSet = \"resource:credits\"\n\n\tCustomers RouteSet = \"resource:customers\"\n\n\tDashboard RouteSet = \"resource:dashboard\"\n\n\tFindings RouteSet = \"resource:findings\"\n\n\tHostEvents RouteSet = \"resource:host_events\"\n\n\tInvoices RouteSet = \"resource:invoices\"\n\n\tMetrics RouteSet = \"resource:metrics\"\n\n\tOperations RouteSet = \"resource:operations\"\n\n\tPSPs RouteSet = \"resource:psps\"\n\n\tPayments RouteSet = \"resource:payments\"\n\n\tRefunds RouteSet = \"resource:refunds\"\n\n\tSettings RouteSet = \"resource:settings\"\n\n\tSubscriptions RouteSet = \"resource:subscriptions\"\n\n\tUsage RouteSet = \"resource:usage\"\n)",
+      "const (\n\tAcknowledgeHostEvents RouteSet = \"route:AcknowledgeHostEvents\"\n\n\tAdmit RouteSet = \"route:Admit\"\n\n\tApplyCatalog RouteSet = \"route:ApplyCatalog\"\n\n\tApplyMerchantConfiguration RouteSet = \"route:ApplyMerchantConfiguration\"\n\n\tArchivePSP RouteSet = \"route:ArchivePSP\"\n\n\tArchiveProduct RouteSet = \"route:ArchiveProduct\"\n\n\tAskCatalog RouteSet = \"route:AskCatalog\"\n\n\tAskMetrics RouteSet = \"route:AskMetrics\"\n\n\tCancelReprice RouteSet = \"route:CancelReprice\"\n\n\tCancelRepriceBatch RouteSet = \"route:CancelRepriceBatch\"\n\n\tCancelSubscription RouteSet = \"route:CancelSubscription\"\n\n\tCaptureAdmission RouteSet = \"route:CaptureAdmission\"\n\n\tChangeTier RouteSet = \"route:ChangeTier\"\n\n\tCheckEntitlements RouteSet = \"route:CheckEntitlements\"\n\n\tCheckProductAccess RouteSet = \"route:CheckProductAccess\"\n\n\tCreateAlertWebhook RouteSet = \"route:CreateAlertWebhook\"\n\n\tCreateCheckoutSession RouteSet = \"route:CreateCheckoutSession\"\n\n\tCreateCreditGrant RouteSet = \"route:CreateCreditGrant\"\n\n\tCreateInvoicePayment RouteSet = \"route:CreateInvoicePayment\"\n\n\tCreateOffChannelPayment RouteSet = \"route:CreateOffChannelPayment\"\n\n\tCreatePSP RouteSet = \"route:CreatePSP\"\n\n\tCreatePlanMigration RouteSet = \"route:CreatePlanMigration\"\n\n\tCreatePrice RouteSet = \"route:CreatePrice\"\n\n\tCreateProduct RouteSet = \"route:CreateProduct\"\n\n\tCreateProductAccess RouteSet = \"route:CreateProductAccess\"\n\n\tCreateRepriceBatch RouteSet = \"route:CreateRepriceBatch\"\n\n\tDeleteAlertWebhook RouteSet = \"route:DeleteAlertWebhook\"\n\n\tDeleteMeterRateCard RouteSet = \"route:DeleteMeterRateCard\"\n\n\tDeletePaymentMethod RouteSet = \"route:DeletePaymentMethod\"\n\n\tDeleteProductAccess RouteSet = \"route:DeleteProductAccess\"\n\n\tDeleteRateOverride RouteSet = \"route:DeleteRateOverride\"\n\n\tDeleteSpendDelegation RouteSet = \"route:DeleteSpendDelegation\"\n\n\tEnsureCustomers RouteSet = \"route:EnsureCustomers\"\n\n\tEnsureProduct RouteSet = \"route:EnsureProduct\"\n\n\tExportBillingArchive RouteSet = \"route:ExportBillingArchive\"\n\n\tExtendAdmission RouteSet = \"route:ExtendAdmission\"\n\n\tExtendOperationAuthorization RouteSet = \"route:ExtendOperationAuthorization\"\n\n\tGenerateDashboardWidget RouteSet = \"route:GenerateDashboardWidget\"\n\n\tGetAPIHost RouteSet = \"route:GetAPIHost\"\n\n\tGetAdmission RouteSet = \"route:GetAdmission\"\n\n\tGetBalance RouteSet = \"route:GetBalance\"\n\n\tGetCatalogRevision RouteSet = \"route:GetCatalogRevision\"\n\n\tGetCheckoutConfig RouteSet = \"route:GetCheckoutConfig\"\n\n\tGetCreditGrant RouteSet = \"route:GetCreditGrant\"\n\n\tGetCreditLimit RouteSet = \"route:GetCreditLimit\"\n\n\tGetCustomerBillingPolicy RouteSet = \"route:GetCustomerBillingPolicy\"\n\n\tGetCustomerBillingProfile RouteSet = \"route:GetCustomerBillingProfile\"\n\n\tGetCustomers RouteSet = \"route:GetCustomers\"\n\n\tGetDashboard RouteSet = \"route:GetDashboard\"\n\n\tGetEffectiveTier RouteSet = \"route:GetEffectiveTier\"\n\n\tGetFinding RouteSet = \"route:GetFinding\"\n\n\tGetFindingSummary RouteSet = \"route:GetFindingSummary\"\n\n\tGetInvoice RouteSet = \"route:GetInvoice\"\n\n\tGetInvoiceProfile RouteSet = \"route:GetInvoiceProfile\"\n\n\tGetMerchantConfiguration RouteSet = \"route:GetMerchantConfiguration\"\n\n\tGetMeter RouteSet = \"route:GetMeter\"\n\n\tGetMetricsSchema RouteSet = \"route:GetMetricsSchema\"\n\n\tGetOperationAuthorization RouteSet = \"route:GetOperationAuthorization\"\n\n\tGetPSP RouteSet = \"route:GetPSP\"\n\n\tGetPayment RouteSet = \"route:GetPayment\"\n\n\tGetPaymentAttempt RouteSet = \"route:GetPaymentAttempt\"\n\n\tGetPaymentSettlementStatus RouteSet = \"route:GetPaymentSettlementStatus\"\n\n\tGetPrice RouteSet = \"route:GetPrice\"\n\n\tGetPriceByKey RouteSet = \"route:GetPriceByKey\"\n\n\tGetProduct RouteSet = \"route:GetProduct\"\n\n\tGetProductArchive RouteSet = \"route:GetProductArchive\"\n\n\tGetProductByKey RouteSet = \"route:GetProductByKey\"\n\n\tGetProviderBillingQualification RouteSet = \"route:GetProviderBillingQualification\"\n\n\tGetRebillCycle RouteSet = \"route:GetRebillCycle\"\n\n\tGetReprice RouteSet = \"route:GetReprice\"\n\n\tGetRepriceBatch RouteSet = \"route:GetRepriceBatch\"\n\n\tGetSubscription RouteSet = \"route:GetSubscription\"\n\n\tGetTrustLevel RouteSet = \"route:GetTrustLevel\"\n\n\tGetUnreadNotificationCount RouteSet = \"route:GetUnreadNotificationCount\"\n\n\tGetUsage RouteSet = \"route:GetUsage\"\n\n\tImportBilling RouteSet = \"route:ImportBilling\"\n\n\tImportBillingArchive RouteSet = \"route:ImportBillingArchive\"\n\n\tListAlertWebhooks RouteSet = \"route:ListAlertWebhooks\"\n\n\tListCatalogDrift RouteSet = \"route:ListCatalogDrift\"\n\n\tListCreditGrants RouteSet = \"route:ListCreditGrants\"\n\n\tListCreditTransactions RouteSet = \"route:ListCreditTransactions\"\n\n\tListCustomerDelinquency RouteSet = \"route:ListCustomerDelinquency\"\n\n\tListCustomerEntitlements RouteSet = \"route:ListCustomerEntitlements\"\n\n\tListCustomers RouteSet = \"route:ListCustomers\"\n\n\tListDelinquency RouteSet = \"route:ListDelinquency\"\n\n\tListEntitlementCustomers RouteSet = \"route:ListEntitlementCustomers\"\n\n\tListFindings RouteSet = \"route:ListFindings\"\n\n\tListHostEvents RouteSet = \"route:ListHostEvents\"\n\n\tListInvoicePayments RouteSet = \"route:ListInvoicePayments\"\n\n\tListInvoices RouteSet = \"route:ListInvoices\"\n\n\tListMerchantNotifications RouteSet = \"route:ListMerchantNotifications\"\n\n\tListMeterRateOverrides RouteSet = \"route:ListMeterRateOverrides\"\n\n\tListMeters RouteSet = \"route:ListMeters\"\n\n\tListOffers RouteSet = \"route:ListOffers\"\n\n\tListPSPs RouteSet = \"route:ListPSPs\"\n\n\tListPaymentAttempts RouteSet = \"route:ListPaymentAttempts\"\n\n\tListPaymentMethods RouteSet = \"route:ListPaymentMethods\"\n\n\tListPayments RouteSet = \"route:ListPayments\"\n\n\tListPriceKeyHistory RouteSet = \"route:ListPriceKeyHistory\"\n\n\tListPrices RouteSet = \"route:ListPrices\"\n\n\tListProductAccess RouteSet = \"route:ListProductAccess\"\n\n\tListProducts RouteSet = \"route:ListProducts\"\n\n\tListRails RouteSet = \"route:ListRails\"\n\n\tListRateOverrides RouteSet = \"route:ListRateOverrides\"\n\n\tListRebillCycles RouteSet = \"route:ListRebillCycles\"\n\n\tListRepriceBatches RouteSet = \"route:ListRepriceBatches\"\n\n\tListReprices RouteSet = \"route:ListReprices\"\n\n\tListSpendDelegations RouteSet = \"route:ListSpendDelegations\"\n\n\tListSubscriptions RouteSet = \"route:ListSubscriptions\"\n\n\tListWorkerHealth RouteSet = \"route:ListWorkerHealth\"\n\n\tMarkInvoiceUncollectible RouteSet = \"route:MarkInvoiceUncollectible\"\n\n\tMarkNotificationsRead RouteSet = \"route:MarkNotificationsRead\"\n\n\tOpenOperationAuthorization RouteSet = \"route:OpenOperationAuthorization\"\n\n\tPreviewPSPRouting RouteSet = \"route:PreviewPSPRouting\"\n\n\tPreviewPlanMigration RouteSet = \"route:PreviewPlanMigration\"\n\n\tPreviewRepriceBatch RouteSet = \"route:PreviewRepriceBatch\"\n\n\tPreviewTierChange RouteSet = \"route:PreviewTierChange\"\n\n\tQueryMetrics RouteSet = \"route:QueryMetrics\"\n\n\tRecordProviderBillingObservation RouteSet = \"route:RecordProviderBillingObservation\"\n\n\tRecordUsage RouteSet = \"route:RecordUsage\"\n\n\tRefreshCatalogDrift RouteSet = \"route:RefreshCatalogDrift\"\n\n\tRefreshPSPs RouteSet = \"route:RefreshPSPs\"\n\n\tRefundPayment RouteSet = \"route:RefundPayment\"\n\n\tReleaseAdmission RouteSet = \"route:ReleaseAdmission\"\n\n\tReleaseOperationAuthorization RouteSet = \"route:ReleaseOperationAuthorization\"\n\n\tReplaceEntitlements RouteSet = \"route:ReplaceEntitlements\"\n\n\tReportWastedSpend RouteSet = \"route:ReportWastedSpend\"\n\n\tResolveFinding RouteSet = \"route:ResolveFinding\"\n\n\tResumeSubscription RouteSet = \"route:ResumeSubscription\"\n\n\tRetryInvoiceCollection RouteSet = \"route:RetryInvoiceCollection\"\n\n\tRevokeCreditGrant RouteSet = \"route:RevokeCreditGrant\"\n\n\tSetAPIHost RouteSet = \"route:SetAPIHost\"\n\n\tSetAlertWebhookURL RouteSet = \"route:SetAlertWebhookURL\"\n\n\tSetCreditLimit RouteSet = \"route:SetCreditLimit\"\n\n\tSetCustomerBillingPolicy RouteSet = \"route:SetCustomerBillingPolicy\"\n\n\tSetDashboard RouteSet = \"route:SetDashboard\"\n\n\tSetInvoiceProfile RouteSet = \"route:SetInvoiceProfile\"\n\n\tSetMeter RouteSet = \"route:SetMeter\"\n\n\tSetMeterRateCard RouteSet = \"route:SetMeterRateCard\"\n\n\tSetRateOverride RouteSet = \"route:SetRateOverride\"\n\n\tSetSpendDelegation RouteSet = \"route:SetSpendDelegation\"\n\n\tSetSpendDelegations RouteSet = \"route:SetSpendDelegations\"\n\n\tSetSubscriptionPaymentMethod RouteSet = \"route:SetSubscriptionPaymentMethod\"\n\n\tSetTrustLevel RouteSet = \"route:SetTrustLevel\"\n\n\tUpdatePSP RouteSet = \"route:UpdatePSP\"\n\n\tUpdatePrice RouteSet = \"route:UpdatePrice\"\n\n\tUpdateProduct RouteSet = \"route:UpdateProduct\"\n\n\tVerifyAPIHost RouteSet = \"route:VerifyAPIHost\"\n\n\tVoidInvoice RouteSet = \"route:VoidInvoice\"\n)",
+      "const (\n\tMerchantConfig RouteSet = \"merchant_config\"\n\n\tStaffReads RouteSet = \"staff_reads\"\n\n\tStaffWrites RouteSet = \"staff_writes\"\n)",
       "const (\n\tSandbox = config.CredentialPostureSandbox\n\n\tLive = config.CredentialPostureLive\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSecretBackendSnapshot = config.SecretBackendSnapshot\n\n\tSecretBackendVault = config.SecretBackendVault\n\n\tSecretBackendDB = config.SecretBackendDB\n\n\tCustomersNone = config.CustomersNone\n\n\tCustomerSelfService = config.CustomerSelfService\n\n\tCustomerSubscriptionManagement = config.CustomerSubscriptionManagement\n\n\tCustomerBillingManagement = config.CustomerBillingManagement\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n)",
       "const QueueBilling = riverjobs.QueueBilling",
       "func (InvoiceSweepArgs) InsertOpts() river.InsertOpts",
@@ -22,9 +25,7 @@
       "func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CheckProductAccessParams, requestOptions ...RequestOption) (map[string]bool, error)",
       "func (c *Client) CheckoutFrameAncestors() string",
       "func (c *Client) Close(ctx context.Context) error",
-      "func (c *Client) ConfirmCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, request billing.ConfirmCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
-      "func (c *Client) CreateCheckoutAttempt(ctx context.Context, request billing.CreateCheckoutAttemptParams, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error)",
       "func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionParams, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error)",
       "func (c *Client) CreateCreditGrant(ctx context.Context, customer billing.CustomerID, params billing.CreateCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
       "func (c *Client) CreateInvoicePayment(ctx context.Context, id billing.InvoiceID, params billing.CreateInvoicePaymentParams, requestOptions ...RequestOption) (*billing.Invoice, error)",
@@ -53,7 +54,6 @@
       "func (c *Client) GetAdmission(ctx context.Context, requestID string, requestOptions ...RequestOption) (*billing.Admission, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
       "func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error)",
-      "func (c *Client) GetCheckoutAttempt(ctx context.Context, id billing.CheckoutAttemptID, requestOptions ...RequestOption) (*billing.CheckoutAttempt, error)",
       "func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.GetCheckoutConfigParams, requestOptions ...RequestOption) (*billing.CheckoutConfig, error)",
       "func (c *Client) GetCreditGrant(ctx context.Context, customer billing.CustomerID, id billing.CreditGrantID, requestOptions ...RequestOption) (*billing.CreditGrant, error)",
       "func (c *Client) GetCreditLimit(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.CreditLimit, error)",
@@ -182,11 +182,9 @@
       "func (p StripePSP) PSPConfig() PSPConfig",
       "func AccessCutoverPreflight(ctx context.Context, db *pgxpool.Pool, database DatabaseConfig, approvedBy string) (*billing.AccessCutoverReport, error)",
       "func ForMerchantID(id billing.MerchantID) RequestOption",
-      "func MachinePermissions() []string",
       "func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error)",
       "func NewRemote(baseURL string, opts ...ClientOption) (*Client, error)",
       "func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error)",
-      "func Permissions() []string",
       "func ReadMerchantFile(path string) (MerchantDeclaration, error)",
       "func RequestMerchant(ctx context.Context) (billing.MerchantID, bool)",
       "func WithAPIKey(key string) ClientOption",
@@ -220,6 +218,7 @@
       "type EmailAddress = config.EmailAddress",
       "type EmailSender = config.EmailSender",
       "type EncryptionConfig = config.EncryptionConfig",
+      "type Guards = config.Guards",
       "type HyperSwitchConfig = config.HyperSwitchConfig",
       "type Identity = billingauth.Identity",
       "type InvoiceSweepArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
@@ -237,6 +236,7 @@
       "type RedisConfig = config.RedisConfig",
       "type RequestOption func(*requestOptions)",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
+      "type RouteSet = config.RouteSet",
       "type Routes = config.Routes",
       "type SendGridConfig = config.SendGridConfig",
       "type SolanaPSP struct {\n\tArchived bool `psp:\"archived\"`\n\n\tPrivateKey string `psp:\"secrets.private_key\"`\n\n\tTransitKey string `psp:\"signer.key\"`\n\n\tRPCProvider string `psp:\"settings.rpc_provider\"`\n\n\tRPCAPIKey string `psp:\"settings.rpc_api_key\"`\n\n\tTokens map[string]SolanaToken `psp:\"settings.tokens\"`\n\n\tRecipientWallet string `psp:\"settings.recipient_wallet\"`\n}",
@@ -306,7 +306,6 @@
       "const (\n\tInvokerTypeCustomer InvokerType = \"customer\"\n\n\tInvokerTypeDelegated InvokerType = \"delegated\"\n)",
       "const (\n\tMaxEntitlementPrefixes  = 10\n\tDefaultHeldEntitlements = 1000\n\tMaxHeldEntitlements     = 10000\n)",
       "const (\n\tMerchantGroupPersona = \"merchant\"\n\tCustomerGroupPersona = \"customer\"\n)",
-      "const (\n\tMerchantHostEventsRead         = \"merchant:host-events:read\"\n\tMerchantHostEventsAcknowledge  = \"merchant:host-events:acknowledge\"\n\tMerchantSettingsRead           = \"merchant:settings:read\"\n\tMerchantSettingsUpdate         = \"merchant:settings:update\"\n\tMerchantPSPsRead               = \"merchant:psps:read\"\n\tMerchantPSPsUpdate             = \"merchant:psps:update\"\n\tMerchantCatalogRead            = \"merchant:catalog:read\"\n\tMerchantCatalogUpdate          = \"merchant:catalog:update\"\n\tMerchantCustomerSettingsRead   = \"merchant:customer-settings:read\"\n\tMerchantCustomerSettingsUpdate = \"merchant:customer-settings:update\"\n\tMerchantInvoicesRead           = \"merchant:invoices:read\"\n\tMerchantInvoicesUpdate         = \"merchant:invoices:update\"\n\tMerchantInvoicesCollect        = \"merchant:invoices:collect\"\n\n\tMerchantCheckoutCreate      = \"merchant:checkout:create\"\n\tMerchantPaymentsRead        = \"merchant:payments:read\"\n\tMerchantPaymentsRefund      = \"merchant:payments:refund\"\n\tMerchantSubscriptionsRead   = \"merchant:subscriptions:read\"\n\tMerchantSubscriptionsUpdate = \"merchant:subscriptions:update\"\n\tMerchantAdmissionsCreate    = \"merchant:admissions:create\"\n\tMerchantUsageRead           = \"merchant:usage:read\"\n\n\tMerchantOperationsRead = \"merchant:operations:read\"\n\n\tMerchantMetricsRead = \"merchant:metrics:read\"\n\n\tMerchantDashboardUpdate = \"merchant:dashboard:update\"\n\n\tMerchantFindingsResolve = \"merchant:findings:resolve\"\n\n\tMerchantBillingImport = \"merchant:billing:import\"\n\n\tMerchantBillingExport = \"merchant:billing:export\"\n\n\tMerchantCreditsGrant = \"merchant:credits:grant\"\n\n\tMerchantCreditsRevoke = \"merchant:credits:revoke\"\n\n\tMerchantMembersRead = \"merchant:members:read\"\n\n\tMerchantMembersManage = \"merchant:members:manage\"\n\n\tMerchantCredentialsManage = \"merchant:credentials:manage\"\n\n\tMerchantAccessGrantPermanent = \"merchant:access:grant-permanent\"\n)",
       "const (\n\tMerchantRetirementRefusedNotLive       MerchantRetirementRefusal = \"not_live\"\n\tMerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = \"group_mismatch\"\n\tMerchantRetirementRefusedReserved      MerchantRetirementRefusal = \"reserved\"\n\tMerchantRetirementRefusedActive        MerchantRetirementRefusal = \"active\"\n)",
       "const (\n\tOfferPermanent OfferKind = \"permanent\"\n\n\tOfferFinite OfferKind = \"finite\"\n\n\tOfferRecurring OfferKind = \"recurring\"\n)",
       "const (\n\tOperationAuthorizationOpen     OperationAuthorizationState = \"open\"\n\tOperationAuthorizationReleased OperationAuthorizationState = \"released\"\n\tOperationAuthorizationSettled  OperationAuthorizationState = \"settled\"\n)",
@@ -344,7 +343,6 @@
       "const MaxMerchantConfigurationBytes = 1 \u003c\u003c 20",
       "const MaxProductAccessChecks = 100",
       "const MaxUsageBatchItems = 1000",
-      "const MerchantAll = \"merchant:*\"",
       "const ProductAccessIDPrefix = \"pa_\"",
       "const ProviderBillingObservationMaxBytes = 768 \u003c\u003c 10",
       "const UsageEventIDPrefix = \"uev_\"",
@@ -514,7 +512,6 @@
       "func InvoiceStatuses() []InvoiceStatus",
       "func LookupCurrency(code string) (CurrencyUnits, bool)",
       "func LookupErrorCode(code string) (ErrorCode, bool)",
-      "func MachineOnly(perm string) bool",
       "func NewCard(number string, expMonth, expYear int, cvc string) (*Card, error)",
       "func NormalizeMerchantSlug(s string) string",
       "func ParseAlertWebhookID(s string) (AlertWebhookID, error)",
@@ -545,7 +542,6 @@
       "func ParseSubscriptionID(s string) (SubscriptionID, error)",
       "func ParseUsageEventID(s string) (UsageEventID, error)",
       "func PaymentFailureFrom(err error) (*PaymentFailure, bool)",
-      "func RequiresRecentSignIn(perm string) bool",
       "func SourceRef(sourceType, id string) string",
       "func ValidateMerchantSlug(s string) error",
       "type APIHostClaim struct {\n\tAPIHost   string        `json:\"api_host\"`\n\tCreatedAt time.Time     `json:\"created_at\"`\n\tDNSRecord APIHostRecord `json:\"dns_record\"`\n}",
@@ -1080,6 +1076,7 @@
       "type EncryptionConfig struct {\n\tMasterKey string\n}",
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
       "type FormerNamesMode string",
+      "type Guards map[RouteSet]fmt.Stringer",
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
       "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
@@ -1093,17 +1090,19 @@
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr     string\n\tPassword string\n\tDB       int\n}",
       "type ResourceServerConfig struct {\n\tIdentifier string\n\n\tDPoPNonceKey string\n\n\tTrustedIssuers []TrustedIssuerConfig\n}",
-      "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tStorefront bool\n\n\tCustomers CustomerHTTPScope\n\n\tMerchant bool\n\n\tCatalogEdits bool\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
+      "type RouteSet string",
+      "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tStorefront bool\n\n\tCustomers CustomerHTTPScope\n\n\tMerchant bool\n\n\tMerchantConfig bool\n\n\tGuards Guards\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
       "type SendGridConfig struct {\n\tAPIKey string\n\tFrom   EmailAddress\n}",
       "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}",
-      "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\tEnabled     bool\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
+      "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
     "openrailstest": [
       "func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases)",
-      "type AuthCases struct {\n\tPermission string\n\n\tCustomer func() *http.Request\n\n\tStaff func() *http.Request\n\n\tRefused map[string]func() *http.Request\n\n\tOtherMerchantStaff func() *http.Request\n\n\tStaleStaff func() *http.Request\n\n\tMachine func() *http.Request\n}"
+      "type AuthCases struct {\n\tGuards openrails.Guards\n\n\tCustomer func() *http.Request\n\n\tStaff func() *http.Request\n\n\tHolders map[openrails.RouteSet]func() *http.Request\n\n\tRefused map[string]func() *http.Request\n\n\tOtherMerchantStaff func() *http.Request\n\n\tStaleStaff func() *http.Request\n\n\tMachine func() *http.Request\n}"
     ],
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
+      "const (\n\tMerchantRead  = staffperm.Read\n\tMerchantWrite = staffperm.Write\n\tMerchantAdmin = staffperm.Admin\n)",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) AuthenticateUser(r *http.Request) (openrails.Identity, error)",
       "func (s *Server) Client() *openrails.Client",
@@ -1132,7 +1131,7 @@
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
       "type AuthConfig = config.AuthConfig",
       "type AuthRateLimit = config.AuthRateLimit",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tCatalogEdits bool\n\n\tAdminConsole *openrails.AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tAdminConsole *openrails.AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n}",
       "type ConsoleIssuer = config.ConsoleIssuer",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tSMS authkit.SMSSender\n\n\tAuthEmail authkit.EmailSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
@@ -1878,9 +1877,6 @@
     },
     "billing/payments.go": {
       "time": "time"
-    },
-    "billing/permissions.go": {
-      "strings": "strings"
     },
     "billing/provider_obligation_errors.go": {
       "fmt": "fmt"
@@ -4458,6 +4454,7 @@
       "http": "net/http",
       "httptest": "net/http/httptest",
       "openrails": "github.com/open-rails/openrails",
+      "sort": "sort",
       "testing": "testing",
       "uuid": "github.com/google/uuid"
     },
@@ -4479,10 +4476,6 @@
       "context": "context",
       "http": "net/http",
       "url": "net/url"
-    },
-    "permissions.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "httproutes": "github.com/open-rails/openrails/internal/http/routes"
     },
     "psp_declarations.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4596,7 +4589,8 @@
       "http": "net/http",
       "iam": "github.com/open-rails/authkit/iam",
       "openrails": "github.com/open-rails/openrails",
-      "operator": "github.com/open-rails/openrails/internal/operator"
+      "operator": "github.com/open-rails/openrails/internal/operator",
+      "staffperm": "github.com/open-rails/openrails/internal/staffperm"
     },
     "server/server.go": {
       "app": "github.com/open-rails/openrails/internal/app",

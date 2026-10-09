@@ -67,8 +67,9 @@ type Config struct {
 	Merchant MerchantDeclaration
 	// Catalog optionally applies one merchant-scoped batch at startup, using
 	// the same permanent content-hash replay as Client.ApplyCatalog. Later
-	// programmatic edits remain available; Routes.CatalogEdits only controls
-	// the catalog-write HTTP routes. Requires Merchant. Nil skips the batch.
+	// programmatic edits remain available, and the catalog-write HTTP routes
+	// (Routes.MerchantConfig) refuse while it is set: the document is the
+	// truth. Requires Merchant. Nil skips the batch.
 	Catalog *catalog.Application
 	// Checkout is the shared payment page several sites sell through; zero
 	// when each site renders its own checkout.
@@ -326,12 +327,12 @@ type EncryptionConfig struct {
 }
 
 // VaultConfig connects to HashiCorp Vault for merchant secrets and Solana
-// Transit signing. The connection selects neither: SecretBackend selects
-// secret storage, and each Solana PSP selects its signer.
+// Transit signing: a non-nil Config.Vault (or Deps.Vault) is the connection.
+// The connection selects neither: SecretBackend selects secret storage, and
+// each Solana PSP selects its signer.
 type VaultConfig struct {
 	Namespace   string
 	ScopePrefix string
-	Enabled     bool
 	// Address is the server URL; empty uses the Vault client's default.
 	Address string
 	// AuthMethod is "token", "approle" or "kubernetes". Empty with a Token is

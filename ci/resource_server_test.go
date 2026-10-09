@@ -33,6 +33,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/open-rails/openrails/server"
 )
 
@@ -68,7 +69,7 @@ func (k issuerKey) mintAs(t *testing.T, typ string, edit func(jwt.MapClaims)) st
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(), "auth_time": now.Unix(),
-		"scope": "openrails:merchant", "permissions": []string{billing.MerchantOperationsRead},
+		"scope": "openrails:merchant", "permissions": []string{staffperm.Read},
 	}
 	if edit != nil {
 		edit(claims)
@@ -169,9 +170,9 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 			TrustedIssuers: []server.TrustedIssuerConfig{
 				{
 					Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop},
-					Permissions:    []string{billing.MerchantOperationsRead, billing.MerchantPSPsRead},
+					Permissions:    []string{staffperm.Read, staffperm.Admin},
 					AllowedOrigins: []string{adminOrigin},
-					GroupRoles:     map[string]string{"billing-viewers": "viewer"},
+					GroupRoles:     map[string]string{"billing-admins": "owner"},
 				},
 				{Name: "other", Issuer: other.iss, Keys: other.pinned(t), Merchants: []string{rival}, Permissions: []string{"merchant:*"}},
 			},
@@ -182,6 +183,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	const findings, psps, catalog = "/v1/merchant/findings", "/v1/merchant/psps", "/v1/merchant/catalog/revision"
+	cancel := "/v1/merchant/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
 	bearer := func(token string) string { return "Bearer " + token }
 
 	t.Run("accepted", func(t *testing.T) {
@@ -190,15 +192,16 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 
 		all := host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: psps, authorization: bearer(all)}).Code, "merchant:* within the ceiling")
-		w = serve(handler, rsRequest{path: catalog, authorization: bearer(all)})
+		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: catalog, authorization: bearer(all)}).Code)
+		w = serve(handler, rsRequest{method: http.MethodPost, path: cancel, authorization: bearer(all), body: "{}"})
 		require.Equal(t, http.StatusForbidden, w.Code)
-		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w), "the ceiling caps merchant:*")
+		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w), "the ceiling caps merchant:*: no staff writes")
 
 		machine := host.mint(t, func(c jwt.MapClaims) { c["sub"], c["client_id"] = "billing-sync", "billing-sync" })
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(machine)}).Code, "a client acting for itself")
 
-		viewer := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-viewers"} })
-		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(viewer)}).Code, "a group role maps to a merchant role")
+		admins := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-admins"} })
+		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: findings, authorization: bearer(admins)}).Code, "a group role maps to a merchant role")
 		none := host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") })
 		require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: findings, authorization: bearer(none)}).Code, "no permissions, no access")
 
@@ -252,13 +255,13 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	})
 
 	t.Run("merchants", func(t *testing.T) {
-		w := serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-viewers"} }))})
+		w := serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-admins"} }))})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		list := merchantList(t, w)
 		require.Len(t, list, 1)
 		require.Equal(t, shop, list[0].Slug)
-		require.Equal(t, "custom", list[0].Role, "viewer grants capped by the ceiling are no named role")
-		require.ElementsMatch(t, []string{billing.MerchantOperationsRead, billing.MerchantPSPsRead}, list[0].Permissions)
+		require.Equal(t, "custom", list[0].Role, "owner grants capped by the ceiling are no named role")
+		require.ElementsMatch(t, []string{staffperm.Read, staffperm.Admin}, list[0].Permissions)
 
 		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
 		require.Equal(t, http.StatusOK, w.Code)
@@ -364,7 +367,7 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 					{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode, authkit.GrantRefreshToken}},
 					{ID: adminUI, Origins: []string{adminOrigin}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange}},
 					{ID: worker, SecretSHA256: authtest.ClientSecretSHA256(workerSecret), Resources: []string{resourceID},
-						Permissions: []string{billing.MerchantOperationsRead}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
+						Permissions: []string{staffperm.Read}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
 				},
 			}
 		}))
@@ -637,7 +640,7 @@ func TestResourceServerFederatedGrants(t *testing.T) {
 		"duplicate":     {owner, body{"email": "staff@example.test", "role": "support"}, http.StatusConflict, billing.CodeResourceConflict},
 		"bad email":     {owner, body{"email": "Staff <staff@example.test>", "role": "viewer"}, http.StatusBadRequest, "invalid_email"},
 		"unknown role":  {owner, body{"email": "x@example.test", "role": "admin"}, http.StatusBadRequest, "unknown_role"},
-		"beyond caller": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{billing.MerchantMembersManage} }), body{"email": "x@example.test", "role": "owner"}, http.StatusForbidden, "role_escalation"},
+		"beyond caller": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{staffperm.MembersManage} }), body{"email": "x@example.test", "role": "owner"}, http.StatusForbidden, "role_escalation"},
 		"not an owner":  {staff(nil), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodePermissionRequired},
 		"stale sign-in": {host.mint(t, func(c jwt.MapClaims) {
 			c["permissions"], c["auth_time"] = []string{"merchant:*"}, time.Now().Add(-time.Hour).Unix()

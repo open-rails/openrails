@@ -43,7 +43,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	require.NoError(t, err)
 	buy := func(price billing.PriceID, amount *int64) *billing.CheckoutAttempt {
 		t.Helper()
-		paid, err := c.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price, Amount: amount, IdempotencyKey: price.String(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)}})
+		paid, err := createCheckoutAttempt(t.Context(), c, billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price, Amount: amount, IdempotencyKey: price.String(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)}})
 		require.NoError(t, err)
 		require.Equal(t, billing.CheckoutAttemptSucceeded, paid.Status)
 		return paid

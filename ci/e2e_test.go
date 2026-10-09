@@ -254,7 +254,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 		SuccessURL:     "https://e2e.test/success",
 		CancelURL:      "https://e2e.test/cancel",
 	}
-	first, err := client.CreateCheckoutAttempt(t.Context(), request)
+	first, err := createCheckoutAttempt(t.Context(), client, request)
 	require.NoError(t, err)
 	require.NotNil(t, first.NextAction, "Stripe's hosted page is the next step: %+v", first)
 	require.Equal(t, "redirect_to_url", first.NextAction.Type)
@@ -262,7 +262,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NotNil(t, first.PriceID)
 	require.Equal(t, price.ID, *first.PriceID)
 
-	replay, err := client.CreateCheckoutAttempt(t.Context(), request)
+	replay, err := createCheckoutAttempt(t.Context(), client, request)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, replay.ID)
 	require.NotNil(t, first.Amount)
@@ -272,11 +272,11 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 
 	changed := request
 	changed.SuccessURL = "https://e2e.test/changed"
-	_, err = client.CreateCheckoutAttempt(t.Context(), changed)
+	_, err = createCheckoutAttempt(t.Context(), client, changed)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "conflicting replay must not contact Stripe")
 
-	read, err := client.GetCheckoutAttempt(t.Context(), first.ID)
+	read, err := getCheckoutAttempt(t.Context(), client, first.ID)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, read.ID)
 	require.Equal(t, request.Customer.ID, read.CustomerID)

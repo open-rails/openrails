@@ -20,37 +20,32 @@ import (
 // payment_method_required and nothing is charged.
 func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	t.Parallel()
-	for _, tp := range []topology{embedded, remote} {
-		t.Run(string(tp), func(t *testing.T) {
-			t.Parallel()
-			w := newWorld(t)
-			c := w.newCustomer()
-			c.saveCard("nmi", visa)
-			sale := w.permanent("content:post")
-			member := w.membership("content:members", 9_990_000)
-			for _, offer := range []struct {
-				price       billing.PriceID
-				entitlement string
-				kind        billing.OfferKind
-			}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
-				_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
-					OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: offer.entitlement, PriceID: offer.price,
-					IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
-				})
-				require.ErrorIs(t, err, billing.ErrPaymentMethodRequired)
-				require.ErrorIs(t, err, billing.ErrInvalid)
-				var status *billing.StatusError
-				require.ErrorAs(t, err, &status)
-				require.Equal(t, http.StatusBadRequest, status.Status)
-				require.Equal(t, billing.CodePaymentMethodRequired, status.Code)
-				require.NotNil(t, status.Param)
-				require.Equal(t, "payment_method_id", *status.Param)
-			}
-			require.Empty(t, w.nmi.ledger(""), "no card is charged")
-			require.Zero(t, len(w.nmi.Attempts()))
-			require.False(t, c.entitled("content:post"))
+	w := newWorld(t)
+	c := w.newCustomer()
+	c.saveCard("nmi", visa)
+	sale := w.permanent("content:post")
+	member := w.membership("content:members", 9_990_000)
+	for _, offer := range []struct {
+		price       billing.PriceID
+		entitlement string
+		kind        billing.OfferKind
+	}{{sale.ID, "content:post", billing.OfferPermanent}, {member.ID, "content:members", billing.OfferRecurring}} {
+		_, err := createCheckoutAttempt(t.Context(), w.client[embedded], billing.CreateCheckoutAttemptParams{
+			OfferKind: offer.kind, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: offer.entitlement, PriceID: offer.price,
+			IdempotencyKey: "implicit-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
 		})
+		require.ErrorIs(t, err, billing.ErrPaymentMethodRequired)
+		require.ErrorIs(t, err, billing.ErrInvalid)
+		var status *billing.StatusError
+		require.ErrorAs(t, err, &status)
+		require.Equal(t, http.StatusBadRequest, status.Status)
+		require.Equal(t, billing.CodePaymentMethodRequired, status.Code)
+		require.NotNil(t, status.Param)
+		require.Equal(t, "payment_method_id", *status.Param)
 	}
+	require.Empty(t, w.nmi.ledger(""), "no card is charged")
+	require.Zero(t, len(w.nmi.Attempts()))
+	require.False(t, c.entitled("content:post"))
 }
 
 // Renewals charge the subscription's stored method, never another of the

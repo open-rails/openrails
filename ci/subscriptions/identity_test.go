@@ -21,10 +21,10 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// A person never creates a checkout for someone else: the checkout routes
-// are automation's, whatever a staff member's roles grant. A saved card is
-// charged over HTTP only on a session its own customer pays, signed in.
-func TestCheckoutIsAutomationAndTheCustomersOwn(t *testing.T) {
+// Staff may hand a customer a checkout session, as the merchant's server
+// may; only the customer pays it, and a saved card only with the customer's
+// own proof. The machine checkout-attempt routes are gone.
+func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
 	w.selfService = true
@@ -34,28 +34,31 @@ func TestCheckoutIsAutomationAndTheCustomersOwn(t *testing.T) {
 	aCard, bCard := a.saveCard("nmi", visa), b.saveCard("nmi", mastercard)
 	charges := len(w.railLedger("nmi"))
 
-	// "staff" holds every permission, the machine-only ones included.
-	staff := w.auth.token(t, "staff")
-	for path, body := range map[string]any{
-		"/v1/merchant/checkout-sessions": map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID},
-		"/v1/merchant/checkout-attempts": map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID,
-			"payment": map[string]any{"psp": "nmi", "payment_method_id": aCard}},
-		"/v1/merchant/checkout-attempts/" + billing.CheckoutAttemptID(uuid.New()).String() + "/confirm": map[string]any{"signature": "sig"},
+	staff := w.auth.token(t, "support")
+	attempt := billing.CheckoutAttemptID(uuid.New()).String()
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/merchant/checkout-attempts"},
+		{http.MethodGet, "/v1/merchant/checkout-attempts/" + attempt},
+		{http.MethodPost, "/v1/merchant/checkout-attempts/" + attempt + "/confirm"},
 	} {
-		status, out := w.merchantJSON(staff, http.MethodPost, path, body)
-		require.Equal(t, http.StatusForbidden, status, "%s: %v", path, out)
-		code, _ := errorOf(out)
-		require.Equal(t, billing.CodePermissionRequired, code, path)
+		status, out := w.merchantCall(staff, route.method, route.path)
+		require.Equal(t, http.StatusNotFound, status, "%s %s is not mounted: %s", route.method, route.path, out)
 	}
 
-	// The host's own backend charges no saved card without its customer.
-	_, err := w.client[remote].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: a.identity(), Entitlement: "content:members", PriceID: price.ID,
-		IdempotencyKey: "proofless-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(aCard)},
-	})
-	requireCode(t, err, http.StatusForbidden, "customer_proof_required")
+	// The checkout-sessions route is a staff write: a reader is refused.
+	mint := map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID}
+	status, out := w.merchantJSON(w.auth.token(t, "reader"), http.MethodPost, "/v1/merchant/checkout-sessions", mint)
+	require.Equal(t, http.StatusForbidden, status, "%v", out)
+	status, out = w.merchantJSON(staff, http.MethodPost, "/v1/merchant/checkout-sessions", mint)
+	require.Equal(t, http.StatusCreated, status, "%v", out)
+	staffSession := hostedSession{w: w, id: out["id"].(string)}
+	status, out = staffSession.pay(map[string]any{"option_id": staffSession.option("nmi"), "payment_method_id": aCard})
+	require.Equal(t, http.StatusForbidden, status, "the staff member's link alone charges no saved card: %v", out)
+	require.Equal(t, "customer_proof_required", hostedErrorCode(out))
+	w.settle()
+	require.Len(t, w.railLedger("nmi"), charges, "the refused link charged nothing")
 
-	// It mints a session; only A, signed in, pays it with A's card.
+	// The host's backend mints one too; only A, signed in, pays it with A's card.
 	session := w.handOver(a, price.ID)
 	option := session.option("nmi")
 	for name, try := range map[string]func() (int, map[string]any){
@@ -329,13 +332,14 @@ func TestHarnessAuthConforms(t *testing.T) {
 		}
 	}
 	openrailstest.CheckAuth(t, v, openrailstest.AuthCases{
-		Permission: billing.MerchantPaymentsRefund,
-		Customer:   req(v.token(t, customer)),
-		Staff:      req(v.token(t, "support")),
+		Guards:   guards,
+		Customer: req(v.token(t, customer)),
+		Staff:    req(v.token(t, "staff")),
+		Holders:  map[openrails.RouteSet]func() *http.Request{openrails.StaffReads: req(v.token(t, "reader"))},
 		Refused: map[string]func() *http.Request{
 			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),
 		},
-		StaleStaff: req(v.staleToken(t, "support")),
+		StaleStaff: req(v.staleToken(t, "staff")),
 		Machine:    req(v.hostToken(t)),
 	})
 }

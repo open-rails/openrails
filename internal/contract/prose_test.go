@@ -167,13 +167,28 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	body, _, _ = strings.Cut(body, "\n}\n")
 	require.Contains(t, program, "func newBilling("+body+"\n}\n", "the README's newBilling")
 
-	// The README mounts AuthKit itself, with the program's role registration.
-	_, roles, ok := strings.Cut(readme, "merchant := rbac.Persona(\"merchant\")\n")
+	// The README's roles, its AuthKit configuration (but its production keys)
+	// and its mount are the program's.
+	_, roles, ok := strings.Cut(readme, "rbac := authkit.NewRoles()\n")
 	require.True(t, ok)
-	roles, _, _ = strings.Cut(roles, "rbac.Root.Role(")
-	require.Contains(t, program, strings.ReplaceAll(roles, "\n", "\n\t"), "the README's role registration")
-	require.Contains(t, readme, "Auth:         ak,")
-	require.Contains(t, program, "Auth:         ak,")
+	roles, _, _ = strings.Cut(roles, "```")
+	for _, line := range strings.Split(strings.TrimSpace(roles), "\n") {
+		require.Contains(t, program, "\t"+strings.TrimRight(line, " ")+"\n", "the README's role registration")
+	}
+	_, config, ok := strings.Cut(readme, "ak, err := authkit.New(ctx, authkit.Config{\n")
+	require.True(t, ok)
+	config, _, _ = strings.Cut(config, "}, authkit.Deps{")
+	for _, line := range strings.Split(strings.TrimSpace(config), "\n") {
+		field, _, _ := strings.Cut(strings.TrimSpace(line), ":")
+		if field == "Keys" || field == "Token" {
+			continue // the program signs with development keys, as its own issuer
+		}
+		require.Contains(t, strings.Join(strings.Fields(program), " "), strings.Join(strings.Fields(line), " "), "the README's AuthKit configuration")
+	}
+	_, mount, ok := strings.Cut(readme, "\t// Billing. Processor webhooks are always mounted; pick the rest.\n")
+	require.True(t, ok)
+	mount, _, _ = strings.Cut(mount, "\n\t})\n")
+	require.Contains(t, program, mount, "the README's mount")
 	require.NotContains(t, readme+program, "billingAuth", "AuthKit is the Auth; no adapter")
 }
 

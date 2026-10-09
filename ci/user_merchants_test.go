@@ -12,6 +12,7 @@ import (
 	helpersauth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,8 +52,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	listed := list(memberToken)
 	require.Len(t, listed, 2)
 	require.Equal(t, []string{"merchant:*"}, listed[0].Permissions, "an owner holds the namespace")
-	require.Contains(t, listed[1].Permissions, billing.MerchantPaymentsRead)
-	require.NotContains(t, listed[1].Permissions, billing.MerchantCatalogUpdate, "a viewer reads only")
+	require.Equal(t, []string{staffperm.Read}, listed[1].Permissions, "a viewer reads only")
 	viewerGrants := listed[1].Permissions
 	require.Equal(t, []billing.UserMerchant{
 		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner", Permissions: []string{"merchant:*"}},

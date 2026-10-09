@@ -170,7 +170,6 @@ var errorCodes = []ErrorCode{
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
 	{"customer_action_required", 403, authz, "Only the customer may take this action, through their own step."},
 	{"customer_session_required", 403, authz, "The operation needs the customer's interactive session."},
-	{"permanent_grant_forbidden", 403, authz, "A grant with no end needs merchant:access:grant-permanent."},
 
 	// Payments and payment methods.
 	{CodeCardDeclined, 402, card, "The provider declined the card; metadata.decline_reason says why."},

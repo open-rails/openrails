@@ -27,12 +27,18 @@ through `host-four`; these are placeholders, not customer or repository names.
 - The Go client is the merchant API: each merchant route has one `*Client` method.
   Customer self-service (`/v1/me`) is for browsers through `sdk/billing-ui`.
 - Every route is declared once in the route catalog (`internal/http/routes`, one file
-  per resource) with its tier, permission, request, responses and error codes. The
-  catalog mounts the route and generates `api/openapi.json`, the TypeScript wire types
-  of billing-ui and the console, and `docs/api/routes.md` / `error-codes.md`.
-- Route groups: checkout, customer (`/v1/me`), one merchant group (`/v1/merchant`,
-  gated by permission, `Routes.Merchant`), webhooks, and the standalone control
-  plane and platform.
+  per resource) with its tier, guards (a staff route) or permission, request,
+  responses and error codes. The catalog mounts the route and generates
+  `api/openapi.json`, the TypeScript wire types of billing-ui and the console, the
+  `openrails.RouteSet` constants (`route_sets.go`), and `docs/api/routes.md` /
+  `error-codes.md`.
+- Route groups: checkout, customer (`/v1/me`), two staff groups under `/v1/merchant`
+  (`Routes.Merchant`: staff work on customers; `Routes.MerchantConfig`: the
+  merchant's own configuration), webhooks, and the standalone control plane and
+  platform.
+- OpenRails names no staff permissions: the host guards staff routes with its own
+  (`Routes.Guards`, by level group, resource group or one route, the most specific
+  winning), and `Mount` refuses a staff route no guard covers.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).

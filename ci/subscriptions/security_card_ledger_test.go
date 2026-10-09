@@ -62,7 +62,7 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", refusedCard), "blocked on replica %s", r.replica.name)
 			require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
 			for _, tp := range []topology{embedded, remote} {
-				_, err := r.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+				_, err := createCheckoutAttempt(t.Context(), r.client[tp], billing.CreateCheckoutAttemptParams{
 					OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
 					IdempotencyKey: "blocked-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi"},
 					SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -119,7 +119,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}
 	pay := func(w *world, tp topology, price string, c *customer, ip string, cd card) error {
-		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		_, err := createCheckoutAttempt(t.Context(), w.client[tp], billing.CreateCheckoutAttemptParams{
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id), ClientIP: ip}, PriceID: pid(price), IdempotencyKey: "host-" + uuid.NewString(),
 			PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(cd), BillingDetails: &billing.BillingDetails{Name: new("Host Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}},
 		})

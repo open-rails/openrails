@@ -10,7 +10,6 @@ test_mode: sandbox        # sandbox | live; allowed in every environment (#762) 
 
 secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
 credential_read_only: false # may restrict a managed backend; cannot grant storage privileges
-catalog_edits: false # mount the merchant API's catalog-write routes; independent of credential custody
 # Trusted local operator catalog application remains available when false.
 # DB credentials require encryption.master_key in every credential posture.
 # alert_secret_backend: db # optional managed outbound webhooks beside a snapshot
@@ -92,14 +91,14 @@ encryption:
   master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it
                     # Required for DB-backed alert webhook URLs and HyperSwitch SDK captures.
 
-vault:
-  enabled: false
-  address: ""       # defaults to the Vault client default / VAULT_ADDR
-  auth_method: ""   # token | approle | kubernetes
-  token: ""
-  role_id: ""
-  secret_id: ""
-  k8s_role: ""
+# Declaring vault connects to it (VAULT_* env settings declare it too).
+# vault:
+#   address: ""       # defaults to the Vault client default / VAULT_ADDR
+#   auth_method: ""   # token | approle | kubernetes
+#   token: ""
+#   role_id: ""
+#   secret_id: ""
+#   k8s_role: ""
 
 # The built-in email sender, for billing and control-plane mail. Billing mail
 # is sent from the merchant's profile from_email when it has one; `from` is the

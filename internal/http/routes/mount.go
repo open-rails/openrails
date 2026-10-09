@@ -43,10 +43,9 @@ type Options struct {
 	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// CatalogWrites mounts the catalog-write routes. Their guard still admits
-	// only the process owner unless the merchant API's mount published catalog
-	// edits (app.Runtime.CatalogEdits).
-	CatalogWrites bool
+	// Guard is the permission Auth.RequirePermission checks for each staff
+	// route (ResolveGuards); a staff route it names none for refuses to mount.
+	Guard func(Route) string
 
 	// External are the handlers the assembly owns.
 	External External
@@ -119,8 +118,8 @@ func controlPlane(pick func(*External) router.Handler) func(*Env) router.Handler
 	return func(e *Env) router.Handler { return pick(&e.External) }
 }
 
-// gated binds a handler that asks the route's staff gate a further
-// permission.
+// gated binds a handler that asks whether its caller would pass another
+// route's guard.
 func gated(build func(httphandlers.StaffCan) func(*httprequest.Request)) func(*Env) router.Handler {
 	return func(e *Env) router.Handler { return router.Handler(build(e.staffCan)) }
 }
@@ -151,21 +150,19 @@ func (e *Env) enabled(f Feature) bool {
 	panic("routes: unknown feature " + string(f))
 }
 
+// mounts reports whether the assembly mounts a selected route: its feature
+// is configured and its handler supplied.
+func (e *Env) mounts(route Route) bool {
+	return e.enabled(route.When) && e.Guarded(route) != nil
+}
+
 // mount registers the selected catalog routes on rr, which is rooted at base.
-// A route is mounted when its feature is configured, its handler is supplied
-// and, for a catalog write, the assembly mounts catalog writes.
 func (e *Env) mount(rr router.Router, base string, selected func(Route) bool) {
 	for _, route := range Catalog() {
-		if !selected(route) || !e.enabled(route.When) {
-			continue
-		}
-		if route.CatalogWrite && !e.CatalogWrites {
+		if !selected(route) || !e.mounts(route) {
 			continue
 		}
 		handler := e.Guarded(route)
-		if handler == nil {
-			continue
-		}
 		path, ok := strings.CutPrefix(route.Path, base)
 		if !ok {
 			panic("routes: " + route.Key() + " is not under " + base)
@@ -325,19 +322,20 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterMerchantRoutes mounts the merchant API, each route gated by its
-// merchant permission, on a router rooted at /v1.
-func RegisterMerchantRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+// RegisterMerchantRoutes mounts the staff routes of groups (Merchant,
+// MerchantConfig), each behind opts.Guard's permission, on a router rooted at
+// /v1.
+func RegisterMerchantRoutes(rr router.Router, rt *app.Runtime, opts Options, groups ...Group) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
 	}
-	newEnv(rt, opts).mount(rr, "/v1", in(Merchant))
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Staff() && inGroups(r, groups) })
 }
 
-// RegisterMerchantRoutesUnder mounts the merchant routes under prefix, on a
+// RegisterMerchantRoutesUnder mounts the staff routes under prefix, on a
 // router rooted at /v1: the CLI's database-only runtimes serve one resource.
 func RegisterMerchantRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
-	newEnv(rt, opts).mount(rr, "/v1", in(Merchant, under(prefix)))
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Staff() && under(prefix)(r) })
 }
 
 // RegisterControlPlaneRoutes mounts the standalone control plane's merchant

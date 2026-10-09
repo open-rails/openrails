@@ -69,14 +69,14 @@ func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) 
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 }
 
-// A startup batch does not own the catalog: client edits remain available when
-// HTTP writes are disabled, and rebooting the same file never undoes those edits.
+// A startup batch does not own the catalog: client edits remain available while
+// the host's file refuses HTTP writes, and rebooting the same file never undoes
+// those edits.
 func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
 	key := "declared-" + uuid.NewString()[:8]
 	title, amount := "Gold", int64(9_990_000)
 	w.cfg = func(cfg *config.Config) { cfg.Catalog = declaredFile(t, key, title, amount) }
-	w.mount = func(r *openrails.Routes) { r.CatalogEdits = false }
 	w.start()
 	original, err := w.client[embedded].GetPriceByKey(t.Context(), key, key+"-monthly")
 	require.NoError(t, err)
@@ -87,8 +87,11 @@ func TestDeclaredCatalog(t *testing.T) {
 	require.NoError(t, err)
 	_, err = w.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Edited in code")})
 	require.NoError(t, err)
-	status := w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, nil)
-	require.Equal(t, http.StatusMethodNotAllowed, status, "HTTP writes are absent while reads remain available")
+	var refused map[string]any
+	status := w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &refused)
+	require.Equal(t, http.StatusForbidden, status, "Config.Catalog is the truth: HTTP writes are refused while reads remain available")
+	code, _ := errorOf(refused)
+	require.Equal(t, "catalog_updates_disabled", code)
 	revision := w.catalogRevision()
 	w.restart()
 	require.Equal(t, revision, w.catalogRevision(), "reboot replays the batch despite a later programmatic edit")

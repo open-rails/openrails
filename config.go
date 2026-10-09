@@ -28,6 +28,12 @@ type (
 	// Routes selects the HTTP surface Client.Routes returns and the adapters
 	// mount on the root router.
 	Routes = config.Routes
+	// Guards is Routes.Guards: the host's permission for each staff route set.
+	Guards = config.Guards
+	// RouteSet names staff routes a guard covers: a level group (StaffReads,
+	// StaffWrites, MerchantConfig), a resource group (Refunds) or one route
+	// (RefundPayment). The constants are generated from the route catalog.
+	RouteSet = config.RouteSet
 	// AdminConsole is Routes.AdminConsole: the merchant admin console.
 	AdminConsole = config.AdminConsole
 	// CustomerRoutes is one further customer surface of

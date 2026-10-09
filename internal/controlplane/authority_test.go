@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 // #565: every credential type matches grants with the same namespace-anchored glob.
@@ -17,16 +18,16 @@ func TestCredentialPermissionGlob(t *testing.T) {
 		perm   string
 		want   bool
 	}{
-		{[]string{"merchant:*"}, billing.MerchantCatalogUpdate, true},
-		{[]string{billing.MerchantCatalogUpdate}, billing.MerchantCatalogUpdate, true},
-		{[]string{billing.MerchantCatalogUpdate}, billing.MerchantCatalogRead, false},
-		{[]string{"merchant:*:read"}, billing.MerchantCatalogRead, true},
-		{[]string{"merchant:*:read"}, billing.MerchantCatalogUpdate, false},
-		{[]string{"customer:*"}, billing.MerchantCatalogUpdate, false},
-		{[]string{"root:*"}, billing.MerchantAdmissionsCreate, false},
-		{[]string{"*"}, billing.MerchantCatalogUpdate, false},
-		{[]string{billing.MerchantCustomerSettingsUpdate}, billing.MerchantAdmissionsCreate, false},
-		{nil, billing.MerchantCatalogUpdate, false},
+		{[]string{"merchant:*"}, staffperm.Admin, true},
+		{[]string{staffperm.Admin}, staffperm.Admin, true},
+		{[]string{staffperm.Admin}, staffperm.Read, false},
+		{[]string{"merchant:*:read"}, staffperm.Read, true},
+		{[]string{"merchant:*:read"}, staffperm.Admin, false},
+		{[]string{"customer:*"}, staffperm.Admin, false},
+		{[]string{"root:*"}, staffperm.Write, false},
+		{[]string{"*"}, staffperm.Admin, false},
+		{[]string{staffperm.Read}, staffperm.Write, false},
+		{nil, staffperm.Admin, false},
 	} {
 		require.Equal(t, tc.want, (&credential.ResolvedDelegated{Permissions: tc.grants}).HasPermission(tc.perm), "delegated %v %s", tc.grants, tc.perm)
 		require.Equal(t, tc.want, (&credential.ResolvedResourceAccess{Permissions: tc.grants}).HasPermission(tc.perm), "resource %v %s", tc.grants, tc.perm)

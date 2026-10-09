@@ -7,8 +7,10 @@ token-lean tables. No SDK.
 
 ## Auth
 
-- Bearer merchant **API key** (`Authorization: Bearer <key>`) carrying the
-  `merchant:metrics:read` permission; mint one from the console (Settings) or the API.
+- Bearer merchant **API key** (`Authorization: Bearer <key>`) that the host's guard
+  for the metrics routes admits (a staff read: `openrails.StaffReads` or
+  `openrails.Metrics`; on the standalone server a `viewer` key); mint one from the
+  console (Settings) or the API.
 - Every query is scoped to the key's merchant (an explicit merchant predicate); the API serves
   **aggregates only**, never entity rows.
 - Prefix: standalone `/v1`, embedded typically `/billing/v1`.

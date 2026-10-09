@@ -77,7 +77,7 @@ Hosts building on the server package set `server.Config.Auth`'s `Naming`
 (`server.NamingConfig`).
 
 Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
-(`merchant:settings:update`), subject to the rename interval and, on hosted
+(`server.MerchantAdmin`), subject to the rename interval and, on hosted
 deployments, the reserved names and creation pattern. `GET /v1/platform/merchants?q=`
 searches current names. A signed-in user lists the merchants they hold a role in
 with `GET /v1/merchants` (`{id, slug, display_name, role}`, the user's role in
@@ -321,10 +321,13 @@ Merchant-scoped backend credentials are minted through the self-serve surface
 - `GET /v1/merchant/api-keys` lists (live, expired, revoked — no secret material).
 - `DELETE /v1/merchant/api-keys/{id}` revokes; cross-merchant ids 404.
 
-Roles are the fixed merchant catalog: `viewer` (read-only — the right choice
-for LLM agents), `support`, `owner`. Minting requires
-`merchant:credentials:manage` (owner-only) and is no-escalation: a caller can
-never mint a key with authority beyond its own credential's.
+Roles are the fixed merchant catalog: `viewer` (`server.MerchantRead`:
+read-only, the right choice for LLM agents), `support` (`server.MerchantRead`
+and `server.MerchantWrite`: acts on customers), `owner` (everything, the
+merchant's configuration included). Minting requires AuthKit's
+credentials-manage permission on the merchant group (owner-only) and is
+no-escalation: a caller can never mint a key with authority beyond its own
+credential's.
 
 ## Webhook routing
 
@@ -355,7 +358,9 @@ Merchant routes are scoped to the authenticated merchant; cross-merchant
 operations are the standalone operator's (`/v1/platform`). PSP metadata and
 archive decisions are always available through the Client; writing a PSP
 credential needs a writable secret backend, so it is refused under `snapshot`
-custody. Catalog mutation routes are mounted only with `Routes.CatalogEdits`
-(standalone: `catalog_edits: true`); the embedded in-process Client is the
-process owner and writes its own catalog whatever the mount says. Catalog data always
+custody. Catalog mutation routes are `Routes.MerchantConfig`'s, refused while
+`Config.Catalog` is the catalog's truth (standalone: allowed when
+`secret_backend` is `vault` or `db`, read-only under `snapshot`); the embedded
+in-process Client is the process owner and writes its own catalog whatever the
+mount says. Catalog data always
 lives in the database. See [self-hosting-mode1.md](self-hosting-mode1.md).

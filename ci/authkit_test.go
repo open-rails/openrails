@@ -62,6 +62,17 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 		return call(t, handler, token, http.MethodGet, "/v1/merchant/findings", "", nil).Code
 	}
 	require.Equal(t, http.StatusOK, findings(viewerKey["secret"].(string)))
+	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey["secret"].(string), http.MethodGet, "/v1/merchant/psps", "", nil).Code, "a viewer reads no merchant configuration")
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey["secret"].(string), http.MethodGet, "/v1/merchant/psps", "", nil).Code)
+	attempt := billing.CheckoutAttemptID(uuid.New()).String()
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/merchant/checkout-attempts"},
+		{http.MethodGet, "/v1/merchant/checkout-attempts/" + attempt},
+		{http.MethodPost, "/v1/merchant/checkout-attempts/" + attempt + "/confirm"},
+	} {
+		w := call(t, handler, ownerKey["secret"].(string), route.method, route.path, "", map[string]any{})
+		require.Equal(t, http.StatusNotFound, w.Code, "%s %s is not mounted: %s", route.method, route.path, w.Body.String())
+	}
 	w = call(t, handler, session, http.MethodDelete, "/v1/merchant/api-keys/"+viewerKey["id"].(string), shop, nil)
 	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.Equal(t, http.StatusUnauthorized, findings(viewerKey["secret"].(string)), "a revoked key authenticates nothing")

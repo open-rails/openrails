@@ -10,12 +10,12 @@ import (
 )
 
 // checkoutRoutes is buying. A browser buys only through a checkout session:
-// the signed-in customer (or the merchant's server) mints one, and the payment
-// page reads and pays it by its id. A checkout attempt is one charge on one
-// PSP; merchant automation creates them directly. Rail steps (a redirect, a
-// Solana Pay link) are an attempt's next_action; Solana Pay's wallet requests
-// address the attempt. Public discovery serves the checkout configuration and
-// accepted Solana tokens.
+// the signed-in customer mints one with their own credential (or the merchant
+// with its own), and the payment page reads and pays it by its id; a saved
+// card pays only with the customer's own proof. A checkout attempt is one charge on one
+// PSP; rail steps (a redirect, a Solana Pay link) are its next_action, and
+// Solana Pay's wallet requests address it. Public discovery serves the
+// checkout configuration and accepted Solana tokens.
 var checkoutRoutes = []Route{
 	{Method: GET, Path: "/v1/checkout-config", Group: Checkout, Auth: AuthPublic,
 		Responses: []Reply{{200, merchants.PublicCheckoutConfig{}}}, Errors: codes("resource_not_found", "service_unavailable"), Handler: h(handlers.GetCheckoutConfig)},
@@ -39,15 +39,9 @@ var checkoutRoutes = []Route{
 		Responses: []Reply{{200, checkoutsession.CheckoutSession{}}}, Errors: codes("card_attempts_blocked", "card_declined", "card_not_saved", "checkout_session_not_found", "checkout_session_unavailable", "credential_custody_transition_required", "customer_blocked", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetCheckoutSession)},
 	{Method: POST, Path: "/v1/me/checkout-sessions/{id}/pay", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement, Throttle: ThrottleSessionPay,
 		Request: checkoutsession.PayCheckoutSessionParams{}, Responses: []Reply{{200, checkoutsession.CheckoutSessionPayResult{}}}, Errors: codes("card_attempts_blocked", "card_declined", "card_not_saved", "card_requires_https", "checkout_offer_unavailable", "checkout_payment_in_progress", "checkout_request_invalid", "checkout_session_expired", "checkout_session_not_found", "checkout_session_unavailable", "credential_custody_transition_required", "customer_action_required", "customer_blocked", "customer_proof_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.SelfPayCheckoutSession)},
-	{Method: POST, Path: "/v1/merchant/checkout-sessions", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCheckoutCreate,
+	{Method: POST, Path: "/v1/merchant/checkout-sessions", Group: Merchant, Auth: AuthMerchant, Name: "CreateCheckoutSession", Level: LevelWrite, Resources: res(ResCheckoutSessions), Sensitive: true,
 		Request: billing.CreateCheckoutSessionParams{}, Responses: []Reply{{201, billing.CheckoutSessionLink{}}}, Errors: codes("authentication_required", "checkout_offer_unavailable", "checkout_session_unavailable", "customer_blocked", "invalid_param", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceCreateCheckoutSession)},
-	{Method: POST, Path: "/v1/merchant/checkout-attempts", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCheckoutCreate, IdempotencyKey: true,
-		Request: billing.CreateCheckoutAttemptParams{}, Responses: []Reply{{200, billing.CheckoutAttempt{}}}, Errors: codes("authentication_required", "card_attempts_blocked", "card_declined", "card_not_saved", "checkout_attempt_closed", "customer_proof_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceCreateCheckoutAttempt)},
-	{Method: GET, Path: "/v1/merchant/checkout-attempts/{id}", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
-		Responses: []Reply{{200, billing.CheckoutAttempt{}}}, Errors: codes("authentication_required", "checkout_attempt_expired", "invalid_param", "resource_access_denied", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceGetCheckoutAttempt)},
-	{Method: POST, Path: "/v1/merchant/checkout-attempts/{id}/confirm", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCheckoutCreate,
-		Request: billing.ConfirmCheckoutAttemptParams{}, Responses: []Reply{{200, billing.CheckoutAttempt{}}, {202, billing.CheckoutAttempt{}}}, Errors: codes("authentication_required", "checkout_attempt_expired", "insufficient_funds", "invalid_param", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceConfirmCheckoutAttempt)},
-	{Method: GET, Path: "/v1/merchant/checkout-config", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCustomerSettingsRead,
+	{Method: GET, Path: "/v1/merchant/checkout-config", Group: Merchant, Auth: AuthMerchant, Name: "GetCheckoutConfig", Level: LevelRead, Resources: res(ResCheckout),
 		Query: params(text("price_id"), text("product_key"), text("price_key")), Responses: []Reply{{200, merchants.PublicCheckoutConfig{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceGetCheckoutConfig)},
 
 	// Captcha discovery: whether this caller must solve one, and the script
