@@ -1,6 +1,6 @@
 //go:build e2e && integration
 
-package subscriptions_test
+package ci_test
 
 import (
 	"bytes"
@@ -14,10 +14,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/stretchr/testify/require"
 
@@ -71,31 +69,20 @@ func (a ownerAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
 // spend the card, and no other owner, user, merchant or surface can pay it.
 func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	t.Parallel()
-	w := prepareWorld(t, 12)
+	f := newFixture(t)
+	stripe := newStripeFake()
 	ctx := t.Context()
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
 	require.NoError(t, err)
-	authSchema := w.schema + "_auth"
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, _ = w.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{authSchema}.Sanitize()+" CASCADE")
+	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
+		cfg.Engine.SecretBackend = openrails.SecretBackendDB
+		cfg.Engine.Encryption = &openrails.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(key)}
+		cfg.Engine.TrustedProxies = []string{"127.0.0.1/32"}
+		cfg.Auth.DirectPeerIP = false
+		deps.Engine.StripeTransport = stripe
 	})
-	srv, err := server.New(ctx, server.Config{
-		Engine: openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
-			SecretBackend: openrails.SecretBackendDB, Encryption: &openrails.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(key)},
-			TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
-		},
-		LocalSignIn: true, Auth: server.AuthConfig{
-			Issuer: "http://127.0.0.1/" + w.schema, AllowMemory: true, AllowMissingSenders: true,
-			AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, KeysPath: t.TempDir(), Schema: authSchema,
-		},
-	}, server.Deps{Engine: openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe}})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, srv.Close(context.Background())) })
 	engine := srv.Client()
 	auth := srv.AuthKit()
 
@@ -197,7 +184,7 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	status, setup := call(oliviaToken, http.MethodPost, surface(acme)+"/payment-method-setups", "", map[string]any{"psp_id": pspOf(t, engine, platform.id), "consent": true})
 	require.Equal(t, http.StatusOK, status, "%v", setup)
 	setup = unwrap(setup)
-	w.stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)
+	stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)
 	status, confirmed := call(oliviaToken, http.MethodPost, surface(acme)+"/payment-method-setups/"+setup["id"].(string)+"/confirm", "", map[string]any{})
 	require.Equal(t, http.StatusOK, status, "%v", confirmed)
 	card := unwrap(confirmed)["payment_method_id"].(string)
@@ -273,11 +260,11 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	saved := doc["saved_methods"].([]any)
 	require.Len(t, saved, 1, "%v", doc)
 	require.Equal(t, card, saved[0].(map[string]any)["id"])
-	charges := len(w.stripe.ledger(""))
+	charges := stripe.charged()
 	status, out = call(oliviaToken, http.MethodPost, surface(acme)+"/checkout-sessions/"+session+"/pay", "", pay)
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "succeeded", out["status"], "%v", out)
-	require.Len(t, w.stripe.ledger(""), charges+1)
+	require.Equal(t, charges+1, stripe.charged())
 	subs, err := engine.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: acmeCustomer, Status: billing.SubscriptionActive}, openrails.ForMerchantID(platform.id))
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1)
@@ -285,6 +272,7 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	none, err := engine.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: acmeCustomer}, openrails.ForMerchantID(other.id))
 	require.NoError(t, err)
 	require.Empty(t, none.Items, "the other merchant's session stays unpaid")
+	require.Empty(t, stripe.unexpected(), "Stripe calls the trimmed fake does not model")
 }
 
 // pspOf is the merchant's one PSP.
@@ -294,4 +282,19 @@ func pspOf(t *testing.T, engine *openrails.Client, merchant billing.MerchantID) 
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
 	return psps.Items[0].ID
+}
+
+// unwrap is a response's data member, or the response.
+func unwrap(v map[string]any) map[string]any {
+	if data, ok := v["data"].(map[string]any); ok {
+		return data
+	}
+	return v
+}
+
+// hostedErrorCode is an error response's code.
+func hostedErrorCode(body map[string]any) string {
+	detail, _ := body["error"].(map[string]any)
+	code, _ := detail["code"].(string)
+	return code
 }

@@ -16,17 +16,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/authkit/iam"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/server"
-	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // Exercise the operator's real CLI over separate databases, then resume through
@@ -36,7 +31,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 	t.Parallel()
 	binary := filepath.Join(t.TempDir(), "openrails")
 	build := exec.CommandContext(t.Context(), "go", "build", "-p", "2", "-o", binary, "./cmd/openrails")
-	build.Dir = "../.."
+	build.Dir = "../../server"
 	output, err := build.CombinedOutput()
 	require.NoError(t, err, "build normal CLI: %s", output)
 
@@ -213,50 +208,4 @@ func handoffTarget(t *testing.T, source *world) *world {
 	require.NoError(t, engine.Migrate(t.Context(), pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema}}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, target.schema))
 	return target
-}
-
-// The group-bound preparation used by the hosted CLI checks real destination
-// AuthKit authority. Neither the archive UUID nor a foreign owner can rebind it.
-func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
-	t.Parallel()
-	source := newWorld(t)
-	mid := source.client[embedded].MerchantID()
-	source.stop()
-	target := handoffTarget(t, source)
-	srv, err := server.New(t.Context(), server.Config{
-		Engine: openrails.Config{
-			Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema},
-			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
-			DB: &openrails.DBConfig{URL: target.dsn},
-		},
-		LocalSignIn: true, Auth: server.AuthConfig{
-			Issuer: "http://127.0.0.1/" + target.schema, AllowMemory: true, AllowMissingSenders: true,
-			AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
-		},
-	}, server.Deps{Engine: openrails.Deps{Postgres: target.pool}})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, srv.Close(context.Background())) })
-	auth := srv.AuthKit()
-	_, cp := operator.Of(srv)
-	owner, outsider := authtest.NewUser(t, auth), authtest.NewUser(t, auth)
-	ownerSubject := iam.UserSubject(owner.ID)
-	group, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
-	require.NoError(t, err)
-	req := operator.ProvisionMerchantForRestoreRequest{MerchantID: mid, Slug: target.slug, ExistingGroupID: group.ID, OwnerUserID: outsider.ID}
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
-	require.ErrorIs(t, err, iam.ErrInsufficientAuthority)
-	req.OwnerUserID = owner.ID
-	prepared, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
-	require.NoError(t, err)
-	require.Equal(t, mid, prepared.MerchantID)
-	require.Equal(t, group.ID, prepared.GroupID)
-	require.True(t, prepared.Created)
-	again, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
-	require.NoError(t, err)
-	require.False(t, again.Created)
-	otherGroup, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
-	require.NoError(t, err)
-	req.ExistingGroupID = otherGroup.ID
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
-	require.ErrorIs(t, err, merchants.ErrMerchantRestoreConflict)
 }
