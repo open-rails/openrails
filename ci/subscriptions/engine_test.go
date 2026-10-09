@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/rivertype"
 )
 
 var rails = []string{"stripe", "nmi"}
@@ -104,9 +105,38 @@ func (e *engineCase) refreshBeforePeriodEnd() {
 		e.w.advance(d)
 	}
 	e.w.refreshProviders()
-	e.w.settleCollectionScans()
+	e.w.settleRefreshes()
 	require.True(e.w.t, e.w.clock.Now().Before(end), "install the fault before the renewal becomes due")
 	require.True(e.w.t, end.Equal(e.periodEnd()), "healthy observation did not advance the paid period")
+}
+
+// settleRefreshes drains every provider refresh and the scans its completion
+// requests, the process's own startup refresh included. River inserts that
+// refresh only once its leader is elected, which under load comes after a
+// scenario has moved the clock; completing after a fault, it would request
+// another due pass.
+func (w *world) settleRefreshes() {
+	w.t.Helper()
+	kinds := []string{"openrails.provider_refresh", "openrails.provider_refresh_merchant", "openrails.dunning", "openrails.invoice"}
+	require.Eventually(w.t, func() bool {
+		if w.replica == nil {
+			var started bool
+			if err := w.pool.QueryRow(w.t.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM billing.river_job WHERE kind = 'openrails.provider_refresh')`)).Scan(&started); err != nil || !started {
+				return false
+			}
+		}
+		scheduled, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds...).States(rivertype.JobStateScheduled).First(100))
+		if err != nil {
+			return false
+		}
+		for _, job := range scheduled.Jobs {
+			if !job.ScheduledAt.After(time.Now()) {
+				_, _ = w.jobs.JobRetry(w.t.Context(), job.ID)
+			}
+		}
+		active, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds(kinds...).States(rivertype.JobStateAvailable, rivertype.JobStateRunning, rivertype.JobStatePending).First(100))
+		return err == nil && len(active.Jobs) == 0
+	}, 30*time.Second, 20*time.Millisecond, "refreshes and the scans they request finish before the fault")
 }
 
 // toFreshPeriodEnd advances a healthy fixture through its billing boundary.
