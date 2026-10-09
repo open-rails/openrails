@@ -35,6 +35,7 @@ ENV GIT_TERMINAL_PROMPT=0
 # module's (server/), which builds against the root's source (its replace).
 COPY go.mod go.sum ./
 COPY server/go.mod server/go.sum ./server/
+WORKDIR /app/server
 
 # Download dependencies with cache mount for Go modules (with retry).
 # All dependencies are public, so no authentication is required.
@@ -42,12 +43,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eu; \
     for i in 1 2 3; do \
-      (cd server && go mod download) && break || (echo "go mod download failed, retrying" && sleep 5); \
+      go mod download && break || (echo "go mod download failed, retrying" && sleep 5); \
     done
 
 # Copy source code, then the console build into the dir go:embed reads.
-COPY . .
-COPY --from=console /web/admin/dist ./web/admin/dist
+COPY . /app
+COPY --from=console /web/admin/dist /app/web/admin/dist
 
 # Release identity (internal/buildinfo); unset falls back to "dev".
 ARG VERSION=
@@ -59,9 +60,8 @@ ARG TARGETARCH
 # Build the application with cache mount
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    test -f web/admin/dist/index.html && \
-    mkdir -p bin && \
-    cd server && \
+    test -f ../web/admin/dist/index.html && \
+    mkdir -p ../bin && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X github.com/open-rails/openrails/internal/buildinfo.version=${VERSION} -X github.com/open-rails/openrails/internal/buildinfo.commit=${COMMIT} -X github.com/open-rails/openrails/internal/buildinfo.date=${DATE}" \
       -o ../bin/openrails ./cmd/openrails
