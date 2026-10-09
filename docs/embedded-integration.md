@@ -43,7 +43,8 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-A host imports four kinds of package; everything else is `internal/`:
+The module requires no AuthKit, so it never sets your AuthKit version. A host
+imports four kinds of package; everything else is `internal/`:
 
 | Package | Holds |
 |---|---|
@@ -467,8 +468,8 @@ selectors require the same operation permission; neither acts as authorization.
 The library serves the merchants its host declares, behind the host's own auth.
 A product that serves many merchants with OpenRails' own accounts (merchant
 sign-up, teams, merchant API keys, trusted issuers, fleet analytics) builds on
-`github.com/open-rails/openrails/server` instead, which composes this engine
-with its own AuthKit like any host does; see
+`github.com/open-rails/openrails/server` instead, its own module released with
+this one, which composes this engine with its own AuthKit like any host does; see
 [standalone-integration.md](standalone-integration.md#building-on-the-server-package).
 
 ### 9. Acting on delinquency

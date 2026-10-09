@@ -18,7 +18,7 @@ import (
 )
 
 func TestExampleManifestsParse(t *testing.T) {
-	manifest, err := LoadMerchantConfigManifest(filepath.Join("..", "..", "config", "merchants_config.example.yaml"))
+	manifest, err := LoadMerchantConfigManifest(filepath.Join("..", "..", "..", "config", "merchants_config.example.yaml"))
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 2)
 	require.Equal(t, "https://local-stack.example/.well-known/jwks.json", manifest.Merchants["local-stack"].RemoteApplication.JWKSURI)

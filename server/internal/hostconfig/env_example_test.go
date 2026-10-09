@@ -23,7 +23,7 @@ var composeOnlyEnvVars = map[string]bool{
 // the file passes the real Load pipeline (dotenv pickup included) in an
 // otherwise empty environment.
 func TestEnvExampleRoundTrip(t *testing.T) {
-	examplePath, err := filepath.Abs(filepath.Join("..", "..", ".env.example"))
+	examplePath, err := filepath.Abs(filepath.Join("..", "..", "..", ".env.example"))
 	require.NoError(t, err)
 	raw, err := os.ReadFile(examplePath)
 	require.NoError(t, err)
@@ -38,7 +38,7 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	require.Equal(t, "5544", moved["DB_PORT"])
 	require.Contains(t, moved["DB_URL"], ":5544/openrails_db")
 
-	compose, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yaml"))
+	compose, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yaml"))
 	require.NoError(t, err)
 	for name := range composeOnlyEnvVars {
 		require.Containsf(t, string(compose), "${"+name, "%s is declared compose-only but compose never interpolates it", name)

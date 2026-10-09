@@ -22,7 +22,7 @@ type HostResolver func(ctx context.Context, host string) (billing.MerchantID, er
 // hostMerchantCtxKey is the unexported context key for the Host-pinned
 // merchant. Deliberately distinct from the general "configured merchant"
 // WithID/FromContext key: HTTP Host resolution sets both together, but only
-// THIS key lets the JWT-issuer resolution path (internal/controlplane)
+// THIS key lets the JWT-issuer resolution path (server/internal/controlplane)
 // positively detect "a Host resolver ran and pinned merchant X for this
 // request" so it can enforce X == the token's own issuer-resolved merchant.
 type hostMerchantCtxKey struct{}

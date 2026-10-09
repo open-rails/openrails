@@ -13,7 +13,7 @@ Everything routine goes through [Task](https://taskfile.dev) (`Taskfile.yaml`):
 
 | Target | What it does |
 |---|---|
-| `task build` | Build `bin/openrails` from `./cmd/openrails` (embeds `web/admin/dist` if built) |
+| `task build` | Build `bin/openrails` from `server/cmd/openrails` (embeds `web/admin/dist` if built) |
 | `task run` | Build + run the server |
 | `task dev` | Hot-reload dev server (Air, `.air.toml`) |
 | `task docker-up` / `task docker-down` | Start/stop the local compose stack (openrails + Postgres + Garnet) |
@@ -101,38 +101,48 @@ a fresh build of it). Wipe it:
 
 ## Repo layout
 
+Three Go modules, each checked on its own (`GOWORK=off`):
+
+- `.` — `github.com/open-rails/openrails`, the embedded library. Its go.mod
+  requires no AuthKit (`scripts/check-embedded-auth-boundary.sh`).
+- `server/` — `github.com/open-rails/openrails/server`: package `server`, the
+  binary `server/cmd/openrails` and the AuthKit-backed packages under
+  `server/internal/` (control plane, operator, host configuration). Released
+  with the root under the same version; in the repository it builds against
+  the root's source (`replace … => ../`).
+- `examples/` — the runnable examples, a host's view of both.
+
+In the root module:
+
 - `client.go`, `remote.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `New` over the in-process transport); `Config`/`Deps` named from `internal/config`
 - `billing/` — the API vocabulary: request/response types, IDs, errors and codes, permission names
 - `catalog/` — the catalog document (`catalog.Application`) and its charge-model types
 - `adapters/{http,gin,fiber}/` — router adapters for `client.Routes`
 - `internal/engine/` — the in-process engine behind `openrails.New` (lifecycle, routes, River, the opt-in control plane)
-- `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
-- `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`), `controlplane/`
+- `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`)
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline
 - `api/` — the frozen-contract snapshots: `go.txt`, `openapi.json`, `schema.txt`
-- `ci/` — the end-to-end suite: public-client contracts with disposable PostgreSQL schemas and deterministic provider transports
+- `ci/` — the end-to-end suite: public-client contracts with disposable PostgreSQL schemas and deterministic provider transports; `server/ci` is the server's (`scripts/e2e.sh` runs both)
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
 
-The root, `billing`, `catalog`, the adapters and `web/admin` are the only
-importable non-`main` packages; `internal/contractaudit` `TestPublicPackages`
-fails on any other.
+The root, `billing`, `catalog`, the adapters, `openrailstest`, `web/admin` and
+`server` are the only importable non-`main` packages;
+`internal/contractaudit` `TestPublicPackages` fails on any other.
 
 ## Releases
 
 ```sh
-gh workflow run cut-release.yaml -f bump=minor   # or bump=patch, bump=major
+scripts/release vX.Y.Z ["note"]   # on master's head, clean, equal to origin/master
 ```
 
-This tags master's head with the next version; the tag runs `release.yaml`
-(GoReleaser: binaries, checksums, SBOMs, generated notes, the
+The root and server modules release together. The script pins
+`server/go.mod`'s require of the root to `vX.Y.Z`, commits that, tags the
+commit `vX.Y.Z` and `server/vX.Y.Z` (signed, annotated) and pushes master and
+both tags. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
+server module: binaries, checksums, SBOMs, generated notes, the
 `openrails-billing-ui-X.Y.Z.tgz` asset, build provenance) and
 `docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one
 manifest for linux/amd64 and linux/arm64). Edit the generated notes on the
 release page if needed. Dry run:
 `goreleaser release --snapshot --clean --skip=publish,sign`.
-
-`cut-release.yaml` pushes the tag with the `RELEASE_TOKEN` secret (a
-fine-grained PAT with Contents and Workflows read/write on this repo): tags
-pushed with `GITHUB_TOKEN` start no workflows. Pushing a `v*` tag by hand
-releases the same way.

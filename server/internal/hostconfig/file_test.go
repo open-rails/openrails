@@ -75,7 +75,7 @@ func TestPort(t *testing.T) {
 
 // config.example.yaml is the documented file: every key in it must still load.
 func TestConfigExampleLoads(t *testing.T) {
-	example, err := filepath.Abs(filepath.Join("..", "..", "config.example.yaml"))
+	example, err := filepath.Abs(filepath.Join("..", "..", "..", "config.example.yaml"))
 	require.NoError(t, err)
 	bootEnv(t)
 	unsetenv(t, "TEST_MODE")
@@ -95,7 +95,7 @@ func TestConfigExampleLoads(t *testing.T) {
 
 // resource_server reaches the control plane's trusted issuers, keys and all.
 func TestResourceServerLoads(t *testing.T) {
-	example, err := os.ReadFile(filepath.Join("..", "..", "config.example.yaml"))
+	example, err := os.ReadFile(filepath.Join("..", "..", "..", "config.example.yaml"))
 	require.NoError(t, err)
 	bootEnv(t)
 	path := filepath.Join(t.TempDir(), "config.yaml")

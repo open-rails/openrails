@@ -2,7 +2,7 @@
 // rail credentials, and webhook routing for OpenRails' merchant platform
 // (issue #225). It builds on the #223 merchant primitive (internal/merchant +
 // billing.merchants)
-// and the #224 in-process AuthKit control plane (internal/controlplane): the
+// and the #224 in-process AuthKit control plane (server/internal/controlplane): the
 // lifecycle service records merchant permission-group ids through control-plane
 // core calls and records merchant directory state directly in openrails.*
 // (OpenRails-owned control-plane state).

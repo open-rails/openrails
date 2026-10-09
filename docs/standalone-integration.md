@@ -353,8 +353,14 @@ other surface (admin API, webhooks, admin) emits no CORS headers at all.
 ### Building on the server package
 
 The `openrails` binary is a command line over
-`github.com/open-rails/openrails/server`. A product that serves many merchants
-with OpenRails' own accounts builds on the same package:
+`github.com/open-rails/openrails/server`, a module of its own released with the
+library under the same version. A product that serves many merchants with
+OpenRails' own accounts builds on the same package:
+
+```bash
+go get github.com/open-rails/openrails/server@vX.Y.Z
+go install github.com/open-rails/openrails/server/cmd/openrails@vX.Y.Z   # the binary
+```
 
 ```go
 srv, err := server.New(ctx, server.Config{

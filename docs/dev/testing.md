@@ -2,14 +2,15 @@
 
 Two kinds of test gate a pull request.
 
-**Package tests** (`go test ./...`, the `Checks` job) need no database: unit
+**Package tests** (`go test ./...` in each module, the `Checks` job;
+`bash scripts/check.sh go`) need no database: unit
 tests, wire and contract guards, source guardrails. Among them are the freeze
 gates: `TestGoAPISurface`, `TestGeneratedContractIsFresh`,
 `TestSchemaSnapshotNamesTheMigrations` and the documentation checks
 (`TestDocsNameWhatExists`, `TestDocsLinksResolve`). See
 [compatibility](../compatibility.md).
 
-**The end-to-end suite** (`ci/`, the `End-to-end` job) is the only database and
+**The end-to-end suite** (`ci/` and `server/ci`, the `End-to-end` job) is the only database and
 provider test lane. It drives the public Client and the mounted HTTP routes
 against a real PostgreSQL 18, with deterministic NMI and Stripe transports.
 Every test migrates its own random schema, so tests never share state. It needs no browser and no real PSP credentials, and it fails when its
@@ -21,11 +22,12 @@ OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
   bash scripts/e2e.sh
 ```
 
-`scripts/e2e.sh` builds the packages under `./ci/...` once (tags
+`scripts/e2e.sh` builds the packages under `./ci/...` of the root and server
+modules once (tags
 `e2e,integration`, `-race`) and runs each top-level test in its own process,
 `OPENRAILS_E2E_JOBS` at a time, longest first. CI splits the suite across
-`OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`;
-a test missing from it counts as the median. Redis is needed by the
+`OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`,
+keyed by package directory; a test missing from it counts as the median. Redis is needed by the
 card-attack captcha test only.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
@@ -39,6 +41,9 @@ card-attack captcha test only.
   embedded and the HTTP client. `TestReplicas*` run two or three embedded
   replicas over one database to prove exactly-once rebilling; a crash cuts the
   replica's database link, so it records nothing afterwards.
+- `server/ci` covers the standalone server and AuthKit: the control plane,
+  registration, teams, merchant names and API keys, trusted issuers, the
+  console, and AuthKit as an embedded host's `Auth`.
 - Adversarial cases (IDOR, merchant isolation, webhook forgery, double-spend
   races, revocation, credential class) are indexed in
   [security tests](../security-tests.md).
@@ -72,5 +77,5 @@ that pins a known amount to its exact wire value.
 Add a small public-client contract to `ci/`. Use a deterministic local
 transport for provider behavior, keep each test on a fresh schema, and assert
 the durable result and the negative safety case. A deliberate behavior change
-sweeps `ci/` for the codes, statuses, paths and fields it changed: green in one
-package is not green.
+sweeps `ci/` and `server/ci` for the codes, statuses, paths and fields it
+changed: green in one package is not green.

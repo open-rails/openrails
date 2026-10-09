@@ -91,12 +91,12 @@ built from an OpenRails checkout carries a console only when `web/admin/dist`
 was built before `go build`; an embedding host supplies its own build as
 `Deps.ConsoleAssets`. Node/pnpm is a build-time dependency only.
 
-**Standalone binary.** Only `dist/.gitkeep` is committed, so `go build ./...`
-needs no Node and yields a console-less binary:
+**Standalone binary.** Only `dist/.gitkeep` is committed, so building
+`server/cmd/openrails` needs no Node and yields a console-less binary:
 
 ```sh
 task admin-build           # build web/admin/dist (gitignored)
-task build-console-binary  # admin-build + go build ./cmd/openrails
+task build-console-binary  # admin-build + go build ./cmd/openrails in server/
 ```
 
 Release archives and Docker images always carry the console (still off until

@@ -7,10 +7,23 @@ keep secrets and customer/account-specific identifiers OUT of editable committed
 files (code, trackers, this file). Neutral examples in this repository use `host-one`
 through `host-four`; these are placeholders, not customer or repository names.
 
+## Modules
+- Root `github.com/open-rails/openrails`: the embedded library. Its go.mod requires NO
+  AuthKit (`scripts/check-embedded-auth-boundary.sh`); never add an AuthKit import to it.
+- `server/` is its own module, `github.com/open-rails/openrails/server`: package `server`,
+  the binary `server/cmd/openrails`, everything AuthKit-backed under `server/internal/`
+  (controlplane, operator, hostconfig, …) and the server's e2e suite `server/ci`. It may
+  import the root's `internal/` packages; the root never imports it. In the repo it builds
+  against the root's source (`replace … => ../`).
+- `examples/` is a module too. Check each module on its own (`GOWORK=off`;
+  `scripts/check.sh` runs all three).
+- `scripts/release vX.Y.Z` releases root and server in lockstep: it pins server's require
+  of the root, then tags `vX.Y.Z` and `server/vX.Y.Z` on that master commit.
+
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
-  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/admin`), the HTTP API,
-  and the database schema.
+  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/admin`, `server`), the
+  HTTP API, and the database schema. `api/go.txt` lists both modules.
 - Each has a generated snapshot: `api/go.txt` (`TestGoAPISurface`), `api/openapi.json`
   (`TestGeneratedContractIsFresh`), `api/schema.txt` (`TestSchemaSnapshot` in `ci/`).
   `go run ./scripts/contracts -write` rewrites all three; the schema needs
@@ -151,9 +164,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   that names a route, Go identifier, table, permission or error code that does not exist.
 
 ## Tests
-- Package tests (`go test ./...`) are guards, contracts and focused regressions; they
-  need no database.
-- `ci/` is the end-to-end suite (build tags `e2e,integration`; `scripts/e2e.sh` with
-  `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18). Every test gets its own schema.
-  A deliberate behaviour change must sweep it: `grep ci/` for the codes, constants and
-  statuses you changed. Green-in-my-package is not green.
+- Package tests (`go test ./...` in each module) are guards, contracts and focused
+  regressions; they need no database. The root's source guards walk `server/` too.
+- `ci/` and `server/ci` are the end-to-end suites (build tags `e2e,integration`;
+  `scripts/e2e.sh` runs both with `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18).
+  Every test gets its own schema. A deliberate behaviour change must sweep them: `grep`
+  `ci/` and `server/ci` for the codes, constants and statuses you changed.
+  Green-in-my-package is not green.

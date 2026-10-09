@@ -33,9 +33,11 @@ snapshot names, and fails when they are not.
 
 Every exported identifier of `openrails`, `billing`, `catalog`, `server`,
 `adapters/http`, `adapters/gin`, `adapters/fiber`, `openrailstest`,
-`openrailstest/nmimock` and `web/admin`.
+`openrailstest/nmimock` and `web/admin`. `server` is its own module,
+`github.com/open-rails/openrails/server`, released with the root under the same
+version (tags `vX.Y.Z` and `server/vX.Y.Z`); one list covers both modules.
 `api/go.txt` holds one line per constant, variable, function, type, struct
-field (with its tag) and method. `internal/…`, `cmd/…`, `examples/…` and `ci/…`
+field (with its tag) and method. `internal/…` and `cmd/…` of either module, `examples/…` and `ci/…`
 are not covered. Some types are declared under `internal/` and named by an
 alias (`openrails.Config`, `openrails.Deps`): the alias and its members are
 covered, and the test fails when the public API reaches an internal type any

@@ -20,12 +20,12 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 
 ### Session state, advisory locks, and wrappers
 
-- `internal/db/db_pgx.go`, `internal/controlplane/customer.go`: `set_config`
+- `internal/db/db_pgx.go`, `server/internal/controlplane/customer.go`: `set_config`
   of the `openrails.merchant_id` session setting. Keep raw because this is session
   state, not a domain query.
 - `internal/db/schema_rewrite.go`: wrapper methods rewrite already-authored SQL
   before delegating to pgx/sqlc. Keep raw wrapper calls.
-- `internal/bootstrap/merchant_manifest.go`,
+- `server/internal/bootstrap/merchant_manifest.go`,
   `internal/http/handlers/admin_payments.go`: advisory locks. Keep raw because
   Postgres lock functions are coordination primitives.
 
@@ -37,7 +37,7 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 
 ### Control-plane/global tables
 
-- `internal/controlplane/*`: bootstrap, API-key, and customer control-plane
+- `server/internal/controlplane/*`: bootstrap, API-key, and customer control-plane
   queries. Keep raw for now because these are global/control-plane paths outside
   the merchant sqlc surface. Convert later if this package grows more static SQL.
 - `internal/merchants/*`: merchant lifecycle, secrets, webhook routing, delete,

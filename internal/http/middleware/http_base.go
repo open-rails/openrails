@@ -352,7 +352,7 @@ func StaticMerchant(id billing.MerchantID) func() billing.MerchantID {
 // merchant" (merchant.WithID — the same key ResolveMerchantHTTP sets, so
 // unauthenticated merchant-scoped routes such as public catalog reads work
 // per-Host in a multi-merchant deployment) AND as merchant.WithHostMerchant, a
-// marker the control plane's JWT-issuer resolution (internal/controlplane)
+// marker the control plane's JWT-issuer resolution (server/internal/controlplane)
 // reads to enforce Host-merchant == issuer-merchant, fail closed on mismatch.
 //
 // resolve is called ON EVERY REQUEST (live per call, #734: no boot-time host
