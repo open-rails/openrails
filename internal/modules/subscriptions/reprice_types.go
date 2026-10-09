@@ -19,6 +19,10 @@ var (
 	// renewal whose provider preparation or money submission may have occurred.
 	ErrRebillTermsCommitted = apperr.New(http.StatusConflict, "rebill_terms_committed", "accepted recurring payment owns the pending price terms")
 
+	// ErrRenewalInProgress refuses a cancel while an accepted renewal payment is
+	// unresolved; the cancel succeeds once the payment resolves.
+	ErrRenewalInProgress = apperr.New(http.StatusConflict, "payment_in_progress", "a renewal payment for this subscription is unresolved; cancel again once it resolves")
+
 	// ErrRepriceCrossProduct: to_price must belong to the SAME product as the
 	// subscription's current price. Cross-product moves are plan changes (a
 	// different feature set) — out of scope for v1 (#778).

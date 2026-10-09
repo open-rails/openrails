@@ -56,8 +56,8 @@ type ClearSubscriptionDeletionMarkerParams struct {
 	RailSubscriptionID string
 }
 
-// NMI deletion completion owns only this read-model marker. A full-row replay
-// can undo another command's price/card/period/quote while waiting for the lock.
+// A verified provider stop owns only this marker. A full-row replay can undo
+// another command's price/card/period/quote while waiting for the lock.
 func (q *Queries) ClearSubscriptionDeletionMarker(ctx context.Context, arg ClearSubscriptionDeletionMarkerParams) (int64, error) {
 	result, err := q.db.Exec(ctx, clearSubscriptionDeletionMarker,
 		arg.Now,
@@ -2034,21 +2034,23 @@ func (q *Queries) MarkCanceledSubscriptionsSuperseded(ctx context.Context, arg M
 	return result.RowsAffected(), nil
 }
 
-const scheduleImportedSubscriptionDeletion = `-- name: ScheduleImportedSubscriptionDeletion :exec
+const markProviderStopPending = `-- name: MarkProviderStopPending :exec
 UPDATE billing.subscriptions
 SET deletion_scheduled_at = $1::timestamptz, updated_at = $1::timestamptz
 WHERE id = $2::uuid AND merchant_id = $3::uuid AND deletion_scheduled_at IS NULL
-  AND deleted_at IS NULL
+  AND status = 'canceled' AND deleted_at IS NULL
 `
 
-type ScheduleImportedSubscriptionDeletionParams struct {
+type MarkProviderStopPendingParams struct {
 	At         time.Time
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 }
 
-func (q *Queries) ScheduleImportedSubscriptionDeletion(ctx context.Context, arg ScheduleImportedSubscriptionDeletionParams) error {
-	_, err := q.db.Exec(ctx, scheduleImportedSubscriptionDeletion, arg.At, arg.ID, arg.MerchantID)
+// A queued provider stop holds the customer's slot until it is verified. A row
+// not yet canceled in the database takes the marker from its own full-row write.
+func (q *Queries) MarkProviderStopPending(ctx context.Context, arg MarkProviderStopPendingParams) error {
+	_, err := q.db.Exec(ctx, markProviderStopPending, arg.At, arg.ID, arg.MerchantID)
 	return err
 }
 

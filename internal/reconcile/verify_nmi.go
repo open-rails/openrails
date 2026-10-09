@@ -373,6 +373,9 @@ func (v *Verifier) bulkRead(ctx context.Context, mid billing.MerchantID) error {
 				if _, err := backfillSubscriptionPayments(ctx, q, sub, txns, now, defaultBackfillLookback); err != nil {
 					return err
 				}
+				if err := refundChargesAfterCancel(ctx, v.DB, sub, txns, now); err != nil {
+					return err
+				}
 				if err := recordScheduleAttempts(attempts.ObservedVia(ctx, "pull"), q, sub, txns, now); err != nil {
 					return err
 				}

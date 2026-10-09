@@ -70,10 +70,11 @@ verification unprocessed as a duplicate of an identical charge (same card and
 amount) it had just made. Nothing was charged or saved; send the request again
 in a few minutes.
 
-NMI-billed (legacy) subscriptions: a cancel while the merchant's destructive
-switch is off is `409 provider_cancel_held` (nothing changed; NMI keeps billing
-until an operator arms the switch); a tier change to a price of another billing
-cycle is `409 tier_change_cadence_unsupported` (NMI's billing date is kept); a
+NMI- and CCBill-billed (legacy) subscriptions: a cancel while the merchant's
+destructive switch is off is `409 provider_cancel_held` (nothing changed; the
+provider keeps billing until an operator arms the switch); on NMI a tier change
+to a price of another billing cycle is `409 tier_change_cadence_unsupported`
+(NMI's billing date is kept); a
 change of a schedule on a named NMI plan to a price without a linked NMI plan of
 the same amount and cycle is `409 tier_change_requires_linked_plan` (NMI changes
 named-plan schedules only by switching plans; nothing was charged).

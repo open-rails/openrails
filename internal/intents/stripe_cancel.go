@@ -104,7 +104,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return Retryable("stripe read before cancel failed: " + err.Error())
 	}
 	if stripeBillingStopped(rec) {
-		return Succeeded(stripeCancelEvidence(psid, rec, false))
+		return h.stopped(ctx, intent, psid, stripeCancelEvidence(psid, rec, false))
 	}
 
 	method, form, op := http.MethodDelete, url.Values(nil), "end"
@@ -120,7 +120,7 @@ func (h *StripeCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	case err != nil:
 		return Ambiguous("stripe cancel outcome unknown: " + err.Error())
 	case status < 300 || status == http.StatusNotFound:
-		return Succeeded(map[string]any{"rail_subscription_id": psid, "action": op})
+		return h.stopped(ctx, intent, psid, map[string]any{"rail_subscription_id": psid, "action": op})
 	case status == http.StatusTooManyRequests:
 		return Retryable("stripe rate limited: " + msg)
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
@@ -154,9 +154,18 @@ func (h *StripeCancelHandler) Verify(ctx context.Context, intent gen.BillingProv
 		return Ambiguous("stripe read failed: " + err.Error())
 	}
 	if stripeBillingStopped(rec) {
-		return Succeeded(stripeCancelEvidence(psid, rec, true))
+		return h.stopped(ctx, intent, psid, stripeCancelEvidence(psid, rec, true))
 	}
 	return Retryable("subscription still billing at Stripe; cancel verified not applied")
+}
+
+// stopped releases the slot the canceled subscription held while Stripe could
+// still bill it.
+func (h *StripeCancelHandler) stopped(ctx context.Context, intent gen.BillingProviderIntent, psid string, evidence map[string]any) Outcome {
+	if err := releaseProviderStop(ctx, h.DB, intent, psid, time.Now().UTC()); err != nil {
+		return Ambiguous("stripe billing stopped, but local release failed: " + err.Error())
+	}
+	return Succeeded(evidence)
 }
 
 // stripeBillingStopped: Stripe will not charge this subscription again.

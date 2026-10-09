@@ -126,6 +126,9 @@ type CancelMembershipParams struct {
 	CancelType         models.CancelType
 	CancelFeedback     *string
 	RevokeAccess       bool
+	// RefuseOwnedRenewal refuses a customer or merchant cancel of an engine
+	// membership while an accepted renewal payment is unresolved.
+	RefuseOwnedRenewal bool
 }
 
 type FailMembershipParams struct {

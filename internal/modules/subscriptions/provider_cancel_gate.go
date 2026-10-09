@@ -39,13 +39,20 @@ func NeedsProviderScheduleDelete(sub *models.Subscription) bool {
 	return sub != nil && sub.CollectionPolicy != models.CollectionPolicyEngine && rails.IsNMI(sub.Rail) && sub.RailSubscriptionID != ""
 }
 
+// needsArmedProviderStop reports whether cancelling sub queues a destructive
+// stop of a schedule the provider bills on its own (an NMI delete or a CCBill
+// cancel).
+func needsArmedProviderStop(sub *models.Subscription) bool {
+	return NeedsProviderScheduleDelete(sub) || (sub != nil && sub.Rail == models.RailCCBill && sub.CollectionPolicy != models.CollectionPolicyEngine && sub.RailSubscriptionID != "")
+}
+
 // RequireProviderCancelArmed admits a cancel of sub. A cancel that needs a
-// provider schedule delete while the merchant is disarmed raises the held
+// provider schedule stop while the merchant is disarmed raises the held
 // finding and is refused, unless accountDeletion: a deleted account is
-// canceled locally now and its delete waits for the operator's arming
+// canceled locally now and its stop waits for the operator's arming
 // (held=true).
 func RequireProviderCancelArmed(ctx context.Context, d *db.DB, sub *models.Subscription, accountDeletion bool) (held bool, err error) {
-	if !NeedsProviderScheduleDelete(sub) {
+	if !needsArmedProviderStop(sub) {
 		return false, nil
 	}
 	verdict := destructive.New(d).CheckMerchant(ctx, sub.MerchantID)

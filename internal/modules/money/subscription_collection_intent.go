@@ -475,7 +475,14 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		}
 		if sub.Status == models.StatusCanceled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
-			return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)
+			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil || sub.Status != models.StatusCanceled {
+				return err
+			}
+			payment, err := payments.NewPaymentService(d, h.Clock).GetByPSPTransactionID(ctx, models.Rail(in.Rail), retained.TransactionID())
+			if err != nil {
+				return err
+			}
+			return intents.RefundChargeAfterCancel(ctx, d, payment, h.Clock)
 		}
 		return h.lifecycle(d).RenewMembership(ctx, params)
 	})

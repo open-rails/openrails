@@ -70,7 +70,7 @@ JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepte
 JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
 WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
  AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
- AND s.status IN ('active','pending','past_due','awaiting_method','unverified') AND s.deleted_at IS NULL
+ AND (s.status IN ('active','pending','past_due','awaiting_method','unverified') OR s.deletion_scheduled_at IS NOT NULL) AND s.deleted_at IS NULL
 ORDER BY s.id LIMIT 1
 `
 
@@ -82,6 +82,7 @@ type GetConflictingInitialEnrollmentSubscriptionParams struct {
 
 // Customer row lock serializes admissions. Unknown obligations retain their
 // exclusion until provider outcome is resolved; a new local row is no handoff.
+// A canceled subscription whose provider stop is unverified still bills.
 func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Context, arg GetConflictingInitialEnrollmentSubscriptionParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getConflictingInitialEnrollmentSubscription, arg.ProductID, arg.MerchantID, arg.CustomerID)
 	var i BillingSubscription

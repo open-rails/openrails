@@ -117,10 +117,18 @@ with `signature` mirrors the landed transaction. Nothing changes before the
 chain confirms it, and a merchant cannot do it for the customer
 (`403 customer_action_required`).
 
-On an NMI-scheduled subscription, a cancel while the merchant's destructive
-switch is off answers `409 provider_cancel_held`: OpenRails will not cancel
-locally while NMI would keep charging. `account_deletion: true` cancels locally
-and holds the NMI delete.
+On an NMI- or CCBill-scheduled subscription, a cancel while the merchant's
+destructive switch is off answers `409 provider_cancel_held`: OpenRails will
+not cancel locally while the provider would keep charging.
+`account_deletion: true` cancels locally and holds the provider stop.
+
+Until the provider confirms its schedule stopped, a canceled subscription keeps
+the customer's place in its product and tier group: buying it again answers
+`409 resource_conflict` (resume it instead, or buy once the stop completes). A
+charge the provider still takes after the cancel is refunded in full and
+raises a `life.charge_after_cancel` finding. An OpenRails-billed subscription
+whose renewal payment is unresolved refuses a cancel with
+`409 payment_in_progress`; cancel again once it resolves.
 
 ### Tier changes
 

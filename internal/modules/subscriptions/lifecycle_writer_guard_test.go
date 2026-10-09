@@ -19,7 +19,6 @@ import (
 // supersedes a membership, a refund that revokes access.
 // Adding a writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
-	"internal/modules/subscriptions/upgrade.go:CompleteUpgradeTx":                  true,
 	"internal/modules/subscriptions/admin_service.go:ExtendSubscriptionByDuration": true,
 	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":       true,
 	"internal/intents/refund.go:revokeMembershipAccess":                            true,

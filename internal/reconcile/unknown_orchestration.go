@@ -267,7 +267,7 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 	// Backfill the provider's missing charges first (#634) so a renewed sub's
 	// confirming payment exists before/with the status flip, and materialize the
 	// provider customer id (#635) — shared with the #684 webhook converge path.
-	backfilled, railCustomer, err := applyDecisionSideEffects(ctx, q, sub, d, now, lookbackCap)
+	backfilled, railCustomer, err := applyDecisionSideEffects(ctx, database, sub, d, now, lookbackCap)
 	if err != nil {
 		return fmt.Errorf("reconcile unknown: %w", err)
 	}

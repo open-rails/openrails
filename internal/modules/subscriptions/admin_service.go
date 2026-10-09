@@ -253,7 +253,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine || subscription.Status == models.StatusCanceled && revokeAccess {
 		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), nil, nil, s.EntitlementService, s.NotificationService, nil, s.Clock())
-		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess})
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess, RefuseOwnedRenewal: true})
 	}
 
 	if !providerCancellable(subscription.Status) {

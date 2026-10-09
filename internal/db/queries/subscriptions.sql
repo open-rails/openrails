@@ -396,8 +396,8 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = sqlc.arg(
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
 
--- NMI deletion completion owns only this read-model marker. A full-row replay
--- can undo another command's price/card/period/quote while waiting for the lock.
+-- A verified provider stop owns only this marker. A full-row replay can undo
+-- another command's price/card/period/quote while waiting for the lock.
 -- name: ClearSubscriptionDeletionMarker :execrows
 UPDATE billing.subscriptions
 SET deletion_scheduled_at=NULL, updated_at=sqlc.arg(now)::timestamptz
@@ -451,8 +451,10 @@ UPDATE billing.subscriptions SET payment_method_id = sqlc.arg(payment_method_id)
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id IS NULL
   AND deleted_at IS NULL;
 
--- name: ScheduleImportedSubscriptionDeletion :exec
+-- A queued provider stop holds the customer's slot until it is verified. A row
+-- not yet canceled in the database takes the marker from its own full-row write.
+-- name: MarkProviderStopPending :exec
 UPDATE billing.subscriptions
 SET deletion_scheduled_at = sqlc.arg(at)::timestamptz, updated_at = sqlc.arg(at)::timestamptz
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deletion_scheduled_at IS NULL
-  AND deleted_at IS NULL;
+  AND status = 'canceled' AND deleted_at IS NULL;

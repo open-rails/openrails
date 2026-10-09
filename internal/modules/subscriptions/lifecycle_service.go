@@ -1359,6 +1359,16 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
+	// A cancel never races an accepted renewal: the charge it may still land
+	// would buy nothing. Renewal admission and completion take this same lock.
+	if params.RefuseOwnedRenewal && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCanceled {
+		if err := RefuseOwnedRebillTerms(ctx, txDB, subscription); errors.Is(err, ErrRebillTermsCommitted) {
+			return nil, ErrRenewalInProgress
+		} else if err != nil {
+			return nil, err
+		}
+	}
+
 	// Cancellation policy (caller-owned): an immediate revoke truncates the
 	// paid period to now; a period-end cancel keeps paid access until the term
 	// ends and only forfeits the pre-appended #368 grace window. The terminal

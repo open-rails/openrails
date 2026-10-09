@@ -256,7 +256,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), s.ProductService, s.PriceService, s.EntitlementService, s.NotificationService, s.PaymentService, s.Clock())
-		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback})
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback, RefuseOwnedRenewal: true})
 	}
 
 	now := s.now()
@@ -301,7 +301,13 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		if s.providerCancel == nil {
 			return fmt.Errorf("ccbill remote-cancel scheduler unavailable")
 		}
+		if _, err := RequireProviderCancelArmed(ctx, s.SubscriptionService.Database(), subscription, false); err != nil {
+			return err
+		}
 		enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
+			if err := resolveProviderCancelHeld(ctx, db.NewWithPgxTx(tx), subscription); err != nil {
+				return err
+			}
 			return s.providerCancel.WithTx(tx).ScheduleProviderCancel(ctx, subscription, now)
 		}
 	case subscription.Rail == models.RailSolana:

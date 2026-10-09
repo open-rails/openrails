@@ -22,8 +22,9 @@ import (
 // the provider intent ledger: every provider-owned schedule OpenRails ends
 // locally is stopped by a durable intent enqueued in the same transaction —
 // the NMI deferred delete, the CCBill DataLink cancel, the Stripe cancel. Each
-// is idempotent per subscription. The DeletionScheduledAt marker remains the
-// NMI read model (set here, cleared by the intent handler's finalize).
+// is idempotent per subscription. The DeletionScheduledAt marker, set here and
+// cleared only by the intent's verified stop, holds the customer's slot while
+// the provider may still bill.
 //
 // origin distinguishes who asked: user-origin intents execute under
 // mode=limited; system-origin intents (dunning exhaustion, unknown-resolution)
@@ -55,9 +56,10 @@ func (s *ProviderCancelScheduler) WithTx(tx pgx.Tx) subscriptions.ProviderCancel
 }
 
 // ScheduleProviderCancel queues the cancel of sub's provider schedule, if a
-// provider bills it. An NMI delete is due at sub.DeletionScheduledAt (the
-// caller's undo or cooling-off window), else now, and stamps the marker;
-// Stripe and CCBill cancels are due now.
+// provider bills it, and stamps the marker on sub and on its stored row once
+// canceled there. An NMI delete is due at sub.DeletionScheduledAt (the
+// caller's undo or cooling-off window), else now; Stripe and CCBill cancels
+// are due now.
 func (s *ProviderCancelScheduler) ScheduleProviderCancel(ctx context.Context, sub *models.Subscription, now time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("intent ledger unavailable for provider cancel scheduling")
@@ -65,22 +67,28 @@ func (s *ProviderCancelScheduler) ScheduleProviderCancel(ctx context.Context, su
 	if sub == nil || strings.TrimSpace(sub.RailSubscriptionID) == "" {
 		return nil
 	}
+	nmi := rails.RemoteDeleteOnTerminalCancel(sub.Rail)
+	if !nmi && sub.Rail != models.RailCCBill && !StripeOwned(sub) {
+		return nil
+	}
+	at := now
+	if sub.DeletionScheduledAt != nil {
+		at = *sub.DeletionScheduledAt
+	}
+	sub.DeletionScheduledAt = &at
+	if err := s.db.Gen(ctx).MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{ID: sub.ID, MerchantID: sub.MerchantID, At: at}); err != nil {
+		return fmt.Errorf("hold slot for provider stop: %w", err)
+	}
 	switch {
-	case rails.RemoteDeleteOnTerminalCancel(sub.Rail):
-		at := now
-		if sub.DeletionScheduledAt != nil {
-			at = *sub.DeletionScheduledAt
-		}
-		sub.DeletionScheduledAt = &at
+	case nmi:
 		return s.ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, at)
 	case sub.Rail == models.RailCCBill:
 		return s.enqueue(ctx, sub, TypeCCBillCancelSubscription, CCBillCancelIdempotencyKey(sub.ID),
 			CCBillCancelPayload{UserID: sub.CustomerID.String(), RailSubscriptionID: sub.RailSubscriptionID}, now)
-	case StripeOwned(sub):
+	default:
 		return s.enqueue(ctx, sub, TypeStripeCancelSubscription, StripeCancelIdempotencyKey(sub.ID),
 			StripeCancelPayload{RailSubscriptionID: sub.RailSubscriptionID}, now)
 	}
-	return nil
 }
 
 // enqueue writes one remote-cancel intent, addressed (or#893) to the PSP
@@ -161,4 +169,15 @@ func (s *ProviderCancelScheduler) CancelNMIDelete(ctx context.Context, userID st
 		_, err = d.Gen(ctx).SupersedePendingNMIDelete(ctx, gen.SupersedePendingNMIDeleteParams{MerchantID: sub.MerchantID, IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, sub.RailSubscriptionID), Reason: &reason})
 		return err
 	})
+}
+
+// releaseProviderStop clears the slot hold once the provider stop of the
+// intent's subscription is verified. It owns only the marker of that exact
+// provider target.
+func releaseProviderStop(ctx context.Context, d *db.DB, intent gen.BillingProviderIntent, railSubscriptionID string, now time.Time) error {
+	if intent.SubscriptionID == nil || intent.PspID == nil || railSubscriptionID == "" {
+		return nil
+	}
+	_, err := d.Gen(ctx).ClearSubscriptionDeletionMarker(ctx, gen.ClearSubscriptionDeletionMarkerParams{MerchantID: intent.MerchantID, ID: *intent.SubscriptionID, PspID: *intent.PspID, RailSubscriptionID: railSubscriptionID, Now: now})
+	return err
 }

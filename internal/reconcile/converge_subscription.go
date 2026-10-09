@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -89,7 +94,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 	d.Backfill = snapshotChargesFor(sub, snap)
 	out.Decision = d
 
-	backfilled, _, err := applyDecisionSideEffects(ctx, database.Gen(ctx), sub, d, now, lookback)
+	backfilled, _, err := applyDecisionSideEffects(ctx, database, sub, d, now, lookback)
 	if err != nil {
 		return out, err
 	}
@@ -154,7 +159,8 @@ func snapshotChargesFor(sub *models.Subscription, snap *RemoteSnapshot) []Remote
 // payment backfill (#634) and rail-customer materialization (#635). Shared by
 // the unknown-cohort resolution and the webhook converge path. Returns the
 // backfilled-payment count and whether a rail customer row was materialized.
-func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.Subscription, d Decision, now time.Time, lookbackCap time.Duration) (int, bool, error) {
+func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.Subscription, d Decision, now time.Time, lookbackCap time.Duration) (int, bool, error) {
+	q := database.Gen(ctx)
 	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, d.Backfill, now, lookbackCap)
 	if err != nil {
 		return 0, false, fmt.Errorf("converge: backfill %s: %w", sub.ID, err)
@@ -162,6 +168,9 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 	if !d.Declared {
 		if err := recordScheduleAttempts(ctx, q, sub, d.Backfill, now); err != nil {
 			return backfilled, false, fmt.Errorf("converge: record schedule attempts %s: %w", sub.ID, err)
+		}
+		if err := refundChargesAfterCancel(ctx, database, sub, d.Backfill, now); err != nil {
+			return backfilled, false, fmt.Errorf("converge: charges after cancel %s: %w", sub.ID, err)
 		}
 	}
 
@@ -182,4 +191,35 @@ func applyDecisionSideEffects(ctx context.Context, q *gen.Queries, sub *models.S
 		railCustomer = true
 	}
 	return backfilled, railCustomer, nil
+}
+
+// refundChargesAfterCancel queues the refund of each mirrored provider charge
+// that landed after OpenRails canceled sub for good (a provider stop that has
+// not taken effect). Idempotent per charge.
+func refundChargesAfterCancel(ctx context.Context, database *db.DB, sub *models.Subscription, txns []RemoteTransaction, now time.Time) error {
+	cancelType := ""
+	if sub.CancelType != nil {
+		cancelType = string(*sub.CancelType)
+	}
+	for _, t := range txns {
+		if !t.Success || !chargeAttempt(t.Type) || t.TransactionID == "" || !chargedAfterCancel(string(sub.Status), cancelType, sub.CanceledAt, t.OccurredAt) {
+			continue
+		}
+		err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			d := database.NewWithPgxTx(tx)
+			clock := clockwork.NewFakeClockAt(now)
+			payment, err := payments.NewPaymentService(d, clock).GetByPSPTransactionID(ctx, sub.Rail, t.TransactionID)
+			if db.IsNotFound(err) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return intents.RefundChargeAfterCancel(ctx, d, payment, clock)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

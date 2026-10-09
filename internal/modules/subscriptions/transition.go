@@ -101,7 +101,8 @@ func writeSnapshot(sub *models.Subscription, before, next lifecycle.Snapshot, ef
 			sub.CanceledAt = &ended
 		}
 	case before.Status == lifecycle.Canceled:
-		sub.CancelType, sub.EndedAt, sub.CanceledAt, sub.CancelFeedback = nil, nil, nil, nil
+		// A pending provider stop is superseded: the schedule bills a live row.
+		sub.CancelType, sub.EndedAt, sub.CanceledAt, sub.CancelFeedback, sub.DeletionScheduledAt = nil, nil, nil, nil, nil
 	}
 }
 

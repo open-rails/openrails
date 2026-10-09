@@ -332,7 +332,7 @@ func ImportDeclaredSubscriptions(
 			if f.CancelScheduleLive && deferDelete != nil &&
 				rails.RemoteDeleteOnTerminalCancel(models.Rail(f.Rail)) {
 				if err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-					if err := gen.New(tx).ScheduleImportedSubscriptionDeletion(ctx, gen.ScheduleImportedSubscriptionDeletionParams{
+					if err := gen.New(tx).MarkProviderStopPending(ctx, gen.MarkProviderStopPendingParams{
 						ID: subID, MerchantID: merchantID, At: asOf,
 					}); err != nil {
 						return err

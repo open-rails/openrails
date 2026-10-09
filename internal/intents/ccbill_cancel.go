@@ -121,7 +121,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		return Retryable("provider read before cancel failed: " + err.Error())
 	}
 	if !rebilling {
-		return Succeeded(verifiedEvidence(psid, status, false))
+		return h.stopped(ctx, intent, psid, verifiedEvidence(psid, status, false))
 	}
 
 	res, err := client.CancelSubscription(ctx, psid)
@@ -141,7 +141,20 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 			return Ambiguous("cancelSubscription failed: " + err.Error())
 		}
 	}
-	return Succeeded(map[string]any{"canceled": true, "results": res.Results, "rail_subscription_id": psid})
+	return h.stopped(ctx, intent, psid, map[string]any{"canceled": true, "results": res.Results, "rail_subscription_id": psid})
+}
+
+// stopped releases the slot the canceled subscription held while CCBill could
+// still rebill it.
+func (h *CCBillCancelHandler) stopped(ctx context.Context, intent gen.BillingProviderIntent, psid string, evidence map[string]any) Outcome {
+	now := time.Now().UTC()
+	if h.Clock != nil {
+		now = h.Clock.Now().UTC()
+	}
+	if err := releaseProviderStop(ctx, h.DB, intent, psid, now); err != nil {
+		return Ambiguous("ccbill rebilling stopped, but local release failed: " + err.Error())
+	}
+	return Succeeded(evidence)
 }
 
 // Verify resolves an ambiguous cancel by reading: not-rebilling means the
@@ -165,7 +178,7 @@ func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.BillingProv
 		return Ambiguous("provider read failed: " + err.Error())
 	}
 	if !rebilling {
-		return Succeeded(verifiedEvidence(psid, status, true))
+		return h.stopped(ctx, intent, psid, verifiedEvidence(psid, status, true))
 	}
 	return Retryable("subscription still rebilling at provider; cancel verified not executed")
 }

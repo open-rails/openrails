@@ -8,10 +8,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -58,6 +62,27 @@ func metadataJSON(m map[string]any) []byte {
 }
 
 func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error) {
+	if !a.ChargeAfterCancel {
+		return w.backfillPayment(ctx, w.DB, a)
+	}
+	var changed bool
+	err := w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := w.DB.NewWithPgxTx(tx)
+		var err error
+		if changed, err = w.backfillPayment(ctx, d, a); err != nil || !changed {
+			return err
+		}
+		clock := clockwork.NewFakeClockAt(w.now())
+		payment, err := payments.NewPaymentService(d, clock).GetByPSPTransactionID(ctx, models.Rail(a.Rail), a.TransactionID)
+		if err != nil {
+			return err
+		}
+		return intents.RefundChargeAfterCancel(ctx, d, payment, clock)
+	})
+	return changed, err
+}
+
+func (w *PGLocalWriter) backfillPayment(ctx context.Context, d *db.DB, a BackfillPaymentAction) (bool, error) {
 	currency := strings.TrimSpace(a.Currency)
 	if currency == "" {
 		return false, fmt.Errorf("payment currency required")
@@ -70,7 +95,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 	if err != nil {
 		return false, err
 	}
-	n, err := w.DB.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
+	n, err := d.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
 		MerchantID:     tid.UUID(),
 		PriceID:        a.PriceID,
 		Rail:           string(a.Rail),
@@ -87,7 +112,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	if a.Grant != nil {
-		if _, err := w.GrantAccess(ctx, *a.Grant); err != nil {
+		if _, err := (&PGLocalWriter{DB: d, Now: w.Now}).GrantAccess(ctx, *a.Grant); err != nil {
 			return n > 0, err
 		}
 	}

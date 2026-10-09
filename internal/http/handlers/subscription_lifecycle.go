@@ -127,10 +127,10 @@ func cancelForCustomer(ctx context.Context, r *httprequest.Request, userID strin
 		}
 	}
 	return r.State.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		CancelFeedback: &reason,
-		RevokeAccess:   false,
+		SubscriptionID:     &sub.ID,
+		CancelType:         models.CancelTypeUser,
+		CancelFeedback:     &reason,
+		RefuseOwnedRenewal: true,
 	})
 }
 

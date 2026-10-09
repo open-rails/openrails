@@ -1243,6 +1243,20 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 	return findings
 }
 
+// chargedAfterCancel: the provider charged a subscription after OpenRails
+// canceled it for good. An expired cancel is excluded: a later provider charge
+// proves that membership alive again.
+func chargedAfterCancel(status, cancelType string, canceledAt *time.Time, at time.Time) bool {
+	if status != string(models.StatusCanceled) || canceledAt == nil || !at.After(*canceledAt) {
+		return false
+	}
+	switch models.CancelType(cancelType) {
+	case models.CancelTypeUser, models.CancelTypeMerchant, models.CancelTypeChargeback, models.CancelTypeUpgrade:
+		return true
+	}
+	return false
+}
+
 func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time.Time) Finding {
 	sub, how, ambiguous := corr.subForTxn(provider, t)
 	f := Finding{
@@ -1300,6 +1314,12 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 		}
 		if inherited {
 			action.Metadata["currency_provenance"] = "inherited_from_subscription_price"
+		}
+		if chargedAfterCancel(sub.Status, sub.CancelType, sub.CanceledAt, t.OccurredAt) {
+			action.Metadata["refund_review"] = "charged after cancellation"
+			action.ChargeAfterCancel = true
+			f.Severity = SeverityCritical
+			f.RecommendedAction += "; the charge landed after the subscription was canceled, so enforce queues its full refund"
 		}
 		// Restore the paid access promise independently of its billing cadence.
 		if sub.IsLive() {

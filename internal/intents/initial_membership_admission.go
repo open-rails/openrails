@@ -77,6 +77,9 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		}
 		conflict, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
 		if err == nil && (!terms.Upgrade() || conflict.ID != terms.Terms.Replaces.SubscriptionID) {
+			if conflict.Status == string(models.StatusCanceled) {
+				return apperr.Conflictf("the customer's canceled subscription for this product or tier group may still bill at its provider until its stop is confirmed; resume it, or retry once the stop completes")
+			}
 			return apperr.Conflictf("customer already has a subscription for this product or tier group")
 		}
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
