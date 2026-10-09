@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -372,17 +373,20 @@ func AdminConsolePath(c *AdminConsole) string {
 	return c.Path
 }
 
-// ValidateNewMerchantURL accepts a same-origin absolute path
-// ("/merchants/new") or an https URL: the console navigates to it, so it must
-// not be a protocol-relative or script URL. name says which setting it is.
-func ValidateNewMerchantURL(name, raw string) error {
-	if raw == "" || strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") && !strings.ContainsAny(raw, "\\\r\n") {
-		return nil
+var consoleExtensionIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidateConsoleExtensions accepts extension ids the console can match and
+// values config.json can carry. name says which setting it is.
+func ValidateConsoleExtensions(name string, extensions map[string]any) error {
+	for id, value := range extensions {
+		if !consoleExtensionIDRe.MatchString(id) {
+			return fmt.Errorf("invalid %s key %q: want an extension id of lowercase letters, digits and -", name, id)
+		}
+		if _, err := json.Marshal(value); err != nil {
+			return fmt.Errorf("invalid %s.%s: %w", name, id, err)
+		}
 	}
-	if u, err := url.Parse(raw); err == nil && u.Scheme == "https" && u.Host != "" {
-		return nil
-	}
-	return fmt.Errorf("invalid %s %q: want an absolute path like /merchants/new or an https URL", name, raw)
+	return nil
 }
 
 var mountPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)

@@ -45,9 +45,9 @@ type Config struct {
 	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
 	// the copilot panel stays Q&A-only.
 	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
-	// NewMerchantURL is AdminConsole.NewMerchantURL: the host page behind
-	// the console's "New merchant" action. Empty hides the action.
-	NewMerchantURL string `json:"new_merchant_url"`
+	// Extensions is AdminConsole.Extensions: host data for the console's
+	// extensions, by extension id. Always an object, empty when unset.
+	Extensions map[string]any `json:"extensions"`
 	// Issuer is the trusted issuer the console signs staff in at; null signs
 	// in to AuthBaseURL's own accounts.
 	Issuer *Issuer `json:"issuer"`
@@ -112,9 +112,12 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "/v1"
 	}
+	if cfg.Extensions == nil {
+		cfg.Extensions = map[string]any{}
+	}
 	configJSON, err := json.Marshal(cfg)
 	if err != nil {
-		panic(err) // static struct, cannot fail
+		return nil, fmt.Errorf("admin console: encode config.json: %w", err)
 	}
 	present := Present(assets)
 	var index []byte

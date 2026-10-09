@@ -5,6 +5,7 @@ import { NoMerchants } from "@/components/no-merchants"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { extensionRoute, useExtensions } from "@/extensions/registry"
 import { useAuth } from "@/lib/auth"
 
 // Longest path first: the catalog sub-pages have to match before the section
@@ -33,6 +34,13 @@ const trails: [string, { label: string; to?: string }[]][] = [
 export function AppLayout() {
   const { ready, signedIn, merchants, merchantsFailed } = useAuth()
   const { pathname } = useLocation()
+  const { extensions } = useExtensions()
+  const route = extensionRoute(extensions, pathname)
+  const scope = route?.scope ?? "merchant"
+  // A host with pages of its own keeps its shell for a user with no merchant.
+  const hasUserPages = extensions.some((extension) =>
+    extension.routes?.some((route) => route.scope === "user")
+  )
 
   if (!ready) {
     return (
@@ -58,10 +66,13 @@ export function AppLayout() {
       </div>
     )
   }
-  if (merchants.length === 0) return <NoMerchants />
+  const noMerchants = merchants.length === 0
+  if (noMerchants && !hasUserPages) return <NoMerchants />
 
   const trail =
-    trails.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? []
+    route?.trail ??
+    trails.find(([prefix]) => pathname.startsWith(prefix))?.[1] ??
+    []
 
   return (
     <TooltipProvider>
@@ -71,7 +82,11 @@ export function AppLayout() {
           <SiteHeader trail={trail} />
           <main className="flex min-w-0 flex-1 flex-col p-4 md:p-8">
             <div className="mx-auto w-full max-w-7xl min-w-0">
-              <Outlet />
+              {noMerchants && scope === "merchant" ? (
+                <NoMerchants inShell />
+              ) : (
+                <Outlet />
+              )}
             </div>
           </main>
         </SidebarInset>

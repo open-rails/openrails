@@ -136,7 +136,7 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	if err := config.ValidateMountPath("Routes.AdminConsole.Path", path); err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
-	if err := config.ValidateNewMerchantURL("Routes.AdminConsole.NewMerchantURL", sel.AdminConsole.NewMerchantURL); err != nil {
+	if err := config.ValidateConsoleExtensions("Routes.AdminConsole.Extensions", sel.AdminConsole.Extensions); err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
 	if !adminconsole.Present(a.ConsoleAssets) {
@@ -165,7 +165,7 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		AskEnabled:             config.LLMAskConfigured(cfg.LLM),
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
-		NewMerchantURL:         sel.AdminConsole.NewMerchantURL,
+		Extensions:             sel.AdminConsole.Extensions,
 		Issuer:                 issuer,
 	}, a.ConsoleAssets)
 	if err != nil {

@@ -32,6 +32,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import type { ConsoleMenuItem } from "@/extensions/types"
+import { useExtensions, userMenuItems } from "@/extensions/registry"
+import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
 
 export interface Crumb {
@@ -41,6 +44,7 @@ export interface Crumb {
 }
 
 export function SiteHeader({ trail }: { trail: Crumb[] }) {
+  const { activeMerchant } = useAuth()
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
@@ -75,7 +79,7 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
-        <NotificationBell />
+        {activeMerchant && <NotificationBell />}
         <UserMenu />
       </div>
     </header>
@@ -83,10 +87,17 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
 }
 
 function UserMenu() {
-  const { me, logout } = useAuth()
-  const signOut = useMutation({ mutationKey: ["auth", "logout"], mutationFn: logout })
+  const { me, activeMerchant, logout } = useAuth()
+  const signOut = useMutation({
+    mutationKey: ["auth", "logout"],
+    mutationFn: logout,
+  })
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
+  const hostItems = userMenuItems(
+    useExtensions().extensions,
+    useConsoleContextFor()
+  )
   if (!me) return null
 
   const name = me.username || me.email || "Signed in"
@@ -128,10 +139,15 @@ function UserMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => navigate("/settings")}>
-          <HugeiconsIcon icon={Settings01Icon} />
-          Settings
-        </DropdownMenuItem>
+        {hostItems.map((item) => (
+          <HostMenuItem key={item.path} item={item} />
+        ))}
+        {activeMerchant && (
+          <DropdownMenuItem onClick={() => navigate("/settings")}>
+            <HugeiconsIcon icon={Settings01Icon} />
+            Merchant settings
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onClick={() => setTheme(dark ? "light" : "dark")}>
           {dark ? (
             <HugeiconsIcon icon={Sun01Icon} />
@@ -154,5 +170,20 @@ function UserMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+const always = () => true
+
+function HostMenuItem({ item }: { item: ConsoleMenuItem }) {
+  const navigate = useNavigate()
+  // A fixed hook per entry: an extension's menu never changes.
+  const visible = (item.useVisible ?? always)()
+  if (!visible) return null
+  return (
+    <DropdownMenuItem onClick={() => navigate(item.path)}>
+      {item.icon && <HugeiconsIcon icon={item.icon} />}
+      {item.title}
+    </DropdownMenuItem>
   )
 }

@@ -23,9 +23,9 @@ export interface BootstrapConfig {
   // #779 Phase 2 gate (llm.catalog_drafting_enabled): false hides the
   // drafting affordances and leaves the copilot panel in Q&A-only mode.
   catalog_drafting_enabled: boolean
-  // The host page behind "New merchant" (AdminConsoleConfig.NewMerchantURL);
-  // empty hides the action, as on a standalone deployment.
-  new_merchant_url: string
+  // Host data for the console's extensions, by extension id
+  // (AdminConsole.Extensions); empty on a standalone deployment.
+  extensions?: Record<string, unknown>
   // The trusted issuer staff sign in at (AdminConsole.Issuer); null signs in
   // to auth_base_url's accounts.
   issuer: IssuerBootstrap | null

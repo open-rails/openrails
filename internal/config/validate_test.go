@@ -108,26 +108,24 @@ func TestValidateMountPath(t *testing.T) {
 	require.Equal(t, "/ops", AdminConsolePath(&AdminConsole{Path: "/ops"}))
 }
 
-// The console navigates to NewMerchantURL, so only a same-origin path or an
-// https URL may reach it.
-func TestValidateNewMerchantURL(t *testing.T) {
-	for raw, ok := range map[string]bool{
-		"":                                    true,
-		"/merchants/new":                      true,
-		"/merchants/new?from=console":         true,
-		"https://openrails.dev/merchants/new": true,
-		"merchants/new":                       false,
-		"//evil.example/new":                  false,
-		`/\evil.example`:                      false,
-		"javascript:alert(1)":                 false,
-		"http://openrails.dev/new":            false,
-		"https:///new":                        false,
-		"/new\r\nX: y":                        false,
+// The host's extension data reaches the console through config.json, keyed by
+// extension id.
+func TestValidateConsoleExtensions(t *testing.T) {
+	for _, row := range []struct {
+		extensions map[string]any
+		err        string
+	}{
+		{nil, ""},
+		{map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}, ""},
+		{map[string]any{"saas-2": true}, ""},
+		{map[string]any{"Hosted": true}, `invalid Routes.AdminConsole.Extensions key "Hosted"`},
+		{map[string]any{"-x": true}, `invalid Routes.AdminConsole.Extensions key "-x"`},
+		{map[string]any{"x": func() {}}, "invalid Routes.AdminConsole.Extensions.x"},
 	} {
-		if err := ValidateNewMerchantURL("admin_console.new_merchant_url", raw); ok {
-			require.NoError(t, err, raw)
+		if err := ValidateConsoleExtensions("Routes.AdminConsole.Extensions", row.extensions); row.err == "" {
+			require.NoError(t, err, row.extensions)
 		} else {
-			require.ErrorContains(t, err, "invalid admin_console.new_merchant_url", raw)
+			require.ErrorContains(t, err, row.err)
 		}
 	}
 }

@@ -52,11 +52,11 @@ type AdminConsole struct {
 	// Deps.AuthKit's (its APIBase, "/api/v1" by default) or, with
 	// Config.ControlPlane, the control plane's.
 	AuthBaseURL string
-	// NewMerchantURL is where the console's "New merchant" action sends a
-	// user: a host page that creates a merchant and returns to the console
-	// with #merchant=<slug>. A same-origin path or an https URL; empty hides
-	// the action, since the engine has no self-service merchant creation.
-	NewMerchantURL string
+	// Extensions is the host's data for the console extensions it builds in
+	// (scripts/build-admin-console.sh --extensions), keyed by extension id and
+	// served verbatim in config.json. OpenRails never reads it; a plain
+	// console build leaves it empty.
+	Extensions map[string]any
 	// Issuer signs staff in at a trusted issuer instead of the control
 	// plane's own accounts. It needs Config.ControlPlane's ResourceServer.
 	Issuer *ConsoleIssuer

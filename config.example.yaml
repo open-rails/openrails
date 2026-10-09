@@ -173,7 +173,6 @@ captcha:
 admin_console:
   enabled: false
   # path: /admin             # e.g. /billing/admin when /admin is taken
-  # new_merchant_url: /merchants/new  # host page behind "New merchant"; unset hides it
   # issuer:                  # staff sign in at a trusted issuer (one of resource_server's)
   #   url: https://example.com/auth
   #   client_id: openrails-console   # public client, redirect URI <console path>/callback
