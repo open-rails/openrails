@@ -89,6 +89,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `idempotency_key_reused` | 409 | `invalid_request_error` | The idempotency key already committed with different terms. |
 | `insufficient_credits` | 402 | `card_error` | The customer's credit balance does not cover the operation. |
 | `insufficient_funds` | 402 | `card_error` | The payment instrument lacks funds. |
+| `insufficient_scope` | 403 | `authorization_error` | The access token was not granted the scope this surface requires. |
 | `internal_error` | 500 | `api_error` | OpenRails failed; request_id identifies the failure in its logs. |
 | `invalid_api_host` | 400 | `invalid_request_error` | api_host must be a bare lowercase domain name. |
 | `invalid_cursor` | 400 | `invalid_request_error` | The cursor is not one this list issued. |

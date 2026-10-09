@@ -153,17 +153,9 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		return nil, credential.ErrResourceTokenInvalid
 	}
 	ctx := r.Context()
-	rs := c.resource
-	is, ok := rs.issuers[unverifiedIssuer(r)]
-	if !ok {
-		return nil, credential.ErrResourceTokenIssuerUnknown
-	}
-	cl, err := requestauth.Once(ctx, rs.verifier, func() (verify.Claims, error) { return rs.verifier.VerifyRequest(r) })
+	cl, is, err := c.verifyResourceToken(r, billing.ScopeMerchant)
 	if err != nil {
-		return nil, resourceTokenError(r, err)
-	}
-	if !cl.IsResourceToken() || strings.TrimSpace(cl.Subject) == "" {
-		return nil, credential.ErrResourceTokenInvalid
+		return nil, err
 	}
 	mid, slug, err := c.resourceMerchant(ctx, r, is)
 	if err != nil {
@@ -187,6 +179,35 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		EmailVerified: cl.EmailVerified,
 		Username:      cl.Username,
 	}, nil
+}
+
+// verifyResourceToken verifies r's access token from a trusted issuer and
+// requires scope, which selects the surface it was minted for.
+func (c *ControlPlane) verifyResourceToken(r *http.Request, scope string) (verify.Claims, trustedIssuer, error) {
+	rs := c.resource
+	is, ok := rs.issuers[unverifiedIssuer(r)]
+	if !ok {
+		return verify.Claims{}, trustedIssuer{}, credential.ErrResourceTokenIssuerUnknown
+	}
+	cl, err := requestauth.Once(r.Context(), rs.verifier, func() (verify.Claims, error) { return rs.verifier.VerifyRequest(r) })
+	if err != nil {
+		return verify.Claims{}, trustedIssuer{}, resourceTokenError(r, err)
+	}
+	if !cl.IsResourceToken() || strings.TrimSpace(cl.Subject) == "" {
+		return verify.Claims{}, trustedIssuer{}, credential.ErrResourceTokenInvalid
+	}
+	if !cl.HasScope(scope) {
+		scheme := "Bearer"
+		if cl.JWKThumbprint != "" {
+			scheme = "DPoP"
+		}
+		return verify.Claims{}, trustedIssuer{}, credential.ChallengeError{
+			Code:    billing.CodeInsufficientScope,
+			Headers: map[string]string{"WWW-Authenticate": scheme + ` error="insufficient_scope", scope="` + scope + `"`},
+			Err:     credential.ErrResourceTokenInvalid,
+		}
+	}
+	return cl, is, nil
 }
 
 // resourceMerchant is the merchant the token acts for: the one the request

@@ -84,6 +84,7 @@ export type OpenRailsErrorCode =
   | "idempotency_key_reused"
   | "insufficient_credits"
   | "insufficient_funds"
+  | "insufficient_scope"
   | "internal_error"
   | "invalid_api_host"
   | "invalid_cursor"
@@ -324,6 +325,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   idempotency_key_reused: { status: 409, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
   insufficient_credits: { status: 402, type: "card_error", meaning: "The customer's credit balance does not cover the operation." },
   insufficient_funds: { status: 402, type: "card_error", meaning: "The payment instrument lacks funds." },
+  insufficient_scope: { status: 403, type: "authorization_error", meaning: "The access token was not granted the scope this surface requires." },
   internal_error: { status: 500, type: "api_error", meaning: "OpenRails failed; request_id identifies the failure in its logs." },
   invalid_api_host: { status: 400, type: "invalid_request_error", meaning: "api_host must be a bare lowercase domain name." },
   invalid_cursor: { status: 400, type: "invalid_request_error", meaning: "The cursor is not one this list issued." },

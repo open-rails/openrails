@@ -24091,6 +24091,7 @@
       "delegated_verification_unavailable",
       "host_merchant_mismatch",
       "host_principal_invalid",
+      "insufficient_scope",
       "internal_error",
       "merchant_binding_mismatch",
       "merchant_context_mismatch",
@@ -24574,6 +24575,11 @@
       "status": 402,
       "type": "card_error",
       "meaning": "The payment instrument lacks funds."
+    },
+    "insufficient_scope": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The access token was not granted the scope this surface requires."
     },
     "internal_error": {
       "status": 500,

@@ -83,6 +83,7 @@ const (
 	CodeAccessTokenIssuerUnknown              = "access_token_issuer_unknown"
 	CodeAccessTokenMerchantNotBound           = "access_token_merchant_not_bound"
 	CodeDPoPNonceRequired                     = "use_dpop_nonce"
+	CodeInsufficientScope                     = "insufficient_scope"
 	CodeHostPrincipalInvalid                  = "host_principal_invalid"
 	CodePermissionRequired                    = "permission_required"
 	CodeMerchantUnresolved                    = "merchant_unresolved"
@@ -172,6 +173,7 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
 	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
 	{CodeAccessTokenMerchantNotBound, 403, authz, "The access token's issuer is not trusted for this merchant."},
+	{CodeInsufficientScope, 403, authz, "The access token was not granted the scope this surface requires."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},

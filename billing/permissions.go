@@ -91,6 +91,13 @@ const (
 	MerchantAccessGrantPermanent = "merchant:access:grant-permanent"
 )
 
+// The OAuth scopes of a trusted issuer's access tokens: ScopeMerchant reaches
+// the merchant API, ScopeSelf a customer's own billing (/v1/me).
+const (
+	ScopeMerchant = "openrails:merchant"
+	ScopeSelf     = "openrails:self"
+)
+
 // RequiresRecentSignIn reports whether perm guards an operation that moves
 // money, grants access or changes who can: a native user needs a recent
 // sign-in (step-up) for it, on every route that serves it. Merchant reads,

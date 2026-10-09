@@ -268,6 +268,8 @@ resource_server:
       allowed_origins: [https://admin.example.com]
 ```
 
+- The merchant API needs the `openrails:merchant` scope; a token without it is
+  answered `403 insufficient_scope`.
 - A token's `permissions` claim is what it grants, within the issuer's ceiling
   (`permissions`), on the issuer's `merchants` only. A token never names its
   merchant: it acts for the one the request selects (`OpenRails-Merchant`), or
@@ -284,7 +286,8 @@ resource_server:
   headers, never cookies.
 - Refusals: `access_token_issuer_unknown` (untrusted `iss`),
   `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
-  `access_token_merchant_not_bound` (another merchant), `permission_required`.
+  `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
+  `permission_required`.
 
 ### Webhooks
 

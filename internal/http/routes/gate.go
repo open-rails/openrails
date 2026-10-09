@@ -247,6 +247,8 @@ func (g legacyGate) authorizeResourceToken(req *http.Request, perm string) (bill
 				refusal = billingauth.Refusal(billing.CodeSenderProofRequired)
 			case billing.CodeCredentialExpired:
 				refusal = billingauth.Refusal(billing.CodeCredentialExpired)
+			case billing.CodeInsufficientScope:
+				refusal = billingauth.Refusal(billing.CodeInsufficientScope)
 			}
 			refusal.Headers = challenge.Headers
 			return billingauth.Principal{}, refusal

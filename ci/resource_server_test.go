@@ -86,7 +86,7 @@ func newBrowserKey(t *testing.T) browserKey {
 func (b browserKey) proof(t *testing.T, method, path, token, nonce string) string {
 	enc := base64.RawURLEncoding.EncodeToString
 	ath := sha256.Sum256([]byte(token))
-	claims := jwt.MapClaims{"htm": method, "htu": "http://127.0.0.1" + path, "ath": enc(ath[:]), "iat": time.Now().Unix(), "jti": uuid.NewString()}
+	claims := jwt.MapClaims{"htm": method, "htu": rsOrigin + path, "ath": enc(ath[:]), "iat": time.Now().Unix(), "jti": uuid.NewString()}
 	if nonce != "" {
 		claims["nonce"] = nonce
 	}
@@ -204,6 +204,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 			"forged signature":   {issuerKey{iss: host.iss, kid: host.kid, key: other.key}.mint(t, nil), "", http.StatusUnauthorized, billing.CodeAccessTokenInvalid},
 			"merchant not bound": {host.mint(t, nil), rival, http.StatusForbidden, billing.CodeAccessTokenMerchantNotBound},
 			"another issuer's":   {other.mint(t, nil), shop, http.StatusForbidden, billing.CodeAccessTokenMerchantNotBound},
+			"customer scope":     {host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }), "", http.StatusForbidden, billing.CodeInsufficientScope},
 		} {
 			w := serve(handler, rsRequest{path: findings, authorization: bearer(tc.token), selector: tc.selector})
 			require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
@@ -252,9 +253,10 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	})
 }
 
-// An AuthKit authorization server is a trusted issuer like any other: its
-// code flow mints the user's root grants within the resource's ceiling, and
-// OpenRails authorizes from that token alone.
+// An AuthKit authorization server is a trusted issuer like any other: the
+// console's code flow, the host admin UI's token exchange and a worker's
+// client credentials each mint DPoP-bound or bearer at+jwt tokens that
+// OpenRails authorizes from alone, within the issuer's ceiling.
 func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 	f := newFixture(t)
 	roles := authkit.NewRoles()
@@ -262,14 +264,21 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 	merchant.Permission("operations", "read")
 	merchant.Permission("psps", "read")
 	admin := roles.Root.Role("admin", merchant.All())
-	const console, callback = "console", "https://admin.host.e2e.test/callback"
+	const console, adminUI, worker, callback = "console", "admin-ui", "billing-worker", "https://admin.host.e2e.test/callback"
+	const adminOrigin = "https://admin.host.e2e.test"
+	workerSecret := strings.Repeat("s", 48)
 	as := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
 		authtest.WithConfig(func(c *authkit.Config) {
 			c.Roles = roles
 			c.AuthorizationServer = authkit.AuthorizationServerConfig{
-				Resources: []authkit.ResourceServerConfig{{ID: resourceID, Scopes: []string{"openrails:merchant"}, Permissions: []string{"merchant:*"}}},
-				Clients:   []authkit.OAuthClientConfig{{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID}}},
+				Resources: []authkit.ResourceServerConfig{{ID: resourceID, Scopes: []string{billing.ScopeMerchant, billing.ScopeSelf}, Permissions: []string{"merchant:*"}}},
+				Clients: []authkit.OAuthClientConfig{
+					{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode, authkit.GrantRefreshToken}},
+					{ID: adminUI, Origins: []string{adminOrigin}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange}},
+					{ID: worker, SecretSHA256: authtest.ClientSecretSHA256(workerSecret), Resources: []string{resourceID},
+						Permissions: []string{billing.MerchantOperationsRead}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
+				},
 			}
 		}))
 	res, err := as.HTTPClient().Get(as.URL + iam.JWKSPath)
@@ -289,23 +298,86 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
 			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
 			TrustedIssuers: []openrails.TrustedIssuerConfig{{
-				Name: "authkit", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
+				Name: "authkit", Issuer: as.URL, Keys: pinned, Merchants: []string{shop},
+				Permissions: []string{"merchant:*"}, AllowedOrigins: []string{adminOrigin},
 			}},
 		}
 	})
 	provision(t, cp, shop)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: resourceID, Scopes: []string{"openrails:merchant"}}
-
+	const findings, psps = "/v1/merchant/findings", "/v1/merchant/psps"
+	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: resourceID, Scopes: []string{billing.ScopeMerchant}}
 	owner := authtest.NewUser(t, as.Client)
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(owner.ID), admin)
-	tokens := as.Authorize(t, owner, flow)
-	w := serve(handler, rsRequest{path: "/v1/merchant/findings", authorization: "Bearer " + tokens.AccessToken})
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	nobody := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
-	w = serve(handler, rsRequest{path: "/v1/merchant/findings", authorization: "Bearer " + nobody.AccessToken})
-	require.Equal(t, http.StatusForbidden, w.Code, "a user the issuer grants nothing")
-	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
+	t.Run("console", func(t *testing.T) {
+		tokens := as.Authorize(t, owner, flow)
+		require.Equal(t, "DPoP", tokens.TokenType)
+		w := serve(handler, rsRequest{path: findings, authorization: "Bearer " + tokens.AccessToken})
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		require.Equal(t, billing.CodeSenderProofRequired, errorCode(t, w), "a DPoP-bound token is no bearer token")
+
+		w = serve(handler, rsRequest{path: findings, authorization: "DPoP " + tokens.AccessToken, dpop: tokens.DPoP.Proof(t, http.MethodGet, rsOrigin+findings, tokens.AccessToken, "")})
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		require.Equal(t, billing.CodeDPoPNonceRequired, errorCode(t, w))
+		require.Equal(t, http.StatusOK, dpopServe(t, handler, tokens, rsRequest{path: findings}).Code)
+
+		renewed := as.Refresh(t, console, "", tokens)
+		require.NotEqual(t, tokens.AccessToken, renewed.AccessToken)
+		require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: psps}).Code, "a refreshed token")
+
+		nobody := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
+		w = dpopServe(t, handler, nobody, rsRequest{path: findings})
+		require.Equal(t, http.StatusForbidden, w.Code, "a user the issuer grants nothing")
+		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
+
+		self := as.Authorize(t, owner, authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: resourceID, Scopes: []string{billing.ScopeSelf}})
+		w = dpopServe(t, handler, self, rsRequest{path: findings})
+		require.Equal(t, http.StatusForbidden, w.Code, "a customer token is not a merchant token")
+		require.Equal(t, billing.CodeInsufficientScope, errorCode(t, w))
+		require.Contains(t, w.Header().Get("WWW-Authenticate"), `scope="openrails:merchant"`)
+	})
+
+	t.Run("host admin UI", func(t *testing.T) {
+		preflight := serve(handler, rsRequest{method: http.MethodOptions, path: findings, origin: adminOrigin})
+		require.Equal(t, http.StatusNoContent, preflight.Code)
+		require.Equal(t, adminOrigin, preflight.Header().Get("Access-Control-Allow-Origin"))
+
+		tokens := as.Exchange(t, authtest.TokenExchange{ClientID: adminUI, SubjectToken: authtest.SignIn(t, as.Client, owner).AccessToken, Resource: resourceID, Scopes: []string{billing.ScopeMerchant}})
+		w := dpopServe(t, handler, tokens, rsRequest{path: findings, origin: adminOrigin})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Equal(t, adminOrigin, w.Header().Get("Access-Control-Allow-Origin"))
+	})
+
+	t.Run("machine", func(t *testing.T) {
+		tokens := as.ClientCredentials(t, worker, workerSecret, resourceID, []string{billing.ScopeMerchant}, nil)
+		w := serve(handler, rsRequest{path: findings, authorization: "Bearer " + tokens.AccessToken})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		w = serve(handler, rsRequest{path: psps, authorization: "Bearer " + tokens.AccessToken})
+		require.Equal(t, http.StatusForbidden, w.Code, "only the client's own grants")
+		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
+	})
+}
+
+// rsOrigin is the control plane's public origin, the URL DPoP proofs sign.
+const rsOrigin = "http://127.0.0.1"
+
+// dpopServe calls q with tokens' DPoP key, retrying once with the server's
+// nonce as a client does.
+func dpopServe(t *testing.T, handler http.Handler, tokens authtest.OAuthTokens, q rsRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	require.NotNil(t, tokens.DPoP, "a DPoP-bound token")
+	method := q.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	q.authorization = "DPoP " + tokens.AccessToken
+	q.dpop = tokens.DPoP.Proof(t, method, rsOrigin+q.path, tokens.AccessToken, "")
+	w := serve(handler, q)
+	if nonce := w.Header().Get("DPoP-Nonce"); w.Code == http.StatusUnauthorized && nonce != "" {
+		q.dpop = tokens.DPoP.Proof(t, method, rsOrigin+q.path, tokens.AccessToken, nonce)
+		w = serve(handler, q)
+	}
+	return w
 }
