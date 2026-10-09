@@ -34,6 +34,10 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 			RevokeTeamInvite: router.Handler(standalonehandlers.MerchantRevokeTeamInvite(s.controlPlane)),
 			ChangeTeamRole:   router.Handler(standalonehandlers.MerchantChangeTeamRole(s.controlPlane)),
 			RemoveTeamMember: router.Handler(standalonehandlers.MerchantRemoveTeamMember(s.controlPlane)),
+
+			ListFederatedGrants:  router.Handler(standalonehandlers.MerchantListFederatedGrants(s.controlPlane)),
+			CreateFederatedGrant: router.Handler(standalonehandlers.MerchantCreateFederatedGrant(s.controlPlane)),
+			RevokeFederatedGrant: router.Handler(standalonehandlers.MerchantRevokeFederatedGrant(s.controlPlane)),
 		}
 		httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, control)
 	}

@@ -205,7 +205,7 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 
 All merchant-admin operations live under `/v1/merchant/*` (same public port; each
 route gated by a `merchant:*` permission). Auth is a merchant API key
-(`Bearer openrails_st_...`), a first-party service JWT, or a user session. Full
+(`Bearer openrails_st_...`), a user session, or a trusted issuer's access token. Full
 reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
@@ -228,7 +228,7 @@ reference: [api/routes.md](api/routes.md).
 | Operational alerts / findings | `GET /v1/merchant/notifications`, `GET /v1/merchant/findings` | Ops |
 
 A user session needs a recent sign-in for every write here (403
-`step_up_required` otherwise); API keys and service JWTs do not. A manual grant
+`step_up_required` otherwise); API keys and access tokens do not. A manual grant
 with no end (no `hours` or `ends_at`) also needs
 `merchant:access:grant-permanent`, owner-level by default; `hours` is at most
 2562047.

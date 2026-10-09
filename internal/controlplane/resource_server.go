@@ -172,6 +172,10 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 	if err != nil {
 		return nil, err
 	}
+	granted, err := c.grantsOf(ctx, cl, []billing.MerchantID{mid})
+	if err != nil {
+		return nil, err
+	}
 	return &credential.ResolvedResourceAccess{
 		Machine:       cl.Kind == iam.ActorOAuthClient,
 		Issuer:        strings.TrimSpace(cl.Issuer),
@@ -179,7 +183,7 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		ClientID:      cl.ClientID,
 		MerchantID:    mid,
 		MerchantSlug:  slug,
-		Permissions:   is.permissions(cl),
+		Permissions:   is.permissions(cl, granted[mid]...),
 		Scopes:        append([]string(nil), cl.Scopes...),
 		SessionID:     cl.SessionID,
 		Email:         cl.Email,
@@ -208,16 +212,38 @@ func (c *ControlPlane) ResolveResourceUser(r *http.Request) (*credential.Resourc
 	}
 	user := &credential.ResourceUser{
 		Machine: cl.Kind == iam.ActorOAuthClient, Issuer: strings.TrimSpace(cl.Issuer), Subject: strings.TrimSpace(cl.Subject),
-		Email: cl.Email, EmailVerified: cl.EmailVerified, Username: cl.Username, Merchants: []billing.UserMerchant{},
+		Email: cl.Email, EmailVerified: cl.EmailVerified, Username: cl.Username,
+		Merchants: []billing.UserMerchant{}, Ceiling: is.ceiling,
 	}
-	perms := is.permissions(cl)
-	if len(perms) == 0 {
-		return user, nil
+	ids := make([]billing.MerchantID, 0, len(refs))
+	for _, ref := range refs {
+		user.Bound = append(user.Bound, billing.MerchantRef{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName})
+		ids = append(ids, ref.ID)
+	}
+	granted, err := c.grantsOf(r.Context(), cl, ids)
+	if err != nil {
+		return nil, err
 	}
 	for _, ref := range refs {
-		user.Merchants = append(user.Merchants, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: merchantRoleFor(perms), Permissions: perms})
+		perms := is.permissions(cl, granted[ref.ID]...)
+		if len(perms) > 0 {
+			user.Merchants = append(user.Merchants, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: merchantRoleFor(perms), Permissions: perms})
+		}
 	}
 	return user, nil
+}
+
+// grantsOf are the federated grants cl's user accepted on merchants; a
+// client acting for itself holds none.
+func (c *ControlPlane) grantsOf(ctx context.Context, cl verify.Claims, merchants []billing.MerchantID) (map[billing.MerchantID][]string, error) {
+	if cl.Kind == iam.ActorOAuthClient || len(merchants) == 0 {
+		return nil, nil
+	}
+	granted, err := c.subjectGrants(ctx, strings.TrimSpace(cl.Issuer), strings.TrimSpace(cl.Subject), merchants)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	}
+	return granted, nil
 }
 
 // ResolveResourceCustomer verifies r's access token for a customer's own
@@ -268,10 +294,10 @@ func (c *ControlPlane) ResolveResourceCustomer(r *http.Request) (*credential.Res
 	}, nil
 }
 
-// permissions is what the issuer lets cl do: its permissions and mapped
-// roles within the ceiling.
-func (is trustedIssuer) permissions(cl verify.Claims) []string {
-	grants := append([]string(nil), cl.Permissions...)
+// permissions is what the issuer lets cl do: its permissions, mapped roles
+// and federated grants within the ceiling.
+func (is trustedIssuer) permissions(cl verify.Claims, granted ...string) []string {
+	grants := append(append([]string(nil), cl.Permissions...), granted...)
 	for _, role := range cl.Roles {
 		grants = append(grants, is.groupRoles[strings.TrimSpace(role)]...)
 	}

@@ -65,8 +65,11 @@ type External struct {
 	CreateAPIKey, ListAPIKeys, RevokeAPIKey            router.Handler
 	ListTeam, ListTeamInvites, InviteTeamMember        router.Handler
 	RevokeTeamInvite, ChangeTeamRole, RemoveTeamMember router.Handler
-	MerchantCreationEnabled                            bool
-	MerchantCreationLimit                              router.Middleware
+	// Federated grants (#1140): the merchant's, and the signed-in user's own.
+	ListFederatedGrants, CreateFederatedGrant, RevokeFederatedGrant router.Handler
+	ListMyFederatedGrants, AcceptFederatedGrant                     router.Handler
+	MerchantCreationEnabled                                         bool
+	MerchantCreationLimit                                           router.Middleware
 }
 
 // Env is one assembly mounting routes: its options and the gates built from

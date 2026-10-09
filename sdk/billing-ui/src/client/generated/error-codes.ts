@@ -67,12 +67,7 @@ export type OpenRailsErrorCode =
   | "database_busy"
   | "default_rate_card_not_found"
   | "default_rate_card_required"
-  | "delegated_merchant_unresolved"
   | "delegated_principal_invalid"
-  | "delegated_token_expired"
-  | "delegated_token_invalid"
-  | "delegated_token_revoked"
-  | "delegated_verification_unavailable"
   | "email_unverified"
   | "finding_action_failed"
   | "finding_not_actionable"
@@ -308,13 +303,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   database_busy: { status: 503, type: "api_error", meaning: "No database connection is available; retry shortly." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   default_rate_card_required: { status: 409, type: "invalid_request_error", meaning: "The meter needs a default rate card." },
-  delegated_merchant_unresolved: { status: 403, type: "authorization_error", meaning: "The delegated token's issuer resolves to no merchant." },
   delegated_principal_invalid: { status: 401, type: "authentication_error", meaning: "The host's delegated principal names no usable merchant or subject." },
-  delegated_token_expired: { status: 401, type: "authentication_error", meaning: "The delegated access token has expired." },
-  delegated_token_invalid: { status: 401, type: "authentication_error", meaning: "The delegated access token is invalid." },
-  delegated_token_revoked: { status: 401, type: "authentication_error", meaning: "The delegated access token was revoked." },
-  delegated_verification_unavailable: { status: 503, type: "api_error", meaning: "Delegated tokens cannot be verified right now; retry." },
-  email_unverified: { status: 403, type: "authorization_error", meaning: "Creating a merchant needs a verified email." },
+  email_unverified: { status: 403, type: "authorization_error", meaning: "The operation needs a verified email." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },

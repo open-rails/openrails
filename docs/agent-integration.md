@@ -79,9 +79,10 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    authenticated `GET /v1/merchant/configuration` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
-4. **Frontend.** Delegated tokens: add ONE token-exchange endpoint to the host API,
-   mint per [frontend-integration.md](frontend-integration.md) /
-   [auth.md](auth.md). Never send the host's own session tokens to OpenRails.
+4. **Frontend.** Access tokens: your identity provider mints DPoP-bound
+   `openrails:self` tokens for OpenRails (code flow or token exchange) per
+   [frontend-integration.md](frontend-integration.md) / [auth.md](auth.md).
+   Never send the host's own session tokens to OpenRails.
 5. **Webhooks + end-to-end.** Rails point directly at OpenRails. Verify the same
    checkout → webhook → entitlement loop as Plan A step 7.
 
@@ -110,7 +111,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
   construct user-parameterized paths.
 - Do not build a billing proxy in the host app (host route that forwards to
   OpenRails billing routes). Embedded mounts the routes; standalone is called
-  browser-direct with delegated tokens.
+  browser-direct with access tokens.
 - Checkout endpoints are tightly rate-limited by design; retry loops in tests will
   hit 429 — back off, don't raise limits.
 - Embedded config is programmatic: no file or environment is read, so nothing is

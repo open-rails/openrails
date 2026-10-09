@@ -27,6 +27,7 @@ var ownedTables = []string{
 	"destructive_action_switch",
 	"destructive_run_before_images",
 	"entitlements",
+	"federated_grants",
 	"grants",
 	"host_outbox",
 	"idempotency_keys",

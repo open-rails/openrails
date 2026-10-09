@@ -272,6 +272,32 @@ type TeamInviteResult struct {
 	URL    *string     `json:"url"`
 }
 
+// FederatedGrant is a merchant role granted to a trusted issuer's user by
+// invitation: pending until a user of an issuer trusted for the merchant
+// accepts it with the invited, verified email, then bound to that user.
+type FederatedGrant struct {
+	ID         FederatedGrantID `json:"id"`
+	Email      string           `json:"email"`
+	Role       string           `json:"role"`
+	Issuer     *string          `json:"issuer"`
+	Subject    *string          `json:"subject"`
+	AcceptedAt *time.Time       `json:"accepted_at"`
+	CreatedAt  time.Time        `json:"created_at"`
+}
+
+// CreateFederatedGrantParams invites an email address with a merchant role.
+type CreateFederatedGrantParams struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// FederatedInvite is a pending grant the signed-in user may accept.
+type FederatedInvite struct {
+	ID       FederatedGrantID `json:"id"`
+	Merchant MerchantRef      `json:"merchant"`
+	Role     string           `json:"role"`
+}
+
 // SetTeamRoleParams changes a member's role.
 type SetTeamRoleParams struct {
 	Role string `json:"role"`

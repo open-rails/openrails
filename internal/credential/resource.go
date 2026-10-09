@@ -63,7 +63,11 @@ type ResourceUser struct {
 	Email         string
 	EmailVerified bool
 	Username      string
-	Merchants     []billing.UserMerchant
+	// Merchants are the issuer's merchants the user may act on; Bound all of
+	// the issuer's merchants, and Ceiling its permission ceiling.
+	Merchants []billing.UserMerchant
+	Bound     []billing.MerchantRef
+	Ceiling   []string
 }
 
 // EquivalentPermissions reports whether each grant set covers the other.

@@ -27,39 +27,30 @@ requests only from that exact configured origin, including bodyless POSTs;
 missing, opaque, cross-origin and sibling origins are refused. Do not wrap
 AuthKit's own auth routes, which own their refresh/CSRF cookie protocol.
 
-Standalone and SaaS browser clients use AuthKit v1 browser delegation:
+Standalone and SaaS browser clients call OpenRails with an OAuth 2.0 access
+token (RFC 9068 `at+jwt`) from an issuer OpenRails trusts ([auth](auth.md#trusted-issuers)):
 
-1. Create a non-extractable WebCrypto P-256 signing key in memory.
-2. Call the merchant issuer's `POST /api/v1/delegated/token` (AuthKit's
-   default mount) using its normal local
-   `Authorization: Bearer` credential and a fresh ES256 `DPoP` proof. Include
-   `audiences: ["openrails"]` and the application's `requested_grant`. The
-   issuer's host authorizer determines the actual grant; the browser does not.
-3. Keep the returned `token_type: "DPoP"` token with that key. For every
-   OpenRails call use `Authorization: DPoP <token>` plus a newly signed `DPoP`
-   proof covering the token hash, HTTP method, externally visible URL without
-   query/fragment, issuance time, and unique nonce (`jti`).
-4. Clear both token and key on logout or account change. Refresh/remint before
-   expiry; a retry needs a fresh proof. Do not automatically repeat a financial
-   mutation without its documented durable operation key.
+1. Get a DPoP-bound access token for OpenRails' resource identifier with scope
+   `openrails:self` from your issuer: an authorization-code flow, or an RFC 8693
+   token exchange of the user's session token. AuthKit's `@openrails/auth-ui`
+   issuer client does both and keeps the DPoP key non-extractable.
+2. Call OpenRails with `Authorization: DPoP <token>` plus a fresh `DPoP` proof
+   for the method and URL (no query or fragment). Answer
+   `401 use_dpop_nonce` by retrying with the response's `DPoP-Nonce` value in
+   the proof.
+3. Clear the token and key on sign-out or account change; refresh before
+   expiry. Do not automatically repeat a financial mutation without its
+   documented durable operation key.
 
-Register the merchant's AuthKit signing application and its bounded grant in
-OpenRails. OpenRails uses its configured `auth.request_origin` plus the request
-path for proof targets, never arbitrary Host/Forwarded headers. CORS allows
-credential-free preflight with `Authorization` and `DPoP`; direct resource
-requests use `credentials: "omit"`. CORS is not identity or authorization.
-
-Native clients may use the certificate-bound delegated profile instead:
-`Authorization: Bearer` plus the actual TLS client certificate matching
-`cnf.x5t#S256`. A proxy header is not a client certificate. Unbound delegated
-JWTs and a DPoP token downgraded to Bearer are refused.
-
-See AuthKit's [tokens](https://github.com/open-rails/authkit/blob/master/docs/tokens.md#delegated-tokens)
-for the mint and proof fields and the shared replay store.
+OpenRails builds proof targets from its configured `auth.request_origin` plus
+the path, never from Host/Forwarded headers. Self-service CORS allows any
+origin without credentials (`credentials: "omit"`). Native clients may use a
+certificate-bound token over mTLS instead; a DPoP token downgraded to Bearer is
+refused.
 
 ### The self-service surface: `/v1/me/*`
 
-Every route is scoped to the token's own subject (`delegated_sub` standalone, your
+Every route is scoped to the token's own subject (`sub` standalone, your
 session identity embedded). There is **no `:user_id` anywhere** — a browser credential
 can only ever act on itself. In embedded mode, prepend the mount prefix to every path.
 
@@ -233,12 +224,12 @@ The pay answer's `status` tells the page what to do next:
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant Y as Your backend
+    participant Y as Your identity provider
     participant O as OpenRails
     participant P as Payment rail
-    B->>Y: GET /api/billing-token (session cookie)
-    Y-->>B: delegated JWT (TTL ~5 min)
-    B->>O: POST /v1/me/checkout-sessions (DPoP delegated JWT + proof)
+    B->>Y: token exchange (session token + DPoP proof)
+    Y-->>B: access token, scope openrails:self (TTL ~5 min)
+    B->>O: POST /v1/me/checkout-sessions (DPoP access token + proof)
     O-->>B: {id, url}
     B->>O: GET /v1/checkout-sessions/{id}
     B->>O: POST /v1/checkout-sessions/{id}/pay
@@ -302,8 +293,9 @@ Errors use a Stripe-style envelope:
 
 Handle in the frontend:
 
-- **401** — delegated token expired/invalid. Re-fetch from your exchange endpoint and
-  retry once. Embedded: your normal session-expiry flow.
+- **401** — access token expired or invalid (`credential_expired`,
+  `access_token_invalid`): get a new one and retry once; `use_dpop_nonce`: retry
+  with the `DPoP-Nonce` value. Embedded: your normal session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
   else's `payment_method_id`).
 - **409** — `idempotency_key_reused` (same key, different terms),

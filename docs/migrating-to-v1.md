@@ -242,6 +242,13 @@ fields (`400 unknown_field`), and every error code is in
 - `api_host` in a configuration application: release a host with
   `PUT /v1/merchant/api-host` and an empty `api_host`.
 - `GET /v1/merchant/repair-alerts`: read `/v1/merchant/notifications`.
+- Delegated access tokens (`delegated-access+jwt`), remote-application tokens
+  (`remote-application-access+jwt`) and service JWTs, with the
+  `delegated_token_*`, `delegated_merchant_unresolved` and
+  `delegated_verification_unavailable` codes. Standalone OpenRails accepts RFC
+  9068 access tokens from trusted issuers instead: `openrails:self` for
+  `/v1/me`, `openrails:merchant` for the merchant API, client credentials for
+  machines ([auth](auth.md#trusted-issuers)).
 
 ### Renamed or reshaped
 

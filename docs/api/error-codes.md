@@ -72,13 +72,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `default_rate_card_required` | 409 | `invalid_request_error` | The meter needs a default rate card. |
-| `delegated_merchant_unresolved` | 403 | `authorization_error` | The delegated token's issuer resolves to no merchant. |
 | `delegated_principal_invalid` | 401 | `authentication_error` | The host's delegated principal names no usable merchant or subject. |
-| `delegated_token_expired` | 401 | `authentication_error` | The delegated access token has expired. |
-| `delegated_token_invalid` | 401 | `authentication_error` | The delegated access token is invalid. |
-| `delegated_token_revoked` | 401 | `authentication_error` | The delegated access token was revoked. |
-| `delegated_verification_unavailable` | 503 | `api_error` | Delegated tokens cannot be verified right now; retry. |
-| `email_unverified` | 403 | `authorization_error` | Creating a merchant needs a verified email. |
+| `email_unverified` | 403 | `authorization_error` | The operation needs a verified email. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |

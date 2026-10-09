@@ -360,7 +360,7 @@ var errorCodes = []ErrorCode{
 	{"name_reserved", 409, invalid, "The merchant name is reserved."},
 	{"renames_disabled", 403, invalid, "Merchant renames are disabled."},
 	{"rename_too_soon", 429, invalid, "The merchant was renamed too recently."},
-	{"email_unverified", 403, authz, "Creating a merchant needs a verified email."},
+	{"email_unverified", 403, authz, "The operation needs a verified email."},
 	{"creation_refused", 403, authz, "Merchant creation was refused."},
 	{CodeMerchantCreationPaymentMethodRequired, 402, card, "Creating another merchant needs a payment method on file."},
 }

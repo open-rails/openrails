@@ -569,3 +569,126 @@ merchants:
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 	require.Equal(t, billing.CodeAccessTokenIssuerUnknown, errorCode(t, w))
 }
+
+// An owner grants a merchant role by email; a user of an issuer trusted for
+// the merchant accepts it with that verified email and then holds the role,
+// within the issuer's ceiling, until it is revoked.
+func TestResourceServerFederatedGrants(t *testing.T) {
+	f := newFixture(t)
+	host := newIssuerKey(t, "https://grants-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
+	other := newIssuerKey(t, "https://grants-other-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
+	shop, rival := uniqueName("fg-shop"), uniqueName("fg-rival")
+	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
+		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
+			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
+			TrustedIssuers: []openrails.TrustedIssuerConfig{
+				{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{"merchant:*"}},
+				{Name: "other", Issuer: other.iss, Keys: other.pinned(t), Merchants: []string{rival}, Permissions: []string{"merchant:*"}},
+			},
+		}
+	})
+	provision(t, cp, shop)
+	provision(t, cp, rival)
+	handler, err := standaloneHandler(cp)
+	require.NoError(t, err)
+	type body = map[string]any
+	send := func(method, path, token string, payload any) *httptest.ResponseRecorder {
+		var raw []byte
+		if payload != nil {
+			raw, err = json.Marshal(payload)
+			require.NoError(t, err)
+		}
+		r := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer "+token)
+		if payload != nil {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	owner := host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })
+	staffSub := "staff-" + uuid.NewString()[:8]
+	staff := func(edit func(jwt.MapClaims)) string {
+		return host.mint(t, func(c jwt.MapClaims) {
+			c["sub"], c["email"], c["email_verified"] = staffSub, "staff@example.test", true
+			delete(c, "permissions")
+			if edit != nil {
+				edit(c)
+			}
+		})
+	}
+	const grants, findings = "/v1/merchant/federated-grants", "/v1/merchant/findings"
+
+	w := send(http.MethodPost, grants, owner, body{"email": " Staff@Example.test ", "role": "viewer"})
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	var grant billing.FederatedGrant
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &grant))
+	require.Equal(t, "staff@example.test", grant.Email)
+	require.Nil(t, grant.Subject, "pending")
+	for name, tc := range map[string]struct {
+		token   string
+		payload body
+		status  int
+		code    string
+	}{
+		"duplicate":     {owner, body{"email": "staff@example.test", "role": "support"}, http.StatusConflict, billing.CodeResourceConflict},
+		"bad email":     {owner, body{"email": "Staff <staff@example.test>", "role": "viewer"}, http.StatusBadRequest, "invalid_email"},
+		"unknown role":  {owner, body{"email": "x@example.test", "role": "admin"}, http.StatusBadRequest, "unknown_role"},
+		"beyond caller": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{billing.MerchantMembersManage} }), body{"email": "x@example.test", "role": "owner"}, http.StatusForbidden, "role_escalation"},
+		"not an owner":  {staff(nil), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodePermissionRequired},
+	} {
+		w := send(http.MethodPost, grants, tc.token, tc.payload)
+		require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
+		require.Equal(t, tc.code, errorCode(t, w), name)
+	}
+
+	require.Equal(t, http.StatusForbidden, send(http.MethodGet, findings, staff(nil), nil).Code, "no access until accepted")
+	var pending billing.ListPage[billing.FederatedInvite]
+	w = send(http.MethodGet, "/v1/merchants/invites", staff(nil), nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pending))
+	require.Len(t, pending.Items, 1)
+	require.Equal(t, grant.ID, pending.Items[0].ID)
+	require.Equal(t, shop, pending.Items[0].Merchant.Slug)
+
+	unverified := staff(func(c jwt.MapClaims) { c["email_verified"] = false })
+	w = send(http.MethodGet, "/v1/merchants/invites", unverified, nil)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pending))
+	require.Empty(t, pending.Items, "an unverified email is offered nothing")
+	accept := "/v1/merchants/invites/" + grant.ID.String() + "/accept"
+	w = send(http.MethodPost, accept, unverified, nil)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	require.Equal(t, "email_unverified", errorCode(t, w))
+	stranger := other.mint(t, func(c jwt.MapClaims) { c["email"], c["email_verified"] = "staff@example.test", true })
+	w = send(http.MethodPost, accept, stranger, nil)
+	require.Equal(t, http.StatusNotFound, w.Code, "an issuer not trusted for the merchant cannot accept its grants")
+
+	w = send(http.MethodPost, accept, staff(nil), nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var reached billing.UserMerchant
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reached))
+	require.Equal(t, shop, reached.Slug)
+	require.Equal(t, "viewer", reached.Role)
+	require.Equal(t, http.StatusNotFound, send(http.MethodPost, accept, staff(nil), nil).Code, "a grant is accepted once")
+
+	require.Equal(t, http.StatusOK, send(http.MethodGet, findings, staff(nil), nil).Code, "the grant's role")
+	require.Equal(t, http.StatusForbidden, send(http.MethodPost, grants, staff(nil), body{"email": "y@example.test", "role": "viewer"}).Code, "a viewer manages nobody")
+	w = send(http.MethodGet, "/v1/merchants", staff(nil), nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	list := merchantList(t, w)
+	require.Len(t, list, 1)
+	require.Equal(t, "viewer", list[0].Role)
+
+	var roster billing.ListPage[billing.FederatedGrant]
+	w = send(http.MethodGet, grants, owner, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &roster))
+	require.Len(t, roster.Items, 1)
+	require.Equal(t, host.iss, *roster.Items[0].Issuer)
+	require.Equal(t, staffSub, *roster.Items[0].Subject)
+
+	require.Equal(t, http.StatusNoContent, send(http.MethodDelete, grants+"/"+grant.ID.String(), owner, nil).Code)
+	require.Equal(t, http.StatusNotFound, send(http.MethodDelete, grants+"/"+grant.ID.String(), owner, nil).Code)
+	require.Equal(t, http.StatusForbidden, send(http.MethodGet, findings, staff(nil), nil).Code, "revoked")
+}

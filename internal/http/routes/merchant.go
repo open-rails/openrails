@@ -67,6 +67,18 @@ var merchantRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.APIKey]{}}}, Errors: codes("merchant_unresolved"), Bind: controlPlane(func(x *External) router.Handler { return x.ListAPIKeys })},
 	{Method: DELETE, Path: "/v1/merchant/api-keys/{id}", Group: ControlPlane, Auth: AuthMerchant, Perm: billing.MerchantCredentialsManage, NoConn: true,
 		Responses: []Reply{{204, nil}}, Errors: codes("credential_revoked", "merchant_unresolved", "resource_not_found", "role_escalation"), Bind: controlPlane(func(x *External) router.Handler { return x.RevokeAPIKey })},
+	// #1140 federated grants: merchant roles granted by email to users of the
+	// merchant's trusted issuers; the invitee accepts with a verified email.
+	{Method: GET, Path: "/v1/merchant/federated-grants", Group: ControlPlane, Auth: AuthMerchant, Perm: billing.MerchantMembersRead, NoConn: true,
+		Responses: []Reply{{200, billing.ListPage[billing.FederatedGrant]{}}}, Errors: codes("merchant_unresolved"), Bind: controlPlane(func(x *External) router.Handler { return x.ListFederatedGrants })},
+	{Method: POST, Path: "/v1/merchant/federated-grants", Group: ControlPlane, Auth: AuthMerchant, Perm: billing.MerchantMembersManage, NoConn: true,
+		Request: billing.CreateFederatedGrantParams{}, Responses: []Reply{{201, billing.FederatedGrant{}}}, Errors: codes("invalid_email", "merchant_unresolved", "resource_conflict", "role_escalation", "unknown_role"), Bind: controlPlane(func(x *External) router.Handler { return x.CreateFederatedGrant })},
+	{Method: DELETE, Path: "/v1/merchant/federated-grants/{id}", Group: ControlPlane, Auth: AuthMerchant, Perm: billing.MerchantMembersManage, NoConn: true,
+		Responses: []Reply{{204, nil}}, Errors: codes("merchant_unresolved", "resource_not_found", "role_escalation"), Bind: controlPlane(func(x *External) router.Handler { return x.RevokeFederatedGrant })},
+	{Method: GET, Path: "/v1/merchants/invites", Group: ControlPlane, Auth: AuthUser, NoConn: true,
+		Responses: []Reply{{200, billing.ListPage[billing.FederatedInvite]{}}}, Errors: codes("authentication_required"), Bind: controlPlane(func(x *External) router.Handler { return x.ListMyFederatedGrants })},
+	{Method: POST, Path: "/v1/merchants/invites/{id}/accept", Group: ControlPlane, Auth: AuthUser, NoConn: true,
+		Responses: []Reply{{200, billing.UserMerchant{}}}, Errors: codes("authentication_required", "email_unverified", "resource_conflict", "resource_not_found"), Bind: controlPlane(func(x *External) router.Handler { return x.AcceptFederatedGrant })},
 	// #760 merchant team: roster, invitations, role changes and removal,
 	// through AuthKit group membership.
 	{Method: GET, Path: "/v1/merchant/team", Group: ControlPlane, Auth: AuthMerchant, Perm: billing.MerchantMembersRead, NoConn: true,

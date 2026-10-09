@@ -401,6 +401,19 @@ type BillingEntitlement struct {
 	DestructiveRunClass *string
 }
 
+// Merchant roles granted by invitation to users of trusted issuers (#1140): pending (email only) until a user of an issuer trusted for the merchant accepts with that verified email, then bound to (issuer, subject). Grants, not accounts; revoking deletes the row.
+type BillingFederatedGrant struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Email      string
+	Role       string
+	Issuer     *string
+	Subject    *string
+	AcceptedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
 type BillingGrant struct {
 	ID         uuid.UUID
