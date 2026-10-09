@@ -49,7 +49,7 @@ tasks:
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BIN_DIR}}
-      - go build -o {{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
+      - cd server && go build -o ../{{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
 
   admin-build:
     desc: Build the admin console SPA into web/admin/dist (gitignored, #754), which the binary go:embeds
@@ -194,7 +194,7 @@ tasks:
       - bash scripts/go-test-gate.sh ./internal/db/ TestNoInlineSQL
 
   lint:
-    desc: golangci-lint over the whole module (same gate CI runs — see .golangci.yaml)
+    desc: golangci-lint over the root and server modules (same gate CI runs — see .golangci.yaml)
     cmds:
       # Pinned: a floating version silently changes what the gate means.
       - |
@@ -213,6 +213,7 @@ tasks:
             ;;
         esac
       - golangci-lint run --timeout=15m ./...
+      - cd server && golangci-lint run --timeout=15m --config ../.golangci.yaml ./...
 
   sql-lint:
     desc: Fail on inline SQL outside internal/db/queries (allowlist in internal/db/inlinesql_test.go)
@@ -228,7 +229,7 @@ tasks:
     desc: Format code
     cmds:
       - echo "Formatting code..."
-      - go fmt ./...
+      - gofmt -w $(git ls-files '*.go')
       - goimports -w .
 
   clean:

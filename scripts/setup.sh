@@ -15,7 +15,7 @@ fi
 # to validate the completed setup.
 ./scripts/install-git-hooks.sh
 bash ./scripts/doctor.sh
-go mod download
+for module in . server examples; do (cd "$module" && go mod download); done
 docker volume create go_mod_cache_persistent >/dev/null
 
 cat <<'EOF'

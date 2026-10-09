@@ -21,7 +21,7 @@ runs:
       shell: bash
       run: |
         printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-        sum="$(sha256sum go.sum | cut -c1-16)"
+        sum="$(cat go.sum server/go.sum examples/go.sum | sha256sum | cut -c1-16)"
         prefix="go-v2-${RUNNER_OS}-${RUNNER_ARCH}-${{ inputs.family }}-$(go env GOVERSION)"
         printf 'prefix=%s\nsum=%s\nkey=%s\n' "$prefix-" "$prefix-$sum-" "$prefix-$sum-$GITHUB_SHA" >> "$GITHUB_OUTPUT"
     - name: Restore Go caches

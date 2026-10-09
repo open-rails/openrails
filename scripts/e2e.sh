@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs ./ci/... : the packages' test binaries are built once, then every
-# top-level test runs in its own process against the same disposable database.
-# Every test creates its own schema, so tests never share state.
+# Runs ./ci/... of the root module and of server/: each package's test binary
+# is built once, then every top-level test runs in its own process against the
+# same disposable database. Every test creates its own schema, so tests never
+# share state. A package is named by its directory (ci/subscriptions, server/ci).
 #
 # OPENRAILS_E2E_WORKERS runners split the tests longest first, each to the
 # least-loaded worker, by ci/e2e-durations.tsv (a test missing from it counts
@@ -14,6 +15,8 @@ set -euo pipefail
 export LC_ALL=C
 
 cd "$(dirname "$0")/.."
+# Each module is proven on its own, never through a developer's go.work.
+export GOWORK=off
 : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL database}"
 workers="${OPENRAILS_E2E_WORKERS:-1}"
 worker="${OPENRAILS_E2E_WORKER:-0}"
@@ -30,23 +33,30 @@ export E2E_OUT
 trap 'rm -rf "$E2E_OUT"' EXIT
 mkdir "$E2E_OUT/logs"
 
-# One build graph for every package; each binary is <package name>.test.
-package_list="$(go list -tags="$tags" -f '{{.Name}} {{.ImportPath}} {{.Dir}}' ./ci/...)"
-mapfile -t packages <<<"$package_list"
-paths=()
-for line in "${packages[@]}"; do
-  read -r _ path _ <<<"$line"
-  paths+=("$path")
-done
-go test -c -race -vet=all -tags="$tags" -o "$E2E_OUT/" "${paths[@]}"
-
+# One build graph per module; a package's binary and directory are filed
+# under its name with / as _.
 : >"$E2E_OUT/all.tsv"
-for line in "${packages[@]}"; do
-  read -r name _ dir <<<"$line"
-  [[ -x "$E2E_OUT/$name.test" ]] || continue
-  printf '%s\n' "$dir" >"$E2E_OUT/$name.dir"
-  listed="$(cd "$dir" && "$E2E_OUT/$name.test" -test.list '^Test')"
-  { printf '%s\n' "$listed" | grep '^Test' || true; } | awk -v p="$name" '{ print p "\t" $1 }' >>"$E2E_OUT/all.tsv"
+for module in . server; do
+  package_list="$(cd "$module" && go list -tags="$tags" -f '{{.ImportPath}} {{.Dir}}' ./ci/...)"
+  mapfile -t packages <<<"$package_list"
+  paths=()
+  for line in "${packages[@]}"; do
+    read -r path _ <<<"$line"
+    paths+=("$path")
+  done
+  mkdir -p "$E2E_OUT/bin/$module"
+  (cd "$module" && go test -c -race -vet=all -tags="$tags" -o "$E2E_OUT/bin/$module/" "${paths[@]}")
+  for line in "${packages[@]}"; do
+    read -r path dir <<<"$line"
+    bin="$E2E_OUT/bin/$module/${path##*/}.test"
+    [[ -x "$bin" ]] || continue
+    name="${dir#"$PWD"/}"
+    file="${name//\//_}"
+    printf '%s\n' "$dir" >"$E2E_OUT/$file.dir"
+    printf '%s\n' "$bin" >"$E2E_OUT/$file.bin"
+    listed="$(cd "$dir" && "$bin" -test.list '^Test')"
+    { printf '%s\n' "$listed" | grep '^Test' || true; } | awk -v p="$name" '{ print p "\t" $1 }' >>"$E2E_OUT/all.tsv"
+  done
 done
 
 # Estimate each test, then assign longest first to the least-loaded worker.
@@ -64,10 +74,11 @@ touch "$E2E_OUT/mine"
 echo "e2e: $(wc -l <"$E2E_OUT/all.tsv") tests in all; worker $worker runs $(wc -l <"$E2E_OUT/mine"), $jobs at a time"
 
 run_one() {
-  local name=$1 test=$2 status=0 start secs log
-  log="$E2E_OUT/logs/$name.$test.log"
+  local name=$1 test=$2 status=0 start secs log file
+  file="${name//\//_}"
+  log="$E2E_OUT/logs/$file.$test.log"
   start=$EPOCHREALTIME
-  (cd "$(<"$E2E_OUT/$name.dir")" && "$E2E_OUT/$name.test" -test.count=1 -test.parallel=4 \
+  (cd "$(<"$E2E_OUT/$file.dir")" && "$(<"$E2E_OUT/$file.bin")" -test.count=1 -test.parallel=4 \
     -test.timeout="$E2E_TIMEOUT" -test.run="^$test\$") >"$log" 2>&1 || status=$?
   if ((status == 0)) && grep -q 'no tests to run' "$log"; then
     echo "e2e: -run ^$test\$ matched no test" >>"$log"
@@ -85,13 +96,13 @@ status=0
 while IFS=$'\t' read -r name test secs result; do
   [[ "$result" == 0 ]] || continue
   echo "::group::ok $name $test (${secs}s)"
-  cat "$E2E_OUT/logs/$name.$test.log"
+  cat "$E2E_OUT/logs/${name//\//_}.$test.log"
   echo "::endgroup::"
 done <"$E2E_OUT/results.tsv"
 while IFS=$'\t' read -r name test secs result; do
   [[ "$result" != 0 ]] || continue
   echo "FAIL $name $test (${secs}s)"
-  cat "$E2E_OUT/logs/$name.$test.log"
+  cat "$E2E_OUT/logs/${name//\//_}.$test.log"
   status=1
 done <"$E2E_OUT/results.tsv"
 planned="$(wc -l <"$E2E_OUT/mine")"

@@ -6,7 +6,8 @@ set -eu
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
-go build ./...
-go vet ./...
+for module in . server examples; do
+  (cd "$module" && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+done
 bash scripts/check_business_time.sh
 task sqlc-generate-check

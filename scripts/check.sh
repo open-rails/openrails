@@ -2,6 +2,18 @@
 # The ordinary validation entry point, shared by local development and CI.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Each module is proven on its own, never through a developer's go.work.
+export GOWORK=off
+# The root library, the server released with it, and the examples.
+modules=(. server examples)
+
+# in_modules runs a command in every module.
+in_modules() {
+  local module
+  for module in "${modules[@]}"; do
+    (cd "$module" && "$@")
+  done
+}
 
 guards() {
   # Keep the source-level safety checks in the compact entrypoint. These are
@@ -27,13 +39,13 @@ guards() {
 # These builds embed only web/admin/dist/.gitkeep: Go must build without a
 # console build.
 build() {
-  go build ./...
+  in_modules go build ./...
 }
 
 go_tests() {
   # Package tests are guards, contracts and focused regressions; database and
   # provider behavior is covered by the e2e suite in End-to-end.
-  go test -vet=all -race -count=1 -cover ./...
+  in_modules go test -vet=all -race -count=1 -cover ./...
 }
 
 console() {
@@ -65,7 +77,7 @@ console() {
     echo "console: the build removed web/admin/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1
   }
-  go build -o /dev/null ./cmd/openrails
+  (cd server && go build -o /dev/null ./cmd/openrails)
 }
 
 checks() {
