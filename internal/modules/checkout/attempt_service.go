@@ -749,13 +749,6 @@ func (s *CheckoutAttemptService) resumeIdempotentSession(
 	}
 }
 
-func equalOptionalUUID(left, right *uuid.UUID) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
-}
-
 func (s *CheckoutAttemptService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutAttemptResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
@@ -2508,40 +2501,6 @@ func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPric
 	railState["quote_expires_at"] = quoteExpiresAt.UTC().Format(time.RFC3339)
 
 	return nil
-}
-
-func checkoutStateString(state map[string]any, key string) string {
-	if state == nil {
-		return ""
-	}
-	return strings.TrimSpace(fmt.Sprint(state[key]))
-}
-
-func checkoutStateUint64(state map[string]any, key string) uint64 {
-	if state == nil {
-		return 0
-	}
-	switch v := state[key].(type) {
-	case uint64:
-		return v
-	case uint:
-		return uint64(v)
-	case int:
-		if v > 0 {
-			return uint64(v)
-		}
-	case int64:
-		if v > 0 {
-			return uint64(v)
-		}
-	case string:
-		// The canonical JSONB shape for a base-unit amount (MONEY-3): a
-		// decimal string, so the value survives the round-trip exactly.
-		if parsed, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
-			return parsed
-		}
-	}
-	return 0
 }
 
 // GetSessionForSolanaPay retrieves and validates a checkout attempt for Solana Pay spec endpoints.

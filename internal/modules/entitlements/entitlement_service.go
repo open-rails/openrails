@@ -380,66 +380,6 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 	})
 }
 
-func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("entitlement service not initialized")
-	}
-	return s.extendActiveBySubscription(ctx, subscriptionID, endAt.UTC(), s.now().UTC())
-}
-
-// extendActiveBySubscription extends a subscription's live finite windows to
-// endAt, never shortening one, and moves the customer's later windows of the
-// product by the same extension.
-func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
-	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		rows, err := q.ListExtendableSubscriptionAccess(ctx, gen.ListExtendableSubscriptionAccessParams{
-			MerchantID: mid.UUID(), SourceID: subscriptionID.String(), EndsAt: endAt,
-		})
-		if err != nil {
-			return err
-		}
-		for _, candidate := range rows {
-			if err := LockAccessTimeline(ctx, tx, candidate.CustomerID.String(), candidate.ProductID); err != nil {
-				return err
-			}
-			current, err := q.GetProductAccessByIDForUpdate(ctx, gen.GetProductAccessByIDForUpdateParams{MerchantID: mid.UUID(), ID: candidate.ID})
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if current.CustomerID != candidate.CustomerID || current.ProductID != candidate.ProductID || current.SourceID != subscriptionID.String() || current.SourceType != string(models.AccessSourceSubscription) {
-				return errors.New("access window changed during extension")
-			}
-			if current.RevokedAt != nil || current.EndsAt == nil {
-				continue
-			}
-			oldEnd := current.EndsAt.UTC()
-			if !endAt.After(oldEnd) {
-				continue
-			}
-			if !endAt.After(current.StartsAt) {
-				return fmt.Errorf("cannot extend access before its start")
-			}
-			if err := ShiftAccessTimeline(ctx, tx, current.CustomerID, current.ProductID, oldEnd, endAt.Sub(oldEnd), now, []uuid.UUID{current.ID}); err != nil {
-				return err
-			}
-			if err := q.UpdateProductAccessEndAtIfMatch(ctx, gen.UpdateProductAccessEndAtIfMatchParams{
-				MerchantID: mid.UUID(), ID: current.ID, NewEndAt: endAt, Now: now, OldEndAt: oldEnd,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // EndActiveByPayment ends a payment's access: started windows are revoked at
 // now and windows not yet started are removed; their grants record it.
 func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.AccessRevokeReason) error {

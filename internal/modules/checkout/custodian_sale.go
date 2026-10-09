@@ -709,14 +709,6 @@ func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, 
 	}
 }
 
-func stringPtrIfSet(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
 // recordAttempt records the custodian sale's answer (#1110). The sale's own
 // writes are not one transaction, so a failed write is logged.
 func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent gen.BillingProviderIntent, cfg *custodialPSP, p CustodianSalePayload, a attempts.Attempt) {

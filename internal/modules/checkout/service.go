@@ -29,17 +29,14 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
@@ -471,72 +468,6 @@ func (s *CheckoutService) processOneTimePurchase(
 	}
 }
 
-// processCCBillSubscription handles CCBill subscription creation
-// Returns a FlexForm URL that the client can redirect to for payment
-func (s *CheckoutService) processCCBillSubscription(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-) (*CheckoutResponse, error) {
-	ccbillClient, err := s.resolveCCBillClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate price has CCBill configuration
-	formName, flexID, hasCCBill := price.GetCCBillFlexForm()
-	if !hasCCBill {
-		return nil, fmt.Errorf("price %s is not configured for CCBill", price.ID)
-	}
-
-	canonicalName := cardholdername.Canonical(req.NameOnCard, req.FirstName, req.LastName)
-	if err := validateCCBillBillingIdentity(canonicalName, req.Zip, req.Country, user); err != nil {
-		return nil, err
-	}
-
-	// User must have a username for CCBill (used for webhook resolution via profiles.users)
-	if user.Username == "" {
-		return nil, errors.New("username required for CCBill payments")
-	}
-
-	firstName, lastName := cardholdername.Parts(canonicalName, "", "")
-	flexFormParams := &ccbill.GenerateFlexFormURLParams{
-		Username:      user.Username,
-		Email:         strings.TrimSpace(*user.Email),
-		CustomerFName: firstName,
-		CustomerLName: lastName,
-		Address1:      strings.TrimSpace(req.Address1),
-		City:          strings.TrimSpace(req.City),
-		State:         strings.TrimSpace(req.State),
-		ZipCode:       strings.TrimSpace(req.Zip),
-		Country:       strings.ToUpper(strings.TrimSpace(req.Country)),
-		FlexID:        flexID,
-		FormName:      formName,
-		ReservationID: req.CheckoutAttemptID,
-		// #819: bill the PRICE's currency. An unbillable/absent currency errors
-		// below — before a form exists, therefore before any charge.
-		Currency: price.Currency,
-	}
-
-	response, err := ccbillClient.GenerateFlexFormURL(flexFormParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate CCBill FlexForm URL: %w", err)
-	}
-
-	log.WithFields(log.Fields{
-		"user_id":  user.ID,
-		"price_id": price.ID,
-	}).Info("Generated CCBill FlexForm URL via checkout")
-
-	return &CheckoutResponse{
-		Status:      "redirect_required",
-		Action:      "new",
-		Message:     "Redirect to CCBill payment form",
-		RedirectURL: response.RedirectURL,
-	}, nil
-}
-
 // processCCBillUpgrade handles CCBill subscription upgrades
 // Returns a FlexForm URL for the upgrade that the client can redirect to
 func (s *CheckoutService) processCCBillUpgrade(
@@ -605,34 +536,6 @@ func (s *CheckoutService) processCCBillUpgrade(
 	}, nil
 }
 
-// processNMISubscription handles NMI-backed subscription creation.
-func (s *CheckoutService) processNMISubscription(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, coverage *CoverageInfo, target railTarget) (*CheckoutResponse, error) {
-	if s.Intents == nil {
-		return nil, errors.New("checkout enrollment executor unavailable")
-	}
-	key := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_subscription")
-	req.attempt = cardAttempt{target: price.ID.String(), owner: attempts.OwnerNMISchedule}
-	_, _, method, created, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
-	if err != nil {
-		return nil, err
-	}
-	accepted, err := s.admitInitialMembership(ctx, req, user, price.ID, method, target, key)
-	if err != nil {
-		return nil, err
-	}
-	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
-	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(accepted), func(in gen.BillingProviderIntent) error {
-		return ownsInitialMembership(in, user.ID, price.ID, fingerprint, nil)
-	})
-	if err != nil {
-		return nil, err
-	}
-	if intent.Status == intents.StatusFailedTerminal && created && method != nil && s.RailPaymentMethodService != nil {
-		_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, method)
-	}
-	return initialMembershipResponseFromIntent(intent)
-}
-
 // initialMembershipResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
 func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*CheckoutResponse, error) {
@@ -693,39 +596,6 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Che
 	return resp, nil
 }
 
-func nmiSubscriptionStartDate(coverage *CoverageInfo, now time.Time) (string, *time.Time) {
-	if coverage == nil || !coverage.HasCoverage || coverage.EndDate == nil || !coverage.EndDate.After(now) {
-		return "", nil
-	}
-	startDate, startAt := buildNMIFutureStartDate(*coverage.EndDate, now)
-	return startDate, &startAt
-}
-
-func metadataString(metadata map[string]any, key string) string {
-	if metadata == nil {
-		return ""
-	}
-	value, ok := metadata[key]
-	if !ok {
-		return ""
-	}
-	s, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(s)
-}
-
-func nmiSubscriptionAttemptStatusFromPayment(attempt *models.Payment) string {
-	if attempt == nil {
-		return ""
-	}
-	if status := strings.ToLower(metadataString(attempt.Metadata, "nmi_attempt_status")); status != "" {
-		return status
-	}
-	return strings.ToLower(strings.TrimSpace(attempt.Status))
-}
-
 // processNMISale handles NMI one-time sale (card purchase)
 func (s *CheckoutService) processNMISale(
 	ctx context.Context,
@@ -754,91 +624,6 @@ func (s *CheckoutService) processSolanaPurchase(
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
 	return nil, errors.New("solana checkout is handled via /v1/checkout attempts")
-}
-
-func (s *CheckoutService) processStripeSubscription(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	coverage *CoverageInfo,
-) (*CheckoutResponse, error) {
-	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
-		return nil, err
-	}
-	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
-	if err != nil {
-		return nil, err
-	}
-	stripePriceID, err := getStripePriceID(price)
-	if err != nil {
-		return nil, err
-	}
-	successURL := strings.TrimSpace(req.SuccessURL)
-	cancelURL := strings.TrimSpace(req.CancelURL)
-	if successURL == "" || cancelURL == "" {
-		return nil, errors.New("stripe success_url and cancel_url are required")
-	}
-
-	// Resolve a single, durable Stripe customer for this user (issue #212) so we
-	// stop minting a fresh customer on every checkout. The mapping is recorded
-	// here, at checkout time, not only via webhook.
-	customerID, err := s.resolveStripeCustomer(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-
-	if stripePaidIntroUnsupported(price) {
-		return nil, errors.New("stripe paid introductory pricing is not supported")
-	}
-	trialAnchor := req.CheckoutStartedAt
-	if trialAnchor.IsZero() {
-		trialAnchor = s.now()
-	}
-	trialEnd := stripeCheckoutTrialEnd(price, coverage, trialAnchor)
-	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
-		Mode:              "subscription",
-		PriceID:           stripePriceID,
-		SuccessURL:        successURL,
-		CancelURL:         cancelURL,
-		UserID:            user.ID,
-		CustomerID:        customerID,
-		CustomerEmail:     userEmail(user),
-		InternalPriceID:   price.ID.String(),
-		TrialEnd:          trialEnd,
-		CheckoutAttemptID: req.CheckoutAttemptID,
-		IdempotencyKey:    req.IdempotencyKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &CheckoutResponse{
-		Status:      "redirect_required",
-		Action:      "new",
-		Message:     "Redirect to Stripe checkout",
-		RedirectURL: urlStr,
-	}, nil
-}
-
-func stripePaidIntroUnsupported(price *models.Price) bool {
-	if price == nil {
-		return false
-	}
-	trialAmount, _, ok := price.GetTrial()
-	return ok && trialAmount != 0
-}
-
-func stripeCheckoutTrialEnd(price *models.Price, coverage *CoverageInfo, now time.Time) int64 {
-	if coverage != nil && coverage.HasCoverage && coverage.EndDate != nil && coverage.EndDate.After(now.Add(5*time.Minute)) {
-		return coverage.EndDate.Unix()
-	}
-	if price != nil {
-		trialAmount, trialHours, ok := price.GetTrial()
-		if ok && trialAmount == 0 && trialHours > 0 {
-			return now.UTC().Add(time.Duration(trialHours) * time.Hour).Unix()
-		}
-	}
-	return 0
 }
 
 func (s *CheckoutService) processStripePayment(
@@ -934,13 +719,6 @@ func (s *CheckoutService) stripeClient() stripeCustomerClient {
 		return nil
 	}
 	return s.StripeService
-}
-
-// resolveStripeCustomer returns the durable Stripe customer id for a user. See
-// resolveStripeCustomerWith for the resolution order; this is the production
-// wiring.
-func (s *CheckoutService) resolveStripeCustomer(ctx context.Context, user *UserIdentity) (string, error) {
-	return resolveStripeCustomerWith(ctx, s.customerStore(), s.stripeClient(), user)
 }
 
 // resolveStripeCustomerWith returns the durable Stripe customer id for a user,
@@ -1095,21 +873,6 @@ func userEmail(user *UserIdentity) string {
 		return ""
 	}
 	return strings.TrimSpace(*user.Email)
-}
-
-func getStripePriceID(price *models.Price) (string, error) {
-	if price == nil {
-		return "", errors.New("price is required")
-	}
-	cfg := price.PSPLinkForRail(models.RailStripe)
-	if cfg == nil {
-		return "", errors.New("stripe price not configured")
-	}
-	id := strings.TrimSpace(cfg[models.RailKeyStripePriceID])
-	if id == "" {
-		return "", errors.New("stripe price id missing")
-	}
-	return id, nil
 }
 
 type stripeCheckoutInlinePrice struct {
@@ -1289,13 +1052,6 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 		ctx = s.stampPSP(ctx, req.Rail)
 	}
 	return s.PurchaseService.RegisterPurchase(ctx, req)
-}
-
-// shortHash returns a stable 16-hex-char digest of s, used to build
-// deterministic rail order references from an idempotency key.
-func shortHash(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])[:16]
 }
 
 // TierChange processes a subscription tier change (upgrade or downgrade).
@@ -1825,32 +1581,4 @@ func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, er
 		return id, nil
 	}
 	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.PSP, target.Rail)
-}
-
-// captureStoredCredentialRef persists a stored-credential sequence anchor for
-// an instrument (#297), write-once and best-effort — a miss just means the
-// next successful charge on that agreement type re-captures.
-func (s *CheckoutService) captureStoredCredentialRef(ctx context.Context, pm *models.PaymentMethod, agreement charge.Agreement, ref string) {
-	ref = strings.TrimSpace(ref)
-	if pm == nil || ref == "" {
-		return
-	}
-	if s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
-		log.WithContext(ctx).Warn("checkout: no DB handle to persist stored-credential reference (#297)")
-		return
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		log.WithContext(ctx).WithError(err).Warn("checkout: no merchant context to persist stored-credential reference (#297)")
-		return
-	}
-	if _, err := s.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
-		MerchantID: tid.UUID(),
-		ID:         pm.ID,
-		Agreement:  string(agreement),
-		Ref:        ref,
-	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("payment_method_id", pm.ID).
-			Warn("checkout: failed to persist stored-credential reference (#297); next charge re-captures")
-	}
 }

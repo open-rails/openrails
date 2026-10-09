@@ -36,12 +36,6 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.grant_id = sqlc.arg(gr
 SELECT * FROM billing.product_access
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL;
 
--- name: GetProductAccessByIDForUpdate :one
--- Customer and timeline locks must precede this row lock.
-SELECT * FROM billing.product_access
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND deleted_at IS NULL
-FOR UPDATE;
-
 -- name: GetLatestProductAccessBySource :one
 SELECT * FROM billing.product_access
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -97,18 +91,6 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg
   AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz);
 
--- name: ShiftAccessTimelineWindows :exec
-UPDATE billing.product_access pa SET
-    starts_at = pa.starts_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second'),
-    ends_at = CASE WHEN pa.ends_at IS NULL THEN NULL
-             ELSE pa.ends_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-  AND pa.product_id = sqlc.arg(product_id)::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.starts_at >= sqlc.arg(from_at)::timestamptz
-  AND NOT (pa.id = ANY(sqlc.arg(exclude_ids)::uuid[]));
-
 -- name: EndActiveProductAccessBySubscription :exec
 -- #691 closure write: bound a subscription's live windows to a PROVEN end.
 -- Future-start windows are removed by SoftDeleteFutureProductAccessBySubscription.
@@ -129,22 +111,6 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscri
   AND pa.source_id = sqlc.arg(source_id)::text
   AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
   AND pa.starts_at >= sqlc.arg(ends_at)::timestamptz;
-
--- name: ListExtendableSubscriptionAccess :many
-SELECT * FROM billing.product_access pa
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscription'
-  AND pa.source_id = sqlc.arg(source_id)::text
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.ends_at IS NOT NULL AND pa.ends_at < sqlc.arg(ends_at)::timestamptz
-ORDER BY pa.starts_at, pa.id;
-
--- name: UpdateProductAccessEndAtIfMatch :exec
-UPDATE billing.product_access pa SET
-    ends_at = sqlc.arg(new_end_at)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = sqlc.arg(id)::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.ends_at = sqlc.arg(old_end_at)::timestamptz;
 
 -- name: RetractFutureProductAccessByPayment :exec
 -- A refund removes the payment's windows that have not started; their grants

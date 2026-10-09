@@ -51,26 +51,6 @@ func LockAccessTimeline(ctx context.Context, qx gen.DBTX, userID string, product
 	return q.AcquireAccessTimelineLock(ctx, accessTimelineLockKey(userID, product))
 }
 
-// ShiftAccessTimeline moves the customer's windows of the product that start
-// at or after from by delta, except excludeIDs.
-func ShiftAccessTimeline(ctx context.Context, qx gen.DBTX, customer, product uuid.UUID, from time.Time, delta time.Duration, now time.Time, excludeIDs []uuid.UUID) error {
-	deltaSeconds := int64(delta.Seconds())
-	if deltaSeconds == 0 {
-		return nil
-	}
-	if excludeIDs == nil {
-		excludeIDs = []uuid.UUID{}
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return gen.New(qx).ShiftAccessTimelineWindows(ctx, gen.ShiftAccessTimelineWindowsParams{
-		MerchantID: mid.UUID(), CustomerID: customer, ProductID: product,
-		DeltaSeconds: deltaSeconds, Now: now, FromAt: from, ExcludeIds: excludeIDs,
-	})
-}
-
 // GetAccessTimelineTailEnd returns the latest finite end of the customer's
 // live windows of the product, or nil when it has none.
 func GetAccessTimelineTailEnd(ctx context.Context, qx gen.DBTX, customer, product uuid.UUID) (*time.Time, error) {

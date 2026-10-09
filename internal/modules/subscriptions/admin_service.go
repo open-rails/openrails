@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -154,49 +153,6 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 	}
 
 	return response, nil
-}
-
-// UpdateSubscription updates a subscription (admin)
-func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subscriptionID uuid.UUID, updates map[string]any) error {
-	database := s.SubscriptionService.Database()
-	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := database.NewWithPgxTx(tx)
-		subscription, err := s.requireLockedSubscription(ctx, d, subscriptionID)
-		if err != nil {
-			return err
-		}
-		// Apply allowed updates
-		for field, value := range updates {
-			switch field {
-			case "status":
-				if status, ok := value.(models.SubscriptionStatus); ok {
-					subscription.Status = status
-					subscription.MarkLifecycleDecision("admin_status_override")
-				}
-			case "notes":
-				if notes, ok := value.(string); ok {
-					// Store notes in Metadata JSONB field which is designed for additional metadata
-					var responseData map[string]any
-					if subscription.Metadata != nil {
-						if err := json.Unmarshal(subscription.Metadata, &responseData); err != nil {
-							responseData = make(map[string]any)
-						}
-					} else {
-						responseData = make(map[string]any)
-					}
-					responseData["admin_notes"] = notes
-					if newData, err := json.Marshal(responseData); err == nil {
-						subscription.Metadata = newData
-					}
-				}
-			}
-		}
-
-		if err := NewSubscriptionRepo(d).UpdateAt(ctx, subscription, s.now()); err != nil {
-			return fmt.Errorf("failed to update subscription: %w", err)
-		}
-		return nil
-	})
 }
 
 // Partial admin commands must read their input image after taking the same
@@ -358,44 +314,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	}
 
 	return nil
-}
-
-// ExtendSubscription extends a subscription period by days (admin)
-func (s *AdminSubscriptionService) ExtendSubscription(ctx context.Context, subscriptionID uuid.UUID, days int, reason string) error {
-	return s.ExtendSubscriptionByDuration(ctx, subscriptionID, time.Duration(days)*24*time.Hour)
-}
-
-// ExtendSubscriptionByDuration extends a subscription period by a duration (admin)
-func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Context, subscriptionID uuid.UUID, duration time.Duration) error {
-	database := s.SubscriptionService.Database()
-	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := database.NewWithPgxTx(tx)
-		subscription, err := s.requireLockedSubscription(ctx, d, subscriptionID)
-		if err != nil {
-			return err
-		}
-		if subscription.Status != models.StatusActive {
-			return ErrSubscriptionNotActive
-		}
-		now := s.now()
-		end := now.Add(duration)
-		if subscription.CurrentPeriodEndsAt != nil {
-			end = subscription.CurrentPeriodEndsAt.Add(duration)
-		} else {
-			subscription.CurrentPeriodStartsAt = &now
-		}
-		subscription.CurrentPeriodEndsAt = &end
-		subscription.MarkLifecycleDecision("admin_extend")
-		if err := NewSubscriptionRepo(d).UpdateAt(ctx, subscription, now); err != nil {
-			return fmt.Errorf("failed to update subscription: %w", err)
-		}
-		if s.EntitlementService != nil {
-			if err := entitlements.NewEntitlementService(d, s.clock).ExtendActiveBySubscription(ctx, subscription.ID, end); err != nil {
-				return fmt.Errorf("failed to extend subscription entitlements: %w", err)
-			}
-		}
-		return nil
-	})
 }
 
 // SendManualNotification sends a manual notification (admin)

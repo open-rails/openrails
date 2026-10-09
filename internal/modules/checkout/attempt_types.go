@@ -67,7 +67,7 @@ type CheckoutAttemptCreateRequest struct {
 	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
 	// Stripe Checkout, supplied by the caller (frontend, which knows its own
 	// origin). Empty for non-Stripe rails. Threaded onto the CheckoutRequest
-	// in initializeCheckoutAttempt; processStripeSubscription/Payment require them.
+	// in initializeCheckoutAttempt; processStripePayment requires them.
 	SuccessURL string
 	CancelURL  string
 

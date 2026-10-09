@@ -381,43 +381,6 @@ func (q *Queries) GetProductAccessByID(ctx context.Context, arg GetProductAccess
 	return i, err
 }
 
-const getProductAccessByIDForUpdate = `-- name: GetProductAccessByIDForUpdate :one
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access
-WHERE merchant_id = $1::uuid AND id = $2::uuid AND deleted_at IS NULL
-FOR UPDATE
-`
-
-type GetProductAccessByIDForUpdateParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// Customer and timeline locks must precede this row lock.
-func (q *Queries) GetProductAccessByIDForUpdate(ctx context.Context, arg GetProductAccessByIDForUpdateParams) (BillingProductAccess, error) {
-	row := q.db.QueryRow(ctx, getProductAccessByIDForUpdate, arg.MerchantID, arg.ID)
-	var i BillingProductAccess
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.ProductID,
-		&i.GrantID,
-		&i.SourceType,
-		&i.SourceID,
-		&i.PaymentID,
-		&i.StartsAt,
-		&i.EndsAt,
-		&i.RevokedAt,
-		&i.RevokeReason,
-		&i.DeletedAt,
-		&i.DestructiveRunID,
-		&i.DestructiveRunClass,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const hasPermanentProductAccess = `-- name: HasPermanentProductAccess :one
 SELECT EXISTS (
     SELECT 1 FROM billing.product_access pa
@@ -522,59 +485,6 @@ func (q *Queries) ListCustomerProductAccessByIDs(ctx context.Context, arg ListCu
 			&i.GrantReason,
 			&i.Actor,
 			&i.Note,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listExtendableSubscriptionAccess = `-- name: ListExtendableSubscriptionAccess :many
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access pa
-WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'subscription'
-  AND pa.source_id = $2::text
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.ends_at IS NOT NULL AND pa.ends_at < $3::timestamptz
-ORDER BY pa.starts_at, pa.id
-`
-
-type ListExtendableSubscriptionAccessParams struct {
-	MerchantID uuid.UUID
-	SourceID   string
-	EndsAt     time.Time
-}
-
-func (q *Queries) ListExtendableSubscriptionAccess(ctx context.Context, arg ListExtendableSubscriptionAccessParams) ([]BillingProductAccess, error) {
-	rows, err := q.db.Query(ctx, listExtendableSubscriptionAccess, arg.MerchantID, arg.SourceID, arg.EndsAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingProductAccess
-	for rows.Next() {
-		var i BillingProductAccess
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.ProductID,
-			&i.GrantID,
-			&i.SourceType,
-			&i.SourceID,
-			&i.PaymentID,
-			&i.StartsAt,
-			&i.EndsAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
-			&i.DeletedAt,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1176,42 +1086,6 @@ func (q *Queries) RevokeProductAccessByID(ctx context.Context, arg RevokeProduct
 	return result.RowsAffected(), nil
 }
 
-const shiftAccessTimelineWindows = `-- name: ShiftAccessTimelineWindows :exec
-UPDATE billing.product_access pa SET
-    starts_at = pa.starts_at + ($1::bigint * interval '1 second'),
-    ends_at = CASE WHEN pa.ends_at IS NULL THEN NULL
-             ELSE pa.ends_at + ($1::bigint * interval '1 second') END,
-    updated_at = $2::timestamptz
-WHERE pa.merchant_id = $3::uuid AND pa.customer_id = $4::uuid
-  AND pa.product_id = $5::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.starts_at >= $6::timestamptz
-  AND NOT (pa.id = ANY($7::uuid[]))
-`
-
-type ShiftAccessTimelineWindowsParams struct {
-	DeltaSeconds int64
-	Now          time.Time
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	ProductID    uuid.UUID
-	FromAt       time.Time
-	ExcludeIds   []uuid.UUID
-}
-
-func (q *Queries) ShiftAccessTimelineWindows(ctx context.Context, arg ShiftAccessTimelineWindowsParams) error {
-	_, err := q.db.Exec(ctx, shiftAccessTimelineWindows,
-		arg.DeltaSeconds,
-		arg.Now,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.ProductID,
-		arg.FromAt,
-		arg.ExcludeIds,
-	)
-	return err
-}
-
 const softDeleteFutureProductAccessBySubscription = `-- name: SoftDeleteFutureProductAccessBySubscription :exec
 UPDATE billing.product_access pa SET
     deleted_at = $1::timestamptz,
@@ -1321,33 +1195,5 @@ type SoftDeleteProductAccessByIDParams struct {
 
 func (q *Queries) SoftDeleteProductAccessByID(ctx context.Context, arg SoftDeleteProductAccessByIDParams) error {
 	_, err := q.db.Exec(ctx, softDeleteProductAccessByID, arg.Now, arg.MerchantID, arg.ID)
-	return err
-}
-
-const updateProductAccessEndAtIfMatch = `-- name: UpdateProductAccessEndAtIfMatch :exec
-UPDATE billing.product_access pa SET
-    ends_at = $1::timestamptz,
-    updated_at = $2::timestamptz
-WHERE pa.merchant_id = $3::uuid AND pa.id = $4::uuid
-  AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-  AND pa.ends_at = $5::timestamptz
-`
-
-type UpdateProductAccessEndAtIfMatchParams struct {
-	NewEndAt   time.Time
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	OldEndAt   time.Time
-}
-
-func (q *Queries) UpdateProductAccessEndAtIfMatch(ctx context.Context, arg UpdateProductAccessEndAtIfMatchParams) error {
-	_, err := q.db.Exec(ctx, updateProductAccessEndAtIfMatch,
-		arg.NewEndAt,
-		arg.Now,
-		arg.MerchantID,
-		arg.ID,
-		arg.OldEndAt,
-	)
 	return err
 }

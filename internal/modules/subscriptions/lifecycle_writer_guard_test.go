@@ -15,18 +15,16 @@ import (
 
 // lifecycleDecisionWriters are the only functions that may name a lifecycle
 // decision (#1091 part C). The state machine's Transition is the rule; the rest
-// are explicit decisions outside it: an operator override, a plan change that
-// supersedes a membership, a refund that revokes access.
+// are explicit decisions outside it: a plan change that supersedes a
+// membership, a refund that revokes access.
 // Adding a writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
-	"internal/modules/subscriptions/admin_service.go:ExtendSubscriptionByDuration": true,
-	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":       true,
-	"internal/intents/refund.go:revokeMembershipAccess":                            true,
-	"internal/modules/subscriptions/transition.go:Transition":                      true,
-	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore":     true,
-	"internal/modules/subscriptions/admin_service.go:UpdateSubscription":           true,
-	"internal/modules/subscriptions/upgrade.go:SupersedeForUpgradeTx":              true,
-	"internal/modules/webhooks/provider_refund_access.go:apply":                    true,
+	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":   true,
+	"internal/intents/refund.go:revokeMembershipAccess":                        true,
+	"internal/modules/subscriptions/transition.go:Transition":                  true,
+	"internal/modules/subscriptions/lifecycle_service.go:createMembershipCore": true,
+	"internal/modules/subscriptions/upgrade.go:SupersedeForUpgradeTx":          true,
+	"internal/modules/webhooks/provider_refund_access.go:apply":                true,
 }
 
 func TestLifecycleDecisionWriters(t *testing.T) {
