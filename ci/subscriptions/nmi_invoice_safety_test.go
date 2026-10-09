@@ -214,6 +214,9 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 	}
 	h.release()
 	f.awaitPasses(passes)
+	// The held submission may belong to the collection scan the refresh
+	// requested rather than to these passes; it completes the invoice.
+	f.any().settleCollectionScans()
 	f.settle()
 	requireInvoicePaidOnce(f, invoice, 2, 2, 75_000_000, 1)
 	require.Equal(t, "75.00", f.base.nmi.Attempts()[1].Get("amount"), "collect only the unpaid remainder")
