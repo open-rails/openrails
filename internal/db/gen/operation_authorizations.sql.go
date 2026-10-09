@@ -12,8 +12,80 @@ import (
 	"github.com/google/uuid"
 )
 
+const extendOperationAuthorization = `-- name: ExtendOperationAuthorization :one
+UPDATE billing.operation_authorizations
+SET extended_amount = extended_amount + $1::bigint
+WHERE merchant_id = $2::uuid
+  AND operation_id = $3::text
+  AND state = 'open'
+  AND extended_amount = $4::bigint
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
+`
+
+type ExtendOperationAuthorizationParams struct {
+	GrantedAmount  int64
+	MerchantID     uuid.UUID
+	OperationID    string
+	ExtendedAmount int64
+}
+
+// Grows an open hold from the extended total the caller read under the payer
+// lock; a stale total or a terminal state matches no row.
+func (q *Queries) ExtendOperationAuthorization(ctx context.Context, arg ExtendOperationAuthorizationParams) (BillingOperationAuthorization, error) {
+	row := q.db.QueryRow(ctx, extendOperationAuthorization,
+		arg.GrantedAmount,
+		arg.MerchantID,
+		arg.OperationID,
+		arg.ExtendedAmount,
+	)
+	var i BillingOperationAuthorization
+	err := row.Scan(
+		&i.OperationID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.RecordOwner,
+		&i.LedgerAccountID,
+		&i.Currency,
+		&i.Amount,
+		&i.ClaimReference,
+		&i.AuthorizationBodyBytes,
+		&i.AuthorizationBodyDigest,
+		&i.State,
+		&i.TerminalReference,
+		&i.CreatedAt,
+		&i.ReleasedAt,
+		&i.SettledAt,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
+		&i.SettlementBodyBytes,
+		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
+	)
+	return i, err
+}
+
+const getLastOperationAuthorizationExtensionOrdinal = `-- name: GetLastOperationAuthorizationExtensionOrdinal :one
+SELECT COALESCE(MAX(ordinal), 0)::bigint AS ordinal
+FROM billing.operation_authorization_extensions
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+`
+
+type GetLastOperationAuthorizationExtensionOrdinalParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+func (q *Queries) GetLastOperationAuthorizationExtensionOrdinal(ctx context.Context, arg GetLastOperationAuthorizationExtensionOrdinalParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getLastOperationAuthorizationExtensionOrdinal, arg.MerchantID, arg.OperationID)
+	var ordinal int64
+	err := row.Scan(&ordinal)
+	return ordinal, err
+}
+
 const getOperationAuthorization = `-- name: GetOperationAuthorization :one
-SELECT operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
+SELECT operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
 FROM billing.operation_authorizations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
@@ -47,6 +119,38 @@ func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperatio
 		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
+	)
+	return i, err
+}
+
+const getOperationAuthorizationExtension = `-- name: GetOperationAuthorizationExtension :one
+SELECT merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
+FROM billing.operation_authorization_extensions
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+  AND ordinal = $3::bigint
+`
+
+type GetOperationAuthorizationExtensionParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+	Ordinal     int64
+}
+
+func (q *Queries) GetOperationAuthorizationExtension(ctx context.Context, arg GetOperationAuthorizationExtensionParams) (BillingOperationAuthorizationExtension, error) {
+	row := q.db.QueryRow(ctx, getOperationAuthorizationExtension, arg.MerchantID, arg.OperationID, arg.Ordinal)
+	var i BillingOperationAuthorizationExtension
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.Ordinal,
+		&i.RequestedAmount,
+		&i.MinimumAmount,
+		&i.GrantedAmount,
+		&i.AuthorizedAmount,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -77,7 +181,7 @@ INSERT INTO billing.operation_authorizations (
     $10::bytea
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
-RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
 `
 
 type InsertOperationAuthorizationParams struct {
@@ -95,7 +199,7 @@ type InsertOperationAuthorizationParams struct {
 
 // Durable operation-level financial reservations. The immutable body
 // and principals make the operation id a safe replay coordinate; only the
-// three-state terminal transition may update a row.
+// three-state terminal transition and extension growth update a row.
 func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, insertOperationAuthorization,
 		arg.OperationID,
@@ -130,8 +234,101 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
 	)
 	return i, err
+}
+
+const insertOperationAuthorizationExtension = `-- name: InsertOperationAuthorizationExtension :one
+INSERT INTO billing.operation_authorization_extensions (
+    merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount
+) VALUES (
+    $1::uuid,
+    $2::text,
+    $3::bigint,
+    $4::bigint,
+    $5::bigint,
+    $6::bigint,
+    $7::bigint
+)
+RETURNING merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
+`
+
+type InsertOperationAuthorizationExtensionParams struct {
+	MerchantID       uuid.UUID
+	OperationID      string
+	Ordinal          int64
+	RequestedAmount  int64
+	MinimumAmount    int64
+	GrantedAmount    int64
+	AuthorizedAmount int64
+}
+
+func (q *Queries) InsertOperationAuthorizationExtension(ctx context.Context, arg InsertOperationAuthorizationExtensionParams) (BillingOperationAuthorizationExtension, error) {
+	row := q.db.QueryRow(ctx, insertOperationAuthorizationExtension,
+		arg.MerchantID,
+		arg.OperationID,
+		arg.Ordinal,
+		arg.RequestedAmount,
+		arg.MinimumAmount,
+		arg.GrantedAmount,
+		arg.AuthorizedAmount,
+	)
+	var i BillingOperationAuthorizationExtension
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.Ordinal,
+		&i.RequestedAmount,
+		&i.MinimumAmount,
+		&i.GrantedAmount,
+		&i.AuthorizedAmount,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listOperationAuthorizationExtensions = `-- name: ListOperationAuthorizationExtensions :many
+SELECT merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
+FROM billing.operation_authorization_extensions
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+ORDER BY ordinal
+`
+
+type ListOperationAuthorizationExtensionsParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+func (q *Queries) ListOperationAuthorizationExtensions(ctx context.Context, arg ListOperationAuthorizationExtensionsParams) ([]BillingOperationAuthorizationExtension, error) {
+	rows, err := q.db.Query(ctx, listOperationAuthorizationExtensions, arg.MerchantID, arg.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingOperationAuthorizationExtension
+	for rows.Next() {
+		var i BillingOperationAuthorizationExtension
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.OperationID,
+			&i.Ordinal,
+			&i.RequestedAmount,
+			&i.MinimumAmount,
+			&i.GrantedAmount,
+			&i.AuthorizedAmount,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const releaseOperationAuthorization = `-- name: ReleaseOperationAuthorization :one
@@ -148,7 +345,7 @@ WHERE merchant_id = $3::uuid
       WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
         AND qualification.operation_id = billing.operation_authorizations.operation_id
   )
-RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
 `
 
 type ReleaseOperationAuthorizationParams struct {
@@ -186,6 +383,8 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
 	)
 	return i, err
 }
@@ -202,7 +401,7 @@ SET state = 'settled',
 WHERE merchant_id = $7::uuid
   AND operation_id = $8::text
   AND state = 'open'
-RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
 `
 
 type SettleOperationAuthorizationPassThroughProviderCostParams struct {
@@ -248,6 +447,8 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 		&i.SettlementAmount,
 		&i.SettlementBodyBytes,
 		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
 	)
 	return i, err
 }

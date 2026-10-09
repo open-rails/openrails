@@ -289,7 +289,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 
 	auth := operationAuthorizationFromRow(authRow, false)
 	if state == ProviderBillingQualificationEligible {
-		body, err := providerBillingSettlementBody(ctx, q, qual)
+		body, err := providerBillingSettlementBody(ctx, q, qual, authRow)
 		if err != nil {
 			return nil, err
 		}
@@ -584,23 +584,37 @@ func equalOptionalString(a, b *string) bool {
 }
 
 type providerBillingSettlementManifest struct {
-	Contract                 string                               `json:"contract"`
-	OperationID              string                               `json:"operation_id"`
-	Provider                 string                               `json:"provider"`
-	ProviderResourceID       string                               `json:"provider_resource_id"`
-	ProviderLifetimeStartsAt string                               `json:"provider_lifetime_starts_at"`
-	ProviderLifetimeEndsAt   string                               `json:"provider_lifetime_ends_at"`
-	ProviderAbsentAt         string                               `json:"provider_absent_at"`
-	ProviderAbsenceReference string                               `json:"provider_absence_reference"`
-	BillingStopReference     string                               `json:"billing_stop_reference"`
-	WindowsClosedAt          string                               `json:"windows_closed_at"`
-	WindowsClosedReference   string                               `json:"windows_closed_reference"`
-	LifecycleEvidenceSHA256  string                               `json:"lifecycle_evidence_sha256"`
-	BaselineObservation      providerBillingSettlementObservation `json:"baseline_observation"`
-	QualifiedObservation     providerBillingSettlementObservation `json:"qualified_observation"`
-	QualifiedCostAmount      int64                                `json:"qualified_cost_amount"`
-	QuiescenceSeconds        int64                                `json:"quiescence_seconds"`
-	QualifiedAt              string                               `json:"qualified_at"`
+	Contract                 string                                 `json:"contract"`
+	OperationID              string                                 `json:"operation_id"`
+	Provider                 string                                 `json:"provider"`
+	ProviderResourceID       string                                 `json:"provider_resource_id"`
+	ProviderLifetimeStartsAt string                                 `json:"provider_lifetime_starts_at"`
+	ProviderLifetimeEndsAt   string                                 `json:"provider_lifetime_ends_at"`
+	ProviderAbsentAt         string                                 `json:"provider_absent_at"`
+	ProviderAbsenceReference string                                 `json:"provider_absence_reference"`
+	BillingStopReference     string                                 `json:"billing_stop_reference"`
+	WindowsClosedAt          string                                 `json:"windows_closed_at"`
+	WindowsClosedReference   string                                 `json:"windows_closed_reference"`
+	LifecycleEvidenceSHA256  string                                 `json:"lifecycle_evidence_sha256"`
+	Authorization            providerBillingSettlementAuthorization `json:"authorization"`
+	BaselineObservation      providerBillingSettlementObservation   `json:"baseline_observation"`
+	QualifiedObservation     providerBillingSettlementObservation   `json:"qualified_observation"`
+	QualifiedCostAmount      int64                                  `json:"qualified_cost_amount"`
+	QuiescenceSeconds        int64                                  `json:"quiescence_seconds"`
+	QualifiedAt              string                                 `json:"qualified_at"`
+}
+
+// providerBillingSettlementAuthorization is the hold the settlement closes:
+// its opening amount and each extension grant.
+type providerBillingSettlementAuthorization struct {
+	OpeningAmount    int64                                `json:"opening_amount,string"`
+	AuthorizedAmount int64                                `json:"authorized_amount,string"`
+	Extensions       []providerBillingSettlementExtension `json:"extensions"`
+}
+
+type providerBillingSettlementExtension struct {
+	Ordinal       int64 `json:"ordinal"`
+	GrantedAmount int64 `json:"granted_amount,string"`
 }
 
 type providerBillingSettlementObservation struct {
@@ -612,7 +626,7 @@ type providerBillingSettlementObservation struct {
 	NormalizedRecordsSHA256 string `json:"normalized_records_sha256"`
 }
 
-func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.BillingCostQualification) ([]byte, error) {
+func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.BillingCostQualification, auth gen.BillingOperationAuthorization) ([]byte, error) {
 	if row.BaselineObservationID == nil || row.QualifiedObservationID == nil ||
 		row.QualifiedCostAmount == nil || row.QualifiedAt == nil {
 		return nil, fmt.Errorf("eligible provider billing qualification is incomplete")
@@ -629,6 +643,19 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 	if err != nil {
 		return nil, fmt.Errorf("load qualified provider billing evidence: %w", err)
 	}
+	extensions, err := q.ListOperationAuthorizationExtensions(ctx, gen.ListOperationAuthorizationExtensionsParams{
+		MerchantID: row.MerchantID, OperationID: row.OperationID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load operation authorization extensions: %w", err)
+	}
+	authorization := providerBillingSettlementAuthorization{
+		OpeningAmount: auth.Amount, AuthorizedAmount: auth.AuthorizedAmount,
+		Extensions: make([]providerBillingSettlementExtension, 0, len(extensions)),
+	}
+	for _, ext := range extensions {
+		authorization.Extensions = append(authorization.Extensions, providerBillingSettlementExtension{Ordinal: ext.Ordinal, GrantedAmount: ext.GrantedAmount})
+	}
 	body, err := json.Marshal(providerBillingSettlementManifest{
 		Contract:                 "openrails/pass-through-provider-cost",
 		OperationID:              row.OperationID,
@@ -642,6 +669,7 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 		WindowsClosedAt:          row.WindowsClosedAt.UTC().Format(time.RFC3339Nano),
 		WindowsClosedReference:   row.WindowsClosedReference,
 		LifecycleEvidenceSHA256:  hex.EncodeToString(row.LifecycleEvidenceDigest),
+		Authorization:            authorization,
 		BaselineObservation:      providerBillingSettlementObservationFromRow(baseline),
 		QualifiedObservation:     providerBillingSettlementObservationFromRow(qualified),
 		QualifiedCostAmount:      *row.QualifiedCostAmount,

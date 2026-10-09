@@ -198,7 +198,7 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 }
 
 const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
-SELECT (COALESCE((SELECT SUM(oa.amount)
+SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
               FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = $1::uuid AND oa.customer_id = $2::uuid AND oa.currency = $3::text AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)

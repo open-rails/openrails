@@ -18,6 +18,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -72,6 +73,7 @@ type OperationAuthorization struct {
 	LedgerAccountID         uuid.UUID
 	Currency                string
 	Amount                  int64
+	AuthorizedAmount        int64
 	ClaimReference          string
 	AuthorizationBody       []byte
 	AuthorizationBodySHA256 [sha256.Size]byte
@@ -139,34 +141,9 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, fmt.Errorf("operation authorization: customer balance ledger account was not materialized")
 	}
 
-	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "financial holds")
+	capacity, err := txSvc.operationCapacity(ctx, q, merchantID.UUID(), in.CustomerID, bal)
 	if err != nil {
 		return nil, err
-	}
-	settings, err := txSvc.getAccountSettings(ctx, in.CustomerID, operationAuthorizationCurrency)
-	if err != nil {
-		return nil, err
-	}
-	if settings.BillingMode == BillingModeArrears {
-		outstanding, oerr := txSvc.moneyLedger(q, merchantID.UUID()).OutstandingOwed(
-			ctx, in.CustomerID.UUID(), operationAuthorizationCurrency,
-		)
-		if oerr != nil {
-			return nil, oerr
-		}
-		if settings.CreditLimitAmount < 0 {
-			return nil, fmt.Errorf("operation authorization: credit limit is negative")
-		}
-		if outstanding < 0 {
-			return nil, fmt.Errorf("operation authorization: outstanding owed is negative")
-		}
-		if settings.CreditLimitAmount > outstanding {
-			remainingCredit := settings.CreditLimitAmount - outstanding
-			capacity, err = addOperationCapacity(capacity, remainingCredit)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 	if capacity < in.Amount {
 		return nil, ErrInsufficientCredits
@@ -204,6 +181,37 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, err
 	}
 	return replayOperationAuthorization(existing, in)
+}
+
+// operationCapacity is what a new or grown hold may take, read under the payer
+// lock: the balance net of every financial hold, plus the arrears credit line
+// still available.
+func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, bal *models.MoneyBalance) (int64, error) {
+	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "financial holds")
+	if err != nil {
+		return 0, err
+	}
+	settings, err := s.getAccountSettings(ctx, customer, operationAuthorizationCurrency)
+	if err != nil {
+		return 0, err
+	}
+	if settings.BillingMode != BillingModeArrears {
+		return capacity, nil
+	}
+	outstanding, err := s.moneyLedger(q, merchantID).OutstandingOwed(ctx, customer.UUID(), operationAuthorizationCurrency)
+	if err != nil {
+		return 0, err
+	}
+	if settings.CreditLimitAmount < 0 {
+		return 0, fmt.Errorf("operation authorization: credit limit is negative")
+	}
+	if outstanding < 0 {
+		return 0, fmt.Errorf("operation authorization: outstanding owed is negative")
+	}
+	if settings.CreditLimitAmount > outstanding {
+		return addOperationCapacity(capacity, settings.CreditLimitAmount-outstanding)
+	}
+	return capacity, nil
 }
 
 func subtractOperationCapacity(capacity, held int64, source string) (int64, error) {
@@ -583,6 +591,7 @@ func operationAuthorizationFromRow(row gen.BillingOperationAuthorization, replay
 		LedgerAccountID:         row.LedgerAccountID,
 		Currency:                row.Currency,
 		Amount:                  row.Amount,
+		AuthorizedAmount:        row.AuthorizedAmount,
 		ClaimReference:          row.ClaimReference,
 		AuthorizationBody:       bytes.Clone(row.AuthorizationBodyBytes),
 		AuthorizationBodySHA256: digest,

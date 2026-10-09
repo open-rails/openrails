@@ -7287,6 +7287,65 @@
         ]
       }
     },
+    "/v1/merchant/provider-operations/{operation_id}/extend": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendOperationAuthorizationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorizationExtension"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "insufficient_credits",
+          "invalid_param",
+          "operation_authorization_conflict",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/merchant/provider-operations/{operation_id}/release": {
       "post": {
         "tags": [
@@ -17404,6 +17463,22 @@
           }
         }
       },
+      "ExtendOperationAuthorizationParams": {
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "minimum_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
+      },
       "FederatedGrant": {
         "type": "object",
         "properties": {
@@ -19652,6 +19727,10 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "authorized_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "claim_reference": {
             "type": "string"
           },
@@ -19758,6 +19837,7 @@
           "record_owner",
           "currency",
           "amount",
+          "authorized_amount",
           "claim_reference",
           "authorization_body",
           "authorization_body_sha256",
@@ -19770,6 +19850,35 @@
           "created_at",
           "released_at",
           "settled_at",
+          "replayed"
+        ]
+      },
+      "OperationAuthorizationExtension": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "granted_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "authorized_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "ordinal",
+          "granted_amount",
+          "authorized_amount",
           "replayed"
         ]
       },

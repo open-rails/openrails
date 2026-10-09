@@ -109,7 +109,7 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 		Authorization: billing.OperationAuthorization{
 			OperationID: "rental/create", MerchantID: merchantID,
 			CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
-			Currency: "USD", Amount: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
+			Currency: "USD", Amount: math.MaxInt64, AuthorizedAmount: math.MaxInt64, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
 			AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.OperationAuthorizationSettled,
 			TerminalReference: "sha256:" + digest.String(), SettlementCostAmount: &cost,
 			SettlementAmount: &rated, SettlementBody: body, SettlementBodySHA256: &digest,

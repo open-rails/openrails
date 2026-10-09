@@ -36,7 +36,7 @@ RETURNING *;
 -- The one financial hold total: open operation authorizations plus open,
 -- unexpired admission reservations. GetAdmissionCapacity computes the same sum.
 -- A live hold was admitted within the hold lifetime, which is held_since.
-SELECT (COALESCE((SELECT SUM(oa.amount)
+SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
               FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = sqlc.arg(merchant_id)::uuid AND oa.customer_id = sqlc.arg(customer_id)::uuid AND oa.currency = sqlc.arg(currency)::text AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)

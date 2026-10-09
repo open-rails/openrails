@@ -33,6 +33,17 @@ func ServiceGetOperationAuthorization(r *httprequest.Request) {
 	writeProviderOperation(r, out, err)
 }
 
+func ServiceExtendOperationAuthorization(r *httprequest.Request) {
+	var req billing.ExtendOperationAuthorizationParams
+	svc, ok := providerOperationService(r, &req)
+	if !ok {
+		return
+	}
+	req.OperationID = r.Param("operation_id")
+	out, err := svc.ExtendOperationAuthorization(r.Request.Context(), req)
+	writeProviderOperation(r, out, err)
+}
+
 func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
 	var req billing.ReleaseOperationAuthorizationParams
 	svc, ok := providerOperationService(r, &req)

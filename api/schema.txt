@@ -14,6 +14,7 @@ migration 0010_entitlement_names.up.sql sha256:b232cc073d440a64f515c5b868624efe7
 migration 0011_currency_codes.up.sql sha256:513950fd96eae6df288a7afd6956ded16b0c84f6fec0ff2b9f0fd3a12103ff37
 migration 0012_provider_applied_coverage.up.sql sha256:33533330adbe12918eae947cd4c94f5c791ebff7a7e65d65d60eeafca9986f16
 migration 0013_federated_grants.up.sql sha256:515cb9f231fbfd2850c0c3e379009be93da9ca702b8cec7bfdf31710857830cf
+migration 0014_operation_authorization_extensions.up.sql sha256:7e96a488b7144c28ce497c77a1c746bd3175cfb056f145fa69559d72b2215c69
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1177,6 +1178,23 @@ table billing.notifications
   index CREATE UNIQUE INDEX notifications_pkey ON billing.notifications USING btree (merchant_id, id)
   index CREATE INDEX notifications_recipient_kind_customer_id_read_at_created_at_idx ON billing.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC)
 
+table billing.operation_authorization_extensions
+  column merchant_id uuid NOT NULL
+  column operation_id text NOT NULL
+  column ordinal bigint NOT NULL
+  column requested_amount bigint NOT NULL
+  column minimum_amount bigint NOT NULL
+  column granted_amount bigint NOT NULL
+  column authorized_amount bigint NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint operation_authorization_extensions_amounts_check CHECK (((minimum_amount > 0) AND (minimum_amount <= granted_amount) AND (granted_amount <= requested_amount)))
+  constraint operation_authorization_extensions_authorization_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT
+  constraint operation_authorization_extensions_authorized_check CHECK ((authorized_amount > granted_amount))
+  constraint operation_authorization_extensions_ordinal_check CHECK ((ordinal >= 1))
+  constraint operation_authorization_extensions_pkey PRIMARY KEY (merchant_id, operation_id, ordinal)
+  index CREATE UNIQUE INDEX operation_authorization_extensions_pkey ON billing.operation_authorization_extensions USING btree (merchant_id, operation_id, ordinal)
+  trigger CREATE TRIGGER immutable_operation_authorization_extensions BEFORE DELETE OR UPDATE ON billing.operation_authorization_extensions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.operation_authorizations
   column operation_id text NOT NULL
   column merchant_id uuid NOT NULL
@@ -1197,6 +1215,8 @@ table billing.operation_authorizations
   column settlement_amount bigint
   column settlement_body_bytes bytea
   column settlement_body_digest bytea
+  column extended_amount bigint NOT NULL DEFAULT 0
+  column authorized_amount bigint NOT NULL GENERATED ALWAYS AS ((amount + extended_amount)) STORED
   constraint operation_authorizations_amount_positive_check CHECK ((amount > 0))
   constraint operation_authorizations_body_present_check CHECK ((octet_length(authorization_body_bytes) > 0))
   constraint operation_authorizations_body_size_check CHECK ((octet_length(authorization_body_bytes) <= 65536))
@@ -1206,6 +1226,7 @@ table billing.operation_authorizations
   constraint operation_authorizations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
   constraint operation_authorizations_digest_check CHECK ((octet_length(authorization_body_digest) = 32))
   constraint operation_authorizations_digest_matches_body_check CHECK ((authorization_body_digest = sha256(authorization_body_bytes)))
+  constraint operation_authorizations_extended_amount_check CHECK ((extended_amount >= 0))
   constraint operation_authorizations_ledger_account_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_account_id) REFERENCES billing.ledger_accounts(merchant_id, customer_id, currency, id) ON DELETE RESTRICT
   constraint operation_authorizations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint operation_authorizations_operation_id_present_check CHECK (((operation_id <> ''::text) AND (operation_id = btrim(operation_id))))
@@ -1220,7 +1241,7 @@ table billing.operation_authorizations
   index CREATE INDEX operation_authorizations_customer_id_created_at_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, created_at DESC)
   index CREATE INDEX operation_authorizations_customer_id_currency_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX operation_authorizations_pkey ON billing.operation_authorizations USING btree (merchant_id, operation_id)
-  trigger CREATE TRIGGER immutable_operation_authorization_facts BEFORE DELETE OR UPDATE ON billing.operation_authorizations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'terminal_reference', 'released_at', 'settled_at', 'settlement_cost_amount', 'settlement_amount', 'settlement_body_bytes', 'settlement_body_digest')
+  trigger CREATE TRIGGER immutable_operation_authorization_facts BEFORE DELETE OR UPDATE ON billing.operation_authorizations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'terminal_reference', 'released_at', 'settled_at', 'settlement_cost_amount', 'settlement_amount', 'settlement_body_bytes', 'settlement_body_digest', 'extended_amount', 'authorized_amount')
 
 table billing.payment_attempts
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2596,6 +2617,7 @@ function billing.guard_billing_restore_receipt()
                     'nmi_history_months',
                     'nmi_history_reads',
                     'notifications',
+                    'operation_authorization_extensions',
                     'operation_authorizations',
                     'payment_attempts',
                     'payment_method_updates',

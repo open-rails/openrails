@@ -35,6 +35,16 @@ func (e *Engine) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, ope
 	return e.svc.GetOperationAuthorizationTx(ctx, tx, operationID)
 }
 
+// ExtendOperationAuthorization grows an open reservation; a refusal writes
+// nothing to tx.
+func (e *Engine) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+	ctx, err := e.bind(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return e.svc.ExtendOperationAuthorizationTx(ctx, tx, req)
+}
+
 // ReleaseOperationAuthorization commits with the host's proven provider
 // non-creation fact. Billing evidence refuses it.
 func (e *Engine) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {

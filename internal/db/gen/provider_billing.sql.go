@@ -116,7 +116,7 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 }
 
 const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
-SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest
+SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
 FROM billing.cost_qualifications q
 JOIN billing.operation_authorizations a
   ON a.merchant_id = q.merchant_id
@@ -180,6 +180,8 @@ func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.C
 		&i.BillingOperationAuthorization.SettlementAmount,
 		&i.BillingOperationAuthorization.SettlementBodyBytes,
 		&i.BillingOperationAuthorization.SettlementBodyDigest,
+		&i.BillingOperationAuthorization.ExtendedAmount,
+		&i.BillingOperationAuthorization.AuthorizedAmount,
 	)
 	return i, err
 }

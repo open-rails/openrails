@@ -38,6 +38,7 @@ var Tables = map[string]Table{
 	"invoice_items":                       {Permanent, permanent},
 	"invoice_payments":                    {Permanent, permanent},
 	"operation_authorizations":            {Permanent, permanent},
+	"operation_authorization_extensions":  {Permanent, permanent},
 	"cost_qualifications":                 {Permanent, permanent},
 	"metered_rating_watermarks":           {Permanent, permanent},
 	"solana_pay_receipts":                 {Permanent, "permanent for credited and review receipts; an ignored receipt goes with its settled reference."},
