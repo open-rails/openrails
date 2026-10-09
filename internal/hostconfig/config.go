@@ -19,6 +19,9 @@ type Config struct {
 	// ResourceServer accepts trusted issuers' access tokens on the merchant
 	// API (resource_server).
 	ResourceServer *billing.ResourceServerConfig
+	// LocalSignIn serves sign-in to the control plane's own accounts
+	// (local_sign_in); off, people sign in at a trusted issuer.
+	LocalSignIn bool
 	// Host and Port are the HTTP listener (default 0.0.0.0:3053).
 	Host string
 	Port int
@@ -107,6 +110,7 @@ type fileConfig struct {
 	Auth *billing.AuthConfig `koanf:"auth"`
 
 	ResourceServer *billing.ResourceServerConfig `koanf:"resource_server"`
+	LocalSignIn    bool                          `koanf:"local_sign_in"`
 }
 
 // defaults is the file before any source is read: local infrastructure and
@@ -148,16 +152,17 @@ func (s *sendGridFile) config() *billing.SendGridConfig {
 // adminConsoleFile is the admin_console section: the server serves the
 // console at path only while enabled.
 type adminConsoleFile struct {
-	Enabled        bool   `koanf:"enabled"`
-	Path           string `koanf:"path"`
-	NewMerchantURL string `koanf:"new_merchant_url"`
+	Enabled        bool                   `koanf:"enabled"`
+	Path           string                 `koanf:"path"`
+	NewMerchantURL string                 `koanf:"new_merchant_url"`
+	Issuer         *billing.ConsoleIssuer `koanf:"issuer"`
 }
 
 func (a *adminConsoleFile) mount() *billing.AdminConsole {
 	if a == nil || !a.Enabled {
 		return nil
 	}
-	return &billing.AdminConsole{Path: a.Path, NewMerchantURL: a.NewMerchantURL}
+	return &billing.AdminConsole{Path: a.Path, NewMerchantURL: a.NewMerchantURL, Issuer: a.Issuer}
 }
 
 // config is the loaded file as the server's configuration.
@@ -201,6 +206,7 @@ func (f *fileConfig) config() (*Config, error) {
 		},
 		Auth:                     f.Auth,
 		ResourceServer:           f.ResourceServer,
+		LocalSignIn:              f.LocalSignIn,
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		MerchantManifestOverlays: f.MerchantManifestOverlays,

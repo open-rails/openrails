@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // Config is the SPA bootstrap document served at <path>/config.json.
@@ -47,6 +48,33 @@ type Config struct {
 	// NewMerchantURL is AdminConsole.NewMerchantURL: the host page behind
 	// the console's "New merchant" action. Empty hides the action.
 	NewMerchantURL string `json:"new_merchant_url"`
+	// Issuer is the trusted issuer the console signs staff in at; null signs
+	// in to AuthBaseURL's own accounts.
+	Issuer *Issuer `json:"issuer"`
+}
+
+// Issuer is the console's OAuth 2.0 public client at a trusted issuer.
+type Issuer struct {
+	URL      string `json:"url"`
+	ClientID string `json:"client_id"`
+	Name     string `json:"name"`
+	// Resource is this deployment's resource identifier, Scope what the
+	// console asks for.
+	Resource string `json:"resource"`
+	Scope    string `json:"scope"`
+}
+
+// ConsoleIssuer resolves console's issuer against the resource server: nil
+// without one.
+func ConsoleIssuer(console *config.AdminConsole, rs *config.ResourceServerConfig) (*Issuer, error) {
+	if console == nil || console.Issuer == nil {
+		return nil, nil
+	}
+	url, name, resource, err := config.ResolveConsoleIssuer(console.Issuer, rs)
+	if err != nil {
+		return nil, err
+	}
+	return &Issuer{URL: url, ClientID: strings.TrimSpace(console.Issuer.ClientID), Name: name, Resource: resource, Scope: config.ConsoleScope}, nil
 }
 
 // Present reports whether assets hold a servable console build: a non-nil

@@ -30,6 +30,8 @@ type (
 	Routes = config.Routes
 	// AdminConsole is Routes.AdminConsole: the merchant admin console.
 	AdminConsole = config.AdminConsole
+	// ConsoleIssuer is AdminConsole.Issuer: the trusted issuer staff sign in at.
+	ConsoleIssuer = config.ConsoleIssuer
 	// CustomerRoutes is one further customer surface of
 	// Routes.CustomerProfiles.
 	CustomerRoutes = config.CustomerRoutes

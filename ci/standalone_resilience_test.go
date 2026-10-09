@@ -49,7 +49,7 @@ merchants:
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token}
 		cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
-		cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
+		cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 			Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
 		}}
 		rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})

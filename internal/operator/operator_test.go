@@ -26,17 +26,19 @@ func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
 		wantErr bool
 	}{
 		"disabled":                        {AttachOptions{}, false},
-		"login with email":                {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender}, false},
-		"login with sms only":             {AttachOptions{PasswordlessLogin: true, SMSSender: smsSender}, false},
-		"open auto-registration":          {AttachOptions{Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
-		"auto-registration without login": {AttachOptions{Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration closed":        {AttachOptions{PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration invite-only":   {AttachOptions{Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"login without sender":            {AttachOptions{PasswordlessLogin: true}, true},
-		"open without sender":             {AttachOptions{Registration: iam.RegistrationModeOpen}, true},
-		"invite-only with sender":         {AttachOptions{Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
-		"closed without sender":           {AttachOptions{Registration: iam.RegistrationModeClosed}, false},
-		"unknown mode":                    {AttachOptions{Registration: "sometimes"}, true},
+		"login with email":                {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, EmailSender: emailSender}, false},
+		"login with sms only":             {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, SMSSender: smsSender}, false},
+		"open auto-registration":          {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
+		"auto-registration without login": {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration closed":        {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration invite-only":   {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"login without sender":            {AttachOptions{LocalSignIn: true, PasswordlessLogin: true}, true},
+		"open without sender":             {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen}, true},
+		"invite-only with sender":         {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
+		"closed without sender":           {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeClosed}, false},
+		"unknown mode":                    {AttachOptions{LocalSignIn: true, Registration: "sometimes"}, true},
+		"open without local sign-in":      {AttachOptions{Registration: iam.RegistrationModeOpen, EmailSender: emailSender}, true},
+		"passwordless without local":      {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender}, true},
 	} {
 		err := validateAttachOptions(tc.opts)
 		require.Equal(t, tc.wantErr, err != nil, "%s: %v", name, err)
@@ -50,7 +52,7 @@ func TestAttachRefusesBeforeBuildingResources(t *testing.T) {
 	require.ErrorContains(t, Attach(context.Background(), nil, cfg, nil, nil), "required")
 	require.ErrorContains(t, Attach(context.Background(), &app.App{}, nil, nil, nil), "required")
 	require.ErrorContains(t, Attach(context.Background(), &app.App{}, cfg, nil, nil), "runtime is required")
-	require.ErrorContains(t, AttachWithOptions(context.Background(), &app.App{Runtime: &app.Runtime{}}, cfg, nil, AttachOptions{PasswordlessLogin: true}), "sender")
+	require.ErrorContains(t, AttachWithOptions(context.Background(), &app.App{Runtime: &app.Runtime{}}, cfg, nil, AttachOptions{LocalSignIn: true, PasswordlessLogin: true}), "sender")
 
 	late := &app.App{Runtime: &app.Runtime{RiverClient: &river.Client[pgx.Tx]{}}}
 	require.ErrorContains(t, Attach(context.Background(), late, cfg, nil, nil), "attach before River initialization")

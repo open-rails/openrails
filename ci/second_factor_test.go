@@ -36,7 +36,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 		auth.Issuer = "http://127.0.0.1/" + f.schema
 		auth.AllowMemory, auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true, true
 		cfg := f.config()
-		cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: auth}
+		cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: auth}
 		client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 		if err == nil {
 			t.Cleanup(func() { _ = client.Close(context.Background()) })

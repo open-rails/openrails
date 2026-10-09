@@ -33,6 +33,8 @@ type ControlPlane struct {
 	// registration is AuthKit's native self-registration mode; closed unless
 	// the host opens it (WithRegistration).
 	registration iam.RegistrationMode
+	// localSignIn mounts AuthKit's sign-in surface (WithLocalSignIn).
+	localSignIn bool
 	// merchantCreation is the hosted policy for user-claimed merchant names
 	// (WithMerchantCreation, or#914); nil otherwise.
 	merchantCreation *MerchantCreationConfig
@@ -59,6 +61,7 @@ type options struct {
 	nameAdmission                func(context.Context, iam.NameAdmissionRequest) error
 	registration                 iam.RegistrationMode
 	passwordlessLogin            bool
+	localSignIn                  bool
 	passwordlessAutoRegistration bool
 	email                        authkit.EmailSender
 	sms                          authkit.SMSSender
@@ -88,6 +91,11 @@ func WithRegistration(mode iam.RegistrationMode) Option {
 // Standalone never passes this.
 func WithMerchantCreation(cfg MerchantCreationConfig) Option {
 	return func(o *options) { o.merchantCreation = &cfg }
+}
+
+// WithLocalSignIn serves sign-in to the control plane's own accounts.
+func WithLocalSignIn() Option {
+	return func(o *options) { o.localSignIn = true }
 }
 
 // WithPasswordless enables AuthKit's contact-based passwordless login.
@@ -339,7 +347,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 		return nil, err
 	}
 	cp := &ControlPlane{
-		registration: registrationMode(options.registration), merchantCreation: options.merchantCreation,
+		registration: registrationMode(options.registration), localSignIn: options.localSignIn, merchantCreation: options.merchantCreation,
 		merchantCreationPattern: pattern, naming: naming,
 		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
 	}

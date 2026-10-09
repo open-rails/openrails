@@ -228,7 +228,7 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 		Schema: target.schema, RiverSchema: target.schema,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		DB: &openrails.DBConfig{URL: target.dsn},
-		ControlPlane: &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
+		ControlPlane: &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 			Issuer: "http://127.0.0.1/" + target.schema, AllowMemory: true, AllowMissingSenders: true,
 			AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 		}},

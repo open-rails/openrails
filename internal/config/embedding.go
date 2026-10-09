@@ -1,5 +1,10 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Routes selects the HTTP surface Client.Routes returns and the adapters
 // mount on the root router. Processor webhooks and GET /v1/capabilities are
 // always mounted.
@@ -52,6 +57,50 @@ type AdminConsole struct {
 	// with #merchant=<slug>. A same-origin path or an https URL; empty hides
 	// the action, since the engine has no self-service merchant creation.
 	NewMerchantURL string
+	// Issuer signs staff in at a trusted issuer instead of the control
+	// plane's own accounts. It needs Config.ControlPlane's ResourceServer.
+	Issuer *ConsoleIssuer
+}
+
+// ConsoleIssuer is the authorization server the console signs staff in at,
+// as an OAuth 2.0 public client (code flow with PKCE and DPoP).
+type ConsoleIssuer struct {
+	// URL is the issuer: one of the resource server's trusted issuers.
+	URL string
+	// ClientID is the console's public client there, registered with the
+	// console path plus /callback as a redirect URI.
+	ClientID string
+	// Name is shown on the sign-in button; empty is the trusted issuer's.
+	Name string
+}
+
+// ConsoleScope is what the console asks a trusted issuer for.
+const ConsoleScope = "openid profile email offline_access openrails:merchant"
+
+// ResolveConsoleIssuer checks console against the resource server: its URL
+// must be a trusted issuer's, and it needs a client id.
+func ResolveConsoleIssuer(console *ConsoleIssuer, rs *ResourceServerConfig) (issuer, name, resource string, err error) {
+	if rs == nil {
+		return "", "", "", fmt.Errorf("admin console issuer: declare resource_server, which trusts it")
+	}
+	url := strings.TrimRight(strings.TrimSpace(console.URL), "/")
+	for _, is := range rs.TrustedIssuers {
+		if strings.TrimRight(strings.TrimSpace(is.Issuer), "/") != url {
+			continue
+		}
+		if strings.TrimSpace(console.ClientID) == "" {
+			return "", "", "", fmt.Errorf("admin console issuer %q: client_id is required", url)
+		}
+		name = strings.TrimSpace(console.Name)
+		if name == "" {
+			name = strings.TrimSpace(is.Name)
+		}
+		if name == "" {
+			name = url
+		}
+		return strings.TrimSpace(is.Issuer), name, strings.TrimSpace(rs.Identifier), nil
+	}
+	return "", "", "", fmt.Errorf("admin console issuer %q is not one of resource_server.trusted_issuers", url)
 }
 
 // CheckoutConfig is Config.Checkout: the shared payment page. The zero value
