@@ -275,30 +275,36 @@ WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
 -- name: CheckProductAccess :many
--- Whether the customer holds each product at at: one indexed probe each.
-SELECT candidate.product_id::uuid AS product_id, EXISTS (
-    SELECT 1 FROM billing.product_access pa
+-- Whether the customer holds each product at at: one indexed probe each (a
+-- LATERAL with LIMIT, which the planner cannot turn into a scan of every
+-- window the customer holds).
+SELECT candidate.product_id::uuid AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id)
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
       AND pa.product_id = candidate.product_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) AS has_access
-FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id);
+    LIMIT 1
+) held ON true;
 
 -- name: CheckProductAccessKeys :many
 -- Resolve product keys and current access in one bounded query. Archived
 -- products stay readable for their holders.
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, EXISTS (
-    SELECT 1 FROM billing.product_access pa
+SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest(sqlc.arg(product_keys)::text[]) AS candidate(product_key)
+LEFT JOIN billing.products p ON p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.key = candidate.product_key
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
       AND pa.product_id = p.id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) AS has_access
-FROM unnest(sqlc.arg(product_keys)::text[]) AS candidate(product_key)
-LEFT JOIN billing.products p ON p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.key = candidate.product_key;
+    LIMIT 1
+) held ON true;
 
 -- name: HasPermanentProductAccess :one
 -- Whether the customer holds the product indefinitely from at on.

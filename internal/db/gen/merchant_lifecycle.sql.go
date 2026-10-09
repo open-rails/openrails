@@ -38,6 +38,28 @@ func (q *Queries) CountMerchantRowsCheckoutAttempts(ctx context.Context, merchan
 	return count, err
 }
 
+const countMerchantRowsEntitlementCache = `-- name: CountMerchantRowsEntitlementCache :one
+SELECT count(*) FROM billing.customer_entitlement_cache WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsEntitlementCache(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsEntitlementCache, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsEntitlementCacheStamps = `-- name: CountMerchantRowsEntitlementCacheStamps :one
+SELECT count(*) FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsEntitlementCacheStamps(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsEntitlementCacheStamps, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
 SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1
 `
@@ -218,6 +240,24 @@ DELETE FROM billing.checkout_attempts WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsCheckoutAttempts(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsCheckoutAttempts, merchantID)
+	return err
+}
+
+const purgeMerchantRowsEntitlementCache = `-- name: PurgeMerchantRowsEntitlementCache :exec
+DELETE FROM billing.customer_entitlement_cache WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsEntitlementCache(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlementCache, merchantID)
+	return err
+}
+
+const purgeMerchantRowsEntitlementCacheStamps = `-- name: PurgeMerchantRowsEntitlementCacheStamps :exec
+DELETE FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsEntitlementCacheStamps(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlementCacheStamps, merchantID)
 	return err
 }
 

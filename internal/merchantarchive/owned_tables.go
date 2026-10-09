@@ -22,6 +22,8 @@ var ownedTables = []string{
 	"custodians",
 	"custody_migrations",
 	"customer_delinquency",
+	"customer_entitlement_cache",
+	"customer_entitlement_cache_stamps",
 	"customer_invoice_profiles",
 	"customers",
 	"dashboard_configs",

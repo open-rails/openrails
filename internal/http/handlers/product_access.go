@@ -294,9 +294,11 @@ func createProductAccess(r *httprequest.Request, gate StaffCan) {
 		return
 	}
 	out := billing.CreateProductAccessBatchResult{Items: make([]billing.ProductAccessGrant, len(granted))}
+	// A grant writes its window in its own transaction; the converge sweep
+	// is the backstop. An inline converge would scan every window of a heavy
+	// buyer on each grant.
 	for i, row := range granted {
 		out.Items[i] = productAccessGrant(row, now)
-		convergeAfterMutation(r, row.CustomerID)
 	}
 	r.JSON(http.StatusCreated, out)
 }
@@ -327,7 +329,6 @@ func DeleteProductAccess(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeResourceNotFound, "product access not found or already revoked"))
 		return
 	}
-	convergeAfterMutation(r, customer.UUID())
 	r.Status(http.StatusNoContent)
 }
 

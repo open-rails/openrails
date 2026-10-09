@@ -14,25 +14,27 @@ import (
 
 const checkDerivedEntitlements = `-- name: CheckDerivedEntitlements :many
 
-SELECT k.key::text AS entitlement, EXISTS (
-    SELECT 1 FROM billing.product_entitlements pe
+SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest($1::text[]) AS k(key)
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
-    WHERE pe.merchant_id = $1::uuid AND pe.entitlement = k.key
-      AND pe.added_at <= $2::timestamptz
-      AND (pe.removed_at IS NULL OR pe.removed_at > $2::timestamptz)
-      AND pa.customer_id = $3::uuid
+    WHERE pe.merchant_id = $2::uuid AND pe.entitlement = k.key
+      AND pe.added_at <= $3::timestamptz
+      AND (pe.removed_at IS NULL OR pe.removed_at > $3::timestamptz)
+      AND pa.customer_id = $4::uuid
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $2::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $2::timestamptz)
-) AS has_access
-FROM unnest($4::text[]) AS k(key)
+      AND pa.starts_at <= $3::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+    LIMIT 1
+) held ON true
 `
 
 type CheckDerivedEntitlementsParams struct {
+	Entitlements []string
 	MerchantID   uuid.UUID
 	AtTime       time.Time
 	CustomerID   uuid.UUID
-	Entitlements []string
 }
 
 type CheckDerivedEntitlementsRow struct {
@@ -44,13 +46,15 @@ type CheckDerivedEntitlementsRow struct {
 // product_access window of theirs covers it and the product granted the key
 // then (product_entitlements valid time). Nothing per customer stores keys.
 // Key-first: for each key, the products granting it, then one probe of the
-// customer's windows of each. Cost: keys x products granting each key.
+// customer's windows of each. Cost: keys x products granting each key. The
+// LATERAL with LIMIT keeps the planner from scanning every window the
+// customer holds instead.
 func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerivedEntitlementsParams) ([]CheckDerivedEntitlementsRow, error) {
 	rows, err := q.db.Query(ctx, checkDerivedEntitlements,
+		arg.Entitlements,
 		arg.MerchantID,
 		arg.AtTime,
 		arg.CustomerID,
-		arg.Entitlements,
 	)
 	if err != nil {
 		return nil, err
@@ -75,24 +79,24 @@ SELECT DISTINCT x.customer_id FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (
     SELECT pa.customer_id FROM billing.product_access pa
     WHERE pa.merchant_id = $1::uuid AND pa.product_id = pe.product_id
+      AND (pa.product_id, pa.customer_id) > (pe.product_id, $2::uuid)
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $2::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $2::timestamptz)
-      AND pa.customer_id > $3::uuid
+      AND pa.starts_at <= $3::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
     ORDER BY pa.customer_id
     LIMIT $4::int
 ) x
 WHERE pe.merchant_id = $1::uuid AND pe.entitlement = $5::text
-  AND pe.added_at <= $2::timestamptz
-  AND (pe.removed_at IS NULL OR pe.removed_at > $2::timestamptz)
+  AND pe.added_at <= $3::timestamptz
+  AND (pe.removed_at IS NULL OR pe.removed_at > $3::timestamptz)
 ORDER BY 1
 LIMIT $4::int
 `
 
 type ListDerivedEntitlementHoldersParams struct {
 	MerchantID  uuid.UUID
-	AtTime      time.Time
 	AfterID     uuid.UUID
+	AtTime      time.Time
 	RowLimit    int32
 	Entitlement string
 }
@@ -100,11 +104,13 @@ type ListDerivedEntitlementHoldersParams struct {
 // The reverse lookup: customers holding a key at at_time, keyset by customer
 // id after after_id. Key-first: the products granting it, then each
 // product's holders in customer order, stopping at the limit per product.
+// The cursor bounds (product, customer) rows, so only the per-product index
+// serves the probe.
 func (q *Queries) ListDerivedEntitlementHolders(ctx context.Context, arg ListDerivedEntitlementHoldersParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementHolders,
 		arg.MerchantID,
-		arg.AtTime,
 		arg.AfterID,
+		arg.AtTime,
 		arg.RowLimit,
 		arg.Entitlement,
 	)
@@ -138,7 +144,8 @@ WITH owned AS MATERIALIZED (
     CROSS JOIN LATERAL (
         SELECT pe.entitlement FROM billing.product_entitlements pe
         WHERE pe.merchant_id = $4::uuid AND pe.product_id = o.product_id
-          AND pe.entitlement >= $7::text AND pe.entitlement < $8::text
+          AND (pe.product_id, pe.entitlement) >= (o.product_id, $7::text)
+          AND (pe.product_id, pe.entitlement) < (o.product_id, $8::text)
           AND pe.added_at <= $6::timestamptz
           AND (pe.removed_at IS NULL OR pe.removed_at > $6::timestamptz)
         OFFSET 0
@@ -175,6 +182,10 @@ type ListDerivedEntitlementsByPrefixRow struct {
 // of each product's keys within [low, high), then the first row_limit keys
 // of each prefix in byte order (callers pass limit+1 to detect truncation).
 // The OFFSET 0 fence keeps the planner from scanning the catalog keyspace.
+// The key range is bounded as (product, key) rows: only the per-product index
+// can use it, so no plan scans a key range of the catalog once per held
+// product. Callers plan it for their parameters (a generic plan prices a
+// 3-product and a 50,000-product customer alike).
 func (q *Queries) ListDerivedEntitlementsByPrefix(ctx context.Context, arg ListDerivedEntitlementsByPrefixParams) ([]ListDerivedEntitlementsByPrefixRow, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementsByPrefix,
 		arg.Prefixes,
@@ -216,7 +227,8 @@ SELECT DISTINCT k.entitlement FROM owned o
 CROSS JOIN LATERAL (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = $1::uuid AND pe.product_id = o.product_id
-      AND pe.entitlement >= $2::text AND pe.entitlement > $3::text
+      AND (pe.product_id, pe.entitlement) >= (o.product_id, $2::text)
+      AND (pe.product_id, pe.entitlement) > (o.product_id, $3::text)
       AND ($4::text = '' OR pe.entitlement < $4::text)
       AND pe.added_at <= $5::timestamptz
       AND (pe.removed_at IS NULL OR pe.removed_at > $5::timestamptz)
@@ -239,7 +251,8 @@ type ListDerivedEntitlementsPageParams struct {
 
 // One keyset page of the keys a customer holds at at_time, in byte order:
 // from low_key, after after_key (exclusive; ” starts) and below before_key
-// (exclusive; ” is unbounded). Customer-first, one probe per held product.
+// (exclusive; ” is unbounded). Customer-first, one probe per held product;
+// the bounds are (product, key) rows, as in ListDerivedEntitlementsByPrefix.
 func (q *Queries) ListDerivedEntitlementsPage(ctx context.Context, arg ListDerivedEntitlementsPageParams) ([]string, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementsPage,
 		arg.MerchantID,

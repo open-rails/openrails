@@ -73,7 +73,9 @@ func validatePrefixes(prefixes []string) error {
 }
 
 // Check answers an entitlement check in one read-only snapshot: the exact
-// keys and the keys held under each prefix see the same catalog and access.
+// keys and the keys held under each prefix see the same catalog and access. A
+// heavy buyer's keys come from their cache while it is valid at At; a check at
+// the current instant that derived them live rebuilds it.
 func (s *EntitlementService) Check(ctx context.Context, customerID string, params billing.CheckEntitlementsParams) (billing.EntitlementCheck, error) {
 	var out billing.EntitlementCheck
 	if err := ValidateCheck(params); err != nil {
@@ -83,81 +85,47 @@ func (s *EntitlementService) Check(ctx context.Context, customerID string, param
 	if at.IsZero() {
 		at = s.now()
 	}
-	err := s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		snapshot := s.db.NewWithPgxTx(tx)
+	limit := params.PrefixLimit
+	if limit == 0 {
+		limit = billing.DefaultHeldEntitlements
+	}
+	if _, err := db.ResolveCustomerID(customerID); err != nil {
+		return out, apperr.Invalidf("invalid customer_id")
+	}
+	err := s.withKeys(ctx, customerID, at, params.At.IsZero(), func(ctx context.Context, r readSnapshot) error {
 		var err error
-		if out.Entitlements, err = s.checkKeys(ctx, snapshot, customerID, params.Entitlements, at); err != nil {
+		if out.Entitlements, err = checkKeys(ctx, r, params.Entitlements); err != nil {
 			return err
 		}
-		out.Held, err = s.heldByPrefix(ctx, snapshot, customerID, params.Prefixes, params.PrefixLimit, at)
+		out.Held, err = heldByPrefix(ctx, r, params.Prefixes, limit)
 		return err
 	})
 	return out, err
 }
 
-// CheckMany answers which of the keys the customer holds at at. It reads the
-// products granting each key and the customer's windows of those products.
-func (s *EntitlementService) CheckMany(ctx context.Context, customerID string, keys []string, at time.Time) (map[string]bool, error) {
-	if err := validateKeys(keys); err != nil {
-		return nil, err
-	}
-	if at.IsZero() {
-		at = s.now()
-	}
-	return s.checkKeys(ctx, s.db, customerID, keys, at)
-}
-
-func (s *EntitlementService) checkKeys(ctx context.Context, database *db.DB, customerID string, keys []string, at time.Time) (map[string]bool, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	customer, err := db.ResolveCustomerID(customerID)
-	if err != nil {
-		return nil, apperr.Invalidf("invalid customer_id")
-	}
+func checkKeys(ctx context.Context, r readSnapshot, keys []string) (map[string]bool, error) {
 	result := make(map[string]bool, len(keys))
 	if len(keys) == 0 {
 		return result, nil
 	}
-	rows, err := database.Gen(ctx).CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: mid.UUID(), CustomerID: customer, Entitlements: keys, AtTime: at})
-	if err != nil {
-		return nil, err
+	if r.cached {
+		rows, err := r.q.CheckCachedEntitlements(ctx, gen.CheckCachedEntitlementsParams{MerchantID: r.merchant, CustomerID: r.customer, Entitlements: keys})
+		for _, row := range rows {
+			result[row.Entitlement] = row.HasAccess
+		}
+		return result, err
 	}
+	rows, err := r.q.CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: r.merchant, CustomerID: r.customer, Entitlements: keys, AtTime: r.at})
 	for _, row := range rows {
 		result[row.Entitlement] = row.HasAccess
 	}
-	return result, nil
+	return result, err
 }
 
-// HeldByPrefix answers, for each prefix, the distinct keys the customer holds
-// at at under it in byte order: at most limit (zero: the default), Truncated
-// when more are held. Every requested prefix is in the result.
-func (s *EntitlementService) HeldByPrefix(ctx context.Context, customerID string, prefixes []string, limit int, at time.Time) (map[string]billing.HeldEntitlements, error) {
-	if err := validatePrefixes(prefixes); err != nil {
-		return nil, err
-	}
-	if at.IsZero() {
-		at = s.now()
-	}
-	return s.heldByPrefix(ctx, s.db, customerID, prefixes, limit, at)
-}
-
-func (s *EntitlementService) heldByPrefix(ctx context.Context, database *db.DB, customerID string, prefixes []string, limit int, at time.Time) (map[string]billing.HeldEntitlements, error) {
-	if limit == 0 {
-		limit = billing.DefaultHeldEntitlements
-	}
-	if limit < 0 || limit > billing.MaxHeldEntitlements {
-		return nil, apperr.Invalidf("prefix_limit must be between 0 and %d", billing.MaxHeldEntitlements).WithParam("prefix_limit")
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	customer, err := db.ResolveCustomerID(customerID)
-	if err != nil {
-		return nil, apperr.Invalidf("invalid customer_id")
-	}
+// heldByPrefix answers, for each prefix, the distinct keys held under it in
+// byte order: at most limit, Truncated when more are held. Every requested
+// prefix is in the result.
+func heldByPrefix(ctx context.Context, r readSnapshot, prefixes []string, limit int) (map[string]billing.HeldEntitlements, error) {
 	held := make(map[string]billing.HeldEntitlements, len(prefixes))
 	if len(prefixes) == 0 {
 		return held, nil
@@ -174,17 +142,34 @@ func (s *EntitlementService) heldByPrefix(ctx context.Context, database *db.DB, 
 			high = uppers[i]
 		}
 	}
-	rows, err := database.Gen(ctx).ListDerivedEntitlementsByPrefix(ctx, gen.ListDerivedEntitlementsByPrefixParams{
-		MerchantID: mid.UUID(), CustomerID: customer, AtTime: at, Low: low, High: high,
-		Prefixes: prefixes, Uppers: uppers, RowLimit: int32(limit + 1),
-	})
-	if err != nil {
-		return nil, err
+	type row struct{ prefix, key string }
+	var rows []row
+	if r.cached {
+		cached, err := r.q.ListCachedEntitlementsByPrefix(ctx, gen.ListCachedEntitlementsByPrefixParams{
+			MerchantID: r.merchant, CustomerID: r.customer, Prefixes: prefixes, Uppers: uppers, RowLimit: int32(limit + 1), // #nosec G115 -- limit is validated
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range cached {
+			rows = append(rows, row{c.Prefix, c.Entitlement})
+		}
+	} else {
+		derived, err := r.q.ListDerivedEntitlementsByPrefix(ctx, gen.ListDerivedEntitlementsByPrefixParams{
+			MerchantID: r.merchant, CustomerID: r.customer, AtTime: r.at, Low: low, High: high,
+			Prefixes: prefixes, Uppers: uppers, RowLimit: int32(limit + 1), // #nosec G115 -- limit is validated
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range derived {
+			rows = append(rows, row{d.Prefix, d.Entitlement})
+		}
 	}
-	for _, row := range rows {
-		h := held[row.Prefix]
-		h.Keys = append(h.Keys, row.Entitlement)
-		held[row.Prefix] = h
+	for _, x := range rows {
+		h := held[x.prefix]
+		h.Keys = append(h.Keys, x.key)
+		held[x.prefix] = h
 	}
 	for prefix, h := range held {
 		slices.Sort(h.Keys)
@@ -204,9 +189,9 @@ func prefixUpper(prefix string) string {
 // MaxEntitlementPage bounds one page of a customer's keys or a key's holders.
 const MaxEntitlementPage = 1000
 
-// ListEntitlementsPage returns up to limit keys the customer holds at at, in
-// byte order, after after (exclusive; "" starts), optionally under prefix.
-// more: another page follows.
+// ListEntitlementsPage returns up to limit keys the customer holds at at
+// (zero: now), in byte order, after after (exclusive; "" starts), optionally
+// under prefix. more: another page follows.
 func (s *EntitlementService) ListEntitlementsPage(ctx context.Context, customer uuid.UUID, prefix, after string, limit int, at time.Time) (keys []string, more bool, err error) {
 	if limit <= 0 || limit > MaxEntitlementPage {
 		return nil, false, apperr.Invalidf("limit must be between 1 and %d", MaxEntitlementPage).WithParam("limit")
@@ -216,19 +201,26 @@ func (s *EntitlementService) ListEntitlementsPage(ctx context.Context, customer 
 			return nil, false, err
 		}
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	if at.IsZero() {
+	current := at.IsZero()
+	if current {
 		at = s.now()
 	}
 	before := ""
 	if prefix != "" {
 		before = prefixUpper(prefix)
 	}
-	keys, err = s.db.Gen(ctx).ListDerivedEntitlementsPage(ctx, gen.ListDerivedEntitlementsPageParams{
-		MerchantID: mid.UUID(), CustomerID: customer, AtTime: at, LowKey: prefix, AfterKey: after, BeforeKey: before, RowLimit: int32(limit + 1),
+	err = s.withKeys(ctx, customer.String(), at, current, func(ctx context.Context, r readSnapshot) error {
+		var err error
+		if r.cached {
+			keys, err = r.q.ListCachedEntitlementsPage(ctx, gen.ListCachedEntitlementsPageParams{
+				MerchantID: r.merchant, CustomerID: customer, LowKey: prefix, AfterKey: after, BeforeKey: before, RowLimit: int32(limit + 1), // #nosec G115 -- limit is bounded above
+			})
+			return err
+		}
+		keys, err = r.q.ListDerivedEntitlementsPage(ctx, gen.ListDerivedEntitlementsPageParams{
+			MerchantID: r.merchant, CustomerID: customer, AtTime: at, LowKey: prefix, AfterKey: after, BeforeKey: before, RowLimit: int32(limit + 1), // #nosec G115 -- limit is bounded above
+		})
+		return err
 	})
 	if err != nil {
 		return nil, false, err
@@ -255,9 +247,18 @@ func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, e
 	if at.IsZero() {
 		at = s.now()
 	}
-	return s.db.Gen(ctx).ListDerivedEntitlementHolders(ctx, gen.ListDerivedEntitlementHoldersParams{
-		MerchantID: mid.UUID(), Entitlement: entitlement, AtTime: at, AfterID: afterID, RowLimit: int32(limit),
+	var holders []uuid.UUID
+	err = s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := s.db.NewWithPgxTx(tx).Gen(ctx)
+		if err := customPlans(ctx, q); err != nil {
+			return err
+		}
+		holders, err = q.ListDerivedEntitlementHolders(ctx, gen.ListDerivedEntitlementHoldersParams{
+			MerchantID: mid.UUID(), Entitlement: entitlement, AtTime: at, AfterID: afterID, RowLimit: int32(limit), // #nosec G115 -- bounded above
+		})
+		return err
 	})
+	return holders, err
 }
 
 // ListEntitlementSources explains why the customer holds each key at at:

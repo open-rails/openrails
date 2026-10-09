@@ -26,18 +26,8 @@ import (
 // change is unapproved, and then converts per-key windows to the products
 // that grant them.
 func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
-	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
-	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	schema := "e2e_cutover_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_, _ = pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-		pool.Close()
-	})
+	pool, schema := cutoverSchema(t, os.Getenv("OPENRAILS_E2E_DSN"))
 	empty, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "")
 	require.NoError(t, err, "the preflight brings a fresh database to the cutover")
 	require.Empty(t, empty.Changes)
@@ -95,8 +85,7 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 		return n.CustomerID == comped && n.Note == "unmapped" && slices.Equal(n.Entitlements, []string{"vip"})
 	}), "%+v", report.Notes)
 
-	cfg := openrails.Config{Schema: schema, RiverSchema: schema}
-	err = openrails.Migrate(ctx, pool, cfg)
+	err = migrateAll(ctx, pool, schema)
 	require.ErrorContains(t, err, "unapproved access changes", "the cutover refuses a change no one approved")
 	var converted int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".product_access").Scan(&converted))
@@ -105,7 +94,7 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	approved, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "operator@example.test")
 	require.NoError(t, err)
 	require.Zero(t, approved.Unapproved())
-	require.NoError(t, openrails.Migrate(ctx, pool, cfg))
+	require.NoError(t, migrateAll(ctx, pool, schema))
 	_, err = migrate.AccessCutoverPreflight(ctx, pool, schema, "")
 	require.ErrorContains(t, err, "already ran")
 
@@ -132,4 +121,25 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 		access = append(access, row)
 	}
 	require.Equal(t, []string{"purchase:" + payment.String()}, access, "the purchase is one window of its product")
+}
+
+// cutoverSchema is a pool and an empty schema of its own, dropped after t.
+func cutoverSchema(t *testing.T, dsn string) (*pgxpool.Pool, string) {
+	t.Helper()
+	dsn = strings.TrimSpace(dsn)
+	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
+	pool, err := pgxpool.New(t.Context(), dsn)
+	require.NoError(t, err)
+	schema := "e2e_cutover_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		pool.Close()
+	})
+	return pool, schema
+}
+
+func migrateAll(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	return openrails.Migrate(ctx, pool, openrails.Config{Schema: schema, RiverSchema: schema})
 }

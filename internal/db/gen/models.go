@@ -328,6 +328,8 @@ type BillingCustomer struct {
 	Username *string
 	// The merchant declared the customer may not buy (banned or deleted at the host): checkout session actions refuse it. Declared with EnsureCustomer.
 	Blocked bool
+	// Steps with every statement that changes the customer's product access: a cached key set from an older version is stale.
+	AccessVersion int64
 }
 
 // Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
@@ -346,6 +348,29 @@ type BillingCustomerDelinquency struct {
 	EvaluatedAt   time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// A heavy buyer's keys as of their stamps row: the keys of the products they hold. Derived; rebuilt on read.
+type BillingCustomerEntitlementCache struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+}
+
+// When a heavy buyer's cached keys are valid: built at entitlement_generation and access_version, for instants in [valid_from, valid_until), the next start or end of one of their windows. Derived; rebuilt on read.
+type BillingCustomerEntitlementCacheStamp struct {
+	ID                    uuid.UUID
+	MerchantID            uuid.UUID
+	CustomerID            uuid.UUID
+	EntitlementGeneration int64
+	AccessVersion         int64
+	ValidFrom             time.Time
+	ValidUntil            *time.Time
+	Keys                  int32
+	HeldProducts          int32
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // Per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.
@@ -680,6 +705,8 @@ type BillingMerchant struct {
 	CatalogRevision         int64
 	// When the merchant was last renamed; NULL if never. The rename interval counts from here.
 	SlugChangedAt *time.Time
+	// Steps with every statement that changes a product's keys: a cached key set from an older generation is stale.
+	EntitlementGeneration int64
 }
 
 // A merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.

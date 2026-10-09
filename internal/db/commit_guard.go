@@ -59,12 +59,22 @@ func (d *DB) SeparatePool(ctx context.Context, maxConns int32) (*DB, error) {
 // ReadSnapshot runs fn in a read-only REPEATABLE READ transaction: every read
 // in fn sees one snapshot.
 func (d *DB) ReadSnapshot(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	return d.snapshot(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY", fn)
+}
+
+// WriteFromSnapshot runs fn in one REPEATABLE READ transaction that may
+// write: what it writes is derived from one consistent view.
+func (d *DB) WriteFromSnapshot(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	return d.snapshot(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", fn)
+}
+
+func (d *DB) snapshot(ctx context.Context, mode string, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := d.pgxBegin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); err != nil {
+	if _, err := tx.Exec(ctx, mode); err != nil {
 		return err
 	}
 	if err := fn(transactionContext(ctx), tx); err != nil {

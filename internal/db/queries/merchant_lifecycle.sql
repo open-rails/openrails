@@ -106,3 +106,15 @@ SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsMoneyAccounts :exec
 DELETE FROM billing.money_settings WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsEntitlementCache :one
+SELECT count(*) FROM billing.customer_entitlement_cache WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsEntitlementCache :exec
+DELETE FROM billing.customer_entitlement_cache WHERE merchant_id = $1;
+
+-- name: CountMerchantRowsEntitlementCacheStamps :one
+SELECT count(*) FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsEntitlementCacheStamps :exec
+DELETE FROM billing.customer_entitlement_cache_stamps WHERE merchant_id = $1;

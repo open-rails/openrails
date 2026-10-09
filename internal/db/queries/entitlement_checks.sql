@@ -4,9 +4,13 @@
 
 -- name: CheckDerivedEntitlements :many
 -- Key-first: for each key, the products granting it, then one probe of the
--- customer's windows of each. Cost: keys x products granting each key.
-SELECT k.key::text AS entitlement, EXISTS (
-    SELECT 1 FROM billing.product_entitlements pe
+-- customer's windows of each. Cost: keys x products granting each key. The
+-- LATERAL with LIMIT keeps the planner from scanning every window the
+-- customer holds instead.
+SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = k.key
       AND pe.added_at <= sqlc.arg(at_time)::timestamptz
@@ -15,14 +19,18 @@ SELECT k.key::text AS entitlement, EXISTS (
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) AS has_access
-FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key);
+    LIMIT 1
+) held ON true;
 
 -- name: ListDerivedEntitlementsByPrefix :many
 -- Customer-first, one pass: the products the customer holds, then one probe
 -- of each product's keys within [low, high), then the first row_limit keys
 -- of each prefix in byte order (callers pass limit+1 to detect truncation).
 -- The OFFSET 0 fence keeps the planner from scanning the catalog keyspace.
+-- The key range is bounded as (product, key) rows: only the per-product index
+-- can use it, so no plan scans a key range of the catalog once per held
+-- product. Callers plan it for their parameters (a generic plan prices a
+-- 3-product and a 50,000-product customer alike).
 WITH owned AS MATERIALIZED (
     SELECT DISTINCT pa.product_id FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
@@ -34,7 +42,8 @@ WITH owned AS MATERIALIZED (
     CROSS JOIN LATERAL (
         SELECT pe.entitlement FROM billing.product_entitlements pe
         WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = o.product_id
-          AND pe.entitlement >= sqlc.arg(low)::text AND pe.entitlement < sqlc.arg(high)::text
+          AND (pe.product_id, pe.entitlement) >= (o.product_id, sqlc.arg(low)::text)
+          AND (pe.product_id, pe.entitlement) < (o.product_id, sqlc.arg(high)::text)
           AND pe.added_at <= sqlc.arg(at_time)::timestamptz
           AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
         OFFSET 0
@@ -53,7 +62,8 @@ ORDER BY r.prefix COLLATE "C", h.entitlement COLLATE "C";
 -- name: ListDerivedEntitlementsPage :many
 -- One keyset page of the keys a customer holds at at_time, in byte order:
 -- from low_key, after after_key (exclusive; '' starts) and below before_key
--- (exclusive; '' is unbounded). Customer-first, one probe per held product.
+-- (exclusive; '' is unbounded). Customer-first, one probe per held product;
+-- the bounds are (product, key) rows, as in ListDerivedEntitlementsByPrefix.
 WITH owned AS MATERIALIZED (
     SELECT DISTINCT pa.product_id FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
@@ -65,7 +75,8 @@ SELECT DISTINCT k.entitlement FROM owned o
 CROSS JOIN LATERAL (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = o.product_id
-      AND pe.entitlement >= sqlc.arg(low_key)::text AND pe.entitlement > sqlc.arg(after_key)::text
+      AND (pe.product_id, pe.entitlement) >= (o.product_id, sqlc.arg(low_key)::text)
+      AND (pe.product_id, pe.entitlement) > (o.product_id, sqlc.arg(after_key)::text)
       AND (sqlc.arg(before_key)::text = '' OR pe.entitlement < sqlc.arg(before_key)::text)
       AND pe.added_at <= sqlc.arg(at_time)::timestamptz
       AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
@@ -79,14 +90,16 @@ LIMIT sqlc.arg(row_limit)::int;
 -- The reverse lookup: customers holding a key at at_time, keyset by customer
 -- id after after_id. Key-first: the products granting it, then each
 -- product's holders in customer order, stopping at the limit per product.
+-- The cursor bounds (product, customer) rows, so only the per-product index
+-- serves the probe.
 SELECT DISTINCT x.customer_id FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (
     SELECT pa.customer_id FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.product_id = pe.product_id
+      AND (pa.product_id, pa.customer_id) > (pe.product_id, sqlc.arg(after_id)::uuid)
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-      AND pa.customer_id > sqlc.arg(after_id)::uuid
     ORDER BY pa.customer_id
     LIMIT sqlc.arg(row_limit)::int
 ) x

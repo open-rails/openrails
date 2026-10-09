@@ -362,6 +362,13 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 		if err != nil {
 			return err
 		}
+		if sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: mid.UUID(), ID: subscriptionID}); err == nil {
+			if err := lockOwner(ctx, q, mid.UUID(), sub.CustomerID); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if err := q.SoftDeleteFutureProductAccessBySubscription(ctx, gen.SoftDeleteFutureProductAccessBySubscriptionParams{
 			MerchantID: mid.UUID(), SourceID: subscriptionID.String(), EndsAt: endAt.UTC(), Now: now,
 		}); err != nil {
@@ -446,6 +453,13 @@ func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID u
 		if err != nil {
 			return err
 		}
+		if payment, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: paymentID}); err == nil {
+			if err := lockOwner(ctx, q, mid.UUID(), payment.CustomerID); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		if err := q.RetractFutureProductAccessByPayment(ctx, gen.RetractFutureProductAccessByPaymentParams{
 			MerchantID: mid.UUID(), PaymentID: paymentID, Now: now, EndsAt: now,
 		}); err != nil {
@@ -499,7 +513,11 @@ func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Contex
 		sources = append(sources, grants.SourceType(st))
 	}
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return s.ledger(gen.New(tx), mid.UUID()).RevokeBySourceAsOf(ctx, customer, grants.Access, sources, subscriptionID.String(), "subscription source revoked", at)
+		q := gen.New(tx)
+		if err := lockOwner(ctx, q, mid.UUID(), customer); err != nil {
+			return err
+		}
+		return s.ledger(q, mid.UUID()).RevokeBySourceAsOf(ctx, customer, grants.Access, sources, subscriptionID.String(), "subscription source revoked", at)
 	})
 }
 
@@ -625,4 +643,15 @@ func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *mo
 		}
 		return l.MaterializeGrant(ctx, g)
 	})
+}
+
+// lockOwner takes the customer's mutex before a writer touches several of
+// their windows: every access writer locks the customer first, so writers of
+// one customer never deadlock on its access version.
+func lockOwner(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID) error {
+	_, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID, ID: customer})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
 }

@@ -22,20 +22,33 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// statements records the SQL of each sqlc statement by its "-- name:".
+// statements records the SQL, last arguments and run count of each sqlc
+// statement by its "-- name:".
 type statements struct {
-	mu  sync.Mutex
-	sql map[string]string
+	mu    sync.Mutex
+	sql   map[string]string
+	args  map[string][]any
+	count map[string]int
 }
 
 func (s *statements) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if _, rest, ok := strings.Cut(data.SQL, "-- name: "); ok {
+	if _, rest, ok := strings.Cut(data.SQL, "-- name: "); ok && !strings.HasPrefix(data.SQL, "EXPLAIN") {
 		name, _, _ := strings.Cut(rest, " ")
 		s.mu.Lock()
-		s.sql[name] = data.SQL
+		s.sql[name], s.args[name] = data.SQL, data.Args
+		s.count[name]++
 		s.mu.Unlock()
 	}
 	return ctx
+}
+
+// ran is how many times each statement ran since the last call.
+func (s *statements) ran() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.count
+	s.count = map[string]int{}
+	return out
 }
 
 func (*statements) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
@@ -45,6 +58,7 @@ type fixture struct {
 	client   *openrails.Client
 	clock    *clockwork.FakeClock
 	pool     *pgxpool.Pool
+	schema   string
 	executed *statements
 }
 
@@ -56,11 +70,12 @@ func newFixture(t *testing.T) *fixture {
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	require.NoError(t, err)
-	f := &fixture{t: t, clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), executed: &statements{sql: map[string]string{}}}
+	f := &fixture{t: t, clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), executed: &statements{sql: map[string]string{}, args: map[string][]any{}, count: map[string]int{}}}
 	config.ConnConfig.Tracer = f.executed
 	f.pool, err = pgxpool.NewWithConfig(t.Context(), config)
 	require.NoError(t, err)
 	schema := "e2e_ent_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	f.schema = schema
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -76,33 +91,6 @@ func newFixture(t *testing.T) *fixture {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, f.client.Close(context.Background())) })
 	return f
-}
-
-// plan is the generic plan of an executed statement with sequential scans
-// off, as TestQueryAudit plans it.
-func (f *fixture) plan(name string) string {
-	f.t.Helper()
-	f.executed.mu.Lock()
-	sql := f.executed.sql[name]
-	f.executed.mu.Unlock()
-	require.NotEmpty(f.t, sql, "%s never ran", name)
-	conn, err := f.pool.Acquire(f.t.Context())
-	require.NoError(f.t, err)
-	defer conn.Release()
-	tx, err := conn.Begin(f.t.Context())
-	require.NoError(f.t, err)
-	defer func() { _ = tx.Rollback(context.Background()) }()
-	_, err = tx.Exec(f.t.Context(), "SET LOCAL enable_seqscan = off")
-	require.NoError(f.t, err)
-	results, err := tx.Conn().PgConn().Exec(f.t.Context(), "EXPLAIN (GENERIC_PLAN) "+sql).ReadAll()
-	require.NoError(f.t, err)
-	var lines []string
-	for _, result := range results {
-		for _, row := range result.Rows {
-			lines = append(lines, string(row[0]))
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 func invalidParam(t *testing.T, err error, param string) {
@@ -177,11 +165,6 @@ func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	other, err := f.client.CheckEntitlements(ctx, billing.CustomerID(uuid.New()), billing.CheckEntitlementsParams{Prefixes: []string{posts}})
 	require.NoError(t, err)
 	require.Equal(t, billing.HeldEntitlements{Keys: []string{}}, other.Held[posts], "another customer's keys never answer")
-
-	plan := f.plan("ListDerivedEntitlementsByPrefix")
-	require.NotContains(t, plan, "Seq Scan", plan)
-	require.Regexp(t, `Index (Only )?Scan using product_access_\w+ on product_access`, plan)
-	require.Regexp(t, `Index (Only )?Scan using product_entitlements_\w+ on product_entitlements pe[^\n]*\n[^\n]*Index Cond: [^\n]*product_id = o\.product_id`, plan, "one probe of each held product's keys")
 
 	tooMany := make([]string, billing.MaxEntitlementPrefixes+1)
 	for i := range tooMany {

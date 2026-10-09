@@ -23,6 +23,7 @@ sql:
       - "internal/migrate/postgres/0018_product_entitlements.up.sql"
       - "internal/migrate/postgres/0019_product_access.up.sql"
       - "internal/migrate/postgres/0020_product_access_cutover.up.sql"
+      - "internal/migrate/postgres/0021_entitlement_cache.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

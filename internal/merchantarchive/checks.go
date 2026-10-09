@@ -53,6 +53,8 @@ var excludedTables = map[string]string{
 	"access_cutover_approvals":      "the source deployment's cutover evidence; the archive carries the converted product access",
 
 	"operation_authorization_extensions": "growth of unsupported operation authorizations, refused with them",
+	"customer_entitlement_cache":         "derived from product access and product keys; rebuilt on read",
+	"customer_entitlement_cache_stamps":  "derived from product access and product keys; rebuilt on read",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -62,7 +64,7 @@ var excludedColumns = map[string]string{
 	"credential_publications":       "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at",
+	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"merchant_api_host_claims":      "merchant_id api_host token created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
@@ -98,6 +100,8 @@ var excludedColumns = map[string]string{
 	"cost_observations":             "merchant_id operation_id observation_id normalized_query query_starts_at query_ends_at raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
 
 	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
+	"customer_entitlement_cache":         "id merchant_id customer_id entitlement",
+	"customer_entitlement_cache_stamps":  "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment
@@ -109,6 +113,7 @@ var omittedColumns = map[string]string{
 	// custody; credentials are re-entered at the destination.
 	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision",
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
+	"customers":         "access_version",
 	"payments":          "destructive_run_class",
 	"checkout_attempts": "destructive_run_class",
 	"product_access":    "destructive_run_class",

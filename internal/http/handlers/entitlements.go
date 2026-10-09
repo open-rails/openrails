@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -142,26 +141,12 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if err := entitlements.ValidateCheck(req); err != nil {
-		writeRefusal(r, err, "entitlement check failed")
-		return
-	}
-	at := req.At
-	if at.IsZero() {
-		at = r.Clock.Now()
-	}
-	svc := r.State.EntitlementService
-	result, err := svc.CheckMany(r.Request.Context(), customer.String(), req.Entitlements, at)
+	out, err := r.State.EntitlementService.Check(r.Request.Context(), customer.String(), req)
 	if err != nil {
 		writeRefusal(r, err, "entitlement check failed")
 		return
 	}
-	held, err := svc.HeldByPrefix(r.Request.Context(), customer.String(), req.Prefixes, req.PrefixLimit, at)
-	if err != nil {
-		writeRefusal(r, err, "entitlement check failed")
-		return
-	}
-	r.SuccessJSON(billing.EntitlementCheck{Entitlements: result, Held: held})
+	r.SuccessJSON(out)
 }
 
 // ServiceGetEffectiveTier answers the tier the customer holds in ?group=.

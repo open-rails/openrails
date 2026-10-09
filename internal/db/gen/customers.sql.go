@@ -54,7 +54,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version
 `
 
 type EnsureCustomerParams struct {
@@ -79,6 +79,7 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.LastSeenAt,
 		&i.Username,
 		&i.Blocked,
+		&i.AccessVersion,
 	)
 	return i, err
 }
@@ -120,7 +121,7 @@ func (q *Queries) FillCustomerEmail(ctx context.Context, arg FillCustomerEmailPa
 }
 
 const getCustomer = `-- name: GetCustomer :one
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -141,12 +142,13 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.LastSeenAt,
 		&i.Username,
 		&i.Blocked,
+		&i.AccessVersion,
 	)
 	return i, err
 }
 
 const getCustomersByIDs = `-- name: GetCustomersByIDs :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
@@ -173,6 +175,7 @@ func (q *Queries) GetCustomersByIDs(ctx context.Context, arg GetCustomersByIDsPa
 			&i.LastSeenAt,
 			&i.Username,
 			&i.Blocked,
+			&i.AccessVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -185,7 +188,7 @@ func (q *Queries) GetCustomersByIDs(ctx context.Context, arg GetCustomersByIDsPa
 }
 
 const listCustomers = `-- name: ListCustomers :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers c
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
    OR c.id::text ILIKE $2 || '%'
@@ -229,6 +232,7 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 			&i.LastSeenAt,
 			&i.Username,
 			&i.Blocked,
+			&i.AccessVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -287,7 +291,7 @@ ON CONFLICT (merchant_id, id) DO UPDATE SET
   username = EXCLUDED.username,
   blocked = EXCLUDED.blocked,
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version
 `
 
 type PutCustomersParams struct {
@@ -324,6 +328,7 @@ func (q *Queries) PutCustomers(ctx context.Context, arg PutCustomersParams) ([]B
 			&i.LastSeenAt,
 			&i.Username,
 			&i.Blocked,
+			&i.AccessVersion,
 		); err != nil {
 			return nil, err
 		}

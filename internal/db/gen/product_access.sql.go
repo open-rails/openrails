@@ -24,22 +24,24 @@ func (q *Queries) AcquireAccessTimelineLock(ctx context.Context, key int64) erro
 }
 
 const checkProductAccess = `-- name: CheckProductAccess :many
-SELECT candidate.product_id::uuid AS product_id, EXISTS (
-    SELECT 1 FROM billing.product_access pa
-    WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $2::uuid
+SELECT candidate.product_id::uuid AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest($1::uuid[]) AS candidate(product_id)
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_access pa
+    WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
       AND pa.product_id = candidate.product_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $3::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
-) AS has_access
-FROM unnest($4::uuid[]) AS candidate(product_id)
+      AND pa.starts_at <= $4::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
+    LIMIT 1
+) held ON true
 `
 
 type CheckProductAccessParams struct {
+	ProductIds []uuid.UUID
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	AtTime     time.Time
-	ProductIds []uuid.UUID
 }
 
 type CheckProductAccessRow struct {
@@ -47,13 +49,15 @@ type CheckProductAccessRow struct {
 	HasAccess bool
 }
 
-// Whether the customer holds each product at at: one indexed probe each.
+// Whether the customer holds each product at at: one indexed probe each (a
+// LATERAL with LIMIT, which the planner cannot turn into a scan of every
+// window the customer holds).
 func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccessParams) ([]CheckProductAccessRow, error) {
 	rows, err := q.db.Query(ctx, checkProductAccess,
+		arg.ProductIds,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.AtTime,
-		arg.ProductIds,
 	)
 	if err != nil {
 		return nil, err
@@ -74,23 +78,25 @@ func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccess
 }
 
 const checkProductAccessKeys = `-- name: CheckProductAccessKeys :many
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, EXISTS (
-    SELECT 1 FROM billing.product_access pa
-    WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $2::uuid
+SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+FROM unnest($1::text[]) AS candidate(product_key)
+LEFT JOIN billing.products p ON p.merchant_id = $2::uuid AND p.key = candidate.product_key
+LEFT JOIN LATERAL (
+    SELECT true AS found FROM billing.product_access pa
+    WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
       AND pa.product_id = p.id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $3::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
-) AS has_access
-FROM unnest($4::text[]) AS candidate(product_key)
-LEFT JOIN billing.products p ON p.merchant_id = $1::uuid AND p.key = candidate.product_key
+      AND pa.starts_at <= $4::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
+    LIMIT 1
+) held ON true
 `
 
 type CheckProductAccessKeysParams struct {
+	ProductKeys []string
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	AtTime      time.Time
-	ProductKeys []string
 }
 
 type CheckProductAccessKeysRow struct {
@@ -103,10 +109,10 @@ type CheckProductAccessKeysRow struct {
 // products stay readable for their holders.
 func (q *Queries) CheckProductAccessKeys(ctx context.Context, arg CheckProductAccessKeysParams) ([]CheckProductAccessKeysRow, error) {
 	rows, err := q.db.Query(ctx, checkProductAccessKeys,
+		arg.ProductKeys,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.AtTime,
-		arg.ProductKeys,
 	)
 	if err != nil {
 		return nil, err
