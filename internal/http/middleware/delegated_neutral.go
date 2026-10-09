@@ -52,9 +52,6 @@ func ResourceUserFromRequest(r *request.Request) (*credential.ResourceUser, bool
 type CredentialType string
 
 const (
-	CredentialAPIKey            CredentialType = "api_key"
-	CredentialRemoteApplication CredentialType = "remote_application"
-	CredentialServiceJWT        CredentialType = "service_jwt"
 	CredentialDelegatedUser     CredentialType = "delegated_user"
 	CredentialHostDelegatedUser CredentialType = "host_delegated_user"
 	CredentialUserSession       CredentialType = "user_session"
