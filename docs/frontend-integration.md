@@ -20,12 +20,8 @@ routing order; the page pays with one of them ([Checkout](#checkout)).
 ### Authentication
 
 Embedded applications use their normal user credential through the host's
-AuthKit request verifier. Cookie-based hosts set `Routes.CookieOrigin` to
-`"https://merchant.example"`; by default the mount strips ambient cookies.
-Admission accepts unsafe cookie
-requests only from that exact configured origin, including bodyless POSTs;
-missing, opaque, cross-origin and sibling origins are refused. Do not wrap
-AuthKit's own auth routes, which own their refresh/CSRF cookie protocol.
+AuthKit request verifier, sent in a header: the mount strips ambient cookies.
+AuthKit's own auth routes keep their refresh/CSRF cookie protocol.
 
 Standalone and SaaS browser clients call OpenRails with an OAuth 2.0 access
 token (RFC 9068 `at+jwt`) from an issuer OpenRails trusts ([auth](auth.md#trusted-issuers)):
@@ -58,7 +54,6 @@ can only ever act on itself. In embedded mode, prepend the mount prefix to every
 GET  /v1/me                               balances, default cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
-GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/{id}]               itemized statements (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements
@@ -71,7 +66,7 @@ PUT  /v1/me/subscriptions/{id}/payment-method  its own saved card, or null to fo
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
-POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deployments)
+POST /v1/me/billing-portal-sessions       → {"url": ...} (Stripe-portal deployments)
 GET  /v1/me/notifications                 billing notifications
 ```
 

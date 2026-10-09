@@ -32,6 +32,7 @@ import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { useAdminUpdates, useMetrics } from "@/lib/capabilities"
 
 export function OpsPage() {
   return <FindingsTab />
@@ -45,8 +46,13 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
+  const canUpdate = useAdminUpdates()
+  const metrics = useMetrics()
   const { data, isPending: loading } = useQuery(adminQueries.findings())
-  const { data: gauges } = useQuery(adminQueries.findingSummary())
+  const { data: gauges } = useQuery({
+    ...adminQueries.findingSummary(),
+    enabled: metrics,
+  })
   const [resolving, setResolving] = React.useState<Finding | null>(null)
   // The bell and alert emails link one finding: ?finding=<id>.
   const [params] = useSearchParams()
@@ -54,7 +60,7 @@ function FindingsTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      {gauges && (
+      {metrics && gauges && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* Each gauge says what is wrong with the MONEY, not what the check
               is called internally: a merchant reading "freeloaders" cannot tell
@@ -125,7 +131,7 @@ function FindingsTab() {
                   </TableCell>
                   <TableCell>{formatDate(f.last_seen_at)}</TableCell>
                   <TableCell className="text-right">
-                    {!f.resolved_at && (
+                    {canUpdate && !f.resolved_at && (
                       <Button
                         variant="outline"
                         size="sm"

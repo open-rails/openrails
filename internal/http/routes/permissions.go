@@ -2,51 +2,52 @@ package routes
 
 import "fmt"
 
-// Permissions are the host's permissions for the staff bundles, as
-// Auth.RequirePermission takes them: the admin routes' reads and writes,
-// catalog edits, and the merchant's configuration. An empty one leaves its
-// routes unmounted.
-type Permissions struct{ AdminRead, AdminWrite, CatalogWrite, MerchantConfig string }
+// Permissions are the host's permissions for the staff route groups, as
+// Auth.RequirePermission takes them: the admin group's reads and updates,
+// the catalog, the merchant's configuration and its business metrics. Each
+// group is independent; an empty one leaves its routes unmounted.
+type Permissions struct{ AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string }
 
-// Validate refuses AdminWrite or CatalogWrite without AdminRead.
+// Validate refuses AdminUpdate without AdminRead.
 func (p Permissions) Validate() error {
-	switch {
-	case p.AdminRead != "":
-	case p.AdminWrite != "":
-		return fmt.Errorf("openrails: Routes.Permissions.AdminWrite needs AdminRead")
-	case p.CatalogWrite != "":
-		return fmt.Errorf("openrails: Routes.Permissions.CatalogWrite needs AdminRead")
+	if p.AdminUpdate != "" && p.AdminRead == "" {
+		return fmt.Errorf("openrails: Permissions.AdminUpdate needs AdminRead")
 	}
 	return nil
 }
 
-// For is the permission a staff route checks: "" when its bundle is not
+// For is the permission a staff route checks: "" when its group is not
 // mounted.
 func (p Permissions) For(r Route) string {
 	switch r.Needs() {
 	case "AdminRead":
 		return p.AdminRead
-	case "AdminWrite":
-		return p.AdminWrite
-	case "CatalogWrite":
-		return p.CatalogWrite
+	case "AdminUpdate":
+		return p.AdminUpdate
+	case "Catalog":
+		return p.Catalog
 	case "MerchantConfig":
 		return p.MerchantConfig
+	case "Metrics":
+		return p.Metrics
 	}
 	return ""
 }
 
 // Needs names the Routes.Permissions field a staff route checks.
 func (r Route) Needs() string {
-	switch {
-	case r.Group == CatalogWrite:
-		return "CatalogWrite"
-	case r.Group == MerchantConfig:
+	switch r.Group {
+	case CatalogAdmin:
+		return "Catalog"
+	case MerchantConfig:
 		return "MerchantConfig"
-	case r.Group != Admin:
-		return ""
-	case r.Level == LevelWrite:
-		return "AdminWrite"
+	case Metrics:
+		return "Metrics"
+	case Admin:
+		if r.Level == LevelUpdate {
+			return "AdminUpdate"
+		}
+		return "AdminRead"
 	}
-	return "AdminRead"
+	return ""
 }

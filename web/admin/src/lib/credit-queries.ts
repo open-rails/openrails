@@ -83,7 +83,7 @@ export const creditMutations = {
     mutationOptions({
       mutationFn: ({ grant, reason }: { grant: string; reason: string }) => {
         assertMerchant(merchant)
-        return revokeCreditGrant(customer, grant, reason)
+        return revokeCreditGrant(grant, reason)
       },
       onSettled: () =>
         client.invalidateQueries({

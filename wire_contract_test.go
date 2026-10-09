@@ -131,7 +131,6 @@ func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 	max := int64(math.MaxInt64)
 	for _, value := range []any{
 		billing.BudgetWindow{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"},
-		billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
 		billing.BillingPolicy{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		billing.MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
 		billing.CustomerSettings{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: max}}, TrustLevels: []billing.TrustLevel{}},

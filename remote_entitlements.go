@@ -79,15 +79,13 @@ func (c *Client) CreateProductAccess(ctx context.Context, params billing.CreateP
 	return out.Items, nil
 }
 
-// DeleteProductAccess revokes one of the customer's product-access grants.
-func (c *Client) DeleteProductAccess(ctx context.Context, customerID billing.CustomerID, id billing.ProductAccessID, requestOptions ...RequestOption) error {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return err
-	}
+// RevokeProductAccess takes back a product a customer holds, with
+// params.Reason; a window not yet started is removed. Revoking again changes
+// nothing.
+func (c *Client) RevokeProductAccess(ctx context.Context, id billing.ProductAccessID, params billing.RevokeProductAccessParams, requestOptions ...RequestOption) error {
 	grant, err := requireTypedID("product_access_id", id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodDelete, path+"/product-access/"+grant, nil, nil, requestOptions...)
+	return c.do(ctx, http.MethodPost, "/v1/admin/product-access/"+grant+"/revoke", params, nil, requestOptions...)
 }

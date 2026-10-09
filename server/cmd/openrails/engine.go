@@ -27,7 +27,7 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	}
 	cfg := server.Config{
 		Engine: *h.Config, Auth: *h.Auth, ResourceServer: h.ResourceServer, LocalSignIn: h.LocalSignIn,
-		AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
+		RouteGroups: h.RouteGroups, AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
 		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
 	}

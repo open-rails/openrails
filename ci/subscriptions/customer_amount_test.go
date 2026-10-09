@@ -50,7 +50,7 @@ func TestHostedCreditDepositSnapshot(t *testing.T) {
 		require.Equal(t, []string{"100.00", "75.00"}[i], pay.nmi.LastSale().Amount)
 	}
 	require.Len(t, pay.nmi.Sales(), 2, "separate deposits are repeat-buyable and retries do not charge twice")
-	grants, err := client.ListCreditGrants(t.Context(), buyer.cid(), billing.CreditGrantListParams{})
+	grants, err := client.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: buyer.cid()})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 2)
 	for _, grant := range grants.Items {

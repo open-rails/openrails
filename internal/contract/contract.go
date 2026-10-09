@@ -41,7 +41,7 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 	// routes: the route table lists them, the wire contract does not.
 	var api, browser []routes.Route
 	for _, r := range routes.Catalog() {
-		if r.Group != routes.Provisioning {
+		if r.Auth != routes.AuthProvisioning {
 			api = append(api, r)
 		}
 		if browserGroups[r.Group] {

@@ -456,7 +456,7 @@ Rules:
   `account_id` would silently lie). Arm a NEW PSP and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
-  `POST /v1/admin/psps/{id}/archive` makes no provider call, so it
+  `PATCH /v1/admin/psps/{id}` with `{archived: true}` makes no provider call, so it
   works when the old provider is terminated or unreachable.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,8 +82,20 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "renamed@host.test", *profile.Contact.Email)
 
-	_, err = w.rt.Routes(openrails.Routes{Auth: w.auth, Prefix: "/other", Provisioning: true})
-	require.ErrorContains(t, err, "Deps.UserInfo", "one source of truth")
+	// One source of truth: the programmatic routes mount without SCIM.
+	routes, err := w.rt.Routes(openrails.Routes{Auth: w.auth, Prefix: "/other", RouteGroups: openrails.RouteGroups{Programmatic: true}})
+	require.NoError(t, err)
+	var app, scim int
+	for _, route := range routes {
+		switch {
+		case strings.HasPrefix(route.Path, "/other/v1/app/scim/"):
+			scim++
+		case strings.HasPrefix(route.Path, "/other/v1/app/"):
+			app++
+		}
+	}
+	require.Positive(t, app)
+	require.Zero(t, scim)
 	_, err = w.rt.SCIMHandler()
 	require.Error(t, err)
 }
@@ -95,7 +108,6 @@ func TestReceiptsGoToThePushedEmail(t *testing.T) {
 	mail := &mailbox{}
 	w := prepareWorld(t, 12)
 	w.deps = func(d *openrails.Deps) { d.Email = mail }
-	w.mount = func(r *openrails.Routes) { r.Provisioning = true }
 	w.start()
 	ctx := t.Context()
 	token, err := w.client[embedded].CreateProvisioningToken(ctx, billing.CreateProvisioningTokenParams{Name: "directory"})
@@ -104,7 +116,7 @@ func TestReceiptsGoToThePushedEmail(t *testing.T) {
 		t.Helper()
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
-		req, err := http.NewRequestWithContext(ctx, method, w.server.URL+mountPrefix+"/scim/v2"+path, bytes.NewReader(raw))
+		req, err := http.NewRequestWithContext(ctx, method, w.server.URL+mountPrefix+"/v1/app/scim/v2"+path, bytes.NewReader(raw))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token.Token)
 		req.Header.Set("Content-Type", "application/scim+json")

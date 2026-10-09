@@ -20,19 +20,22 @@ func GetMerchantConfiguration(r *httprequest.Request) {
 	r.SuccessJSON(state)
 }
 
-func ApplyMerchantConfiguration(r *httprequest.Request) {
-	var params billing.ApplyMerchantConfigurationParams
+// UpdateMerchantConfiguration merges the body into the merchant's
+// configuration at the revision it names, once per Idempotency-Key.
+func UpdateMerchantConfiguration(r *httprequest.Request) {
+	var params billing.UpdateMerchantConfigurationParams
 	if !r.BindJSON(&params) {
 		return
 	}
+	params.IdempotencyKey = r.Header("Idempotency-Key")
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	receipt, err := svc.ApplyMerchantConfiguration(r.Request.Context(), params)
+	receipt, err := svc.UpdateMerchantConfiguration(r.Request.Context(), params)
 	if err != nil {
-		writeRefusal(r, err, "apply merchant configuration failed")
+		writeRefusal(r, err, "update merchant configuration failed")
 		return
 	}
 	r.SuccessJSON(receipt)

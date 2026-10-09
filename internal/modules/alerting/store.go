@@ -50,6 +50,20 @@ func (s *store) rotateWebhookURL(ctx context.Context, id uuid.UUID, host string,
 	return webhookFromRow(row), nil
 }
 
+func (s *store) updateWebhook(ctx context.Context, id uuid.UUID, setName bool, name, format *string, enabled *bool) (Webhook, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return Webhook{}, err
+	}
+	row, err := s.db.Gen(ctx).UpdateMerchantWebhook(ctx, gen.UpdateMerchantWebhookParams{
+		MerchantID: mid.UUID(), ID: id, SetName: setName, Name: name, Format: format, Enabled: enabled,
+	})
+	if err != nil {
+		return Webhook{}, err
+	}
+	return webhookFromRow(row), nil
+}
+
 func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

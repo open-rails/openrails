@@ -145,8 +145,8 @@ func TestEntitlementScaleBenchmark(t *testing.T) {
 			granted = append(granted, out...)
 		}))
 		next := 0
-		row("DeleteProductAccess (revoke)", n, measure(t, 20, nil, func() {
-			require.NoError(t, client.DeleteProductAccess(ctx, whale, granted[next].ID))
+		row("RevokeProductAccess", n, measure(t, 20, nil, func() {
+			require.NoError(t, revokeAccess(client, ctx, granted[next].ID))
 			next++
 		}))
 		row("ListEntitlements prefix page after a write", n, measure(t, 5, func() {

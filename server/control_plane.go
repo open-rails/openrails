@@ -96,13 +96,14 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 }
 
 // The permissions the server's merchant persona declares: its staff routes'
-// AdminRead, AdminWrite, and CatalogWrite and MerchantConfig (MerchantAdmin).
-// Owners hold all three, support MerchantRead and MerchantWrite, viewers
-// MerchantRead.
+// AdminRead, AdminUpdate, Catalog and MerchantConfig (MerchantAdmin), and
+// Metrics (MerchantMetrics). Owners hold all four, support MerchantRead and
+// MerchantWrite, viewers MerchantRead.
 const (
-	MerchantRead  = staffperm.Read
-	MerchantWrite = staffperm.Write
-	MerchantAdmin = staffperm.Admin
+	MerchantRead    = staffperm.Read
+	MerchantWrite   = staffperm.Write
+	MerchantAdmin   = staffperm.Admin
+	MerchantMetrics = staffperm.Metrics
 )
 
 // ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole

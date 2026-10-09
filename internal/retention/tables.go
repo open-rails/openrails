@@ -126,7 +126,6 @@ var Tables = map[string]Table{
 	"billing_policies":                  {Class: State},
 	"billing_policy_bindings":           {Class: State},
 	"money_settings":                    {Class: State},
-	"invoker_spend_limits":              {Class: State},
 	"psp_refresh_watermarks":            {Class: State},
 	"webhook_health":                    {Class: State},
 	"nmi_bulk_checkpoints":              {Class: State},

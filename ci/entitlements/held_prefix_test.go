@@ -130,7 +130,7 @@ func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	}
 	ended := start.Add(30 * time.Minute)
 	grant("content:t:post:expired", &ended)
-	require.NoError(t, f.client.DeleteProductAccess(ctx, customer, grant("content:t:post:revoked", nil)))
+	require.NoError(t, revokeAccess(f.client, ctx, grant("content:t:post:revoked", nil)))
 	f.clock.Advance(time.Hour)
 	grant("content:t:post:future", nil)
 	at := start.Add(45 * time.Minute)

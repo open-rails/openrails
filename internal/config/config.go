@@ -68,7 +68,7 @@ type Config struct {
 	// Catalog optionally applies one merchant-scoped batch at startup, using
 	// the same permanent content-hash replay as Client.ApplyCatalog. Later
 	// programmatic edits remain available, and the catalog-write HTTP routes
-	// (Routes.Permissions.CatalogWrite) refuse while it is set: the document is the
+	// (RouteGroups.Catalog) refuse while it is set: the document is the
 	// truth. Requires Merchant. Nil skips the batch.
 	Catalog *catalog.Application
 	// Checkout is the shared payment page several sites sell through; zero
@@ -350,8 +350,8 @@ type VaultConfig struct {
 	TransitMount string
 }
 
-// AdminConsolePath is AdminConsole.Path, defaulted to "/admin".
-func AdminConsolePath(c *AdminConsole) string {
+// AdminConsolePath is ConsoleMount.Path, defaulted to "/admin".
+func AdminConsolePath(c *ConsoleMount) string {
 	if c == nil || c.Path == "" {
 		return "/admin"
 	}

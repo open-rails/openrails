@@ -10,7 +10,7 @@ import {
   getPrice,
   getPriceHistory,
   getProduct,
-  getRebillCycle,
+  getRenewal,
   getSubscription,
   getUsageMeter,
   listCustomerEntitlements,
@@ -26,11 +26,12 @@ import {
   listPayments,
   listPrices,
   listProducts,
-  listRebillCycles,
+  listRenewals,
   listPriceMigrations,
   listSubscriptions,
   listUsageMeterOverrides,
   listUsageMeters,
+  getAdminAccess,
   getConfig,
   listWebhooks,
   PAGE_MAX,
@@ -90,7 +91,7 @@ const buildQueryKeys = (root: () => MerchantRoot) => ({
   payments: () => [...root(), "payments"] as const,
   payment: (id: string) => [...root(), "payments", id] as const,
   attempts: () => [...root(), "payment-attempts"] as const,
-  cycles: () => [...root(), "rebill-cycles"] as const,
+  cycles: () => [...root(), "renewals"] as const,
   catalog: () => [...root(), "catalog"] as const,
   catalogDrift: () => [...root(), "catalog", "drift"] as const,
   usageMeters: () => [...root(), "catalog", "meters"] as const,
@@ -291,17 +292,16 @@ export const adminQueries = {
   cycles: (filters: CycleFilters, limit: number, cursor?: string) =>
     queryOptions({
       queryKey: [...queryKeys.cycles(), { filters, limit, cursor }],
-      queryFn: ({ signal }) =>
-        listRebillCycles(filters, { limit, cursor }, signal),
+      queryFn: ({ signal }) => listRenewals(filters, { limit, cursor }, signal),
       placeholderData: keepPreviousData,
-      meta: { errorAction: "Load rebill cycles" },
+      meta: { errorAction: "Load renewals" },
     }),
   cycle: (id: string) =>
     queryOptions({
       queryKey: [...queryKeys.cycles(), id],
-      queryFn: ({ signal }) => getRebillCycle(id, signal),
+      queryFn: ({ signal }) => getRenewal(id, signal),
       enabled: Boolean(id),
-      meta: { errorAction: "Load rebill cycle" },
+      meta: { errorAction: "Load renewal" },
     }),
   products: (
     options: { limit?: number; cursor?: string; errorAction?: string } = {}
@@ -506,6 +506,13 @@ export const adminQueries = {
       queryFn: ({ signal }) => getConfig(signal),
       staleTime: 5 * 60_000,
       meta: { errorAction: "Load configuration" },
+    }),
+  access: () =>
+    queryOptions({
+      queryKey: [...queryKeys.merchant(), "access"],
+      queryFn: ({ signal }) => getAdminAccess(signal),
+      staleTime: 5 * 60_000,
+      meta: { errorAction: "Load your access" },
     }),
   webhooks: () =>
     queryOptions({

@@ -14,17 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
-
-// ApplyMerchantMetadata is the trusted startup entry to the same application
-// boundary used by the authorized Client. It does not select a merchant.
-func ApplyMerchantMetadata(ctx context.Context, database *db.DB, params billing.ApplyMerchantConfigurationParams) (*billing.MerchantConfigurationReceipt, error) {
-	return (&Service{rt: &app.Runtime{DB: database}}).ApplyMerchantConfiguration(ctx, params)
-}
 
 func (s *Service) merchantConfigurationState(ctx context.Context) (*billing.MerchantConfigurationState, error) {
 	mid, err := merchant.Require(ctx)
@@ -78,7 +71,7 @@ func (s *Service) GetMerchantConfigurationState(ctx context.Context) (state *bil
 	return state, err
 }
 
-func merchantApplicationDigest(params billing.ApplyMerchantConfigurationParams) ([32]byte, error) {
+func merchantApplicationDigest(params billing.UpdateMerchantConfigurationParams) ([32]byte, error) {
 	// JSON omitempty otherwise erases the distinction between an omitted list
 	// and an explicitly empty list that clears declarative policy.
 	presence := struct{ Policies, Bindings, Windows bool }{}
@@ -88,16 +81,19 @@ func merchantApplicationDigest(params billing.ApplyMerchantConfigurationParams) 
 		presence.Windows = params.Settings.DelegatedInvokerWastedSpendLimits != nil
 	}
 	body, err := json.Marshal(struct {
-		Params   billing.ApplyMerchantConfigurationParams
+		Params   billing.UpdateMerchantConfigurationParams
 		Presence any
 	}{params, presence})
 	return sha256.Sum256(body), err
 }
 
-func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing.ApplyMerchantConfigurationParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
-	params.ApplicationID = strings.TrimSpace(params.ApplicationID)
-	if params.ApplicationID == "" || len(params.ApplicationID) > 128 || params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
-		return nil, apperr.Invalidf("application_id and expected_revision are required")
+func (s *Service) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams) (receipt *billing.MerchantConfigurationReceipt, err error) {
+	params.IdempotencyKey = strings.TrimSpace(params.IdempotencyKey)
+	if params.IdempotencyKey == "" || len(params.IdempotencyKey) > 128 {
+		return nil, apperr.New(400, "idempotency_key_required", "Idempotency-Key header is required (at most 128 bytes)")
+	}
+	if params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
+		return nil, apperr.Invalidf("expected_revision is required").WithParam("expected_revision")
 	}
 	if params.DisplayName != nil && strings.TrimSpace(*params.DisplayName) == "" {
 		return nil, apperr.Invalidf("display_name must not be empty")
@@ -122,10 +118,10 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 		if _, err := q.LockMerchantSettings(ctx, mid.UUID()); err != nil {
 			return err
 		}
-		previous, err := q.GetMerchantConfigurationApplication(ctx, gen.GetMerchantConfigurationApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.ApplicationID})
+		previous, err := q.GetMerchantConfigurationApplication(ctx, gen.GetMerchantConfigurationApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.IdempotencyKey})
 		if err == nil {
 			if !bytes.Equal(previous.RequestSha256, digest[:]) {
-				return apperr.New(409, "merchant_configuration_application_conflict", "application_id was already committed with different content")
+				return apperr.New(422, billing.CodeIdempotencyKeyReused, "Idempotency-Key was already committed with different content")
 			}
 			receipt = &billing.MerchantConfigurationReceipt{}
 			if err := json.Unmarshal(previous.Result, receipt); err != nil {
@@ -158,12 +154,12 @@ func (s *Service) ApplyMerchantConfiguration(ctx context.Context, params billing
 		if err != nil {
 			return err
 		}
-		receipt = &billing.MerchantConfigurationReceipt{ApplicationID: params.ApplicationID, Revision: current.Revision}
+		receipt = &billing.MerchantConfigurationReceipt{Revision: current.Revision}
 		body, err := json.Marshal(receipt)
 		if err != nil {
 			return err
 		}
-		return q.InsertMerchantConfigurationApplication(ctx, gen.InsertMerchantConfigurationApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.ApplicationID, RequestSha256: digest[:], Result: body})
+		return q.InsertMerchantConfigurationApplication(ctx, gen.InsertMerchantConfigurationApplicationParams{MerchantID: mid.UUID(), ApplicationID: params.IdempotencyKey, RequestSha256: digest[:], Result: body})
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

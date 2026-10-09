@@ -260,7 +260,8 @@ func TestSCIMBulk(t *testing.T) {
 
 // Provisioning mounted on an embedded host: each merchant's directory
 // authenticates with its own token, which reaches only its own customers; a
-// revoked or unknown token is refused, and a merchant's declared token works.
+// revoked or unknown token is no credential, and the host's Auth refuses it;
+// a merchant's declared token works.
 func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
@@ -271,7 +272,7 @@ func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
 		mux := http.NewServeMux()
-		require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", Provisioning: true}))
+		require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}, Prefix: "/billing", RouteGroups: openrails.RouteGroups{Programmatic: true}}))
 		return client, mux
 	}
 	declared := "declared-" + strings.Repeat("x", 32)
@@ -292,8 +293,8 @@ func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 		require.NotContains(t, string(raw), "orscim_", "a token is shown once")
 	}
 
-	asAlice := scimClient{t: t, handler: aliceMux, base: "/billing/scim/v2", token: minted.Token}
-	asBob := scimClient{t: t, handler: bobMux, base: "/billing/scim/v2", token: bobToken.Token}
+	asAlice := scimClient{t: t, handler: aliceMux, base: "/billing/v1/app/scim/v2", token: minted.Token}
+	asBob := scimClient{t: t, handler: bobMux, base: "/billing/v1/app/scim/v2", token: bobToken.Token}
 	shared := uuid.NewString()
 	asAlice.must(http.MethodPost, "/Users", scimUser(shared, "shared", "alice-side@example.test", ""), http.StatusCreated)
 	asBob.must(http.MethodGet, "/Users/"+shared, nil, http.StatusNotFound)
@@ -304,11 +305,10 @@ func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 	require.Equal(t, "alice-side@example.test", user["emails"].([]any)[0].(map[string]any)["value"], "one merchant's push never touches another's")
 
 	for name, token := range map[string]string{"none": "", "unknown": "orscim_" + uuid.NewString(), "another merchant's": bobToken.Token} {
-		status, out := scimClient{t: t, handler: aliceMux, base: "/billing/scim/v2", token: token}.do(http.MethodGet, "/Users/"+shared, nil)
+		status, _ := scimClient{t: t, handler: aliceMux, base: "/billing/v1/app/scim/v2", token: token}.do(http.MethodGet, "/Users/"+shared, nil)
 		require.Equal(t, http.StatusUnauthorized, status, name)
-		require.Equal(t, "401", out["status"], name)
 	}
-	asDeclared := scimClient{t: t, handler: aliceMux, base: "/billing/scim/v2", token: declared}
+	asDeclared := scimClient{t: t, handler: aliceMux, base: "/billing/v1/app/scim/v2", token: declared}
 	asDeclared.must(http.MethodGet, "/Users/"+shared, nil, http.StatusOK)
 
 	require.NoError(t, alice.DeleteProvisioningToken(ctx, minted.ID))

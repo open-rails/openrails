@@ -5,13 +5,15 @@ import (
 	"time"
 )
 
-// ApplyMerchantConfigurationParams is an explicit, replayable metadata update.
-// Omitted fields preserve stored values. Credentials and provider lifecycle
-// changes use the PSP methods and their separate publication receipts; the
+// UpdateMerchantConfigurationParams is an explicit, replayable metadata update
+// against ExpectedRevision, the revision the caller read. Omitted fields
+// preserve stored values. IdempotencyKey (the Idempotency-Key header, at most
+// 128 bytes) replays the first result; the same key with other content is
+// refused. Credentials and provider lifecycle changes use the PSP methods; the
 // operator binds the API host (the merchant manifest, or the server's
 // SetMerchantAPIHost), and a hosted product claims one for its merchant.
-type ApplyMerchantConfigurationParams struct {
-	ApplicationID    string            `json:"application_id"`
+type UpdateMerchantConfigurationParams struct {
+	IdempotencyKey   string            `json:"-"`
 	ExpectedRevision *string           `json:"expected_revision"`
 	Settings         *MerchantSettings `json:"settings,omitempty"`
 	DisplayName      *string           `json:"display_name,omitempty"`
@@ -20,8 +22,8 @@ type ApplyMerchantConfigurationParams struct {
 // MarshalJSON preserves explicit empty policy lists across both Client
 // transports. MerchantSettings omitempty tags otherwise turn a clear into
 // omission, which means preserve for a metadata application.
-func (p ApplyMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
-	type plain ApplyMerchantConfigurationParams
+func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
+	type plain UpdateMerchantConfigurationParams
 	body, err := json.Marshal(plain(p))
 	if err != nil || p.Settings == nil {
 		return body, err
@@ -53,9 +55,8 @@ func (p ApplyMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 // MerchantConfigurationReceipt records a committed metadata application. Replay
 // returns the original revision even when later operations changed metadata.
 type MerchantConfigurationReceipt struct {
-	ApplicationID string `json:"application_id"`
-	Revision      string `json:"revision"`
-	Replayed      bool   `json:"replayed"`
+	Revision string `json:"revision"`
+	Replayed bool   `json:"replayed"`
 }
 
 // MerchantConfigurationState contains current non-secret metadata and an opaque
@@ -90,8 +91,8 @@ type APIHostRecord struct {
 	Value string `json:"value"`
 }
 
-// Capabilities is what this deployment serves: each optional route bundle
-// (admin, catalog_write, merchant_config), on or off, and the optional
+// Capabilities is what this deployment serves: each optional route group
+// (admin, catalog, merchant_config, metrics, app), on or off, and the optional
 // features its configuration enables.
 type Capabilities struct {
 	RouteGroups map[string]bool `json:"route_groups"`

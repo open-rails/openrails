@@ -64,7 +64,7 @@ year-old invoice must not turn into a shutoff instruction.
 ## Policy (two knobs, both defaulted)
 
 Merchant settings, declared under the merchant's `settings:` (mode 1) or
-applied through `POST /v1/admin/configuration/applications` (mode 2); the
+applied through `PATCH /v1/admin/configuration` (mode 2); the
 same names in both:
 
 ```yaml
@@ -83,7 +83,7 @@ Amounts are integers in the currency's native units (micros for USD).
 
 ## What OpenRails enforces: admission
 
-A delinquent customer is refused at `/v1/admin/admissions` with its **own** deny
+A delinquent customer is refused at `/v1/app/admissions` with its **own** deny
 code:
 
 ```json

@@ -2,7 +2,6 @@ package openrails
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
@@ -164,30 +163,4 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.Cust
 		return nil, err
 	}
 	return &out, nil
-}
-
-// DeletePaymentMethod removes a saved payment method. The result says
-// whether it is deleted or awaits the provider; pending is never reported
-// deleted.
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.CustomerID, methodID billing.PaymentMethodID, requestOptions ...RequestOption) (*billing.PaymentMethodDeletion, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	method, err := requireTypedID("payment_method_id", methodID)
-	if err != nil {
-		return nil, err
-	}
-	response, err := c.doResponse(ctx, http.MethodDelete, path+"/payment-methods/"+method, nil, nil, requestOptions...)
-	if err != nil {
-		return nil, err
-	}
-	switch response.status {
-	case http.StatusNoContent:
-		return &billing.PaymentMethodDeletion{}, nil
-	case http.StatusAccepted:
-		return &billing.PaymentMethodDeletion{Pending: true}, nil
-	default:
-		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", billing.ErrUnreachable, response.status)
-	}
 }

@@ -42,7 +42,7 @@ import {
   previewPriceMigration,
   previewSubscriptionChange,
   applyCatalog,
-  refreshCatalogDrift,
+  refreshPSPs,
   refundPayment,
   createPriceMigration,
   resolveFinding,
@@ -380,7 +380,8 @@ export const adminMutations = {
     const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "product-access", "revoke"],
-      mutationFn: (grantId: string) => revokeProductAccess(customerId, grantId),
+      mutationFn: ({ grantId, reason }: { grantId: string; reason: string }) =>
+        revokeProductAccess(grantId, reason),
       onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
     })
   },
@@ -430,11 +431,11 @@ export const adminMutations = {
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
-  refreshCatalogDrift: (queryClient: QueryClient) => {
+  refreshPSPs: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalogDrift(), "refresh"],
-      mutationFn: () => refreshCatalogDrift(),
+      mutationFn: () => refreshPSPs(),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalogDrift()),
     })
   },

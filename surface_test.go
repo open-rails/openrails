@@ -68,6 +68,7 @@ var routeArguments = map[string][]any{
 	"PreviewPriceMigration": {billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
 	"UpdateProduct":         {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
+	"UpdateAlertWebhook":    {billing.AlertWebhookID(uuid.New()), billing.UpdateAlertWebhookParams{Enabled: catalog.Value(true)}},
 	"UpdateCustomer":        {billing.CustomerID(uuid.New()), billing.UpdateCustomerParams{BillingPolicy: catalog.Null[string]()}},
 }
 
@@ -82,7 +83,7 @@ var verbs = map[string][]string{
 
 // documents are the requests that are not named ...Params: what the route
 // stores or runs, sent whole.
-var documents = []string{"SpendDelegation", "DeclaredBilling", "MetricsQuery", "PageRequest", "Application"}
+var documents = []string{"DeclaredBilling", "MetricsQuery", "PageRequest", "Application"}
 
 // synonyms are spellings of the seven verbs the API does not use.
 var synonyms = []string{"Retrieve", "Fetch", "Read", "Find", "Lookup", "Search", "Upsert", "Put", "Add", "New", "Make", "Remove", "Destroy", "Modify", "Edit", "Patch"}
@@ -237,7 +238,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			continue
 		}
 		route, ok := catalogRoutes[seen[0]]
-		if !ok || !route.Staff() {
+		if !ok || !clientRoute(route) {
 			t.Errorf("%s calls %s, which is not a merchant route", m.Name, seen[0])
 			continue
 		}
@@ -279,7 +280,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 
 	for _, r := range routes.Catalog() {
 		switch {
-		case r.Staff():
+		case clientRoute(r):
 			methods := methodsOf[r.Key()]
 			sort.Strings(methods)
 			if len(methods) != 1 {
@@ -291,4 +292,10 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			}
 		}
 	}
+}
+
+// clientRoute reports a route the Client has a method for: a staff,
+// programmatic or access route.
+func clientRoute(r routes.Route) bool {
+	return r.Staff() || r.Auth == routes.AuthApplication || r.Auth == routes.AuthSignedIn
 }

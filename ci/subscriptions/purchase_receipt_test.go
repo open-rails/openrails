@@ -104,7 +104,7 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 	paid, err := w.stripe.CompleteCheckoutSession(ctx, checkout[0]["id"].(string))
 	require.NoError(t, err)
 	w.settle()
-	grants, err := client.ListCreditGrants(ctx, c.customerID(), billing.CreditGrantListParams{})
+	grants, err := client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: c.customerID()})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 1)
 	require.EqualValues(t, 12_990_000, grants.Items[0].Amount, "the chosen amount is the credit")
@@ -129,7 +129,7 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 	require.Equal(t, "12990000", receipts[0]["amount"])
 	require.Equal(t, "API credit", receipts[0]["product_name"])
 	require.True(t, strings.HasPrefix(receipts[0]["payment_id"].(string), billing.PaymentIDPrefix), "%v", receipts[0])
-	grants, err = client.ListCreditGrants(ctx, c.customerID(), billing.CreditGrantListParams{})
+	grants, err = client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: c.customerID()})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 1)
 }

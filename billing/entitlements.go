@@ -28,6 +28,48 @@ func (id *ProductAccessID) UnmarshalText(text []byte) error {
 	return err
 }
 
+// MaxEntitlementChecks bounds the keys of one entitlement check.
+const MaxEntitlementChecks = 100
+
+// Bounds of the prefixes of one entitlement check and of the keys answered
+// under each.
+const (
+	MaxEntitlementPrefixes  = 10
+	DefaultHeldEntitlements = 1000
+	MaxHeldEntitlements     = 10000
+)
+
+// CheckEntitlementsParams asks which of up to MaxEntitlementChecks keys
+// CustomerID holds at At (zero: now), and which keys they hold under each of up
+// to MaxEntitlementPrefixes byte prefixes: at most PrefixLimit per prefix
+// (zero: DefaultHeldEntitlements, at most MaxHeldEntitlements). A prefix is
+// bytes, not grammar: OpenRails gives it no meaning. Its last byte must be
+// printable ASCII (0x21-0x7E). At least one key or prefix is required.
+type CheckEntitlementsParams struct {
+	CustomerID   CustomerID `json:"customer_id"`
+	Entitlements []string   `json:"entitlements"`
+	Prefixes     []string   `json:"prefixes,omitempty"`
+	PrefixLimit  int        `json:"prefix_limit,omitempty"`
+	At           time.Time  `json:"at,omitzero"`
+}
+
+// EntitlementCheck answers every requested key, and every requested prefix in
+// Held ({} when none was asked).
+// Quantities answers every requested key with the most seats a held per-seat
+// product grants it: null when it is not held per seat. Prefixes carry none.
+type EntitlementCheck struct {
+	Entitlements map[string]bool             `json:"entitlements"`
+	Quantities   map[string]*int             `json:"quantities"`
+	Held         map[string]HeldEntitlements `json:"held"`
+}
+
+// HeldEntitlements is the keys a customer holds under one prefix, in byte
+// order. Truncated: more were held than the limit returned.
+type HeldEntitlements struct {
+	Keys      []string `json:"keys"`
+	Truncated bool     `json:"truncated"`
+}
+
 // EntitlementListParams reads the entitlements customers hold at At (zero:
 // now), ordered by customer, then by key in byte order. CustomerIDs names 1
 // to MaxBatchItems customers; with none, Entitlements names exactly one key
@@ -50,31 +92,6 @@ type CustomerEntitlement struct {
 	CustomerID  CustomerID `json:"customer_id"`
 	Entitlement string     `json:"entitlement"`
 	Quantity    *int       `json:"quantity"`
-}
-
-// GetEffectiveTiersParams asks the tier each of 1 to MaxBatchItems customers
-// holds in Group.
-type GetEffectiveTiersParams struct {
-	Group       string       `json:"group"`
-	CustomerIDs []CustomerID `json:"customer_ids"`
-}
-
-// EffectiveTierLookup answers every requested customer with the tier they
-// hold in the group: the highest-ranked product whose entitlements they hold.
-// A customer holding none, or unknown to the merchant, is null; the host
-// applies its default.
-type EffectiveTierLookup struct {
-	Tiers map[CustomerID]*Tier `json:"tiers"`
-}
-
-// Tier is one product of a tier group. Entitlement is its immutable key;
-// DisplayName is for display only.
-type Tier struct {
-	Entitlement string    `json:"entitlement"`
-	DisplayName string    `json:"display_name"`
-	TierRank    int       `json:"tier_rank"`
-	ProductID   ProductID `json:"product_id"`
-	ProductKey  string    `json:"product_key"`
 }
 
 // ProductAccessSourceType is what a product-access window came from.
@@ -129,6 +146,11 @@ type ProductAccessGrant struct {
 	RevokeReason *string      `json:"revoke_reason"`
 	CreatedAt    time.Time    `json:"created_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
+}
+
+// RevokeProductAccessParams says why staff take a product back.
+type RevokeProductAccessParams struct {
+	Reason string `json:"reason"`
 }
 
 // CreateProductAccessParams grants a customer a product free. At most one of

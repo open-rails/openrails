@@ -152,11 +152,19 @@ func TestOwnerFreeGrantFollowsTheProduct(t *testing.T) {
 	_, err = client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{IdempotencyKey: key, Items: []billing.CreateProductAccessParams{{CustomerID: third.customerID(), ProductID: other, Hours: &day}}})
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 
-	// Revoking names the customer: another customer's window is not found.
-	require.ErrorIs(t, client.DeleteProductAccess(t.Context(), comped.customerID(), once[0].ID), billing.ErrNotFound)
+	// Revoking keeps the window with its reason; an unknown window is not found,
+	// and revoking again changes nothing.
+	reason := billing.RevokeProductAccessParams{Reason: "support"}
+	require.ErrorIs(t, client.RevokeProductAccess(t.Context(), billing.ProductAccessID(uuid.New()), reason), billing.ErrNotFound)
 	require.True(t, third.entitled("premium"))
-	require.NoError(t, client.DeleteProductAccess(t.Context(), third.customerID(), once[0].ID))
+	require.NoError(t, client.RevokeProductAccess(t.Context(), once[0].ID, reason))
 	require.False(t, third.entitled("premium"))
+	listed, err := client.ListProductAccess(t.Context(), billing.ProductAccessListParams{IDs: []billing.ProductAccessID{once[0].ID}})
+	require.NoError(t, err)
+	require.Len(t, listed.Items, 1)
+	require.Equal(t, "revoked", listed.Items[0].Status)
+	require.NotNil(t, listed.Items[0].RevokedAt)
+	require.NoError(t, client.RevokeProductAccess(t.Context(), once[0].ID, reason))
 }
 
 // Product access answers for every source: a subscription holds its product

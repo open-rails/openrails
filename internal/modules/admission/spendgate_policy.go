@@ -12,18 +12,16 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-// SpendgatePolicyLoader resolves policy and delegation windows inside the
+// SpendgatePolicyLoader resolves the payer's policy windows inside the
 // admission transaction. FX conversion expresses each limit in the request unit.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
-	budgets  *InvokerSpendLimitStore
 	fx       fx.Provider
 }
 
-// NewSpendgatePolicyLoader wires the loader. budgetScopes may be nil (then only
-// the bound policy's payer-scope windows are loaded).
-func NewSpendgatePolicyLoader(policies *BillingPolicyStore, budgetScopes *InvokerSpendLimitStore, fxp fx.Provider) *SpendgatePolicyLoader {
-	return &SpendgatePolicyLoader{policies: policies, budgets: budgetScopes, fx: fxp}
+// NewSpendgatePolicyLoader wires the loader.
+func NewSpendgatePolicyLoader(policies *BillingPolicyStore, fxp fx.Provider) *SpendgatePolicyLoader {
+	return &SpendgatePolicyLoader{policies: policies, fx: fxp}
 }
 
 // ResolvePolicy reads the current binding and policy together from PostgreSQL.
@@ -31,107 +29,18 @@ func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identit
 	return l.policies.Resolve(ctx, payer, trustLevel)
 }
 
-// Load turns an already-resolved policy plus the payer's delegated grants into
-// the scoped windows the SQL gate enforces, in requestCurrency. req supplies
-// the principals so the invoker_tier scope (whose policy key IS the trust level)
-// resolves to a per-invoker window that applies only at the matching trust level.
-//
-// hasDelegatedGrant reports whether any invoker/role-scoped window matched the
-// request — the caller uses it to deny a delegated invoker that has no explicit
-// spend grant (the pre-existing "delegated_spend_not_allowed" guarantee).
-func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.CustomerID, trustLevel, requestCurrency string, req spendgate.Request, resolved ResolvedPolicy) (pol spendgate.Policy, hasDelegatedGrant bool, err error) {
-	var scopes []spendgate.ScopedWindows
-
-	// The bound policy's NEW-spend windows (populated only by window_spend_cap;
-	// an outstanding_cap policy caps debt, not velocity, and declares none).
+// Load turns an already-resolved policy into the payer-scope windows the SQL
+// gate enforces, in requestCurrency. Only window_spend_cap declares NEW-spend
+// windows; an outstanding_cap policy caps debt, not velocity.
+func (l *SpendgatePolicyLoader) Load(ctx context.Context, requestCurrency string, resolved ResolvedPolicy) (spendgate.Policy, error) {
 	pw, err := l.convert(ctx, spendgate.ScopePayer, resolved.SpendWindows, requestCurrency)
 	if err != nil {
-		return spendgate.Policy{}, false, err
+		return spendgate.Policy{}, err
 	}
-	if len(pw) > 0 {
-		scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopePayer, Windows: pw})
+	if len(pw) == 0 {
+		return spendgate.Policy{}, nil
 	}
-	delegated, hasDelegatedGrant, err := l.LoadDelegatedWindows(ctx, payer, trustLevel, requestCurrency, req)
-	if err != nil {
-		return spendgate.Policy{}, false, err
-	}
-	scopes = append(scopes, delegated...)
-	return spendgate.Policy{Scopes: scopes}, hasDelegatedGrant, nil
-}
-
-// LoadDelegatedWindows resolves the payer's DELEGATED grants (invoker / role /
-// invoker_tier scopes in invoker_spend_limits) into the scoped windows the gate
-// meters, in requestCurrency. hasDelegatedGrant reports whether any of them
-// names req's invoker or one of its roles — the "a delegated invoker may never
-// spend the payer's money without an explicit grant" guarantee.
-//
-// ONE HOME. The admit path (Load) and the invoker's own spend-window read
-// (internal/service.InvokerSpendWindows, or#930) resolve the same windows here, so a
-// user can never be shown a window the gate does not enforce, or denied on one
-// it does not show.
-//
-// These are read LIVE, never cached: a freshly added grant must take effect
-// immediately, and a stale-absent grant would wrongly deny a just-granted
-// invoker for the whole cache TTL (#517). Only the per-trust-level payer CAPS
-// are cached (benign when stale: a missing upper bound briefly admits a little
-// more, never denies).
-func (l *SpendgatePolicyLoader) LoadDelegatedWindows(ctx context.Context, payer identity.CustomerID, trustLevel, requestCurrency string, req spendgate.Request) (scopes []spendgate.ScopedWindows, hasDelegatedGrant bool, err error) {
-	if l == nil || l.budgets == nil {
-		return nil, false, nil
-	}
-	policies, err := l.budgets.LoadAll(ctx, payer)
-	if err != nil {
-		return nil, false, err
-	}
-	roleMatch := make(map[string]bool, len(req.Roles))
-	for _, r := range req.Roles {
-		roleMatch[r] = true
-	}
-	for _, p := range policies {
-		bw := toBudgetWindows(p.Windows)
-		switch budgets.NormalizeScope(p.Scope) {
-		case budgets.ScopeInvoker:
-			w, cerr := l.convert(ctx, spendgate.ScopeInvoker, bw, requestCurrency)
-			if cerr != nil {
-				return nil, false, cerr
-			}
-			if len(w) > 0 {
-				scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopeInvoker, ScopeID: p.ScopeKey, Windows: w})
-				if p.ScopeKey == req.Invoker {
-					hasDelegatedGrant = true
-				}
-			}
-		case budgets.ScopeRole:
-			w, cerr := l.convert(ctx, spendgate.ScopeRole, bw, requestCurrency)
-			if cerr != nil {
-				return nil, false, cerr
-			}
-			if len(w) > 0 {
-				scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopeRole, ScopeID: p.ScopeKey, Windows: w})
-				if roleMatch[p.ScopeKey] {
-					hasDelegatedGrant = true
-				}
-			}
-		case budgets.ScopeInvokerTrustLevel:
-			// Per-invoker cap selected by trust level: applies only at the matching level.
-			if strings.TrimSpace(p.ScopeKey) != strings.TrimSpace(trustLevel) || strings.TrimSpace(req.Invoker) == "" {
-				continue
-			}
-			w, cerr := l.convert(ctx, spendgate.ScopeInvoker, bw, requestCurrency)
-			if cerr != nil {
-				return nil, false, cerr
-			}
-			// Prefix the key so a trust-level-selected bucket can't alias a plain invoker window.
-			for i := range w {
-				w[i].Key = "it:" + trustLevel + ":" + w[i].Key
-			}
-			if len(w) > 0 {
-				scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopeInvoker, ScopeID: req.Invoker, Windows: w})
-				hasDelegatedGrant = true
-			}
-		}
-	}
-	return scopes, hasDelegatedGrant, nil
+	return spendgate.Policy{Scopes: []spendgate.ScopedWindows{{Scope: spendgate.ScopePayer, Windows: pw}}}, nil
 }
 
 // convert maps budgets.BudgetWindow → spendgate.Window, FX-converting the limit to

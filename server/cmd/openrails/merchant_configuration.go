@@ -26,7 +26,7 @@ import (
 
 // Both modes use the public Client. Remote mode never loads local infrastructure.
 func newMerchantConfigurationCmd(apply bool) *cobra.Command {
-	var serverURL, tokenFile, slug, file string
+	var serverURL, tokenFile, slug, file, idempotencyKey string
 	name := "get-merchant-config"
 	if apply {
 		name = "apply-merchant-config"
@@ -62,10 +62,13 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			var params billing.ApplyMerchantConfigurationParams
+			var params billing.UpdateMerchantConfigurationParams
 			if apply {
 				if file == "" {
-					return fmt.Errorf("--file is required for an application document with application_id and expected_revision")
+					return fmt.Errorf("--file is required for a document with expected_revision")
+				}
+				if strings.TrimSpace(idempotencyKey) == "" {
+					return fmt.Errorf("--idempotency-key is required")
 				}
 				input, err := os.Open(file)
 				if err != nil {
@@ -81,6 +84,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 					return err
 				}
 				params = *parsed
+				params.IdempotencyKey = idempotencyKey
 			}
 			var client *openrails.Client
 			var err error
@@ -102,7 +106,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			}
 			var result any
 			if apply {
-				result, err = client.ApplyMerchantConfiguration(cmd.Context(), params)
+				result, err = client.UpdateMerchantConfiguration(cmd.Context(), params)
 			} else {
 				result, err = client.GetMerchantConfiguration(cmd.Context())
 			}
@@ -116,7 +120,8 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file holding an access token from the merchant's trusted issuer (client credentials), read on every call")
 	if apply {
-		cmd.Flags().StringVarP(&file, "file", "f", "", "YAML or JSON application with stable application_id and expected_revision")
+		cmd.Flags().StringVarP(&file, "file", "f", "", "YAML or JSON document with expected_revision")
+		cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "stable key that replays this change's first result")
 	}
 	return cmd
 }

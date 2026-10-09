@@ -99,11 +99,8 @@ var (
 )
 
 // ErrUnauthorized refuses a request without a credential the merchant
-// accepts; ErrForbidden one whose credential acts for another merchant.
-var (
-	ErrUnauthorized = errors.New("scim: no valid credential")
-	ErrForbidden    = errors.New("scim: the credential does not act for this merchant")
-)
+// accepts.
+var ErrUnauthorized = errors.New("scim: no valid credential")
 
 // writeJSON answers status with body as application/scim+json.
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -113,6 +110,12 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	if body != nil {
 		_ = json.NewEncoder(w).Encode(body)
 	}
+}
+
+// WriteRefusal answers a refusal made before the SCIM server ran, such as
+// the host's Auth refusing a credential, as a SCIM error with its status.
+func WriteRefusal(w http.ResponseWriter, status int, detail string) {
+	writeError(w, &Error{Status: status, Detail: detail})
 }
 
 func writeError(w http.ResponseWriter, e *Error) {
@@ -132,15 +135,11 @@ func (s *Server) serve(h handler) http.Handler {
 			return
 		}
 		mid, err := s.Authenticate(r)
-		switch {
-		case errors.Is(err, ErrForbidden):
-			writeError(w, errorf(http.StatusForbidden, "", "the credential does not act for this merchant"))
-			return
-		case err != nil:
+		if err != nil {
 			if !errors.Is(err, ErrUnauthorized) {
 				log.WithContext(r.Context()).WithError(err).Warn("scim: authentication failed")
 			}
-			writeError(w, errorf(http.StatusUnauthorized, "", "a provisioning token or a client-credentials access token with scope scim is required"))
+			writeError(w, errorf(http.StatusUnauthorized, "", "a provisioning token or an application credential is required"))
 			return
 		}
 		h(merchant.WithID(r.Context(), mid), w, r, mid)

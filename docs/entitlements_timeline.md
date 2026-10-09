@@ -26,7 +26,15 @@ for its holders.
 
 ## Reading access
 
-Admin API (`Permissions.AdminRead`):
+Your backend gates content with the programmatic route (an application
+credential, `RouteGroups.Programmatic`; in process, the `Client`):
+
+- `POST /v1/app/entitlements/check` —
+  `{"customer_id", "entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
+  `{"entitlements": {key: bool}, "quantities": {key: n}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
+  for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
+
+Staff read with the admin API (`Permissions.AdminRead`):
 
 - `GET /v1/admin/entitlements?customer_id=&entitlement=&prefix=&at=&cursor=&limit=` —
   the keys customers hold at one instant, by customer then key in byte order
@@ -39,7 +47,7 @@ Admin API (`Permissions.AdminRead`):
 - `GET /v1/admin/product-access?customer_id=&product_id=&live=` — products held,
   bought, subscribed or granted (`Client.ListProductAccess`); `live=true` with a
   `product_id` is a product check, and each window's `quantity` is the seats it gives.
-- `GET /v1/me/entitlements` and `GET /v1/me/product-access` — the signed-in customer's own.
+- `GET /v1/me/entitlements` — the signed-in customer's own.
 
 A prefix is bytes OpenRails gives no meaning; its last byte must be printable ASCII. Every
 list is `{data, next_cursor}` with keyset cursors.
@@ -55,8 +63,9 @@ list is `{data, next_cursor}` with keyset cursors.
   after the customer's latest live window of the product), `ends_at`, or neither
   (indefinite), a `reason` and a `note`. The grant records who granted it. A retry with the same `Idempotency-Key` header answers
   the first grants.
-- **Revoke** one window with `DELETE /v1/admin/customers/{customer_id}/product-access/{id}`
-  (`Client.DeleteProductAccess`). Refunds and chargebacks revoke their payment's window.
+- **Revoke** one window with `POST /v1/admin/product-access/{id}/revoke` and a `reason`
+  (`Client.RevokeProductAccess`); the window keeps its row. Refunds and chargebacks revoke
+  their payment's window.
 - **Catalog edits**: `UpdateProduct` and catalog applications set a product's keys; an
   application's `entitlement_replacements` (`[{from, to}]`; an empty `to` removes `from`)
   moves a key to another across every product in the same edit. Each edit reports, per product, the keys

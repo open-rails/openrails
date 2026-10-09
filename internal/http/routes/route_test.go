@@ -25,22 +25,24 @@ import (
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
 // scimPathShape is SCIM's: RFC 7644 names its endpoints in CamelCase.
-var scimPathShape = regexp.MustCompile(`^/scim/v2(/([A-Z][A-Za-z]*|\{[a-z_]+\}))+$`)
+var scimPathShape = regexp.MustCompile(`^/v1/app/scim/v2(/([A-Z][A-Za-z]*|\{[a-z_]+\}))+$`)
 
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
 	Admin:          {"/v1/admin/"},
-	CatalogWrite:   {"/v1/admin/catalog/", "/v1/admin/customers/"},
+	CatalogAdmin:   {"/v1/admin/catalog/", "/v1/admin/price-migrations/"},
+	Access:         {"/v1/admin/access/"},
 	MerchantConfig: {"/v1/admin/"},
+	Metrics:        {"/v1/admin/metrics/", "/v1/admin/dashboard/"},
+	App:            {"/v1/app/"},
 	Customer:       {"/v1/me/"},
-	Provisioning:   {"/scim/v2/"},
 	Webhooks:       {"/v1/webhooks/"},
 }
 
 // pathParams are the names a path parameter takes: a resource's own id is
 // {id}, its customer {customer_id}; the rest name an identity the caller
 // chose, by what it is.
-var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "scope", "scope_key", "entitlement", "user_id", "rail", "account_id", "currency"}
+var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "entitlement", "user_id", "rail", "account_id", "currency"}
 
 var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
 
@@ -54,7 +56,7 @@ func TestCatalogDeclarations(t *testing.T) {
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
-		if r.Group == Provisioning {
+		if r.Auth == AuthProvisioning {
 			require.Regexp(t, scimPathShape, r.Path, key)
 		} else {
 			require.Regexp(t, pathShape, r.Path, key)
@@ -67,12 +69,9 @@ func TestCatalogDeclarations(t *testing.T) {
 		for _, param := range pathParam.FindAllStringSubmatch(r.Path, -1) {
 			require.Contains(t, pathParams, param[1], "%s: name the path parameter {id}, or add what it is to pathParams", key)
 		}
-		require.Equal(t, r.Staff(), r.Auth == AuthMerchant, "%s: a staff route, and only one, is behind its bundle's permission", key)
+		require.Equal(t, r.Staff(), r.Auth == AuthMerchant, "%s: a staff route, and only one, is behind its group's permission", key)
 		if r.Limit != "" {
 			require.Equal(t, AuthMerchant, r.Auth, "%s: the operation limiter keys the authorized principal", key)
-		}
-		if r.InvokerScoped {
-			require.Equal(t, Customer, r.Group, key)
 		}
 		if r.Method == GET {
 			require.Nil(t, r.Request, "%s: a GET has no body", key)
@@ -162,7 +161,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterUserRoutes(at("/v1"), rt, opts)
 	RegisterStaffRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
-	RegisterProvisioningRoutes(at("/scim/v2"), rt, Options{Provisioning: func(*http.Request) (billing.MerchantID, error) { return billing.MerchantID{}, nil }})
+	RegisterAppRoutes(at("/v1"), rt, opts)
 	RegisterCustomerRoutes(at("/v1/me"), rt, customers)
 
 	var unmounted []string
@@ -199,7 +198,7 @@ func sorted(list []string) []string {
 }
 
 // A route without its handler or its feature is not mounted, and a staff
-// route only with its bundle's permission.
+// route only with its group's permission.
 func TestMountHonorsConfiguration(t *testing.T) {
 	seen := map[string]int{}
 	RegisterMetaRoutes(recorder{seen: seen}, Options{Capabilities: &billing.Capabilities{}})
@@ -216,23 +215,34 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	mount := func(seen map[string]int, perms Permissions) {
 		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Permissions: perms})
 	}
+	metrics := map[string]int{}
 	mount(reads, Permissions{AdminRead: "r"})
-	mount(staff, Permissions{AdminRead: "r", AdminWrite: "w"})
-	mount(edits, Permissions{AdminRead: "r", CatalogWrite: "e"})
+	mount(staff, Permissions{AdminRead: "r", AdminUpdate: "w"})
+	mount(edits, Permissions{Catalog: "e"})
 	mount(configuration, Permissions{MerchantConfig: "c"})
+	mount(metrics, Permissions{Metrics: "m"})
 	require.Contains(t, reads, "GET /v1/admin/payments")
 	require.Contains(t, reads, "POST /v1/admin/subscriptions/{id}/change/preview", "a preview is a read")
-	require.NotContains(t, reads, "POST /v1/admin/payments/{id}/refunds", "a write needs AdminWrite")
+	require.NotContains(t, reads, "POST /v1/admin/payments/{id}/refunds", "an update needs AdminUpdate")
 	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds")
-	require.NotContains(t, staff, "POST /v1/admin/catalog/products")
-	require.Contains(t, staff, "GET /v1/admin/catalog/products")
+	require.NotContains(t, staff, "GET /v1/admin/catalog/products", "the catalog is its own group")
+	require.NotContains(t, staff, "POST /v1/admin/price-migrations")
+	require.NotContains(t, staff, "POST /v1/admin/metrics/query")
 	require.Contains(t, staff, "GET /v1/admin/entitlements", "a lookup is a read")
 	require.Contains(t, edits, "POST /v1/admin/catalog/products")
-	require.Contains(t, edits, "GET /v1/admin/catalog/products", "catalog reads are AdminRead's")
-	require.NotContains(t, edits, "POST /v1/admin/payments/{id}/refunds")
-	require.NotContains(t, configuration, "POST /v1/admin/catalog/products")
+	require.Contains(t, edits, "GET /v1/admin/catalog/products", "catalog reads are Catalog's")
+	require.Contains(t, edits, "POST /v1/admin/price-migrations")
+	require.NotContains(t, edits, "GET /v1/admin/payments")
 	require.NotContains(t, configuration, "GET /v1/admin/catalog/products")
 	require.Contains(t, configuration, "GET /v1/admin/psps", "a configuration read is MerchantConfig's")
+	require.Contains(t, configuration, "PUT /v1/admin/dashboard", "the layout is configuration")
+	require.NotContains(t, configuration, "GET /v1/admin/dashboard")
+	require.Contains(t, metrics, "GET /v1/admin/dashboard")
+	require.Contains(t, metrics, "POST /v1/admin/metrics/query")
+	require.NotContains(t, metrics, "GET /v1/admin/payments")
+	for _, seen := range []map[string]int{reads, staff, edits, configuration, metrics} {
+		require.Contains(t, seen, "GET /v1/admin/access", "every staff group brings the access read")
+	}
 }
 
 // A declared integer query parameter that is not a non-negative integer is

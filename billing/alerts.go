@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // AlertWebhookID names an alert webhook; on the wire "awh_<uuid>".
@@ -97,9 +98,13 @@ type CreateAlertWebhookParams struct {
 	Enabled *bool              `json:"enabled"`
 }
 
-// SetAlertWebhookURLParams replaces a webhook's URL, keeping the webhook.
-type SetAlertWebhookURLParams struct {
-	URL string `json:"url"`
+// UpdateAlertWebhookParams changes a webhook; omitted fields keep their
+// values, and a null name clears it. A new URL is stored as a new secret.
+type UpdateAlertWebhookParams struct {
+	Name    catalog.Field[string]             `json:"name,omitzero"`
+	URL     catalog.Field[string]             `json:"url,omitzero"`
+	Format  catalog.Field[AlertWebhookFormat] `json:"format,omitzero"`
+	Enabled catalog.Field[bool]               `json:"enabled,omitzero"`
 }
 
 // MarkNotificationsReadParams marks a customer's notifications read: 1 to

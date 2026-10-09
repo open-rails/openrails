@@ -48,7 +48,7 @@ func TestSilentProviderOperationRaisesFinding(t *testing.T) {
 
 	body := []byte(`{"rental":"silent"}`)
 	digest := sha256.Sum256(body)
-	status, opened := w.hostJSON(http.MethodPost, "/v1/admin/provider-operations", map[string]any{
+	status, opened := w.hostJSON(http.MethodPost, "/v1/app/provider-operations", map[string]any{
 		"operation_id": "rental-silent", "customer_id": c.id, "record_owner": "user:1", "currency": "USD", "amount": "1000000",
 		"claim_reference": "claim:silent", "authorization_body": base64.StdEncoding.EncodeToString(body),
 		"authorization_body_sha256": hex.EncodeToString(digest[:]),
@@ -65,7 +65,7 @@ func TestSilentProviderOperationRaisesFinding(t *testing.T) {
 	require.EqualValues(t, 1_000_000, held(), "the operation still holds the customer's money")
 	require.Equal(t, []string{"provider_operation:rental-silent"}, findings())
 
-	status, released := w.hostJSON(http.MethodPost, "/v1/admin/provider-operations/rental-silent/release", map[string]any{"release_reference": "never-created"})
+	status, released := w.hostJSON(http.MethodPost, "/v1/app/provider-operations/rental-silent/release", map[string]any{"release_reference": "never-created"})
 	require.Equal(t, http.StatusOK, status, "%v", released)
 	require.Zero(t, held())
 	require.Empty(t, findings(), "the finding clears with the release")

@@ -124,6 +124,7 @@ const (
 	CodeHostMerchantMismatch                 = "host_merchant_mismatch"
 	CodeMerchantContextMismatch              = "merchant_context_mismatch"
 	CodeInvokerScopedPrincipal               = "invoker_scoped_principal"
+	CodeApplicationRequired                  = "application_required"
 	CodeStepUpRequired                       = "step_up_required"
 	CodeStepUpUnavailable                    = "step_up_unavailable"
 	CodeAuthenticationUnavailable            = "authentication_unavailable"
@@ -169,6 +170,7 @@ var errorCodes = []ErrorCode{
 	{CodeRouteNotFound, 404, invalid, "No route matches the path."},
 	{CodeMethodNotAllowed, 405, invalid, "The path exists but not for this method; Allow lists its methods."},
 	{"idempotency_key_required", 400, invalid, "The operation needs an Idempotency-Key header."},
+	{"idempotency_key_in_progress", 409, invalid, "A request with this Idempotency-Key is still running; retry it later."},
 	{"csrf_origin_denied", 403, authz, "A cookie-authenticated request came from an origin that is not allowed."},
 	{"captcha_required", 403, invalid, "The caller must solve a captcha and resend with its token."},
 	{"captcha_invalid", 403, invalid, "The captcha token was rejected."},
@@ -204,6 +206,7 @@ var errorCodes = []ErrorCode{
 	{CodeAccessTokenMerchantNotBound, 403, authz, "The access token's issuer is not trusted for this merchant."},
 	{CodeInsufficientScope, 403, authz, "The access token was not granted the scope this surface requires."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
+	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},
 	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
@@ -312,7 +315,6 @@ var errorCodes = []ErrorCode{
 	{"admission_not_found", 404, invalid, "No admission was made under this request id."},
 	{"admission_captured", 409, invalid, "The admission was captured; it can no longer be released."},
 	{"hold_not_found", 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
-	{"spend_delegation_not_found", 404, invalid, "The spend delegation does not exist."},
 	{"currency_unsupported", 400, invalid, "The currency is not in OpenRails' registry."},
 	{"provider_operation_not_found", 404, invalid, "The provider operation does not exist."},
 	{"provider_operation_conflict", 409, invalid, "The provider operation call repeats a committed one with a changed term; param names it."},
@@ -372,7 +374,6 @@ var errorCodes = []ErrorCode{
 	{"credential_source_read_only", 405, invalid, "The provider credential source has no writable custody."},
 	{"credential_store_read_only", 403, authz, "The credential store is read-only."},
 	{"invalid_psp_reference", 400, invalid, "The PSP reference is invalid."},
-	{"merchant_configuration_application_conflict", 409, invalid, "The application id already committed with different content."},
 	{"merchant_configuration_revision_conflict", 409, invalid, "The merchant configuration changed; read its revision before applying."},
 	{"webhook_invalid", 400, invalid, "The outbound webhook is invalid."},
 	{"webhook_account_mismatch", 400, invalid, "The webhook's account does not match its payload."},

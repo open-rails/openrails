@@ -24,10 +24,10 @@ Before the code:
 
 | Before | After |
 |---|---|
-| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Permissions`: `AdminRead` and `AdminWrite` mount staff work on customers, `CatalogWrite` catalog edits, `MerchantConfig` the merchant's own configuration |
-| `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Give your own in `Routes.Permissions` (`AdminRead`, `AdminWrite`, `CatalogWrite`, `MerchantConfig`); AuthKit checks a `root:` permission on root with no configuration |
-| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `Permissions`, `CustomerProfiles`, `CookieOrigin`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
-| `Routes.Guards`, the `openrails.RouteSet` constants (level, resource and route groups); `Routes.Storefront`, `Routes.Customers` and the customer scopes (`CustomerSelfService`, …); `Routes.Merchant`, `Routes.MerchantConfig` | `Routes.Permissions{AdminRead, AdminWrite, CatalogWrite, MerchantConfig}`: a bundle mounts only with its permission, and OpenRails decides each admin route's level |
+| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.RouteGroups` (`Admin`, `Catalog`, `MerchantConfig`, `Metrics`, `Programmatic`) turns each group on, and `Routes.Permissions` names what its callers hold: `AdminRead` and `AdminUpdate` for customer support, `Catalog`, `MerchantConfig`, `Metrics` |
+| `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Give your own in `Routes.Permissions` (`AdminRead`, `AdminUpdate`, `Catalog`, `MerchantConfig`, `Metrics`); AuthKit checks a `root:` permission on root with no configuration |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, the customer routes, `Merchant`, the cookie origin); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `RouteGroups`, `Permissions`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `Routes.Guards`, the `openrails.RouteSet` constants (level, resource and route groups); `Routes.Storefront`, `Routes.Customers` and the customer scopes (`CustomerSelfService`, …); `Routes.Merchant`, `Routes.MerchantConfig` | `Routes.RouteGroups` turns each group on and `Routes.Permissions{AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics}` names what its callers hold; OpenRails decides each admin route's level (read or update) |
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
 | `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
 | `catalog_edits` (env `CATALOG_EDITS`) on the standalone server | Removed: catalog edits over HTTP are always on, documents skip what an edit set, and `catalog_edits` refuses boot |
@@ -41,7 +41,8 @@ Before the code:
 | `Config.SendGrid` (`SendGridConfig`, SendGrid's API); the standalone server's `sendgrid` section (`SENDGRID_*`) | `Config.SMTP` (`SMTPConfig`); the `email_smtp` section (`EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, `EMAIL_SMTP_FROM`). SendGrid over SMTP is host `smtp.sendgrid.net`, port 587, username `apikey`, password the API key. A `sendgrid` setting refuses boot |
 | `Config.ControlPlane` (`ControlPlaneConfig`, `AuthConfig`, `MerchantCreationConfig`, `ResourceServerConfig`, `NamingConfig`), `ErrNoControlPlane`, `Deps.SMS`, `Deps.HasVaultedPaymentMethod`, `AdminConsole.Issuer`, `Email.Auth`, and the control-plane `Client` methods (`ProvisionMerchant`, `AuthKit`, `FleetAnalytics`, …) | The `server` package: `server.New(ctx, server.Config{Engine: cfg, Auth: …}, server.Deps{Engine: deps})` builds the engine, its own AuthKit and the control plane; the methods are the `server.Server`'s; `server.Config.ConsoleIssuer` signs staff in to the console at a trusted issuer |
 | A hand-written `ALTER … OWNER` pass after migrating a shared schema | The role of the pool `New` runs with owns every object; for another owner, have that pool's connections `SET ROLE` to it |
-| `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
+| `Routes.CookieOrigin` and cookie admission; `Routes.Provisioning`; the `AdminConsole` struct (`Path`, `AuthBaseURL`, `Extensions`) | Removed: ambient cookies never authenticate, a browser sends its credential in a header; SCIM mounts with `RouteGroups.Programmatic`; `AdminConsole: true` serves the console at the prefix's `/admin`, signing staff in at `/api/v1` (a standalone server's path and extensions are `server.Config.AdminConsole`'s) |
+| `CustomerRoutesConfig{Authenticate: fn}` per profile, further customer surfaces | Removed: one customer surface, `/v1/me`; a standalone server selects the merchant per request, and `Routes.Auth` names the customer |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
 | `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `Deps.UserInfo` (your AuthKit) answers each customer's email, username and name when OpenRails needs them; a standalone server keeps what your directory pushes over SCIM. Your auth decides who may sign in |
 | `Deps.Contacts: ak`, `openrails.Contacts`, `openrails.Contact`, `openrailstest.Contacts` | `Deps.UserInfo: ak.UserInfo()` (AuthKit v1.14.0), `openrails.UserInfo` (helpers' `userinfo.Lookup`: `Get`, `Search`), `userinfo.User`, `openrailstest.UserInfo` |
@@ -158,12 +159,12 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `Entitlements`, at most 100 each, and `At`); a key not listed is not held |
+| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | Your backend: `client.CheckEntitlements(` with `billing.CheckEntitlementsParams` (`CustomerID`, at most 100 `Entitlements`, `At`). Staff: `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `Entitlements`, at most 100 each, and `At`); a key not listed is not held |
 | `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListEntitlements(` with up to 100 `CustomerIDs` (and a `Prefix`, `At`, a page), answering each customer's keys |
 | `ListCustomersWithEntitlement` | `client.ListEntitlements(` with one key in `Entitlements` and no `CustomerIDs` |
-| `GrantEntitlement`, `RevokeEntitlement` | Grant the product that carries the key: `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
-| `ResolveEffectiveTier` | `client.GetEffectiveTiers(` with `billing.GetEffectiveTiersParams` (`Group`, up to 100 `CustomerIDs`); a customer's tier is nil when they hold none |
-| `client.ProductAccess.Check`, `CheckMany`, `List` | `client.ListProductAccess(` (`CustomerIDs`, `ProductIDs`, `LiveOnly`), `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
+| `GrantEntitlement`, `RevokeEntitlement` | Grant the product that carries the key: `client.CreateProductAccess(`, `client.RevokeProductAccess(` |
+| `ResolveEffectiveTier` | Removed: a customer's tier is the `tier_group` and `tier_rank` of the products they hold (`client.ListProductAccess(`) |
+| `client.ProductAccess.Check`, `CheckMany`, `List` | `client.ListProductAccess(` (`CustomerIDs`, `ProductIDs`, `LiveOnly`), `client.CreateProductAccess(`, `client.RevokeProductAccess(` |
 
 Every entitlement now derives from a grant; `source_type` is `purchase`,
 `subscription`, `admin` or `grace`.
@@ -172,7 +173,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(`, `client.EnsureProduct(`, `client.GetProduct(`, `client.UpdateProduct(`, `client.ListProducts(` (by key: `Keys`) |
+| `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(` (`Ensure`: a catalog application, `client.ApplyCatalog(`), `client.GetProduct(`, `client.UpdateProduct(`, `client.ListProducts(` (by key: `Keys`) |
 | `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(` (by key: `ProductKey`, `Key`), `client.ListPriceHistory(` |
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`, `client.GetCatalogRevision(` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
@@ -181,7 +182,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
-| `CheckCatalogDrift` | `client.RefreshCatalogDrift(` |
+| `CheckCatalogDrift` | `client.RefreshPSPs(`, which also reads each PSP's catalog for drift |
 | `ListPurchaseReviews`, `ResolvePurchaseReview`; `ArchiveProductParams` with `Action` and `Window` | A purchase an archive leaves for review is a finding (`finding_id`), resolved with `client.ResolveFinding(`; `billing.ArchiveProductParams` takes `PurchaseAction`, `PurchaseWindowStartsAt` and `WindowSeconds` |
 
 ### Checkout
@@ -192,7 +193,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | Removed: the customer pays a checkout session (`POST /v1/checkout-sessions/{id}/pay`) they minted themselves or `client.CreateCheckoutSession(` minted for them |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
 | `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.ListCheckoutOptions(` with `billing.CheckoutOptionListParams` |
-| `GetCheckoutConfig(ctx)` | `client.GetPublicConfig(ctx)`: the PSPs are its `Payment` |
+| `GetCheckoutConfig(ctx)` | Removed: the public `GET /v1/config` carries the PSPs as its `payment` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
 | `CheckoutPaymentOptions.Card` | Removed: a Client never carries a card |
@@ -220,9 +221,9 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `DepositCredits`, `GetDeposit` | `client.CreateCreditGrants(` with up to 100 `billing.CreateCreditGrantParams`, all or none; `client.ListCreditGrants(` by `source_id` answers what a key did |
 | Revoke with a body on `DELETE` | `client.RevokeCreditGrant(` |
 | `GetCreditAccount` | `client.GetBalance(` answers `billing.Balance` (`balance_amount`, `held_amount`, `available_amount`, `owed_amount`) |
-| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
+| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
 | `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; usage reports through `client.QueryMetrics(`. Resource revenue is removed |
-| `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(` (the whole set), `client.DeleteSpendDelegation(` |
+| `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | Removed: only the customer's own credential spends its balance |
 | `InvokerTypePayer` (`invoker_type: "payer"`) | `billing.InvokerTypeCustomer` (`"customer"`) |
 | `DeclaredTransaction.AmountCents` | `Amount`, in native units (micros for USD) |
 | `DeclaredSubscription.UserEmail`; `DeclaredPaymentMethod.LastFour`, `CardType`, `ExpiryDate`, `InitialTransactionID` | `DeclaredCustomer.Email`; `DeclaredPaymentMethod.Card` (`billing.CardDetails`); `InitialTransactionID` is removed |
@@ -240,21 +241,21 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderPaid` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.CreatePayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
-| `Subscription.RailSubscriptionID`, `SpendDelegation.Provenance`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
+| `Subscription.RailSubscriptionID`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |
 | `Invoice.PeriodFrom`, `PeriodTo`; `InvoiceListParams.PeriodFrom`, `PeriodTo` | `PeriodStartsAt`, `PeriodEndsAt`; the list filters are `PeriodStartsAfter` (inclusive) and `PeriodStartsBefore` (exclusive) |
 
 ### PSPs, configuration and operations
 
 | Before | After |
 |---|---|
-| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(`, `client.ArchivePSP(`, `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in `client.GetPublicConfig(` |
+| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in the public `GET /v1/config` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
-| `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.ApplyMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
+| `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
 | `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
-| Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.SetAlertWebhookURL(`, `client.DeleteAlertWebhook(` |
+| Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.UpdateAlertWebhook(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
-| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename and a user's merchants are the server's `RenameMerchant` and `ListUserMerchants` |
+| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.UpdateMerchantConfiguration(`; a rename and a user's merchants are the server's `RenameMerchant` and `ListUserMerchants` |
 | `client.ListWorkerHealth(`, `client.SetAPIHost(`, `client.VerifyAPIHost(` | The server's `ListWorkerHealth` (`openrails workers`, the private listener's `/metrics`), `ClaimMerchantAPIHost` and `VerifyMerchantAPIHost` |
 | `GetUnreadNotificationCount` (merchant) | Removed: count open findings with `client.QueryMetrics(` (`open_findings`) |
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical findings in `client.ListFindings(` |
@@ -313,19 +314,19 @@ fields (`400 unknown_field`), and every error code is in
 | Before | After |
 |---|---|
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
-| `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
+| `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
-| `/v1/admin/credits/deposit`, `/v1/admin/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` |
-| `/v1/admin/credits/balance`, `/v1/admin/credit-limit`, `/v1/admin/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
-| `/v1/admin/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
-| `PUT …/spend-delegations:upsert` | `PUT /v1/admin/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
-| `/v1/admin/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
-| `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `POST /v1/admin/metrics/query` |
-| `/v1/admin/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
-| `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `GET /v1/admin/entitlements`, `POST /v1/admin/tiers/lookup` |
-| `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
-| `GET /v1/admin/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
+| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
+| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
+| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
+| `PUT …/spend-delegations:upsert` | Removed |
+| `/v1/merchant/admissions/{id}/…` | `POST /v1/app/admissions/{request_id}/capture`, `POST /v1/app/admissions/release`, `POST /v1/app/admissions/extend`, with the host backend's credential |
+| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/admin/metrics/query` |
+| `/v1/merchant/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
+| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |
+| `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
+| `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
 | `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
@@ -334,6 +335,8 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `GET /v1/admin/catalog/rate-overrides`; `PATCH` the product or price |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |
+| `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |
+| `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema`, `GET /v1/admin/dashboard`, `POST /v1/admin/metrics/ask` behind `AdminRead`; `POST /v1/admin/dashboard/widgets/generate` behind `MerchantConfig`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes behind `Permissions.Metrics` and `Permissions.Catalog`; `GET /v1/admin/access` answers what the caller holds |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/admin/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 
@@ -401,8 +404,8 @@ fields (`400 unknown_field`), and every error code is in
 - **Entitlements.** `ent_` ids, `starts_at`, `ends_at`; `/v1/me/entitlements` is
   a page.
 - **Absent is null.** `Subscription.rail_subscription_id` (an engine-collected
-  subscription has none), `SpendDelegation.provenance`, `CreditGrant.source_id`
-  and `AlertWebhook.name` are `null` when absent, no longer `""`.
+  subscription has none), `CreditGrant.source_id` and `AlertWebhook.name` are
+  `null` when absent, no longer `""`.
 - **Instants end in `_at`.** Invoices: `period_starts_at`, `period_ends_at`,
   and the list filters `period_starts_after`, `period_starts_before` (were
   `period_from`, `period_to`). Delinquency, its host event and its

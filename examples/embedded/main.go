@@ -93,9 +93,15 @@ func run(ctx context.Context) error {
 	defer db.Close()
 
 	rbac := authkit.NewRoles()
+
 	customersRead := rbac.Root.Permission("customers", "read")
 	customersUpdate := rbac.Root.Permission("customers", "update")
-	rbac.Root.Role("admin", customersRead, customersUpdate)
+	catalogUpdate := rbac.Root.Permission("catalog", "update")
+	billingConfig := rbac.Root.Permission("billing-config", "update")
+	metricsRead := rbac.Root.Permission("metrics", "read")
+
+	rbac.Root.Role("support", customersRead, customersUpdate)
+	rbac.Root.Role("operator", customersRead, customersUpdate, catalogUpdate, billingConfig, metricsRead)
 
 	ak, err := newAuth(ctx, db, rbac) // see AuthKit's README
 	if err != nil {
@@ -123,11 +129,15 @@ func run(ctx context.Context) error {
 	}
 	// Billing. Public, customer (/me) and webhook routes are always mounted.
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:   ak,         // AuthKit guards each route: OpenRails asks it, by route
-		Prefix: "/billing", // the API is served at /billing/v1/*
+		Auth:        ak,         // AuthKit guards each route: OpenRails asks it, by route
+		Prefix:      "/billing", // the API is served at /billing/v1/*
+		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
 		Permissions: openrails.Permissions{
-			AdminRead:  customersRead, // your staff's admin routes: customers' billing, refunds, subscriptions
-			AdminWrite: customersUpdate,
+			AdminRead:      customersRead,
+			AdminUpdate:    customersUpdate,
+			Catalog:        catalogUpdate, // edits share the catalog with catalog.yaml
+			MerchantConfig: billingConfig,
+			Metrics:        metricsRead,
 		},
 	})
 	if err != nil {

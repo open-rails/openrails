@@ -43,13 +43,14 @@ func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlert
 	return &out, nil
 }
 
-// SetAlertWebhookURL replaces an alert webhook's URL, keeping the webhook.
-func (c *Client) SetAlertWebhookURL(ctx context.Context, id billing.AlertWebhookID, req billing.SetAlertWebhookURLParams, options ...RequestOption) (*billing.AlertWebhook, error) {
+// UpdateAlertWebhook changes an alert webhook's URL, name, format or enabled
+// state; omitted fields keep their values.
+func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error) {
 	if id.IsZero() {
 		return nil, invalidErr("alert webhook id is required")
 	}
 	var out billing.AlertWebhook
-	if err := c.do(ctx, http.MethodPut, "/v1/admin/alert-webhooks/"+id.String()+"/url", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/admin/alert-webhooks/"+id.String(), req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

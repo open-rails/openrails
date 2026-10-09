@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -26,7 +25,7 @@ var (
 	ErrCreditGrantHeld        = errors.New("credit_grant_held")
 )
 
-func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) billing.CreditGrant {
+func creditGrantFromRow(row gen.GetCreditGrantRow, now time.Time) billing.CreditGrant {
 	state := billing.CreditGrantActive
 	switch {
 	case row.Termination == "revoke":
@@ -50,7 +49,7 @@ func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) billin
 }
 
 // ListCreditGrants lists a customer's credit grants, newest first.
-func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.CustomerID, params billing.CreditGrantListParams) (billing.ListPage[billing.CreditGrant], error) {
+func (s *MoneyService) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams) (billing.ListPage[billing.CreditGrant], error) {
 	if s == nil || s.db == nil {
 		return billing.ListPage[billing.CreditGrant]{}, fmt.Errorf("money service not initialized")
 	}
@@ -59,13 +58,13 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 		return billing.ListPage[billing.CreditGrant]{}, err
 	}
 	if params.IDs != nil {
-		rows, err := s.db.Gen(ctx).ListCustomerCreditGrantsByIDs(ctx, gen.ListCustomerCreditGrantsByIDsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Ids: uuidutil.Of(params.IDs)})
+		rows, err := s.db.Gen(ctx).ListCreditGrantsByIDs(ctx, gen.ListCreditGrantsByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
 		if err != nil {
 			return billing.ListPage[billing.CreditGrant]{}, err
 		}
 		var page billing.ListPage[billing.CreditGrant]
 		for _, row := range rows {
-			page.Items = append(page.Items, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), s.now()))
+			page.Items = append(page.Items, creditGrantFromRow(gen.GetCreditGrantRow(row), s.now()))
 		}
 		return page, nil
 	}
@@ -86,7 +85,7 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 		sourceID = &params.SourceID
 	}
 	rows, err := s.db.Gen(ctx).ListCustomerCreditGrants(ctx, gen.ListCustomerCreditGrantsParams{
-		MerchantID: mid.UUID(), CustomerID: payer.UUID(), Currency: currency, SourceID: sourceID,
+		MerchantID: mid.UUID(), CustomerID: params.CustomerID.UUID(), Currency: currency, SourceID: sourceID,
 		AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
 	})
 	if err != nil {
@@ -95,7 +94,7 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 	now := s.now()
 	grants := make([]billing.CreditGrant, 0, len(rows))
 	for _, row := range rows {
-		grants = append(grants, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), now))
+		grants = append(grants, creditGrantFromRow(gen.GetCreditGrantRow(row), now))
 	}
 	return pagination.Cut(grants, limit, func(g billing.CreditGrant) any {
 		return pagination.TimeID{At: g.CreatedAt, ID: g.ID.UUID()}
@@ -103,12 +102,12 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 }
 
 // GetCreditGrant reads one of a customer's credit grants.
-func (s *MoneyService) GetCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID) (*billing.CreditGrant, error) {
+func (s *MoneyService) GetCreditGrant(ctx context.Context, grantID uuid.UUID) (*billing.CreditGrant, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).GetCustomerCreditGrant(ctx, gen.GetCustomerCreditGrantParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), GrantID: grantID})
+	row, err := s.db.Gen(ctx).GetCreditGrant(ctx, gen.GetCreditGrantParams{MerchantID: mid.UUID(), GrantID: grantID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCreditGrantNotFound
 	}
@@ -121,11 +120,11 @@ func (s *MoneyService) GetCreditGrant(ctx context.Context, payer identity.Custom
 
 // RevokeCreditGrant removes the unspent remainder under the payer money lock,
 // respecting the same durable reservation total as admission and spending.
-func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string) (*billing.CreditGrant, error) {
+func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID, reason string) (*billing.CreditGrant, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	if payer.IsZero() || grantID == uuid.Nil {
+	if grantID == uuid.Nil {
 		return nil, ErrCreditGrantNotFound
 	}
 	reason = strings.TrimSpace(reason)
@@ -136,18 +135,26 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 	if err != nil {
 		return nil, err
 	}
+	args := gen.GetCreditGrantParams{MerchantID: mid.UUID(), GrantID: grantID}
+	// The grant names its customer, whose money lock the revocation takes.
+	addressed, err := s.db.Gen(ctx).GetCreditGrant(ctx, args)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCreditGrantNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	payer := addressed.CustomerID
 	var result *billing.CreditGrant
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		// Lock only an existing customer. A failed grant address must not create one.
-		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payer.UUID()}); err != nil {
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: payer}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrCreditGrantNotFound
 			}
 			return err
 		}
-		args := gen.GetCustomerCreditGrantParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), GrantID: grantID}
-		row, err := q.GetCustomerCreditGrant(ctx, args)
+		row, err := q.GetCreditGrant(ctx, args)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCreditGrantNotFound
 		}
@@ -182,7 +189,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 				return ErrCreditGrantHeld
 			}
 		}
-		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer.UUID(), row.Currency)
+		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer, row.Currency)
 		if err != nil {
 			return err
 		}
@@ -204,7 +211,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		if err := ledger.MaterializeGrant(ctx, original); err != nil {
 			return err
 		}
-		updated, err := q.GetCustomerCreditGrant(ctx, args)
+		updated, err := q.GetCreditGrant(ctx, args)
 		if err != nil {
 			return err
 		}

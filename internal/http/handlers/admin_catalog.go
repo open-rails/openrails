@@ -69,31 +69,6 @@ func CreateProduct(r *httprequest.Request) {
 	writeProduct(r, svc, http.StatusCreated, out)
 }
 
-// EnsureProduct creates the product under the path's key unless it exists;
-// an existing product is returned unchanged.
-func EnsureProduct(r *httprequest.Request) {
-	var params billing.CreateProductParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	key := r.Param("product_key")
-	if params.Key != "" && params.Key != key {
-		r.ErrorCode(billing.CodeInvalidParam, "product key in path and body must match")
-		return
-	}
-	params.Key = key
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.EnsureProduct(r.Request.Context(), params)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	writeProduct(r, svc, http.StatusOK, out)
-}
-
 func ListProducts(r *httprequest.Request) {
 	page, ok := r.Page()
 	if !ok {

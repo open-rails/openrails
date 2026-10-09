@@ -180,18 +180,18 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/subscriptions":                                {"/v1/admin/subscriptions", "", "subscriptions", "", ""},
 		"GET /v1/admin/price-migrations":                             {"/v1/admin/price-migrations", "", "price_migrations", "", ""},
 		"GET /v1/admin/product-access":                               {"/v1/admin/product-access", "customer_id=" + c.id, "product_access", "", ""},
-		"GET /v1/admin/customers/{customer_id}/credit-grants":        {funded + "/credit-grants", "", "grants", "", ""},
+		"GET /v1/admin/credit-grants":                                {"/v1/admin/credit-grants", "customer_id=" + d.id, "grants", "", ""},
 		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
 		"GET /v1/admin/invoices":                                     {"/v1/admin/invoices", "", "invoices", "", ""},
 		"GET /v1/admin/orders":                                       {"/v1/admin/orders", "", "orders", "", ""},
 		"GET /v1/admin/payments":                                     {"/v1/admin/payments", "", "payments", "", ""},
 		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},
-		"GET /v1/admin/rebill-cycles":                                {"/v1/admin/rebill-cycles", "", "rebill_cycles", "", ""},
+		"GET /v1/admin/renewals":                                     {"/v1/admin/renewals", "", "rebill_cycles", "", ""},
 		"GET /v1/admin/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
 		"GET /v1/admin/psps":                                         {"/v1/admin/psps", "", "psps", ", account_id = 'elsewhere'", ""},
 		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "merchant_webhooks", "", ""},
 		"GET /v1/admin/provisioning-tokens":                          {"/v1/admin/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
-		"GET /v1/admin/host-events":                                  {"/v1/admin/host-events", "include_acknowledged=true", "host_outbox", "", ""},
+		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
 	}
 	listed := 0
@@ -200,7 +200,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		for _, p := range route.Query {
 			takesIDs = takesIDs || p.Kind == "ids"
 		}
-		if !route.Staff() || !takesIDs {
+		if !route.Staff() && route.Auth != routes.AuthApplication || !takesIDs {
 			continue
 		}
 		fixture, ok := fixtures[route.Key()]
@@ -208,6 +208,9 @@ func TestListsReadNamedRecords(t *testing.T) {
 		listed++
 		get := func(query string) (int, map[string]any) {
 			t.Helper()
+			if strings.HasPrefix(fixture.path, "/v1/app/") {
+				return w.hostJSON(http.MethodGet, fixture.path+"?"+query, nil)
+			}
 			return w.staffJSON(http.MethodGet, fixture.path+"?"+query, nil)
 		}
 
@@ -271,48 +274,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 	require.Nil(t, page["data"].([]any)[0].(map[string]any)["contact"], "another merchant's contact is not this customer's")
 }
 
-// Effective tiers are looked up for many customers at once: every requested
-// customer is answered, null when it holds no tier of the group, and another
-// merchant's access never counts.
-func TestEffectiveTierLookups(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	ctx := t.Context()
-	group := "g" + uuid.NewString()[:8]
-	low := w.tierPrice(group, 1, 1000, monthHours, false)
-	high := w.tierPrice(group, 2, 2000, monthHours, false)
-	hours := monthHours
-	one, both, none := w.newCustomer(), w.newCustomer(), w.newCustomer()
-	one.grant(low.ProductID, &hours, nil)
-	both.grant(low.ProductID, &hours, nil)
-	window := both.grant(high.ProductID, &hours, nil)
-	unknown := billing.CustomerID(uuid.New())
-	// The same window at another merchant, for a customer holding none here.
-	w.cloneElsewhere("product_access", window.ID.String(), fmt.Sprintf(", customer_id = '%s'", none.cid().UUID()))
-
-	tiers, err := w.client[remote].GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{Group: group, CustomerIDs: []billing.CustomerID{one.cid(), both.cid(), none.cid(), unknown, one.cid()}})
-	require.NoError(t, err)
-	require.Len(t, tiers, 4, "every requested customer is answered once")
-	require.Equal(t, low.ent, tiers[one.cid()].Entitlement)
-	require.Equal(t, 1, tiers[one.cid()].TierRank)
-	require.Equal(t, high.ent, tiers[both.cid()].Entitlement, "the highest-ranked product wins")
-	require.Equal(t, high.ProductID, tiers[both.cid()].ProductID)
-	require.Contains(t, tiers, none.cid())
-	require.Nil(t, tiers[none.cid()], "another merchant's access never counts")
-	require.Contains(t, tiers, unknown)
-	require.Nil(t, tiers[unknown], "an unknown customer holds no tier")
-
-	ids := make([]string, billing.MaxBatchItems+1)
-	for i := range ids {
-		ids[i] = uuid.NewString()
-	}
-	for _, body := range []map[string]any{{"group": group, "customer_ids": ids}, {"group": group, "customer_ids": []string{}}, {"customer_ids": ids[:1]}} {
-		status, refused := w.staffJSON(http.MethodPost, "/v1/admin/tiers/lookup", body)
-		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
-		require.Equal(t, "invalid_param", refused["error"].(map[string]any)["code"])
-	}
-}
-
 // The single forms the batches replaced are gone, every batch route refuses
 // more items than its bound, and a credit-grant batch answers 201, or 200
 // when it only replays.
@@ -325,8 +286,8 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 		{http.MethodGet, "/v1/admin/customers/" + c.id + "/tier?group=g"},
 		{http.MethodPut, "/v1/admin/customers/" + c.id + "/spend-delegations/invoker/someone"},
 		{http.MethodPost, "/v1/admin/customers/" + c.id + "/credit-grants"},
-		{http.MethodPost, "/v1/admin/admissions/req-1/release"},
-		{http.MethodPost, "/v1/admin/admissions/req-1/extend"},
+		{http.MethodPost, "/v1/app/admissions/req-1/release"},
+		{http.MethodPost, "/v1/app/admissions/req-1/extend"},
 	} {
 		status, body := w.staff(probe.method, probe.path)
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, status, "%s %s: %s", probe.method, probe.path, body)
@@ -343,8 +304,8 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	}
 	expires := w.clock.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	for path, body := range map[string]map[string]any{
-		"/v1/admin/admissions/release": {"request_ids": many(billing.MaxAdmissionBatchItems+1, func(i int) any { return fmt.Sprint("r", i) })},
-		"/v1/admin/admissions/extend": {"items": many(billing.MaxAdmissionBatchItems+1, func(i int) any {
+		"/v1/app/admissions/release": {"request_ids": many(billing.MaxAdmissionBatchItems+1, func(i int) any { return fmt.Sprint("r", i) })},
+		"/v1/app/admissions/extend": {"items": many(billing.MaxAdmissionBatchItems+1, func(i int) any {
 			return map[string]any{"request_id": fmt.Sprint("r", i), "expires_at": expires}
 		})},
 		"/v1/admin/credit-grants": {"items": many(billing.MaxBatchItems+1, func(i int) any {

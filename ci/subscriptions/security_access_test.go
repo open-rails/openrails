@@ -116,7 +116,7 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 		future := c.grant(gift, &hours, nil)
 		now := w.clock.Now()
 		require.True(t, c.entitledAt("content:gift", now.Add(30*time.Hour)), "hours extend after the live grant")
-		require.NoError(t, w.client[embedded].DeleteProductAccess(t.Context(), c.customerID(), future.ID))
+		require.NoError(t, revokeAccess(w.client[embedded], t.Context(), future.ID))
 		for range 2 {
 			require.False(t, c.entitledAt("content:gift", now.Add(30*time.Hour)), "the revoked grant stays revoked")
 			require.True(t, c.entitledAt("content:gift", now.Add(12*time.Hour)))
@@ -309,8 +309,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], w.auth, psps)
-		cfg, err := r.client.GetPublicConfig(t.Context())
-		require.NoError(t, err)
+		cfg := publicConfig(t, r.client)
 		found := false
 		for _, psp := range cfg.Payment.PSPs {
 			if psp.Rail == "nmi" {

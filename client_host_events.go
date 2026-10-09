@@ -24,7 +24,7 @@ func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListPa
 		return nil, err
 	}
 	var out billing.ListPage[billing.HostEvent]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/host-events?"+q.Encode(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/app/host-events?"+q.Encode(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -39,7 +39,7 @@ func (c *Client) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEv
 		return nil, err
 	}
 	var out billing.HostEventLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/host-events/acknowledge", billing.AcknowledgeHostEventsParams{HostEventIDs: ids}, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/host-events/acknowledge", billing.AcknowledgeHostEventsParams{HostEventIDs: ids}, &out, options...); err != nil {
 		return nil, err
 	}
 	return out.HostEvents, nil

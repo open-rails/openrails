@@ -84,8 +84,6 @@ func moneyRefusal(err error) *api.APIError {
 		return api.Coded("credit_grant_held", err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantUnavailable):
 		return api.Coded("credit_grant_unavailable", err.Error())
-	case errors.Is(err, billingservice.ErrInvalidInvokerSpendLimit):
-		return api.Coded(billing.CodeInvalidParam, err.Error())
 	case errors.Is(err, billingservice.ErrUsageOutsideIngestWindow):
 		return api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at")
 	}
@@ -127,25 +125,33 @@ func CreateCreditGrants(r *httprequest.Request) {
 
 // ListCreditGrants lists a customer's credit grants, newest first.
 func ListCreditGrants(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
 	var params billing.CreditGrantListParams
 	if !r.BindQuery(&params) {
 		return
 	}
+	var ok bool
 	if params.PageRequest, ok = r.Page(); !ok {
 		return
 	}
 	if params.IDs, ok = listIDs(r, billing.ParseCreditGrantID); !ok {
 		return
 	}
+	if params.IDs == nil {
+		id, err := billing.ParseCustomerID(strings.TrimSpace(r.Query("customer_id")))
+		if err != nil || id.IsZero() {
+			r.APIError(api.Coded("invalid_customer_id", "customer_id is required").WithParam("customer_id"))
+			return
+		}
+		if !requireServiceCustomerScope(r, id) {
+			return
+		}
+		params.CustomerID = id
+	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
 	}
-	page, err := svc.ListCreditGrants(r.Request.Context(), customer, params)
+	page, err := svc.ListCreditGrants(r.Request.Context(), params)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant list failed")
 		return
@@ -159,15 +165,11 @@ func creditGrantParam(r *httprequest.Request) (billing.CreditGrantID, bool) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid credit grant id").WithParam("id"))
 		return billing.CreditGrantID{}, false
 	}
-	return id, true
+	return id, requireMerchantRoutePrincipal(r)
 }
 
-// GetCreditGrant reads one of a customer's credit grants.
+// GetCreditGrant reads one credit grant.
 func GetCreditGrant(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
 	id, ok := creditGrantParam(r)
 	if !ok {
 		return
@@ -176,7 +178,7 @@ func GetCreditGrant(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	grant, err := svc.GetCreditGrant(r.Request.Context(), customer, id)
+	grant, err := svc.GetCreditGrant(r.Request.Context(), id)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant read failed")
 		return
@@ -186,10 +188,6 @@ func GetCreditGrant(r *httprequest.Request) {
 
 // RevokeCreditGrant revokes a grant's unspent remainder.
 func RevokeCreditGrant(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
 	id, ok := creditGrantParam(r)
 	if !ok {
 		return
@@ -207,7 +205,7 @@ func RevokeCreditGrant(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	grant, err := svc.RevokeCreditGrant(r.Request.Context(), customer, id, params.Reason)
+	grant, err := svc.RevokeCreditGrant(r.Request.Context(), id, params.Reason)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant revocation failed")
 		return

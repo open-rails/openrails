@@ -225,7 +225,7 @@ Per merchant:
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
   `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the
-  merchant's directory presents at `/scim/v2`
+  merchant's directory presents at `/v1/app/scim/v2`
   ([customer contacts](customer-contacts.md)). OpenRails keeps its SHA-256 as
   the merchant's declared token, replaced when this changes and removed when it
   is removed; tokens minted over the API stand beside it.
@@ -366,7 +366,7 @@ operations are the standalone operator's: the server's Go methods and the
 `openrails` CLI, never a route. PSP metadata and
 archive decisions are always available through the Client; writing a PSP
 credential needs a writable secret backend, so it is refused under `snapshot`
-custody. Catalog mutation routes are `Permissions.CatalogWrite`'s, refused while
+custody. Catalog routes are `Permissions.Catalog`'s, their changes refused while
 `Config.Catalog` is the catalog's truth (standalone: allowed when
 `secret_backend` is `vault` or `db`, read-only under `snapshot`); the embedded
 in-process Client is the process owner and writes its own catalog whatever the

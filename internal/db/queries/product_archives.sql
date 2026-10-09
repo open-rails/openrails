@@ -9,12 +9,6 @@ FROM billing.product_archive_operations o
 JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
 WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.idempotency_key = sqlc.arg(idempotency_key)::text;
 
--- name: GetProductArchiveByID :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
-FROM billing.product_archive_operations o
-JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
-WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.arg(id)::uuid;
-
 -- name: InsertProductArchive :exec
 INSERT INTO billing.product_archive_operations (merchant_id, idempotency_key, request_sha256, product_id, purchase_action, purchase_window_starts_at, reason)
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(idempotency_key)::text, sqlc.arg(request_sha256)::bytea, sqlc.arg(product_id)::uuid,

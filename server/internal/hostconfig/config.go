@@ -37,10 +37,13 @@ type Config struct {
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
 	MerchantManifestOverlays []string
+	// RouteGroups turns the server's route groups on (route_groups); each is
+	// off by default.
+	RouteGroups billing.RouteGroups
 	// AdminConsole serves the merchant admin console; nil, the default,
 	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
 	// at a trusted issuer.
-	AdminConsole  *billing.AdminConsole
+	AdminConsole  *billing.ConsoleMount
 	ConsoleIssuer *ConsoleIssuer
 }
 
@@ -90,6 +93,7 @@ type fileConfig struct {
 	Vault              *billing.VaultConfig      `koanf:"vault"`
 	AdminConsole       *adminConsoleFile         `koanf:"admin_console"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
+	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
 
 	SecretBackend        string `koanf:"secret_backend"`
 	CredentialSnapshotID string `koanf:"credential_snapshot_id"`
@@ -211,11 +215,11 @@ type adminConsoleFile struct {
 	Issuer  *ConsoleIssuer `koanf:"issuer"`
 }
 
-func (a *adminConsoleFile) mount() *billing.AdminConsole {
+func (a *adminConsoleFile) mount() *billing.ConsoleMount {
 	if a == nil || !a.Enabled {
 		return nil
 	}
-	return &billing.AdminConsole{Path: a.Path}
+	return &billing.ConsoleMount{Path: a.Path}
 }
 
 func (a *adminConsoleFile) issuer() *ConsoleIssuer {
@@ -276,6 +280,7 @@ func (f *fileConfig) config() (*Config, error) {
 		DrainDelay:               f.DrainDelay,
 		ShutdownTimeout:          f.ShutdownTimeout,
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
+		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole.mount(),
 		ConsoleIssuer:            f.AdminConsole.issuer(),
 	}, nil

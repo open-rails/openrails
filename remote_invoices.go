@@ -66,7 +66,7 @@ func (c *Client) VoidInvoice(ctx context.Context, id billing.InvoiceID, requestO
 // MarkInvoiceUncollectible marks an open or past-due invoice uncollectible.
 // Repeating it changes nothing.
 func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error) {
-	return invoiceCall[billing.Invoice](ctx, c, http.MethodPost, id, "/uncollectible", nil, nil, requestOptions)
+	return invoiceCall[billing.Invoice](ctx, c, http.MethodPost, id, "/mark-uncollectible", nil, nil, requestOptions)
 }
 
 // RetryInvoiceCollection charges an open invoice to one of its customer's

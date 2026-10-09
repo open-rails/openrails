@@ -270,7 +270,7 @@ func TestHeavyBuyerCacheNeverAnswersStale(t *testing.T) {
 	// A revocation, then a window that ends with no write at all.
 	access, err := f.client.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{whale}, PageRequest: billing.PageRequest{Limit: 1}})
 	require.NoError(t, err)
-	require.NoError(t, f.client.DeleteProductAccess(ctx, whale, access.Items[0].ID))
+	require.NoError(t, revokeAccess(f.client, ctx, access.Items[0].ID))
 	require.NotContains(t, held(), "w:zz:2", "a revoked window's keys go at once")
 	rental, err := f.client.CreateProduct(ctx, billing.CreateProductParams{Key: "rental", DisplayName: "Rental", Entitlements: []string{"w:rent:1"}})
 	require.NoError(t, err)
@@ -345,7 +345,7 @@ func TestHeavyBuyerCacheRaces(t *testing.T) {
 			windows, err := f.client.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: whale, ProductID: granted.ID}}})
 			require.NoError(t, err)
 			require.True(t, f.held(whale, time.Time{}, key)[key], "a grant shows at once")
-			require.NoError(t, f.client.DeleteProductAccess(ctx, whale, windows[0].ID))
+			require.NoError(t, revokeAccess(f.client, ctx, windows[0].ID))
 			require.False(t, f.held(whale, time.Time{}, key)[key], "a refund shows at once")
 		}
 	}

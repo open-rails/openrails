@@ -85,20 +85,6 @@ func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilit
 	return doc
 }
 
-// ServiceGetPublicConfig serves the same document to the merchant, without
-// public cache headers.
-func ServiceGetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
-	return func(r *httprequest.Request) {
-		payment, ok := merchantPaymentConfig(r)
-		if !ok {
-			return
-		}
-		doc := publicConfigDocument(r, capabilities)
-		doc.Payment = &payment
-		r.SuccessJSON(doc)
-	}
-}
-
 // ListCheckoutOptions serves GET /v1/admin/checkout-options: the ways
 // checkout can sell one price, each with the browser driver that renders it.
 func ListCheckoutOptions(r *httprequest.Request) {

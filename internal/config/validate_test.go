@@ -104,8 +104,8 @@ func TestValidateMountPath(t *testing.T) {
 			require.ErrorContains(t, err, "invalid admin_console.path", path)
 		}
 	}
-	require.Equal(t, "/admin", AdminConsolePath(&AdminConsole{}))
-	require.Equal(t, "/ops", AdminConsolePath(&AdminConsole{Path: "/ops"}))
+	require.Equal(t, "/admin", AdminConsolePath(&ConsoleMount{}))
+	require.Equal(t, "/ops", AdminConsolePath(&ConsoleMount{Path: "/ops"}))
 }
 
 // The host's extension data reaches the console through config.json, keyed by

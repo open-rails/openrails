@@ -1,7 +1,8 @@
 # Durable request admission
 
-How admissions and their holds behave. The routes are `/v1/admin/admissions`
-([routes](api/routes.md)); the Go methods are `Admit`, `GetAdmission`,
+How admissions and their holds behave. The routes are `/v1/app/admissions`
+([routes](api/routes.md)), your backend's own: they take an application's
+credential and an `Idempotency-Key` on each write. The Go methods are `Admit`,
 `CaptureAdmission`, `ReleaseAdmissions` and `ExtendAdmissions`. Admit,
 release and extend take up to 1,000 items and answer one result per item, each
 decided on its own; capture settles one request.

@@ -252,8 +252,8 @@ func (m *model) operation(r routes.Route) *obj {
 	if r.When != routes.Always {
 		op.set("x-openrails-mounted-when", string(r.When))
 	}
-	if r.Group == routes.CatalogWrite {
-		op.set("x-openrails-catalog-write", true)
+	if r.CatalogUpdate() {
+		op.set("x-openrails-catalog-update", true)
 	}
 	if r.Limit != "" {
 		op.set("x-openrails-operation-limit", string(r.Limit))

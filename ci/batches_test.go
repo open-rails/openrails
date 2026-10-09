@@ -76,11 +76,11 @@ func TestCreditGrantBatchesAreAllOrNone(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalid)
 	require.Equal(t, "items[1].source_id", refusedParam(t, err))
 	for _, source := range []string{"x-3", "x-4"} {
-		page, err := a.ListCreditGrants(ctx, x, billing.CreditGrantListParams{SourceID: source})
+		page, err := a.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: x, SourceID: source})
 		require.NoError(t, err)
 		require.Empty(t, page.Items, "%s was rolled back", source)
 	}
-	page, err := a.ListCreditGrants(ctx, y, billing.CreditGrantListParams{SourceID: "y-3"})
+	page, err := a.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: y, SourceID: "y-3"})
 	require.NoError(t, err)
 	require.Empty(t, page.Items, "y-3 was rolled back")
 	require.EqualValues(t, 1_500_000, balanceOf(t, a, x))
@@ -96,7 +96,7 @@ func TestCreditGrantBatchesAreAllOrNone(t *testing.T) {
 	require.NotEqual(t, grants[0].ID, other[0].ID)
 	require.EqualValues(t, 7, balanceOf(t, b, x))
 	require.EqualValues(t, 1_500_000, balanceOf(t, a, x))
-	listed, err := b.ListCreditGrants(ctx, x, billing.CreditGrantListParams{IDs: []billing.CreditGrantID{grants[0].ID, grants[2].ID, other[0].ID}})
+	listed, err := b.ListCreditGrants(ctx, billing.CreditGrantListParams{IDs: []billing.CreditGrantID{grants[0].ID, grants[2].ID, other[0].ID}})
 	require.NoError(t, err)
 	require.Len(t, listed.Items, 1, "a merchant reads only its own grants")
 	require.Equal(t, other[0].ID, listed.Items[0].ID)
@@ -114,7 +114,7 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	_, err := createCreditGrant(ctx, a, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "support", SourceID: "seed"})
 	require.NoError(t, err)
 	deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	admit := func(requestID string) {
+	admit := func(requestID string) *billing.Admission {
 		t.Helper()
 		verdicts, err := a.Admit(ctx, []billing.AdmitParams{{
 			RequestID: requestID, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
@@ -122,6 +122,7 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 		}})
 		require.NoError(t, err)
 		require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
+		return verdicts[0].Admission
 	}
 	r1, r2, r3 := "r1-"+uuid.NewString(), "r2-"+uuid.NewString(), "r3-"+uuid.NewString()
 	for _, id := range []string{r1, r2, r3} {
@@ -152,8 +153,8 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	foreignExtend, err := b.ExtendAdmissions(ctx, []billing.ExtendAdmissionParams{{RequestID: r2, ExpiresAt: later}})
 	require.NoError(t, err)
 	require.Equal(t, "admission_not_found", foreignExtend[0].Error.Code)
-	open, err := a.GetAdmission(ctx, r2)
-	require.NoError(t, err)
+	open := admit(r2) // a replay answers the admission as it stands
+	require.True(t, open.Replayed)
 	require.Equal(t, billing.AdmissionOpen, *open.State)
 	require.True(t, open.ExpiresAt.Equal(deadline), "untouched by the other merchant")
 

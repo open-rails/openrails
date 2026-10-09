@@ -192,7 +192,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	}))
 	// An unrelated merchant revocation must survive a later dispute recovery.
 	require.NoError(t, syncRefund(20_000_000))
-	_, err = client.RevokeCreditGrant(ctx, customer, billing.CreditGrantID(grantID), billing.RevokeCreditGrantParams{Reason: "separate merchant revocation"})
+	_, err = client.RevokeCreditGrant(ctx, billing.CreditGrantID(grantID), billing.RevokeCreditGrantParams{Reason: "separate merchant revocation"})
 	require.NoError(t, err)
 	require.NoError(t, syncRefund(0))
 	assertBalance(200_000_000)
@@ -209,7 +209,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	reserved, err = paymentService.ReserveRefund(ctx, second.ID, uuid.NewString(), 200_000_000, nil)
 	require.NoError(t, err)
-	_, err = client.RevokeCreditGrant(ctx, customer, billing.CreditGrantID(secondGrant), billing.RevokeCreditGrantParams{Reason: "cannot revoke the cash refund reservation"})
+	_, err = client.RevokeCreditGrant(ctx, billing.CreditGrantID(secondGrant), billing.RevokeCreditGrantParams{Reason: "cannot revoke the cash refund reservation"})
 	require.Error(t, err, "another available lot cannot make the reserved source revocable")
 	require.ErrorIs(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		ledger := grants.New(gen.New(tx), client.MerchantID().UUID())
@@ -255,7 +255,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 		retiredGrant, err := svc.Fund(ctx, retiredTerms)
 		require.NoError(t, err)
 		if retiredAs == "revoked_credits" {
-			_, err = client.RevokeCreditGrant(ctx, customer, billing.CreditGrantID(retiredGrant), billing.RevokeCreditGrantParams{Reason: "retired credit refund test"})
+			_, err = client.RevokeCreditGrant(ctx, billing.CreditGrantID(retiredGrant), billing.RevokeCreditGrantParams{Reason: "retired credit refund test"})
 			require.NoError(t, err)
 		} else {
 			require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

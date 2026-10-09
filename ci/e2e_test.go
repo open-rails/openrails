@@ -161,25 +161,6 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	require.Equal(t, map[string]bool{key: false}, foreign)
 }
 
-func TestCatalogEnsureIsIdempotent(t *testing.T) {
-	f := newFixture(t)
-	client := f.runtime(t, "idempotent-"+uuid.NewString()[:8])
-	key := "stable-product-" + uuid.NewString()[:8]
-
-	first, err := client.EnsureProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "First title"})
-	require.NoError(t, err)
-	second, err := client.EnsureProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Changed title"})
-	require.NoError(t, err)
-	require.Equal(t, first.ID, second.ID)
-	require.Equal(t, first.DisplayName, second.DisplayName)
-
-	read, err := client.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{key}})
-	require.NoError(t, err)
-	require.Len(t, read.Items, 1)
-	require.Equal(t, first.ID, read.Items[0].ID)
-	require.Equal(t, first.DisplayName, read.Items[0].DisplayName)
-}
-
 // A catalog application's meters and rate cards land in the runtime's own schema.
 func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	f := newFixture(t)

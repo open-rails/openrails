@@ -60,17 +60,18 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	grantParams.Amount = 2_000_000
 	_, err = createCreditGrant(ctx, client, customer, grantParams)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-	byKey, err := client.ListCreditGrants(ctx, customer, billing.CreditGrantListParams{SourceID: "grant-1"})
+	byKey, err := client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: customer, SourceID: "grant-1"})
 	require.NoError(t, err)
 	require.Len(t, byKey.Items, 1)
 	require.Equal(t, grant.ID, byKey.Items[0].ID)
 
 	requestID := "job-" + uuid.NewString()
 	deadline := time.Now().Add(time.Hour)
-	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
+	admit := billing.AdmitParams{
 		RequestID: requestID, CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
 		Currency: "USD", EstimatedAmount: 300_000, ExpiresAt: &deadline,
-	}})
+	}
+	verdicts, err := client.Admit(ctx, []billing.AdmitParams{admit})
 	require.NoError(t, err)
 	require.Len(t, verdicts, 1)
 	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
@@ -80,9 +81,15 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.EqualValues(t, 300_000, balance.HeldAmount)
 	require.EqualValues(t, 700_000, balance.AvailableAmount)
 
-	open, err := client.GetAdmission(ctx, requestID)
-	require.NoError(t, err)
-	require.Equal(t, billing.AdmissionOpen, *open.State)
+	// An admit replay answers the admission as it stands.
+	state := func() *billing.Admission {
+		t.Helper()
+		replay, err := client.Admit(ctx, []billing.AdmitParams{admit})
+		require.NoError(t, err)
+		require.True(t, replay[0].Admission.Replayed)
+		return replay[0].Admission
+	}
+	require.Equal(t, billing.AdmissionOpen, *state().State)
 	capture := billing.CaptureAdmissionParams{Amount: 250_000, Usage: &billing.CaptureUsage{EventType: "inference"}}
 	receipt, err := client.CaptureAdmission(ctx, requestID, capture)
 	require.NoError(t, err)
@@ -94,10 +101,8 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	capture.Amount = 260_000
 	_, err = client.CaptureAdmission(ctx, requestID, capture)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-	captured, err := client.GetAdmission(ctx, requestID)
-	require.NoError(t, err)
+	captured := state()
 	require.Equal(t, billing.AdmissionCaptured, *captured.State)
-	require.EqualValues(t, 250_000, *captured.CapturedAmount)
 	_, err = releaseAdmission(ctx, client, requestID)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
@@ -140,11 +145,11 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}, settings.Settings.TrustLevels)
 
-	revoked, err := client.RevokeCreditGrant(ctx, customer, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
+	revoked, err := client.RevokeCreditGrant(ctx, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
 	require.NoError(t, err)
 	require.Equal(t, billing.CreditGrantRevoked, revoked.State)
 	require.EqualValues(t, 700_000, revoked.RevokedAmount)
-	revokedAgain, err := client.RevokeCreditGrant(ctx, customer, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
+	revokedAgain, err := client.RevokeCreditGrant(ctx, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
 	require.NoError(t, err)
 	require.True(t, revokedAgain.Replayed)
 
@@ -157,8 +162,9 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 
 	// One merchant's customer is never another's.
 	foreign := f.runtime(t, "credits-other-"+uuid.NewString()[:8])
-	_, err = foreign.GetCreditGrant(ctx, customer, grant.ID)
+	_, err = foreign.GetCreditGrant(ctx, grant.ID)
 	require.ErrorIs(t, err, billing.ErrNotFound)
-	_, err = foreign.GetAdmission(ctx, requestID)
-	require.ErrorIs(t, err, billing.ErrNotFound)
+	foreignRelease, err := foreign.ReleaseAdmissions(ctx, []string{requestID})
+	require.NoError(t, err)
+	require.Equal(t, "admission_not_found", foreignRelease[0].Error.Code)
 }

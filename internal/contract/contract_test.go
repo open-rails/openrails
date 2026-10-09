@@ -34,7 +34,7 @@ func TestOpenAPICoversTheCatalog(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(files[OpenAPIFile], &doc))
 	for _, r := range routes.Catalog() {
-		if r.Group == routes.Provisioning {
+		if r.Auth == routes.AuthProvisioning {
 			require.NotContains(t, doc.Paths, r.Path, "SCIM's messages are the standard's")
 			continue
 		}

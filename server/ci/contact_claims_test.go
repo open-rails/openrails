@@ -131,7 +131,7 @@ merchants:
 	require.Contains(t, receipt.Text+receipt.HTML, "9.99")
 
 	// The directory pushes later. An older report leaves the claims; a newer one wins.
-	scim := scimClient{t: t, handler: handler, base: "/scim/v2", token: scimToken}
+	scim := scimClient{t: t, handler: handler, base: "/v1/app/scim/v2", token: scimToken}
 	older := scimUser(user, "newcomer", "older@claims.test", "New Comer")
 	older["meta"] = map[string]any{"lastModified": registered.Add(-time.Hour).UTC().Format(time.RFC3339)}
 	created := scim.must(http.MethodPost, "/Users", older, http.StatusCreated)
@@ -156,17 +156,18 @@ merchants:
 	require.NoError(t, err)
 	require.Equal(t, "newer@claims.test", *customers.Items[0].Contact.Email, "an unverified email is no contact")
 
-	// A client-credentials token with scope scim provisions too.
+	// The issuer's application provisions too, holding no permission; a
+	// person's token is refused, whatever it holds.
 	machine := host.mint(t, func(c jwt.MapClaims) {
-		c["sub"], c["client_id"], c["scope"] = "directory-sync", "directory-sync", billing.ScopeSCIM
+		c["sub"], c["client_id"], c["scope"] = "directory-sync", "directory-sync", billing.ScopeMerchant
 		delete(c, "permissions")
 	})
-	scimClient{t: t, handler: handler, base: "/scim/v2", token: machine}.must(http.MethodGet, "/Users/"+user, nil, http.StatusOK)
-	selfToken := scimClient{t: t, handler: handler, base: "/scim/v2", token: host.mint(t, func(c jwt.MapClaims) {
-		c["sub"], c["client_id"], c["scope"] = "directory-sync", "directory-sync", billing.ScopeMerchant
+	scimClient{t: t, handler: handler, base: "/v1/app/scim/v2", token: machine}.must(http.MethodGet, "/Users/"+user, nil, http.StatusOK)
+	person := scimClient{t: t, handler: handler, base: "/v1/app/scim/v2", token: host.mint(t, func(c jwt.MapClaims) {
+		c["sub"], c["scope"] = user, billing.ScopeMerchant
 	})}
-	status, _ := selfToken.do(http.MethodGet, "/Users/"+user, nil)
-	require.Equal(t, http.StatusForbidden, status, "a token without scope scim provisions nothing")
+	status, body := person.do(http.MethodGet, "/Users/"+user, nil)
+	require.Equal(t, http.StatusForbidden, status, "a person provisions nothing: %v", body)
 }
 
 // scimClient drives the server's SCIM routes the way a directory does.

@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
 )
@@ -60,7 +59,7 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 					Name: "Example ID", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
 				}},
 			}
-			cfg.AdminConsole, cfg.ConsoleIssuer = &openrails.AdminConsole{}, issuer
+			cfg.AdminConsole, cfg.ConsoleIssuer = &server.AdminConsole{}, issuer
 			deps.Engine.ConsoleAssets = consoleBuild("federated")
 		}
 	}

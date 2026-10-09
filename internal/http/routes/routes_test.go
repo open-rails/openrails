@@ -74,7 +74,7 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 }
 
 // Every staff route asks the gate before its handler, for the permission of
-// the bundle its blast radius sets: a read, a write on customers, or the
+// the group its blast radius sets: a read, a write on customers, or the
 // merchant's own configuration.
 func TestMerchantRouteAuthorization(t *testing.T) {
 	gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}}
@@ -83,6 +83,9 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 	h := table.Handler()
 	asked := map[string]string{}
 	for _, key := range routeKeys(table) {
+		if key == "GET /v1/admin/access" {
+			continue
+		}
 		method, path, _ := strings.Cut(key, " ")
 		gate.asked = nil
 		rec := do(h, method, wildcard.ReplaceAllString(path, "x"), nil)
@@ -91,73 +94,61 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		asked[key] = gate.asked[0]
 	}
 
-	read, write, catalog, admin := staffPermissions.AdminRead, staffPermissions.AdminWrite, staffPermissions.CatalogWrite, staffPermissions.MerchantConfig
+	read, write, catalog, admin, metrics := staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics
 	for key, perm := range map[string]string{
-		"GET /v1/admin/billing-archive":                                                  admin,
-		"POST /v1/admin/billing-archive":                                                 admin,
-		"POST /v1/admin/billing-import":                                                  admin,
-		"GET /v1/admin/host-events":                                                      read,
-		"POST /v1/admin/host-events/acknowledge":                                         write,
-		"GET /v1/admin/entitlements":                                                     read,
-		"POST /v1/admin/tiers/lookup":                                                    read,
-		"GET /v1/admin/customers/{customer_id}":                                          read,
-		"GET /v1/admin/orders":                                                           read,
-		"PUT /v1/admin/customers/{customer_id}/spend-delegations":                        write,
-		"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": write,
-		"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}":                  write,
-		"POST /v1/admin/payments":                                                        write,
-		"POST /v1/admin/product-access":                                                  write,
-		"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}":                 catalog,
-		"PATCH /v1/admin/customers/{customer_id}":                                        write,
-		"POST /v1/admin/credit-grants":                                                   write,
-		"POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke":               write,
-		"GET /v1/admin/customers/{customer_id}/credit-grants":                            read,
-		"POST /v1/admin/checkout-sessions":                                               write,
-		"POST /v1/admin/admissions":                                                      write,
-		"POST /v1/admin/admissions/{request_id}/capture":                                 write,
-		"POST /v1/admin/admissions/release":                                              write,
-		"POST /v1/admin/admissions/extend":                                               write,
-		"GET /v1/admin/admissions/{request_id}":                                          read,
-		"POST /v1/admin/provider-operations":                                             write,
-		"GET /v1/admin/provider-operations/{operation_id}":                               read,
-		"GET /v1/admin/provider-operations":                                              read,
-		"POST /v1/admin/provider-operations/{operation_id}/increment":                    write,
-		"POST /v1/admin/provider-operations/{operation_id}/observations":                 write,
-		"POST /v1/admin/provider-operations/{operation_id}/close":                        write,
-		"POST /v1/admin/usage-events":                                                    write,
-		"GET /v1/admin/payments":                                                         read,
-		"POST /v1/admin/payments/{id}/refunds":                                           write,
-		"GET /v1/admin/subscriptions":                                                    read,
-		"POST /v1/admin/subscriptions/{id}/cancel":                                       write,
-		"POST /v1/admin/subscriptions/{id}/change":                                       write,
-		"POST /v1/admin/subscriptions/{id}/change/preview":                               read,
-		"POST /v1/admin/price-migrations/preview":                                        read,
-		"GET /v1/admin/product-access":                                                   read,
-		"POST /v1/admin/price-migrations":                                                write,
-		"GET /v1/admin/invoices":                                                         read,
-		"POST /v1/admin/invoices/{id}/void":                                              write,
-		"POST /v1/admin/invoices/{id}/retry-collection":                                  write,
-		"POST /v1/admin/metrics/query":                                                   read,
-		"PUT /v1/admin/dashboard":                                                        admin,
-		"GET /v1/admin/findings/{id}":                                                    read,
-		"POST /v1/admin/findings/{id}/resolve":                                           write,
-		"GET /v1/admin/configuration":                                                    admin,
-		"POST /v1/admin/configuration/applications":                                      admin,
-		"PUT /v1/admin/alert-webhooks/{id}/url":                                          admin,
-		"GET /v1/admin/psps":                                                             admin,
-		"POST /v1/admin/psps":                                                            admin,
-		"GET /v1/admin/psps/{id}":                                                        admin,
-		"PATCH /v1/admin/psps/{id}":                                                      admin,
-		"POST /v1/admin/psps/{id}/archive":                                               admin,
-		"POST /v1/admin/psps/routing-preview":                                            admin,
-		"POST /v1/admin/psps/refresh":                                                    admin,
-		"GET /v1/admin/catalog/products":                                                 read,
-		"GET /v1/admin/catalog/prices/{id}/history":                                      read,
-		"GET /v1/admin/catalog/rate-overrides":                                           read,
-		"POST /v1/admin/catalog/applications":                                            catalog,
-		"PUT /v1/admin/catalog/meters/{key}":                                             catalog,
-		"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}":              catalog,
-		"POST /v1/admin/catalog/product-archives":                                        catalog,
+		"GET /v1/admin/billing-archive":                                     admin,
+		"POST /v1/admin/billing-archive":                                    admin,
+		"POST /v1/admin/billing-import":                                     admin,
+		"GET /v1/admin/entitlements":                                        read,
+		"POST /v1/admin/product-access":                                     write,
+		"POST /v1/admin/product-access/{id}/revoke":                         write,
+		"GET /v1/admin/product-access":                                      read,
+		"GET /v1/admin/catalog/rate-overrides":                              catalog,
+		"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}":    catalog,
+		"GET /v1/admin/customers/{customer_id}":                             read,
+		"PATCH /v1/admin/customers/{customer_id}":                           write,
+		"POST /v1/admin/credit-grants":                                      write,
+		"POST /v1/admin/credit-grants/{id}/revoke":                          write,
+		"GET /v1/admin/credit-grants":                                       read,
+		"GET /v1/admin/credit-grants/{id}":                                  read,
+		"POST /v1/admin/checkout-sessions":                                  write,
+		"GET /v1/admin/provider-operations/{operation_id}":                  read,
+		"GET /v1/admin/provider-operations":                                 read,
+		"POST /v1/admin/provider-operations/{operation_id}/close":           write,
+		"GET /v1/admin/payments":                                            read,
+		"POST /v1/admin/payments/{id}/refunds":                              write,
+		"GET /v1/admin/renewals":                                            read,
+		"GET /v1/admin/subscriptions":                                       read,
+		"POST /v1/admin/subscriptions/{id}/cancel":                          write,
+		"POST /v1/admin/subscriptions/{id}/change":                          write,
+		"POST /v1/admin/subscriptions/{id}/change/preview":                  read,
+		"POST /v1/admin/price-migrations/preview":                           catalog,
+		"POST /v1/admin/price-migrations":                                   catalog,
+		"GET /v1/admin/invoices":                                            read,
+		"POST /v1/admin/invoices/{id}/void":                                 write,
+		"POST /v1/admin/invoices/{id}/mark-uncollectible":                   write,
+		"POST /v1/admin/invoices/{id}/retry-collection":                     write,
+		"POST /v1/admin/metrics/query":                                      metrics,
+		"PUT /v1/admin/dashboard":                                           admin,
+		"GET /v1/admin/findings/{id}":                                       read,
+		"POST /v1/admin/findings/{id}/resolve":                              write,
+		"GET /v1/admin/configuration":                                       admin,
+		"PATCH /v1/admin/configuration":                                     admin,
+		"PATCH /v1/admin/alert-webhooks/{id}":                               admin,
+		"GET /v1/admin/psps":                                                admin,
+		"POST /v1/admin/psps":                                               admin,
+		"GET /v1/admin/psps/{id}":                                           admin,
+		"PATCH /v1/admin/psps/{id}":                                         admin,
+		"POST /v1/admin/psps/routing-preview":                               admin,
+		"POST /v1/admin/psps/refresh":                                       write,
+		"GET /v1/admin/catalog/products":                                    catalog,
+		"GET /v1/admin/catalog/prices/{id}/history":                         catalog,
+		"POST /v1/admin/catalog/applications":                               catalog,
+		"PUT /v1/admin/catalog/meters/{key}":                                catalog,
+		"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}": catalog,
+		"POST /v1/admin/catalog/product-archives":                           catalog,
+		"GET /v1/admin/orders":                                              read,
+		"POST /v1/admin/payments":                                           write,
 	} {
 		require.Contains(t, asked, key)
 		require.Equal(t, perm, asked[key], key)
@@ -181,9 +172,9 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 			RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{MerchantConfig: "staff:admin"}})
 			keys := routeKeys(table)
 			for _, key := range []string{
-				"GET /admin/configuration", "POST /admin/configuration/applications",
+				"GET /admin/configuration", "PATCH /admin/configuration",
 				"GET /admin/psps", "POST /admin/psps", "PATCH /admin/psps/{id}",
-				"POST /admin/psps/{id}/archive", "POST /admin/alert-webhooks", "PUT /admin/alert-webhooks/{id}/url",
+				"POST /admin/alert-webhooks", "PATCH /admin/alert-webhooks/{id}",
 			} {
 				require.Contains(t, keys, key, "%s/%v", backend, writable)
 			}
@@ -191,23 +182,26 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 	}
 }
 
-// The catalog's writes are CatalogWrite's; its reads and lookups, and
-// customers' credit grants, are Admin's.
+// The catalog, its reads and edits and price migrations, is Catalog's;
+// customers' credit grants and the PSP refresh are customer support's.
 func TestCatalogWritePolicy(t *testing.T) {
 	rt := &app.Runtime{Config: &config.Config{}}
 	staff, edits := &router.Table{}, &router.Table{}
-	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
-	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", CatalogWrite: "staff:catalog"}})
-	for _, key := range []string{"GET /admin/catalog/revision", "GET /admin/catalog/meters", "GET /admin/catalog/product-archives/{id}", "GET /admin/catalog/products", "GET /admin/catalog/prices/{id}/history", "GET /admin/catalog/rate-overrides", "POST /admin/credit-grants"} {
+	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{Catalog: "staff:catalog"}})
+	for _, key := range []string{"POST /admin/credit-grants", "POST /admin/psps/refresh"} {
 		require.Contains(t, routeKeys(staff), key)
 	}
 	for _, key := range routeKeys(staff) {
 		_, path, _ := strings.Cut(key, " ")
 		route, ok := Lookup(strings.Fields(key)[0], "/v1"+path)
 		require.True(t, ok, key)
-		require.NotEqual(t, CatalogWrite, route.Group, "%s: a catalog write is CatalogWrite's", key)
+		require.NotEqual(t, CatalogAdmin, route.Group, "%s: the catalog is Catalog's", key)
 	}
-	for _, key := range []string{"POST /admin/catalog/applications", "PUT /admin/catalog/products/by-key/{product_key}", "PATCH /admin/catalog/prices/{id}", "PUT /admin/catalog/meters/{key}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/rate-overrides/{customer_id}/{meter_key}", "DELETE /admin/catalog/rate-overrides/{customer_id}/{meter_key}"} {
+	for _, key := range []string{"GET /admin/catalog/revision", "GET /admin/catalog/meters", "GET /admin/catalog/products", "GET /admin/catalog/rate-overrides", "GET /admin/price-migrations", "POST /admin/price-migrations/preview"} {
+		require.Contains(t, routeKeys(edits), key)
+	}
+	for _, key := range []string{"POST /admin/catalog/applications", "PATCH /admin/catalog/prices/{id}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/rate-overrides/{customer_id}/{meter_key}", "DELETE /admin/catalog/rate-overrides/{customer_id}/{meter_key}"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
 
@@ -223,7 +217,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.
@@ -239,7 +233,7 @@ func TestAdminOperationLimits(t *testing.T) {
 	require.NotEmpty(t, rec.Header().Get("Retry-After"))
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/m/admin/admissions", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/m/admin/subscriptions/"+userA+"/resume", nil))
 	require.Equal(t, http.StatusBadRequest, rec.Code, "an authorized call reaches its handler")
 }
 

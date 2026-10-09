@@ -92,9 +92,8 @@ func CreateAlertWebhook(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, hook)
 }
 
-// SetAlertWebhookURL handles PUT /v1/admin/alert-webhooks/{id}/url: a new
-// credential, the same webhook.
-func SetAlertWebhookURL(r *httprequest.Request) {
+// UpdateAlertWebhook handles PATCH /v1/admin/alert-webhooks/{id}.
+func UpdateAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
 		return
@@ -103,11 +102,11 @@ func SetAlertWebhookURL(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	var in billing.SetAlertWebhookURLParams
+	var in billing.UpdateAlertWebhookParams
 	if !r.BindJSON(&in) {
 		return
 	}
-	hook, err := svc.SetWebhookURL(r.Request.Context(), id, in)
+	hook, err := svc.UpdateWebhook(r.Request.Context(), id, in)
 	if err != nil {
 		handleAlertWriteError(r, err)
 		return

@@ -6,31 +6,41 @@ A React SPA (`web/admin`, Vite), the staff dashboard, driving the
 `/v1/admin/*` API. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, settings. It holds no state and no privileges of its own; every
-action is an admin-API call its permission admits the caller for. Catalog
-editing appears only where catalog edits are mounted (`Permissions.CatalogWrite`);
-each edit sends the revision it loaded, so a product, price, meter or rate
-another person changed meanwhile is refused and reloaded, and applying a
-catalog document lists what an edit kept,
-its PSP, settings and notification pages, and dashboard editing, only where the
-merchant's configuration is (`Permissions.MerchantConfig`); both are always on
-the standalone server.
+action is a staff-route call its permission admits the caller for.
+
+It has four areas, one per staff route group: customer support
+(`RouteGroups.Admin`), the catalog (`Catalog`), merchant config
+(`MerchantConfig`: PSPs, settings, notifications) and business metrics
+(`Metrics`: the dashboard's charts, the Ops gauges). On load it asks
+`GET /v1/admin/access`, which any signed-in staff member may call, and shows an
+area only when its group is on and the staff member holds its permission.
+Customer support is read-only without `AdminUpdate`, and the dashboard's
+layout is editable only to
+someone holding both `Metrics` and `MerchantConfig`. Someone holding none of
+the four sees only that they have no access. Each catalog edit sends the
+revision it loaded, so a product, price, meter or rate another person changed
+meanwhile is refused and reloaded, and applying a catalog document lists what
+an edit kept.
 
 ### Turning it on and off
 
 Off is the default: nothing mounts the console, and no console route exists.
 On is one switch, where the HTTP surface is chosen:
 
-- **Embedded:** `Routes.AdminConsole` in the `openrails.Routes` given to the
-  adapter's `Mount` (or `Client.Routes`). Omit it to turn the console off.
+- **Embedded:** `AdminConsole: true` in the `openrails.Routes` given to the
+  adapter's `Mount` (or `Client.Routes`). The console is served at the
+  prefix's `/admin`.
 - **Standalone server:** `admin_console.enabled: true` in `config.yaml`
-  (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path`.
+  (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path`, and the staff route
+  groups it drives turned on in `route_groups`.
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
     Auth:         ak,
-    Prefix:       "/billing", // the API at /billing/v1/*
-    Permissions:  openrails.Permissions{AdminRead: customersRead, AdminWrite: customersUpdate}, // the console drives the admin API
-    AdminConsole: &openrails.AdminConsole{Path: "/billing-admin"}, // nil: no console
+    Prefix:       "/billing", // the API at /billing/v1/*, the console at /billing/admin
+    RouteGroups:  openrails.RouteGroups{Admin: true},
+    Permissions:  openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
+    AdminConsole: true,
 })
 ```
 
@@ -44,13 +54,13 @@ Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`.
 
 Mounting the console fails loudly, before anything registers, when:
 
-- `Permissions.AdminRead` is not given: the console has no API to drive;
+- no staff route group is on: the console has no API to drive;
 - there is no console build (see below);
-- the path is invalid or overlaps an OpenRails route (`/v1`, or a path under the
-  API's `Prefix/v1`).
+- standalone, `admin_console.path` is invalid or overlaps an OpenRails route.
 
-**Path.** An absolute URL path without a trailing slash, made of letters,
-digits and `. _ ~ -` segments; `/admin` by default. One build serves any path:
+**Path.** Embedded, `Routes.Prefix` + `/admin`. Standalone, an absolute URL
+path without a trailing slash, made of letters, digits and `. _ ~ -` segments;
+`/admin` by default. One build serves any path:
 its URLs are relative to the `<base href="/admin/">` in `index.html`, which the
 server rewrites to the path, and the SPA derives its routes and `config.json`
 URL from `document.baseURI`.
@@ -66,8 +76,8 @@ offers "New merchant". Any link may open the console on a merchant with
 `#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the console selects it and
 drops the fragment.
 
-**Where staff sign in.** Embedded, at the host's AuthKit
-(`AdminConsole.AuthBaseURL`). Standalone, at a trusted issuer when
+**Where staff sign in.** Embedded, at the host's AuthKit JSON API, `/api/v1`
+on the console's origin. Standalone, at a trusted issuer when
 `server.Config.ConsoleIssuer` (`admin_console.issuer`) names one of the
 resource server's trusted issuers and the console's public client there;
 otherwise at the server's own AuthKit. A standalone console needs one of the
@@ -80,15 +90,13 @@ and accepted invitations decide what each person may do.
 
 **Where it finds the API.** The console reads `config.json` beneath its path:
 `api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
-`auth_base_url` is the AuthKit JSON API staff sign in through:
-`Routes.AdminConsole.AuthBaseURL` embedded (required), the control plane's
-standalone. Both are paths on the console's own origin. The
+`auth_base_url` is the AuthKit JSON API staff sign in through: `/api/v1`
+embedded, the control plane's standalone. Both are paths on the console's own origin. The
 admin API answers no cross-origin requests, so the console, the API and
 AuthKit share one origin. A separate host such as `billing.example.com` works by
 sending that host to the same server, or to a router (for example a Gin engine
-chosen by `Host`) that mounts AuthKit and OpenRails, with `Merchant` and
-`AdminConsole`, for it. No CORS or `CookieOrigin` setting is involved: the
-console sends bearer tokens.
+chosen by `Host`) that mounts AuthKit and OpenRails, with `AdminConsole`, for
+it. No CORS or cookie setting is involved: the console sends bearer tokens.
 
 ### Console build
 
@@ -157,7 +165,7 @@ import { defineConsoleExtension } from "@openrails/console"
 
 export default [
   defineConsoleExtension({
-    id: "hosted", // also its key in Routes.AdminConsole.Extensions
+    id: "hosted", // also its key in the server's AdminConsole.Extensions
     routes: [
       { path: "/account", scope: "user", lazy: () => import("./account").then((m) => ({ Component: m.AccountPage })) },
       { path: "/plan", scope: "merchant", lazy: () => import("./plan").then((m) => ({ Component: m.PlanPage })) },
@@ -190,7 +198,7 @@ export default [
   extension loads) hide them. `userMenu` adds account-menu
   entries. A path the console already routes refuses to start.
 - **Runtime.** `useConsole(id)` gives the user, their merchants, the selected
-  one and the extension's `Routes.AdminConsole.Extensions[id]`; `authFetch()` calls
+  one and the extension's `server.Config.AdminConsole.Extensions[id]`; `authFetch()` calls
   the host's own APIs with the console's session (local or a trusted
   issuer's) instead of starting a second one, and `authClient()` is the AuthKit
   client when staff sign in to the deployment's own accounts; `consoleHref(path, merchant?)` links into the
@@ -210,10 +218,10 @@ set are always the console's single copies. The console's own sources are
 type-checked in OpenRails; the host type-checks its extension against the three
 self-contained files `web/admin/src/extensions/{public,types,runtime}.ts`.
 
-**Embedding contract.** The Go side is unchanged by extensions: supply the
-combined build as `Deps.ConsoleAssets`, select `Routes.AdminConsole` at any
-`Path`, and pass extension data as `Routes.AdminConsole.Extensions`, served
-verbatim in `config.json` under `extensions`. OpenRails never reads it.
+**Embedding contract.** Extensions are a standalone server's: supply the
+combined build as `Deps.ConsoleAssets`, and pass extension data as
+`server.Config.AdminConsole.Extensions`, served verbatim in `config.json` under
+`extensions`. OpenRails never reads it.
 
 ### Security posture
 
@@ -284,24 +292,23 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
 | Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications) |
-| Settings | `/settings` | Tabs: Merchant profile, Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), Customer controls, and a host extension's |
+| Settings | `/settings` | Tabs: Merchant profile (with MerchantConfig), Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), Customer controls, and a host extension's |
 
-**Natural-language features** are fail-closed on the server's `llm:` config and
-mirrored into `config.json` so the UI shows a pointed empty-state (naming the
-knob) instead of a broken button:
+**Assistants** are off without the server's `llm:` config and show only in the
+area they serve, to staff who see that area. `config.json` mirrors each gate so
+the UI shows a pointed empty-state instead of a broken button:
 
-| Feature | Gate (config / env) |
-|---------|--------------------|
-| NL widget generation (widgets are LLM-authored; sees only the metrics schema) | `llm.api_key` / `LLM_API_KEY` |
-| Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
-| Catalog copilot Q&A (read-only catalog/subscriber aggregates) | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
-| Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
+| Assistant | Route group | Gate (config / env) |
+|---------|---------|--------------------|
+| Widget generation (proposes a widget; sees only the metrics schema; saving the layout is MerchantConfig's) | Metrics | `llm.api_key` / `LLM_API_KEY` |
+| Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | Metrics | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
+| Catalog copilot Q&A (read-only catalog/subscriber aggregates) | Catalog | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
+| Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | Catalog, with catalog updates | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
 
 `llm.provider` is `anthropic` (default) or `openai`; `llm.base_url` points
 `openai` at any OpenAI-compatible backend (Groq, Ollama, vLLM). Everything else
 on the dashboard works keyless.
 
 Day-to-day workflows — catalog authoring, dunning, refund doctrine — live in
-[the merchant guide](merchant-guide.md).
-For programmatic access to the same metrics the console uses, see
-[metrics-for-llms.md](metrics-for-llms.md).
+[the merchant guide](merchant-guide.md). For programmatic access to the same
+metrics the console uses, see [metrics-for-llms.md](metrics-for-llms.md).

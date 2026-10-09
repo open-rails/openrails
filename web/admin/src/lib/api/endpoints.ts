@@ -6,9 +6,10 @@ import {
   type PageRequest,
 } from "./client"
 import type {
+  AdminAccess,
   Allowance,
   CatalogApplicationReceipt,
-  CatalogDriftRefresh,
+  PSPRefresh,
   CreatePriceParams,
   Customer,
   ListPage,
@@ -22,7 +23,7 @@ import type {
   PublicConfig,
   RateOverride,
   RatePrice,
-  RebillCycle,
+  Renewal,
   RefundPaymentParams,
   UpdateCustomerParams,
   UpdatePriceParams,
@@ -157,9 +158,12 @@ export const grantProductAccess = (customerId: string, grant: ProductGrant) =>
     },
   })
 
-export const revokeProductAccess = (customerId: string, grantId: string) =>
-  api<void>(`/admin/customers/${customerId}/product-access/${grantId}`, {
-    method: "DELETE",
+// revokeProductAccess takes a product back; the window keeps its row and the
+// reason.
+export const revokeProductAccess = (grantId: string, reason: string) =>
+  api<void>(`/admin/product-access/${grantId}/revoke`, {
+    method: "POST",
+    body: { reason },
   })
 
 // --- Subscriptions ---
@@ -281,7 +285,7 @@ export const refundPayment = (
   })
 }
 
-// --- Payment attempts and rebill cycles (#1116) ---
+// --- Payment attempts and renewals (#1116) ---
 // Filters are the API's query parameters verbatim; a text filter is one value
 // or a comma-separated list, so a console URL carries them unchanged.
 
@@ -350,18 +354,18 @@ export const listPaymentAttempts = (
 export const getPaymentAttempt = (id: string, signal?: AbortSignal) =>
   api<PaymentAttempt>(`/admin/payment-attempts/${id}`, { signal })
 
-export const listRebillCycles = (
+export const listRenewals = (
   filters: CycleFilters,
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RebillCycle>>("/admin/rebill-cycles", {
+  api<ListPage<Renewal>>("/admin/renewals", {
     query: { ...filters, ...page },
     signal,
   })
 
-export const getRebillCycle = (id: string, signal?: AbortSignal) =>
-  api<RebillCycle>(`/admin/rebill-cycles/${id}`, { signal })
+export const getRenewal = (id: string, signal?: AbortSignal) =>
+  api<Renewal>(`/admin/renewals/${id}`, { signal })
 
 // Rails whose refunds route through a provider API today (admin_payments.go);
 // off-rail payments are refunded where they were taken.
@@ -583,8 +587,10 @@ export const applyCatalog = (document: string, force = false) =>
     ...(force ? { query: { force: "true" } } : {}),
   })
 
-export const refreshCatalogDrift = () =>
-  api<CatalogDriftRefresh>("/admin/catalog/drift/refresh", { method: "POST" })
+// refreshPSPs re-reads every PSP now, its catalog drift included; the pass
+// runs in the background.
+export const refreshPSPs = () =>
+  api<PSPRefresh>("/admin/psps/refresh", { method: "POST" })
 
 // --- Ops ---
 
@@ -622,17 +628,11 @@ export const applyMerchantSettings = (
   revision: string,
   settings: MerchantSettings
 ) =>
-  api<{ application_id: string; revision: string; replayed: boolean }>(
-    "/admin/configuration/applications",
-    {
-      method: "POST",
-      body: {
-        application_id: crypto.randomUUID(),
-        expected_revision: revision,
-        settings,
-      },
-    }
-  )
+  api<{ revision: string; replayed: boolean }>("/admin/configuration", {
+    method: "PATCH",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: { expected_revision: revision, settings },
+  })
 
 // A merchant has a handful of PSPs: one page holds them all.
 export const listPSPs = (signal?: AbortSignal) =>
@@ -688,15 +688,20 @@ export const previewPSPRouting = (
 // provider. The rail's last active PSP is refused (409 psp_last_active)
 // unless allowLast.
 export const archivePSP = (id: string, allowLast = false) =>
-  api<PSP>(`/admin/psps/${encodeURIComponent(id)}/archive`, {
-    method: "POST",
-    body: allowLast ? { allow_last: true } : {},
+  api<PSP>(`/admin/psps/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: allowLast ? { archived: true, allow_last: true } : { archived: true },
   })
 
 // The public configuration: what the deployment serves, the currency
 // registry and the payment setup.
 export const getConfig = (signal?: AbortSignal) =>
   api<PublicConfig>("/config", { signal })
+
+// getAdminAccess is what the signed-in staff member may use of each staff
+// route group that is mounted: the console's areas.
+export const getAdminAccess = (signal?: AbortSignal) =>
+  api<AdminAccess>("/admin/access", { signal })
 
 // updateCustomer changes only the settings params names and answers the
 // customer.
@@ -722,8 +727,8 @@ export const createWebhook = (body: WebhookRequest) =>
   api<MerchantWebhook>("/admin/alert-webhooks", { method: "POST", body })
 
 export const rotateWebhookURL = (id: string, url: string) =>
-  api<MerchantWebhook>(`/admin/alert-webhooks/${id}/url`, {
-    method: "PUT",
+  api<MerchantWebhook>(`/admin/alert-webhooks/${id}`, {
+    method: "PATCH",
     body: { url },
   })
 

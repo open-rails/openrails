@@ -30,8 +30,8 @@ type (
 	CheckoutAttemptID uuid.UUID
 	// PaymentAttemptID names one authorization a PSP answered (#1110).
 	PaymentAttemptID uuid.UUID
-	// RebillCycleID names one paid period that came due (#1111).
-	RebillCycleID uuid.UUID
+	// RenewalID names one paid period that came due (#1111).
+	RenewalID uuid.UUID
 	// PSPID names one merchant account on a rail.
 	PSPID uuid.UUID
 	// FederatedGrantID names one merchant role granted to a trusted issuer's
@@ -51,7 +51,7 @@ const (
 	MandateIDPrefix         = "mdt_"
 	CheckoutAttemptIDPrefix = "chk_"
 	PaymentAttemptIDPrefix  = "att_"
-	RebillCycleIDPrefix     = "cyc_"
+	RenewalIDPrefix         = "cyc_"
 	PSPIDPrefix             = "psp_"
 	FederatedGrantIDPrefix  = "fgr_"
 	OrderIDPrefix           = "ord_"
@@ -119,9 +119,9 @@ func ParsePaymentAttemptID(s string) (PaymentAttemptID, error) {
 	u, err := parsePrefixedID("payment attempt", PaymentAttemptIDPrefix, s)
 	return PaymentAttemptID(u), err
 }
-func ParseRebillCycleID(s string) (RebillCycleID, error) {
-	u, err := parsePrefixedID("rebill cycle", RebillCycleIDPrefix, s)
-	return RebillCycleID(u), err
+func ParseRenewalID(s string) (RenewalID, error) {
+	u, err := parsePrefixedID("renewal", RenewalIDPrefix, s)
+	return RenewalID(u), err
 }
 func ParsePSPID(s string) (PSPID, error) {
 	u, err := parsePrefixedID("PSP", PSPIDPrefix, s)
@@ -149,7 +149,7 @@ func (id CheckoutAttemptID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id OrderID) UUID() uuid.UUID           { return uuid.UUID(id) }
 func (id OrderLineID) UUID() uuid.UUID       { return uuid.UUID(id) }
 func (id PaymentAttemptID) UUID() uuid.UUID  { return uuid.UUID(id) }
-func (id RebillCycleID) UUID() uuid.UUID     { return uuid.UUID(id) }
+func (id RenewalID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PSPID) UUID() uuid.UUID             { return uuid.UUID(id) }
 func (id FederatedGrantID) UUID() uuid.UUID  { return uuid.UUID(id) }
 
@@ -164,7 +164,7 @@ func (id CheckoutAttemptID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 func (id OrderID) IsZero() bool           { return uuid.UUID(id) == uuid.Nil }
 func (id OrderLineID) IsZero() bool       { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentAttemptID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
-func (id RebillCycleID) IsZero() bool     { return uuid.UUID(id) == uuid.Nil }
+func (id RenewalID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PSPID) IsZero() bool             { return uuid.UUID(id) == uuid.Nil }
 func (id FederatedGrantID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
 
@@ -188,8 +188,8 @@ func (id OrderLineID) String() string { return formatPrefixedID(OrderLineIDPrefi
 func (id PaymentAttemptID) String() string {
 	return formatPrefixedID(PaymentAttemptIDPrefix, uuid.UUID(id))
 }
-func (id RebillCycleID) String() string { return formatPrefixedID(RebillCycleIDPrefix, uuid.UUID(id)) }
-func (id PSPID) String() string         { return formatPrefixedID(PSPIDPrefix, uuid.UUID(id)) }
+func (id RenewalID) String() string { return formatPrefixedID(RenewalIDPrefix, uuid.UUID(id)) }
+func (id PSPID) String() string     { return formatPrefixedID(PSPIDPrefix, uuid.UUID(id)) }
 func (id FederatedGrantID) String() string {
 	return formatPrefixedID(FederatedGrantIDPrefix, uuid.UUID(id))
 }
@@ -205,7 +205,7 @@ func (id CheckoutAttemptID) MarshalText() ([]byte, error) { return []byte(id.Str
 func (id OrderID) MarshalText() ([]byte, error)           { return []byte(id.String()), nil }
 func (id OrderLineID) MarshalText() ([]byte, error)       { return []byte(id.String()), nil }
 func (id PaymentAttemptID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
-func (id RebillCycleID) MarshalText() ([]byte, error)     { return []byte(id.String()), nil }
+func (id RenewalID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id PSPID) MarshalText() ([]byte, error)             { return []byte(id.String()), nil }
 func (id FederatedGrantID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
 
@@ -264,8 +264,8 @@ func (id *PaymentAttemptID) UnmarshalText(text []byte) error {
 	*id = parsed
 	return err
 }
-func (id *RebillCycleID) UnmarshalText(text []byte) error {
-	parsed, err := ParseRebillCycleID(string(text))
+func (id *RenewalID) UnmarshalText(text []byte) error {
+	parsed, err := ParseRenewalID(string(text))
 	*id = parsed
 	return err
 }

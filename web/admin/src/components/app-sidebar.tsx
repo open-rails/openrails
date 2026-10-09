@@ -118,20 +118,39 @@ function NavEntry({
       {item.items && active && (
         <SidebarMenuSub>
           {item.items.map((sub) => (
-            <SidebarMenuSubItem key={sub.path}>
-              <SidebarMenuSubButton
-                isActive={subItemIsActive(pathname, sub.path, item.path)}
-                render={
-                  <Link to={sub.path}>
-                    <span>{sub.title}</span>
-                  </Link>
-                }
-              />
-            </SidebarMenuSubItem>
+            <NavSubEntry
+              key={sub.path}
+              sub={sub}
+              active={subItemIsActive(pathname, sub.path, item.path)}
+            />
           ))}
         </SidebarMenuSub>
       )}
     </SidebarMenuItem>
+  )
+}
+
+function NavSubEntry({
+  sub,
+  active,
+}: {
+  sub: NonNullable<ConsoleNavItem["items"]>[number]
+  active: boolean
+}) {
+  // A fixed hook per entry, as for NavEntry.
+  const visible = (sub.useVisible ?? always)()
+  if (!visible) return null
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton
+        isActive={active}
+        render={
+          <Link to={sub.path}>
+            <span>{sub.title}</span>
+          </Link>
+        }
+      />
+    </SidebarMenuSubItem>
   )
 }
 

@@ -1,4 +1,4 @@
-// Payments → Attempts and Rebill cycles (#1117): the #1116 lists and details.
+// Payments → Attempts and Renewals (#1117): the #1116 lists and details.
 // A list's filters are its URL's query parameters, as the API names them, so
 // the health page links straight into a filtered list.
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -20,7 +20,7 @@ import {
   type AttemptFilters,
   type CycleFilters,
 } from "@/lib/api/endpoints"
-import type { PaymentAttempt, RebillCycle } from "@/lib/api/generated/wire"
+import type { PaymentAttempt, Renewal } from "@/lib/api/generated/wire"
 import { useUrlCursor } from "@/hooks/use-cursor-paging"
 import {
   formatCard,
@@ -231,7 +231,7 @@ export function AttemptDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label="Rebill cycle">
+        <Fact label="Renewal">
           {a.cycle_id ? (
             <To to={`/payments/cycles/${a.cycle_id}`}>
               {shortId(a.cycle_id, 16)}
@@ -282,9 +282,9 @@ export function AttemptDetailPage() {
   )
 }
 
-// --- rebill cycles ----------------------------------------------------------------------
+// --- renewals ----------------------------------------------------------------------
 
-const cycleColumns: ColumnDef<RebillCycle, unknown>[] = [
+const cycleColumns: ColumnDef<Renewal, unknown>[] = [
   {
     header: "Due",
     cell: ({ row }) => (
@@ -330,14 +330,14 @@ export function CyclesPage() {
   )
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Rebill cycles</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Renewals</h1>
       <FilterChips keys={CYCLE_FILTERS} />
       <DataTable
         columns={cycleColumns}
         data={data?.data ?? []}
         loading={isPending}
         onRowClick={(row) => navigate(`/payments/cycles/${row.id}`)}
-        emptyMessage="No rebill cycles match."
+        emptyMessage="No renewals match."
       />
       <CursorPager
         pages={paging}
@@ -355,9 +355,7 @@ export function CycleDetailPage() {
   if (isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!c)
-    return (
-      <p className="text-sm text-muted-foreground">Rebill cycle not found.</p>
-    )
+    return <p className="text-sm text-muted-foreground">Renewal not found.</p>
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">

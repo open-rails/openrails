@@ -6,8 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { creditCustomerKey, creditMutations, creditQueries } from "@/lib/credit-queries"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import {
-  aPaymentMethod, calls, client, cursorPages, exec, MAX_INT64, render, selectMerchant, server,
-  type Recorded, type Reply,
+  FULL_ACCESS,
+  MAX_INT64,
+  aPaymentMethod,
+  calls,
+  client,
+  cursorPages,
+  exec,
+  render,
+  selectMerchant,
+  server,
+  type Recorded,
+  type Reply,
 } from "@/test/harness"
 import { DefaultCardBadges } from "./default-card-badges"
 import { CustomerCreditSupportSection } from "./credits"
@@ -35,11 +45,11 @@ describe("credit support requests", () => {
     await queries.fetchQuery(creditQueries.grants("alpha", "cus_a", "EUR", 20, "c2"))
     await queries.fetchQuery(creditQueries.transactions("alpha", "cus_a", "USD", 20, ""))
     expect(calls(requests)).toEqual([
-      "GET /admin/customers/cus_a/credit-grants",
+      "GET /admin/credit-grants",
       "GET /admin/customers/cus_a/balance/transactions",
     ])
     expect(requests.map((request) => request.query)).toEqual([
-      "currency=EUR&limit=20&cursor=c2",
+      "customer_id=cus_a&currency=EUR&limit=20&cursor=c2",
       "currency=USD&limit=20",
     ])
     queries.clear()
@@ -75,7 +85,7 @@ describe("credit support requests", () => {
     const key = creditCustomerKey("alpha", "cus_a")
     queries.setQueryData(key, { balance: 100 })
     const revocation = { id: "grant-a", revoked_amount: "70", replayed: false }
-    routes["POST /admin/customers/cus_a/credit-grants/grant-a/revoke"] = revocation
+    routes["POST /admin/credit-grants/grant-a/revoke"] = revocation
     const revoke = (reason: string) =>
       exec(queries, creditMutations.revoke(queries, "alpha", "cus_a"), { grant: "grant-a", reason })
 
@@ -85,7 +95,7 @@ describe("credit support requests", () => {
     expect(queries.getQueryData(key)).toEqual({ balance: 100 })
     expect(queries.getQueryState(key)?.isInvalidated).toBe(true)
 
-    routes["POST /admin/customers/cus_a/credit-grants/grant-a/revoke"] = () =>
+    routes["POST /admin/credit-grants/grant-a/revoke"] = () =>
       Response.json({ error: { message: "The remaining credit is needed by active holds" } }, { status: 409 })
     await expect(revoke("support")).rejects.toThrow("needed by active holds")
   })
@@ -93,6 +103,7 @@ describe("credit support requests", () => {
 
 describe("credit support rendering", () => {
   const seed = (queries: QueryClient, remaining = MAX_INT64) => {
+    queries.setQueryData(adminQueries.access().queryKey, FULL_ACCESS)
     queries.setQueryData(creditQueries.grants("alpha", "cus_a", "USD", 20, "").queryKey, {
       data: [{
         id: "grant-private-alpha", customer_id: "cus_a", currency: "USD",

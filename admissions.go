@@ -13,7 +13,7 @@ import (
 // request is a verdict, not an error.
 func (c *Client) Admit(ctx context.Context, requests []billing.AdmitParams, requestOptions ...RequestOption) ([]billing.AdmissionVerdict, error) {
 	var out billing.AdmitBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/admissions", billing.AdmitBatchParams{Items: requests}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/admissions", billing.AdmitBatchParams{Items: requests}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -30,20 +30,7 @@ func admissionPath(requestID string) (string, error) {
 	if segment == "." || segment == ".." {
 		segment = strings.ReplaceAll(segment, ".", "%2E")
 	}
-	return "/v1/admin/admissions/" + segment, nil
-}
-
-// GetAdmission reads an allowed admission and its hold.
-func (c *Client) GetAdmission(ctx context.Context, requestID string, requestOptions ...RequestOption) (*billing.Admission, error) {
-	path, err := admissionPath(requestID)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Admission
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return "/v1/app/admissions/" + segment, nil
 }
 
 // CaptureAdmission settles an admitted request. An exact retry returns the
@@ -69,7 +56,7 @@ func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string, req
 		return nil, err
 	}
 	var out billing.AdmissionBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/admissions/release", billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/admissions/release", billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -88,7 +75,7 @@ func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdm
 		body.Items[i] = item
 	}
 	var out billing.AdmissionBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/admissions/extend", body, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/admissions/extend", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -111,7 +98,7 @@ func (c *Client) RecordUsage(ctx context.Context, items []billing.RecordUsagePar
 		body.Items[i] = item
 	}
 	var out billing.RecordUsageBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/usage-events", body, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/app/usage-events", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil

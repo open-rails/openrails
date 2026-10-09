@@ -89,7 +89,9 @@ func StandalonePrincipal(r *http.Request) (StaffPrincipal, bool) {
 }
 
 // Required admits a merchant API key, a trusted issuer's access token
-// granted openrails:merchant, or a control-plane user session.
+// granted openrails:merchant, or a control-plane user session, and binds the
+// merchant a key or token acts on. A user's merchant is the one
+// RequirePermission finds them a member of.
 func (a *StandaloneAuth) Required() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,9 +100,31 @@ func (a *StandaloneAuth) Required() func(http.Handler) http.Handler {
 				refuseWith(w, r, err)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), standaloneCredentialKey{}, cred)))
+			ctx := context.WithValue(r.Context(), standaloneCredentialKey{}, cred)
+			if target, ok := cred.target(); ok {
+				if host, hosted := merchant.HostMerchant(ctx); hosted && host != target.MerchantID {
+					refuseWith(w, r, billingauth.Refusal(billing.CodeHostMerchantMismatch))
+					return
+				}
+				if resolved, ok := merchanttarget.FromContext(ctx); !ok || resolved.MerchantID != target.MerchantID {
+					ctx = merchanttarget.WithResolved(ctx, target)
+				}
+				ctx = merchant.WithID(ctx, target.MerchantID)
+			}
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// target is the merchant a key or an access token acts on.
+func (c standaloneCredential) target() (billingauth.Target, bool) {
+	switch {
+	case c.apiKey != nil && !c.apiKey.MerchantID.IsZero():
+		return billingauth.Target{MerchantID: c.apiKey.MerchantID, MerchantSlug: c.apiKey.MerchantSlug}, true
+	case c.resource != nil && !c.resource.MerchantID.IsZero():
+		return billingauth.Target{MerchantID: c.resource.MerchantID, MerchantSlug: c.resource.MerchantSlug}, true
+	}
+	return billingauth.Target{}, false
 }
 
 // RequirePermission authenticates the request (unless Required already

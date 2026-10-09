@@ -654,28 +654,6 @@ export type Product = {
   updated_at: string
 }
 
-export type ProductAccessGrant = {
-  id: string
-  customer_id: string
-  product_id: string
-  product_key: string
-  product_name: string
-  source_type: "grace" | "grant" | "purchase" | "subscription"
-  source_id: string
-  payment_id: string | null
-  quantity: number | null
-  grant_reason: "comp" | "import" | "migration" | "staff" | null
-  granted_by: string | null
-  note: string | null
-  status: string
-  starts_at: string
-  ends_at: string | null
-  revoked_at: string | null
-  revoke_reason: string | null
-  created_at: string
-  updated_at: string
-}
-
 export type ProductSummary = {
   id: string
   key: string
@@ -763,24 +741,6 @@ export type SolanaPaymentToken = {
   decimals: number
   preferred: boolean
   recurring_eligible: boolean
-}
-
-export type SpendLimits = {
-  currency: string
-  invoker: string
-  windows: SpendWindow[]
-}
-
-export type SpendWindow = {
-  scope: "invoker" | "invoker_tier" | "role"
-  key: string
-  window_seconds: number
-  limit: string
-  currency: string
-  used: string
-  reserved: string
-  remaining: string
-  resets_at: string
 }
 
 export type StripeEngineAuthentication = {

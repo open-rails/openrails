@@ -43,9 +43,8 @@ func TestSecondDeclarationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		psps["nmi-again"] = openrails.NMIPSP{AccountID: "e2e-nmi-again", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
 	}
 	w.start()
-	cfg, err := w.client[embedded].GetPublicConfig(t.Context())
-	require.NoError(t, err)
-	keys := armedKeys(t, cfg)
+	cfg := publicConfig(t, w.client[embedded])
+	keys := armedKeys(t, &cfg)
 	require.Contains(t, keys, "nmi", "the first declaration stays armed")
 	require.NotContains(t, keys, "nmi-again", "the second declaration of the account is disarmed")
 	require.Equal(t, 1, duplicateFindings(t, w, "nmi-again"))

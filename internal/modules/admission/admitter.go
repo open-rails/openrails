@@ -1,14 +1,8 @@
 // Package admission implements OpenRails service admission: the payer money
-// affordability + delegated spend-cap gate and the delegated wasted-spend cutoff.
+// affordability and spend-cap gate, and the delegated wasted-spend cutoff.
 //
 // Admission and settlement share durable SQL operations under the payer money lock.
 // Redis is used only by independent rate and abuse signals, never as financial truth.
-//
-// Delegated metering is PER-INVOKER (#563): a role/trust-level grant only selects
-// WHICH invokers a window applies to — it is never a pool shared across them. The
-// Invoker string and role UUIDs are host-owned, opaque, stable keys; OpenRails
-// never materializes a row for a delegated invoker. Only the payer scope is
-// aggregate across the whole account.
 package admission
 
 import (
@@ -35,9 +29,8 @@ const DefaultTrustLevel = "free"
 // DenyFailureRateLimited is the delegated-invoker wasted-spend cutoff deny code.
 const DenyFailureRateLimited = "failure_rate_limited"
 
-// DenyDelegatedSpendNotAllowed denies a delegated invoker that has no explicit
-// budget grant (a delegated invoker may never spend the payer's money without a
-// scope=invoker/role/invoker_tier cap — #473).
+// DenyDelegatedSpendNotAllowed denies a delegated invoker: only the customer's
+// own credential spends its balance.
 const DenyDelegatedSpendNotAllowed = "delegated_spend_not_allowed"
 
 // DenyBudgetExceeded is the deny code when a spend-cap window blocks the request.
@@ -192,7 +185,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	err := a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(ctx context.Context, d *db.DB, capacity money.AdmissionCapacity) error {
 		bound := *a
 		bound.money = money.NewMoneyService(d, a.money.Clock())
-		bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), NewInvokerSpendLimitStore(d), a.loader.fx)
+		bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), a.loader.fx)
 		if a.rates != nil {
 			rates := *a.rates
 			rates.db = d
@@ -289,13 +282,14 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 
 	// Cap windows (FX-normalized to the request currency).
-	policy, hasGrant, err := a.loader.Load(ctx, req.CustomerID, trustLevel, req.Currency, sgReq, resolved)
+	policy, err := a.loader.Load(ctx, req.Currency, resolved)
 	if err != nil {
 		return AdmitDecision{}, err
 	}
 
-	// A delegated invoker must hold an explicit spend grant (#473 guarantee).
-	if !identity.IsDirectPayerInvoker(req.InvokerType) && !hasGrant {
+	// Only the customer's own credential spends its balance: nothing grants a
+	// delegated invoker spend.
+	if !identity.IsDirectPayerInvoker(req.InvokerType) {
 		a.recordDenial(ctx, merchantID, req.CustomerID, DenyDelegatedSpendNotAllowed)
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
 	}
@@ -367,7 +361,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 }
 
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role
-// scope matches on (the invoker_spend_limits role scope key is the role uuid string).
+// scope matches on (a role scope key is the role uuid string).
 func roleStrings(roles []uuid.UUID) []string {
 	out := make([]string, 0, len(roles))
 	for _, r := range roles {

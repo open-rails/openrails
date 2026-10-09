@@ -124,8 +124,7 @@ func probe(t *testing.T, rt *openrails.Client, name string) error {
 
 func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.PSPPaymentConfig, bool) {
 	t.Helper()
-	cfg, err := client.GetPublicConfig(t.Context())
-	require.NoError(t, err)
+	cfg := publicConfig(t, client)
 	for _, psp := range cfg.Payment.PSPs {
 		if psp.Rail == rail {
 			return psp, true

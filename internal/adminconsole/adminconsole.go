@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // Config is the SPA bootstrap document served at <path>/config.json.
@@ -53,6 +54,15 @@ type Config struct {
 	// Merchant is the merchant the mount serves; null where staff choose one
 	// (a host's console extension lists theirs, or they open one by name).
 	Merchant *Merchant `json:"merchant"`
+}
+
+// Assistants turns on the console's assistants the deployment has an LLM
+// for, each only where its route group is mounted.
+func (c *Config) Assistants(llm *config.LLMConfig, catalog, metrics bool) {
+	c.NLWidgetsEnabled = metrics && config.LLMConfigured(llm)
+	c.AskEnabled = metrics && config.LLMAskConfigured(llm)
+	c.CatalogCopilotEnabled = catalog && config.LLMCatalogCopilotConfigured(llm)
+	c.CatalogDraftingEnabled = catalog && config.LLMCatalogDraftingConfigured(llm)
 }
 
 // Merchant is the merchant a console mount serves.

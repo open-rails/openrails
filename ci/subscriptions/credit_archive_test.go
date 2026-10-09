@@ -50,7 +50,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	_, err = c.RefundPayment(t.Context(), *paidBonus.PaymentID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "archive-bonus-refund"})
 	require.NoError(t, err)
 	w.settle()
-	grants, err := c.ListCreditGrants(t.Context(), buyer.cid(), billing.CreditGrantListParams{})
+	grants, err := c.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: buyer.cid()})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 2)
 	var available int64

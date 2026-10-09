@@ -180,7 +180,3 @@ type DefaultPaymentMethod struct {
 	Currency        string          `json:"currency"`
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
-
-// PaymentMethodDeletion distinguishes completed deletion from a durable
-// operation awaiting provider reconciliation. Pending is never reported deleted.
-type PaymentMethodDeletion struct{ Pending bool }

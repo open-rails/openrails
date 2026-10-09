@@ -5,6 +5,9 @@ package ci_test
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -37,20 +40,28 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	})
 	engine := srv.Client()
-	publish := func(account string) openrails.RequestOption {
-		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: "seller-" + uuid.NewString()[:8]})
+	// publish arms a merchant's NMI PSP and binds its API host, where its
+	// browsers read GET /v1/config.
+	publish := func(account string) string {
+		slug := "seller-" + uuid.NewString()[:8]
+		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
 		at := openrails.ForMerchantID(m.MerchantID)
 		_, err = engine.CreatePSP(ctx, billing.CreatePSPParams{OperationID: uuid.New(), Key: "nmi", Rail: billing.RailNMI, AccountID: account,
 			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
 			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}}, at)
 		require.NoError(t, err)
-		return at
+		host := slug + ".e2e.test"
+		require.NoError(t, srv.SetMerchantAPIHost(ctx, m.MerchantID, host))
+		return host
 	}
-	armed := func(at openrails.RequestOption) []string {
-		cfg, err := engine.GetPublicConfig(ctx, at)
-		require.NoError(t, err)
-		require.NotNil(t, cfg.Payment)
+	armed := func(host string) []string {
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://"+host+"/v1/config", nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var cfg billing.PublicConfig
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cfg))
+		require.NotNil(t, cfg.Payment, w.Body.String())
 		var keys []string
 		for _, psp := range cfg.Payment.PSPs {
 			keys = append(keys, psp.Key)

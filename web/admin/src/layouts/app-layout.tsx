@@ -1,12 +1,15 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { NoAccess } from "@/components/no-access"
 import { NoMerchants } from "@/components/no-merchants"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { extensionRoute, useExtensions } from "@/extensions/registry"
+import type { AdminAccess } from "@/lib/api/generated/wire"
 import { useAuth } from "@/lib/auth"
+import { hasAnyArea, useAccess } from "@/lib/capabilities"
 
 // Longest path first: the catalog sub-pages have to match before the section
 // they live under. A trail of more than one entry becomes a real breadcrumb.
@@ -31,9 +34,30 @@ const trails: [string, { label: string; to?: string }[]][] = [
   ["/settings", [{ label: "Settings" }]],
 ]
 
+// areaOf is the console area a merchant page belongs to, and whether the
+// caller may use it; Settings belongs to none (its tabs check their own).
+function areaOf(
+  pathname: string,
+  access: AdminAccess
+): { name: string; allowed: boolean } | null {
+  const under = (prefix: string) =>
+    pathname === prefix || pathname.startsWith(prefix + "/")
+  if (under("/payments/health"))
+    return { name: "payment health", allowed: access.metrics }
+  if (
+    ["/customers", "/subscriptions", "/payments", "/invoices", "/ops"].some(
+      under
+    )
+  )
+    return { name: "customer support", allowed: access.admin !== "none" }
+  if (under("/catalog")) return { name: "the catalog", allowed: access.catalog }
+  return null
+}
+
 export function AppLayout() {
   const { ready, signedIn, merchants, merchantsFailed } = useAuth()
   const { pathname } = useLocation()
+  const access = useAccess()
   const { extensions } = useExtensions()
   const route = extensionRoute(extensions, pathname)
   const scope = route?.scope ?? "merchant"
@@ -84,6 +108,12 @@ export function AppLayout() {
             <div className="mx-auto w-full max-w-7xl min-w-0">
               {noMerchants && scope === "merchant" ? (
                 <NoMerchants inShell />
+              ) : scope === "merchant" && access && !hasAnyArea(access) ? (
+                <NoAccess />
+              ) : scope === "merchant" &&
+                access &&
+                areaOf(pathname, access)?.allowed === false ? (
+                <NoAccess area={areaOf(pathname, access)?.name} />
               ) : (
                 <Outlet />
               )}

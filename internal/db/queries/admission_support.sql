@@ -82,43 +82,6 @@ WHERE b.merchant_id = $1
 ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
 LIMIT 1;
 
--- name: UpsertInvokerSpendLimit :exec
--- Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
--- invoker/role. Payer-set only (no owner discriminator). provenance (or#911)
--- is the caller's opaque reference for what authorized the grant; an upsert
--- replaces the whole grant, provenance included.
-INSERT INTO billing.invoker_spend_limits (
-    id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, NULLIF(sqlc.arg(provenance)::text, ''), $8, $9)
-ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
-    windows = EXCLUDED.windows,
-    provenance = EXCLUDED.provenance,
-    updated_at = EXCLUDED.updated_at;
-
--- name: DeleteInvokerSpendLimit :execrows
--- Single-grant revocation (or#911): removes exactly one addressed delegation
--- and leaves every sibling untouched. 0 rows is a real answer (nothing at that
--- key), surfaced to the caller rather than swallowed.
-DELETE FROM billing.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4;
-
--- name: DeleteAllInvokerSpendLimits :execrows
--- Full-document replacement removes the exact merchant+payer set before
--- inserting the canonical replacement. This also purges legacy non-canonical
--- scope_key values that cannot be addressed safely by normalized key deletes.
-DELETE FROM billing.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2;
-
--- name: ListInvokerSpendLimits :many
--- ALL invoker spend limits for a payer (the admit path reads every scope to
--- compose the verdict).
-SELECT * FROM billing.invoker_spend_limits
-WHERE merchant_id = $1 AND customer_id = $2;
-
--- Serializes one payer's spend-limit document writes.
--- name: LockInvokerSpendLimits :exec
-SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
-
 -- name: ListCustomerBillingPolicyAssignments :many
 -- One binding per customer at most (the customer rung's unique index).
 SELECT customer_id, policy_name FROM billing.billing_policy_bindings

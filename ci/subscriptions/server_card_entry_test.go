@@ -123,8 +123,7 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 			t.Parallel()
 			w := tc.world(t)
 			price := w.membership("content:members", 9_990_000)
-			config, err := w.client[remote].GetPublicConfig(t.Context())
-			require.NoError(t, err)
+			config := publicConfig(t, w.client[embedded])
 			for _, psp := range config.Payment.PSPs {
 				if psp.Rail != "nmi" {
 					continue

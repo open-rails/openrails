@@ -79,8 +79,7 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	status, body := attacked.newCustomer().cardSave(ip(100), visa)
 	require.Equal(t, http.StatusForbidden, status, "the attacked merchant's card routes ask everyone for a captcha: %s", body)
 	require.Contains(t, body, "captcha_required")
-	public, err := attacked.client[embedded].GetPublicConfig(t.Context())
-	require.NoError(t, err)
+	public := publicConfig(t, attacked.client[embedded])
 	require.Equal(t, &billing.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "e2e-site", ScriptURL: config.CaptchaScriptURL(&config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "e2e-site"}),
 		Action: config.CaptchaAction, TokenHeader: "X-Captcha-Token"}, public.Captcha, "the configuration says how to solve it")
 	require.NotEmpty(t, public.Rails, "and carries the rail registry")

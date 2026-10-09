@@ -8,14 +8,15 @@ application and does not persist supplied credentials.
 
 Use the same Client methods in embedded and remote applications.
 `GetMerchantConfiguration` returns redacted settings and an opaque revision.
-`ApplyMerchantConfiguration` requires a stable application ID and the revision observed before preparing the
-update. It applies atomically. Retrying the identical document returns its original
-receipt even if later updates changed the merchant. Reusing an ID for different
+`UpdateMerchantConfiguration` (`PATCH /v1/admin/configuration`) requires a stable
+`Idempotency-Key` and the revision observed before preparing the update. It applies
+atomically. Retrying the identical document with its key returns its original
+receipt even if later updates changed the merchant. Reusing a key for different
 content or applying against a stale revision fails with a conflict.
 
 Omitted fields preserve existing values. Explicit empty policy lists clear those
 lists. PSP credentials and lifecycle use the PSP methods (`Client.CreatePSP`,
-`UpdatePSP`, `ArchivePSP`) and their own publication operations. Metadata applications cannot change issuer trust,
+`UpdatePSP`, which also archives one) and their own publication operations. Metadata applications cannot change issuer trust,
 credential backends, HTTP exposure or Vault paths.
 
 ## CLI
@@ -27,13 +28,12 @@ current or former merchant name:
 
 ```sh
 openrails get-merchant-config --config config.yaml --merchant shop
-openrails apply-merchant-config --config config.yaml --merchant shop --file update.yaml
+openrails apply-merchant-config --config config.yaml --merchant shop --file update.yaml --idempotency-key support-links-2026-09
 ```
 
 Prepare the document using the revision returned by `get-merchant-config`:
 
 ```yaml
-application_id: support-links-2026-09
 expected_revision: "COPY_THE_OBSERVED_REVISION"
 display_name: Shop
 settings:
@@ -50,7 +50,7 @@ selected merchant and operation:
 
 ```sh
 openrails get-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop
-openrails apply-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop --file update.yaml
+openrails apply-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop --file update.yaml --idempotency-key support-links-2026-09
 ```
 
 Remote mode does not read local infrastructure configuration and rejects explicit

@@ -21,9 +21,8 @@ func TestPublicConfigDegradesOnePSP(t *testing.T) {
 		WHERE rail = 'nmi'`))
 	require.NoError(t, err)
 
-	for _, tp := range []topology{embedded, remote} {
-		cfg, err := w.client[tp].GetPublicConfig(t.Context())
-		require.NoError(t, err, "%s: the document is served", tp)
+	for _, tp := range []topology{embedded} {
+		cfg := publicConfig(t, w.client[tp])
 		byRail := map[string]billing.PSPPaymentConfig{}
 		for _, psp := range cfg.Payment.PSPs {
 			byRail[psp.Rail] = psp

@@ -38,8 +38,8 @@ type Deps struct {
 
 	// UserInfo is the host's directory (helpers/userinfo.Lookup, AuthKit's
 	// Client.UserInfo()): who each customer is, asked whenever OpenRails emails
-	// a customer or shows one, and never copied. Nil keeps the copy
-	// Routes.Provisioning's SCIM pushes fill instead; without either,
+	// a customer or shows one, and never copied. Nil keeps the copy SCIM
+	// pushes fill instead (RouteGroups.Programmatic); without either,
 	// customers get no email.
 	UserInfo UserInfo
 

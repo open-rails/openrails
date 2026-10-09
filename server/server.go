@@ -23,13 +23,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
-	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
@@ -52,6 +49,9 @@ type (
 	ResourceServerConfig = hostconfig.ResourceServerConfig
 	// TrustedIssuerConfig is one of ResourceServerConfig.TrustedIssuers.
 	TrustedIssuerConfig = hostconfig.TrustedIssuerConfig
+	// AdminConsole is Config.AdminConsole: where the merchant admin console
+	// is served, how staff sign in, and the console extensions' data.
+	AdminConsole = config.ConsoleMount
 	// ConsoleIssuer is Config.ConsoleIssuer: the trusted issuer staff sign in
 	// to the admin console at.
 	ConsoleIssuer = hostconfig.ConsoleIssuer
@@ -115,9 +115,15 @@ type Config struct {
 	// without the server holding their accounts. Nil accepts none.
 	ResourceServer *ResourceServerConfig
 
-	// AdminConsole serves the merchant admin console; nil serves none. Its
-	// AuthBaseURL defaults to this server's AuthKit with LocalSignIn.
-	AdminConsole *openrails.AdminConsole
+	// RouteGroups turns the merchant route groups on, each off by default:
+	// Admin, Catalog, MerchantConfig and Metrics behind the server's own
+	// merchant permissions (MerchantRead, MerchantWrite, MerchantAdmin,
+	// MerchantMetrics), and Programmatic.
+	RouteGroups openrails.RouteGroups
+	// AdminConsole serves the merchant admin console; nil serves none. It
+	// needs a staff route group on. Its AuthBaseURL defaults to this server's
+	// AuthKit with LocalSignIn.
+	AdminConsole *AdminConsole
 	// ConsoleIssuer signs staff in to the console at one of ResourceServer's
 	// trusted issuers instead of the server's own accounts.
 	ConsoleIssuer *ConsoleIssuer
@@ -254,7 +260,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return fail(err)
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
-		AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer,
+		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer,
 		ResourceServer: cfg.ResourceServer, Issuer: cfg.Auth.Issuer,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
@@ -274,22 +280,9 @@ func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
-// own root router (the adapters' MountRoutes), plus further customer
-// surfaces, each with its own Auth. A surface without a Merchant serves the
-// merchant each request selects (the OpenRails-Merchant header or the
-// merchant's API host), bound before its Auth runs (openrails.RequestMerchant);
-// a request that selects none is refused merchant_unresolved.
-func (s *Server) Routes(profiles ...openrails.CustomerRoutes) ([]openrails.Route, error) {
-	a := s.graph
-	extra, err := embedhttp.BuildCustomerRoutes(a, profiles, s.cp.ResolveMerchantByHost)
-	if err != nil {
-		return nil, err
-	}
-	router.ResolveMerchantSelectors(extra, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-	}, embedhttp.CustomerPrefixes("", profiles)...)
+// own root router (the adapters' MountRoutes).
+func (s *Server) Routes() ([]openrails.Route, error) {
 	table := s.surface.HTTPRoutes()
-	table.Entries = append(table.Entries, extra.Entries...)
 	if err := embedhttp.ValidateRouteTable(table); err != nil {
 		return nil, err
 	}

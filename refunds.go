@@ -45,17 +45,3 @@ func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProdu
 	}
 	return &out, nil
 }
-
-// GetProductArchive reads an archive operation with the current outcome of
-// each qualifying purchase. It performs no refunds.
-func (c *Client) GetProductArchive(ctx context.Context, id billing.ProductArchiveID, requestOptions ...RequestOption) (*billing.ProductArchive, error) {
-	path, err := requireTypedID("product_archive_id", id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.ProductArchive
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/product-archives/"+path, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

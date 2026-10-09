@@ -29,17 +29,6 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 	return &out, nil
 }
 
-// GetPublicConfig returns what GET /v1/config serves a browser: the
-// capabilities of the mount serving the request, the currency registry and
-// the merchant's payment setup.
-func (c *Client) GetPublicConfig(ctx context.Context, requestOptions ...RequestOption) (*billing.PublicConfig, error) {
-	var out billing.PublicConfig
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/config", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListCheckoutOptions lists the ways checkout can sell one price now, in
 // routing order, each with the browser driver and public values that render
 // it.

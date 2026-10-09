@@ -62,11 +62,12 @@ func newGuardedHost(t *testing.T, f *fixture) *guardedHost {
 	return h
 }
 
-// mount serves client's routes with perms.
+// mount serves client's routes with perms, each one's route group on.
 func (h *guardedHost) mount(t *testing.T, client *openrails.Client, perms openrails.Permissions) (http.Handler, error) {
 	t.Helper()
 	mux := http.NewServeMux()
-	err := openrailshttp.Mount(mux, client, openrails.Routes{Auth: h.ak, Prefix: "/billing", Permissions: perms})
+	groups := openrails.RouteGroups{Admin: perms.AdminRead != nil, Catalog: perms.Catalog != nil, MerchantConfig: perms.MerchantConfig != nil, Metrics: perms.Metrics != nil}
+	err := openrailshttp.Mount(mux, client, openrails.Routes{Auth: h.ak, Prefix: "/billing", RouteGroups: groups, Permissions: perms})
 	return mux, err
 }
 
@@ -83,7 +84,7 @@ func TestAuthKitPassesCheckAuth(t *testing.T) {
 		}
 	}
 	openrailstest.CheckAuth(t, h.ak, openrailstest.AuthCases{
-		Permissions: openrails.Permissions{AdminRead: h.read, AdminWrite: h.update},
+		Permissions: openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update},
 		Customer:    request(h.customer),
 		Staff:       request(h.support),
 		Holders:     map[string]func() *http.Request{h.read.String(): request(h.reader)},
@@ -92,14 +93,14 @@ func TestAuthKitPassesCheckAuth(t *testing.T) {
 	})
 }
 
-// Each admin route checks the host's AdminRead or AdminWrite by its level,
-// each merchant-config route MerchantConfig; a bundle without its permission
-// is not mounted. A write that moves money still needs a recent sign-in, and
-// the machine checkout-attempt routes are gone.
-func TestBundlePermissions(t *testing.T) {
+// Each admin route checks the host's AdminRead or AdminUpdate by its level,
+// each catalog route Catalog, each merchant-config route MerchantConfig; a
+// group that is off is not mounted. A write that moves money still needs a
+// recent sign-in, and the machine checkout-attempt routes are gone.
+func TestRouteGroupPermissions(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	client := f.runtime(t, "bundles-"+uuid.NewString()[:8])
+	client := f.runtime(t, "groups-"+uuid.NewString()[:8])
 	payment := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 	subscription := "/billing/v1/admin/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
 	serve := func(mux http.Handler, token, method, path string) (int, string) {
@@ -129,7 +130,7 @@ func TestBundlePermissions(t *testing.T) {
 	}
 
 	t.Run("admin reads and writes", func(t *testing.T) {
-		mux, err := h.mount(t, client, openrails.Permissions{AdminRead: h.read, AdminWrite: h.update})
+		mux, err := h.mount(t, client, openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update})
 		require.NoError(t, err)
 		refused(t, mux, h.customer, http.MethodGet, "/billing/v1/admin/payments", forbidden)
 		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/payments")
@@ -164,13 +165,13 @@ func TestBundlePermissions(t *testing.T) {
 		mux, err := h.mount(t, client, openrails.Permissions{AdminRead: h.read})
 		require.NoError(t, err)
 		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/payments")
-		passes(t, mux, h.reader, http.MethodPost, "/billing/v1/admin/tiers/lookup")
+		passes(t, mux, h.reader, http.MethodPost, "/billing/v1/admin/subscriptions/"+billing.SubscriptionID(uuid.New()).String()+"/change/preview")
 		unmounted(t, mux, http.MethodPost, payment)
 		unmounted(t, mux, http.MethodPost, subscription)
 	})
 
 	t.Run("merchant configuration", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "config-"+uuid.NewString()[:8]), openrails.Permissions{AdminRead: h.read, AdminWrite: h.update, MerchantConfig: h.admin})
+		mux, err := h.mount(t, f.runtime(t, "config-"+uuid.NewString()[:8]), openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update, MerchantConfig: h.admin})
 		require.NoError(t, err)
 		refused(t, mux, h.support, http.MethodGet, "/billing/v1/admin/psps", forbidden)
 		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/psps")
@@ -178,33 +179,34 @@ func TestBundlePermissions(t *testing.T) {
 		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/catalog/products")
 	})
 
-	t.Run("catalog edits", func(t *testing.T) {
-		mux, err := h.mount(t, f.runtime(t, "catalog-"+uuid.NewString()[:8]), openrails.Permissions{AdminRead: h.read, CatalogWrite: h.admin})
+	t.Run("the catalog alone", func(t *testing.T) {
+		mux, err := h.mount(t, f.runtime(t, "catalog-"+uuid.NewString()[:8]), openrails.Permissions{Catalog: h.admin})
 		require.NoError(t, err)
 		refused(t, mux, h.support, http.MethodPost, "/billing/v1/admin/catalog/products", forbidden)
+		refused(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/catalog/products", forbidden)
 		passes(t, mux, h.owner, http.MethodPost, "/billing/v1/admin/catalog/products")
-		passes(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/catalog/products")
+		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/catalog/products")
 		unmounted(t, mux, http.MethodGet, "/billing/v1/admin/psps")
-		unmounted(t, mux, http.MethodPost, payment)
+		unmounted(t, mux, http.MethodGet, "/billing/v1/admin/payments")
 	})
 }
 
-// Mount fails closed: AdminWrite without AdminRead, and any bundle without
-// Auth.
-func TestMountRefusesWritesWithoutReads(t *testing.T) {
+// Mount fails closed: a group on without its permission, a permission for a
+// group that is off, and any group without Auth.
+func TestMountFailsClosed(t *testing.T) {
 	f := newFixture(t)
 	h := newGuardedHost(t, f)
-	client := f.runtime(t, "bundles-"+uuid.NewString()[:8])
-	for name, perms := range map[string]openrails.Permissions{
-		"writes alone":          {AdminWrite: h.update},
-		"an empty read":         {AdminRead: iam.Perm{}, AdminWrite: h.update},
-		"configuration, writes": {AdminWrite: h.update, MerchantConfig: h.admin},
+	client := f.runtime(t, "groups-"+uuid.NewString()[:8])
+	for name, tc := range map[string]struct {
+		routes openrails.Routes
+		err    string
+	}{
+		"admin without its read": {openrails.Routes{Auth: h.ak, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminUpdate: h.update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"an empty read":          {openrails.Routes{Auth: h.ak, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: iam.Perm{}}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"a group that is off":    {openrails.Routes{Auth: h.ak, Permissions: openrails.Permissions{Catalog: h.admin}}, "Permissions.Catalog is given, but RouteGroups.Catalog is off"},
+		"no Auth":                {openrails.Routes{RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "Routes.Auth is required"},
 	} {
-		_, err := h.mount(t, client, perms)
-		require.ErrorContains(t, err, "AdminWrite needs AdminRead", name)
+		err := openrailshttp.Mount(http.NewServeMux(), client, tc.routes)
+		require.ErrorContains(t, err, tc.err, name)
 	}
-	_, err := h.mount(t, client, openrails.Permissions{CatalogWrite: h.admin})
-	require.ErrorContains(t, err, "CatalogWrite needs AdminRead")
-	err = openrailshttp.Mount(http.NewServeMux(), client, openrails.Routes{Prefix: "/billing", Permissions: openrails.Permissions{AdminRead: h.read}})
-	require.ErrorContains(t, err, "Routes.Auth is required")
 }

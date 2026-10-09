@@ -34,7 +34,11 @@ func TestFileReachesConfig(t *testing.T) {
 			field.Set(reflect.New(field.Type().Elem()))
 		case reflect.Struct:
 			for j := range field.NumField() {
-				field.Field(j).SetString("sandbox")
+				if sub := field.Field(j); sub.Kind() == reflect.Bool {
+					sub.SetBool(true)
+				} else {
+					sub.SetString("sandbox")
+				}
 			}
 		default:
 			t.Fatalf("%s: unhandled kind %s", v.Type().Field(i).Name, field.Kind())

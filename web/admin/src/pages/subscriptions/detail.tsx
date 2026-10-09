@@ -53,8 +53,10 @@ import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { ChangeSubscriptionDialog } from "@/pages/subscriptions/change-subscription-dialog"
 import { dunningSummary } from "@/pages/subscriptions/dunning"
+import { useAdminUpdates } from "@/lib/capabilities"
 
 export function SubscriptionDetailPage() {
+  const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
   const { data: sub, isPending: loading } = useQuery(
@@ -97,28 +99,32 @@ export function SubscriptionDetailPage() {
           </p>
         </div>
         <div className="ml-auto flex gap-2">
-          {resumable && (
+          {canUpdate && resumable && (
             <ResumeButton id={sub.id} customerId={sub.customer_id} />
           )}
-          <ChangeSubscriptionDialog
-            subscriptionId={sub.id}
-            customerId={sub.customer_id}
-            productId={sub.product_id}
-            priceId={sub.price_id}
-            quantity={sub.quantity}
-            currency={sub.price?.currency}
-            collectionPolicy={sub.collection_policy}
-            scheduledChange={sub.scheduled_change}
-            rail={sub.rail}
-            status={sub.status}
-          />
-          <ChangePaymentMethodDialog
-            subscriptionId={sub.id}
-            customerId={sub.customer_id}
-            rail={sub.rail}
-            collectionPolicy={sub.collection_policy}
-          />
-          {cancellable && (
+          {canUpdate && (
+            <ChangeSubscriptionDialog
+              subscriptionId={sub.id}
+              customerId={sub.customer_id}
+              productId={sub.product_id}
+              priceId={sub.price_id}
+              quantity={sub.quantity}
+              currency={sub.price?.currency}
+              collectionPolicy={sub.collection_policy}
+              scheduledChange={sub.scheduled_change}
+              rail={sub.rail}
+              status={sub.status}
+            />
+          )}
+          {canUpdate && (
+            <ChangePaymentMethodDialog
+              subscriptionId={sub.id}
+              customerId={sub.customer_id}
+              rail={sub.rail}
+              collectionPolicy={sub.collection_policy}
+            />
+          )}
+          {canUpdate && cancellable && (
             <CancelDialog id={sub.id} customerId={sub.customer_id} />
           )}
         </div>

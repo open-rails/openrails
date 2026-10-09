@@ -33,16 +33,6 @@ func httpRuntime() *Engine {
 	return &Engine{App: &app.App{Config: c, Runtime: rt}}
 }
 
-// profiles mounts customer surfaces at prefixes beside /v1/me, each admitted
-// by a.
-func profiles(a billingauth.Auth, prefixes ...string) config.Routes {
-	sel := config.Routes{Auth: a}
-	for _, prefix := range prefixes {
-		sel.CustomerProfiles = append(sel.CustomerProfiles, config.CustomerRoutes{Prefix: prefix, Auth: a})
-	}
-	return sel
-}
-
 // hookAuth admits whom admit says, as the user customer.
 type hookAuth struct{ admit func(*http.Request) bool }
 
@@ -91,25 +81,15 @@ func serve(h http.Handler, method, target, body string, headers ...string) *http
 	return rec
 }
 
-// Routes copies the selection: neither the host's later edits nor a caller's
-// edits to returned routes leak into another mount.
+// A caller's edits to returned routes never leak into another mount.
 func TestRoutesCopyTheSelection(t *testing.T) {
 	rt := httpRuntime()
 	fake := &authtest.Fake{}
-	sel := profiles(fake, "/portal")
-	routes, err := rt.Routes(sel)
+	routes, err := rt.Routes(config.Routes{Auth: fake})
 	require.NoError(t, err)
-	sel.CustomerProfiles[0].Prefix = "/mutated"
-	var portal bool
-	for _, route := range routes {
-		require.NotContains(t, route.Path, "/admin/")
-		require.NotContains(t, route.Path, "/mutated")
-		portal = portal || strings.HasPrefix(route.Path, "/portal/")
-	}
-	require.True(t, portal)
 	original := routes[0].Path
 	routes[0].Path = "/caller-mutated"
-	again, err := rt.Routes(profiles(fake, "/portal"))
+	again, err := rt.Routes(config.Routes{Auth: fake})
 	require.NoError(t, err)
 	require.Equal(t, original, again[0].Path)
 
@@ -132,7 +112,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 	}
 	require.True(t, public && customer, "the public and customer routes are always mounted")
 
-	full := config.Routes{Auth: fake, Permissions: authtest.Permissions()}
+	full := config.Routes{Auth: fake, RouteGroups: authtest.Groups(), Permissions: authtest.Permissions()}
 	rt := httpRuntime()
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
 	mux := mountAt(t, rt, full, "/api/pay")
@@ -162,18 +142,20 @@ func TestCapabilitiesReportTheMount(t *testing.T) {
 		require.NotEmpty(t, doc.Currencies)
 		return doc.Capabilities.RouteGroups
 	}
-	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": false, "provisioning": false}, read(config.Routes{Auth: fake}))
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false, "provisioning": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
-	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true, "provisioning": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true, "provisioning": true}, read(config.Routes{Auth: fake, Permissions: authtest.Permissions(), Provisioning: true}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": false, "metrics": false, "app": false}, read(config.Routes{Auth: fake}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
+	all := authtest.Groups()
+	all.Programmatic = true
+	require.Equal(t, map[string]bool{"admin": true, "catalog": true, "merchant_config": true, "metrics": true, "app": true}, read(config.Routes{Auth: fake, RouteGroups: all, Permissions: authtest.Permissions()}))
 }
 
-func TestCatalogEditsFollowTheCatalogWriteMount(t *testing.T) {
+func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 	writes := func(rt *Engine, sel config.Routes) (reads, writes int) {
 		routes, err := rt.Routes(sel)
 		require.NoError(t, err)
 		for _, route := range routes {
-			if !strings.Contains(route.Path, "/catalog") || route.Method == http.MethodOptions {
+			if !strings.Contains(route.Path, "/admin/catalog") || route.Method == http.MethodOptions {
 				continue
 			}
 			// Offer lookup is a read with a POST body.
@@ -187,39 +169,41 @@ func TestCatalogEditsFollowTheCatalogWriteMount(t *testing.T) {
 	}
 	fake := &authtest.Fake{}
 	rt := httpRuntime()
-	reads, n := writes(rt, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()})
-	require.Positive(t, reads)
-	require.Zero(t, n, "catalog writes are CatalogWrite's")
-	mux := mountAt(t, rt, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()}, "/api/pay")
+	reads, n := writes(rt, config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions()})
+	require.Zero(t, reads+n, "the catalog is its own group")
+	mux := mountAt(t, rt, config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions()}, "/api/pay")
 	for _, path := range []string{"/api/pay/v1/admin/catalog/products", "/api/pay/v1/admin/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
 	// Mounts choose independently; a host's catalog document never closes them.
 	rt.App.Config.Catalog = &pkgcatalog.Application{}
-	_, n = writes(rt, config.Routes{Auth: fake, Permissions: authtest.Permissions()})
+	reads, n = writes(rt, config.Routes{Auth: fake, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: authtest.Perm(authtest.StaffCatalog)}})
+	require.Positive(t, reads)
 	require.Positive(t, n)
 	_, err := rt.Routes(config.Routes{Auth: fake})
 	require.NoError(t, err)
 
-	_, err = httpRuntime().Routes(config.Routes{Permissions: authtest.AdminPermissions()})
+	_, err = httpRuntime().Routes(config.Routes{RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions()})
 	require.ErrorContains(t, err, "Routes.Auth is required", "the admin API never mounts open")
-	_, err = httpRuntime().Routes(config.Routes{Auth: (*authtest.Fake)(nil), Permissions: authtest.AdminPermissions()})
+	_, err = httpRuntime().Routes(config.Routes{Auth: (*authtest.Fake)(nil), RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions()})
 	require.ErrorContains(t, err, "Routes.Auth is required", "a typed nil is no Auth")
 }
 
-// AdminWrite and CatalogWrite need AdminRead; a typed nil permission is none.
+// A group on needs its permission, a permission needs its group on, and a
+// typed nil permission is none.
 func TestPermissionsFailClosed(t *testing.T) {
 	fake := &authtest.Fake{}
-	for name, sel := range map[string]config.Routes{
-		"writes without reads":      {Auth: fake, Permissions: config.Permissions{AdminWrite: authtest.Perm("w")}},
-		"a typed nil read":          {Auth: fake, Permissions: config.Permissions{AdminRead: (*nilPerm)(nil), AdminWrite: authtest.Perm("w")}},
-		"merchant config and write": {Auth: fake, Permissions: config.Permissions{AdminWrite: authtest.Perm("w"), MerchantConfig: authtest.Perm("c")}},
+	for name, tc := range map[string]struct {
+		sel config.Routes
+		err string
+	}{
+		"admin on without its read": {config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: config.Permissions{AdminUpdate: authtest.Perm("w")}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"a typed nil read":          {config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: config.Permissions{AdminRead: (*nilPerm)(nil)}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"a permission, group off":   {config.Routes{Auth: fake, Permissions: config.Permissions{Catalog: authtest.Perm("e")}}, "Permissions.Catalog is given, but RouteGroups.Catalog is off"},
 	} {
-		_, err := httpRuntime().Routes(sel)
-		require.ErrorContains(t, err, "AdminWrite needs AdminRead", name)
+		_, err := httpRuntime().Routes(tc.sel)
+		require.ErrorContains(t, err, tc.err, name)
 	}
-	_, err := httpRuntime().Routes(config.Routes{Auth: fake, Permissions: config.Permissions{CatalogWrite: authtest.Perm("e")}})
-	require.ErrorContains(t, err, "CatalogWrite needs AdminRead")
 }
 
 type nilPerm struct{}
@@ -227,21 +211,20 @@ type nilPerm struct{}
 func (*nilPerm) String() string { panic("never called") }
 
 func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
-	const target = "/api/pay/v1/tenants/a%2Fb/me/invoices/invoice-1?view=raw"
+	const target = "/api/pay/v1/me/invoices/inv%2F1?view=raw"
 	const body = "{ \"signed\" : \"unaltered\" }\n"
 	calls := 0
 	verifier := hookAuth{admit: func(r *http.Request) bool {
 		calls++
 		require.Equal(t, target, r.RequestURI)
-		require.Equal(t, "/api/pay/v1/tenants/a%2Fb/me/invoices/invoice-1", r.URL.RawPath)
-		require.Equal(t, "a/b", r.PathValue("tenant"))
-		require.Equal(t, "invoice-1", r.PathValue("id"))
+		require.Equal(t, "/api/pay/v1/me/invoices/inv%2F1", r.URL.RawPath)
+		require.Equal(t, "inv/1", r.PathValue("id"))
 		raw, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		require.Equal(t, body, string(raw))
 		return false
 	}}
-	mux := mountAt(t, httpRuntime(), profiles(verifier, "/v1/tenants/{tenant}/me"), "/api/pay")
+	mux := mountAt(t, httpRuntime(), config.Routes{Auth: verifier}, "/api/pay")
 	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, target, body, "Authorization", "Bearer signed").Code)
 	require.Equal(t, 1, calls)
 
@@ -282,64 +265,10 @@ func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 	}
 }
 
-func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
-	portalAuth, platformAuth := &authtest.Fake{}, &authtest.Fake{}
-	const customer = "22222222-2222-4222-8222-222222222222"
-	tokens := map[string]string{"portal": portalAuth.Person(customer), "platform": platformAuth.Person(customer)}
-	rt := httpRuntime()
-	sel := config.Routes{Auth: &authtest.Fake{}, CustomerProfiles: []config.CustomerRoutes{
-		{Prefix: "/billing/v1/me", Auth: portalAuth},
-		{Prefix: "/api/v1/merchants/{slug}/billing/me", Auth: platformAuth},
-	}}
-	mux := mountAt(t, rt, sel, "/api/pay")
-	const portal, platform = "/billing/v1/me", "/api/v1/merchants/host-selected/billing/me"
-	for _, tc := range []struct {
-		prefix, token string
-		status        int
-	}{
-		{portal, "portal", 400},
-		{portal, "platform", 401},
-		{platform, "portal", 401},
-		{platform, "platform", 400},
-	} {
-		rec := serve(mux, http.MethodPost, "/api/pay"+tc.prefix+"/subscriptions/not-id/cancel?proof=original", "{}", "Authorization", "Bearer "+tokens[tc.token])
-		require.Equal(t, tc.status, rec.Code, rec.Body.String())
-	}
-	for _, a := range []*authtest.Fake{portalAuth, platformAuth} {
-		require.Equal(t, 1, a.Admitted("Required"))
-		require.Equal(t, 1, a.Refused("Required"))
-	}
-	for _, path := range []string{portal + "/admin/customers", "/billing/v1/admin/psps"} {
-		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay"+path, "").Code, path)
-	}
-	routes, err := rt.Routes(sel)
-	require.NoError(t, err)
-	me, platformRoutes := 0, 0
-	for _, route := range routes {
-		switch {
-		case route.Path == "/v1/me" || strings.HasPrefix(route.Path, "/v1/me/"):
-			me++
-		case strings.HasPrefix(route.Path, "/api/v1/merchants/"):
-			platformRoutes++
-		}
-	}
-	require.Positive(t, me)
-	require.Equal(t, me, platformRoutes, "every customer surface serves the whole customer API")
-}
-
-func TestCustomerExposureValidation(t *testing.T) {
-	validate := func(sel config.Routes) error {
-		_, err := httpRuntime().Routes(sel)
-		return err
-	}
-	fake := &authtest.Fake{}
-	for _, prefix := range []string{"/", "/customer/", "/customer/../other", "/customer/{tail...}", "/customer/{slug}/%2f"} {
-		require.Error(t, validate(profiles(fake, prefix)), prefix)
-	}
-	require.ErrorContains(t, validate(config.Routes{}), "Routes.Auth is required", "customer routes never mount open")
-	require.ErrorContains(t, validate(profiles(nil, "/portal")), "Routes.Auth is required")
-	require.ErrorContains(t, validate(profiles(fake, "/v1/me")), "conflicting", "/v1/me is always mounted")
-	require.ErrorContains(t, validate(config.Routes{Auth: fake, CookieOrigin: "http://portal.example"}), "CookieOrigin", "plain HTTP only on loopback")
+// No route mounts without an Auth.
+func TestRoutesNeedAuth(t *testing.T) {
+	_, err := httpRuntime().Routes(config.Routes{})
+	require.ErrorContains(t, err, "Routes.Auth is required", "customer routes never mount open")
 }
 
 // The customer routes are always mounted, the admin ones only with
@@ -356,100 +285,69 @@ func TestCustomerRoutesAlwaysMounted(t *testing.T) {
 	require.NotContains(t, rec.Body.String(), `"routes"`)
 }
 
-// Customer mounts ignore ambient cookies unless Routes.CookieOrigin admits
-// them, and admission still requires that origin.
-func TestCustomerCookieAdmission(t *testing.T) {
+// An ambient cookie never reaches the host's Auth: a browser call carries its
+// credential in a header.
+func TestAmbientCookiesNeverAuthenticate(t *testing.T) {
 	calls := 0
 	authn := hookAuth{admit: func(r *http.Request) bool {
 		calls++
 		_, err := r.Cookie("session")
 		return err == nil
 	}}
-	sel := profiles(authn, "/portal")
-	mux := mountAt(t, httpRuntime(), sel, "/api/pay")
-	sel.CookieOrigin = "https://portal.example"
-	admitting := mountAt(t, httpRuntime(), sel, "/api/pay")
-	for _, tc := range []struct {
-		name, origin, bearer string
-		admitted             bool
-		code, authCalls      int
-	}{
-		{name: "ambient cookie stripped", code: 401, authCalls: 1},
-		{name: "missing origin", admitted: true, code: 403},
-		{name: "foreign origin", origin: "https://other.example", admitted: true, code: 403},
-		{name: "admitted session", origin: "https://portal.example", admitted: true, code: 400, authCalls: 1},
-		{name: "explicit credential cannot fall back", origin: "https://portal.example", bearer: "Bearer invalid", admitted: true, code: 401, authCalls: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			calls = 0
-			req := httptest.NewRequest(http.MethodPost, "/api/pay/portal/subscriptions/not-id/cancel", strings.NewReader("{}"))
-			req.AddCookie(&http.Cookie{Name: "session", Value: "valid"})
-			if tc.origin != "" {
-				req.Header.Set("Origin", tc.origin)
-			}
-			if tc.bearer != "" {
-				req.Header.Set("Authorization", tc.bearer)
-			}
-			var target http.Handler = mux
-			if tc.admitted {
-				target = admitting
-			}
-			rec := httptest.NewRecorder()
-			target.ServeHTTP(rec, req)
-			require.Equal(t, tc.code, rec.Code, rec.Body.String())
-			require.Equal(t, tc.authCalls, calls)
-		})
-	}
+	mux := mountAt(t, httpRuntime(), config.Routes{Auth: authn}, "/api/pay")
+	req := httptest.NewRequest(http.MethodPost, "/api/pay/v1/me/subscriptions/not-id/cancel", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: "valid"})
+	req.Header.Set("Origin", "https://portal.example")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusUnauthorized, rec.Code, rec.Body.String())
+	require.Equal(t, 1, calls)
 }
 
-// The admin console mounts with the admin API it drives, at its own path,
-// pointed at the API's prefix and the host's AuthKit; otherwise Mount fails.
+// The admin console mounts with the admin API it drives, at the prefix's
+// /admin, pointed at the API and the host's AuthKit on the same origin;
+// otherwise Mount fails.
 func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 	rt := httpRuntime()
 	fake := &authtest.Fake{}
-	console := &config.AdminConsole{Path: "/billing-admin"}
-	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: console, Auth: fake})
-	require.ErrorContains(t, err, "set Routes.Permissions.AdminRead")
-	sel := config.Routes{Prefix: "/billing", Permissions: authtest.AdminPermissions(), AdminConsole: console, Auth: fake}
+	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: true, Auth: fake})
+	require.ErrorContains(t, err, "turn on at least one of RouteGroups.Admin")
+	sel := config.Routes{Prefix: "/billing", RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions(), AdminConsole: true, Auth: fake}
 	_, err = rt.Routes(sel)
 	require.ErrorContains(t, err, "needs a console build")
 	rt.App.ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
-	_, err = rt.Routes(sel)
-	require.ErrorContains(t, err, "AuthBaseURL")
-	console.AuthBaseURL = "/api/v1"
-	for _, bad := range []config.Routes{
-		{Prefix: "billing", Auth: fake, Permissions: authtest.AdminPermissions()},
-		{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{Path: "/admin/", AuthBaseURL: "/api/v1"}},
-		{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{Path: "/billing/v1/admin", AuthBaseURL: "/api/v1"}},
-	} {
-		_, err = rt.Routes(bad)
-		require.Error(t, err, "%+v", bad)
-	}
+	_, err = rt.Routes(config.Routes{Prefix: "billing", Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions(), AdminConsole: true})
+	require.Error(t, err)
 
 	mux := mountAt(t, rt, sel, "")
-	rec := serve(mux, http.MethodGet, "/billing-admin/", "")
+	rec := serve(mux, http.MethodGet, "/billing/admin/", "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `<base href="/billing-admin/">host build`)
-	rec = serve(mux, http.MethodGet, "/billing-admin/config.json", "")
+	require.Contains(t, rec.Body.String(), `<base href="/billing/admin/">host build`)
+	rec = serve(mux, http.MethodGet, "/billing/admin/config.json", "")
 	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"merchant":null}`, rec.Body.String())
+
+	// An assistant shows where the deployment has an LLM and its group is mounted.
+	for _, tc := range []struct {
+		sel  config.Routes
+		want string
+	}{
+		{sel, `"nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false`},
+		{config.Routes{Prefix: "/billing", RouteGroups: authtest.Groups(), Permissions: authtest.Permissions(), AdminConsole: true, Auth: fake}, `"nl_widgets_enabled":true,"ask_enabled":true,"catalog_copilot_enabled":true`},
+	} {
+		assisted := httpRuntime()
+		assisted.App.ConsoleAssets = rt.App.ConsoleAssets
+		assisted.App.Config.LLM = &config.LLMConfig{APIKey: "k", AskEnabled: true, CatalogCopilotEnabled: true}
+		require.Contains(t, serve(mountAt(t, assisted, tc.sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String(), tc.want)
+	}
 
 	// The console acts for the merchant the engine serves.
 	declared := httpRuntime()
 	declared.App.ConsoleAssets = rt.App.ConsoleAssets
 	declared.App.Config.Merchant = config.MerchantDeclaration{Slug: "acme", DisplayName: "Acme"}
-	body := serve(mountAt(t, declared, sel, ""), http.MethodGet, "/billing-admin/config.json", "").Body.String()
+	body := serve(mountAt(t, declared, sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String()
 	require.Contains(t, body, `"merchant":{"id":"11111111-1111-4111-8111-111111111111","slug":"acme","display_name":"Acme"}`)
-
-	// A host's extension data reaches its console extensions only through
-	// config.json, verbatim and keyed by extension id.
-	hosted := httpRuntime()
-	hosted.App.ConsoleAssets = rt.App.ConsoleAssets
-	_, err = hosted.Routes(config.Routes{Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"Hosted": true}}})
-	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
-	hostedMux := mountAt(t, hosted, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
-	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/config", "").Code)
 
-	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions()}, "")
-	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/admin/", "").Code, "no console unless selected")
+	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: fake, RouteGroups: authtest.AdminGroups(), Permissions: authtest.AdminPermissions()}, "")
+	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/billing/admin/", "").Code, "no console unless selected")
 }

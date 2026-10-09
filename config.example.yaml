@@ -182,6 +182,17 @@ captcha:
   secret_key: ""
 
 
+# Route groups beyond the public, customer and webhook routes, each off until
+# turned on here. The staff groups check the server's own merchant
+# permissions; programmatic (/v1/app, with SCIM provisioning) takes a
+# merchant's application credential, never a person.
+route_groups:
+  admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
+  catalog: true          # products, prices, meters, price migrations
+  merchant_config: true  # PSPs, settings, billing import and export
+  metrics: true          # business metrics, read-only
+  programmatic: true     # your backend's calls and SCIM user provisioning
+
 # Merchant admin console (staff dashboard), served at path. Off by default:
 # while enabled is false no console route exists. Needs console assets in the
 # binary: `task build` embeds web/admin/dist after `task admin-build`; enabled

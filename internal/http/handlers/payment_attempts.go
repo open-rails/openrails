@@ -62,7 +62,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
 		}), CycleID: q.typed("cycle_id", func(s string) (uuid.UUID, error) {
-			id, err := billing.ParseRebillCycleID(s)
+			id, err := billing.ParseRenewalID(s)
 			return id.UUID(), err
 		}), Since: q.time("since"), Until: q.time("until"),
 	}
@@ -105,18 +105,18 @@ func GetPaymentAttempt(r *httprequest.Request) {
 	r.JSON(http.StatusOK, paymentAttemptToAPI(row))
 }
 
-// ListRebillCycles lists the merchant's rebill cycles, latest due first
+// ListRenewals lists the merchant's renewals, latest due first
 // (#1116).
 //
-//	GET /admin/rebill-cycles?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
+//	GET /admin/renewals?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
-func ListRebillCycles(r *httprequest.Request) {
+func ListRenewals(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseRebillCycleID)
+	ids, ok := listIDs(r, billing.ParseRenewalID)
 	if !ok {
 		return
 	}
@@ -124,10 +124,10 @@ func ListRebillCycles(r *httprequest.Request) {
 		now := r.Clock.Now()
 		rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCyclesByIDs(r.Request.Context(), gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: uuidutil.Of(ids)})
 		if err != nil {
-			r.InternalError("rebill cycles could not be listed", err)
+			r.InternalError("renewals could not be listed", err)
 			return
 		}
-		r.SuccessJSON(pagination.Map(billing.ListPage[gen.ListRebillCyclesByIDsRow]{Items: rows}, func(c gen.ListRebillCyclesByIDsRow) billing.RebillCycle {
+		r.SuccessJSON(pagination.Map(billing.ListPage[gen.ListRebillCyclesByIDsRow]{Items: rows}, func(c gen.ListRebillCyclesByIDsRow) billing.Renewal {
 			return rebillCycleToAPI(gen.ListRebillCyclesRow(c), now)
 		}))
 		return
@@ -155,24 +155,24 @@ func ListRebillCycles(r *httprequest.Request) {
 	params.RowLimit = pagination.Fetch(limit)
 	rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCycles(r.Request.Context(), params)
 	if err != nil {
-		r.InternalError("rebill cycles could not be listed", err)
+		r.InternalError("renewals could not be listed", err)
 		return
 	}
 	page := pagination.Cut(rows, limit, func(c gen.ListRebillCyclesRow) any { return pagination.TimeID{At: c.DueAt, ID: c.ID} })
-	r.SuccessJSON(pagination.Map(page, func(c gen.ListRebillCyclesRow) billing.RebillCycle { return rebillCycleToAPI(c, now) }))
+	r.SuccessJSON(pagination.Map(page, func(c gen.ListRebillCyclesRow) billing.Renewal { return rebillCycleToAPI(c, now) }))
 }
 
-// GetRebillCycle reads one rebill cycle with its attempts, oldest first.
+// GetRenewal reads one renewal with its attempts, oldest first.
 //
-//	GET /admin/rebill-cycles/{id}
-func GetRebillCycle(r *httprequest.Request) {
+//	GET /admin/renewals/{id}
+func GetRenewal(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
 		return
 	}
-	id, err := billing.ParseRebillCycleID(r.Param("id"))
+	id, err := billing.ParseRenewalID(r.Param("id"))
 	if err != nil || id.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid rebill cycle id").WithParam("id"))
+		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid renewal id").WithParam("id"))
 		return
 	}
 	ctx := r.Request.Context()
@@ -180,16 +180,16 @@ func GetRebillCycle(r *httprequest.Request) {
 	now := r.Clock.Now()
 	rows, err := q.ListRebillCyclesByIDs(ctx, gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: []uuid.UUID{id.UUID()}})
 	if err != nil {
-		r.InternalError("rebill cycle could not be read", err)
+		r.InternalError("renewal could not be read", err)
 		return
 	}
 	if len(rows) == 0 {
-		r.ErrorCode(billing.CodeResourceNotFound, "rebill cycle not found")
+		r.ErrorCode(billing.CodeResourceNotFound, "renewal not found")
 		return
 	}
 	attempts, err := q.ListCycleAttempts(ctx, gen.ListCycleAttemptsParams{MerchantID: mid, CycleID: id.UUID()})
 	if err != nil {
-		r.InternalError("rebill cycle attempts could not be read", err)
+		r.InternalError("renewal attempts could not be read", err)
 		return
 	}
 	out := rebillCycleToAPI(gen.ListRebillCyclesRow(rows[0]), now)
@@ -233,7 +233,7 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		out.OrderID = &id
 	}
 	if a.CycleID != nil {
-		id := billing.RebillCycleID(*a.CycleID)
+		id := billing.RenewalID(*a.CycleID)
 		out.CycleID = &id
 	}
 	if a.SubscriptionID != nil {
@@ -256,9 +256,9 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 	return out
 }
 
-func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.RebillCycle {
-	out := billing.RebillCycle{
-		ID: billing.RebillCycleID(c.ID), SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
+func rebillCycleToAPI(c gen.ListRebillCyclesRow, now time.Time) billing.Renewal {
+	out := billing.Renewal{
+		ID: billing.RenewalID(c.ID), SubscriptionID: billing.SubscriptionID(c.SubscriptionID),
 		CustomerID: billing.CustomerID(c.CustomerID), PSPID: billing.PSPID(c.PspID), Rail: c.Rail, Owner: c.Owner, DueAt: c.DueAt, Amount: c.Amount,
 		Currency: c.Currency, FirstOutcome: c.FirstOutcome, MissedAt: c.MissedAt, MissReason: normalize.FromPtr(c.MissReason),
 		CollectedAt: c.WonAt, RecoveredBy: c.RecoveredBy, ClosesAt: c.ClosedAt,

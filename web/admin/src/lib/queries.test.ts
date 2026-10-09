@@ -35,7 +35,7 @@ it("scopes cached server state before a merchant is selected", () => {
   expect(queryKeys.dashboard()).toEqual(["merchant", "unselected", "dashboard"])
 })
 
-it("keeps same-named price histories and price migrations separate by product", async () => {
+it("keeps price histories and same-named price migrations separate", async () => {
   selectMerchant("merchant-a")
   const requests = await server({
     "/admin/catalog/prices/price_premium/history": { data: [{ price_id: "premium_price" }] },

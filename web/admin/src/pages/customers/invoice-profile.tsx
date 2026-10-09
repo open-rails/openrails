@@ -12,12 +12,14 @@ import {
   invoiceProfileRequest,
   type ProfileFormValues,
 } from "../invoices/model"
+import { useAdminUpdates } from "@/lib/capabilities"
 
 export function CustomerInvoiceProfileSection({
   customerId,
 }: {
   customerId: string
 }) {
+  const canUpdate = useAdminUpdates()
   const query = useQuery(invoiceQueries.profile(customerId))
   return (
     <Card>
@@ -42,6 +44,7 @@ export function CustomerInvoiceProfileSection({
             key={customerId}
             customerId={customerId}
             profile={query.data}
+            readOnly={!canUpdate}
           />
         )}
       </CardContent>
@@ -52,9 +55,12 @@ export function CustomerInvoiceProfileSection({
 export function InvoiceProfileEditor({
   customerId,
   profile,
+  readOnly = false,
 }: {
   customerId: string
   profile: InvoiceProfile | null
+  // readOnly shows the profile to staff who may not change it.
+  readOnly?: boolean
 }) {
   const [values, setValues] = useState(() => invoiceProfileValues(profile))
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +97,7 @@ export function InvoiceProfileEditor({
         Terms and billing facts for future invoices. Issued invoices keep their
         original snapshots. Tax details are recorded; no tax is calculated.
       </p>
-      <fieldset disabled={mutation.isPending} className="space-y-4">
+      <fieldset disabled={readOnly || mutation.isPending} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label htmlFor="invoice-profile-terms">Payment terms (days)</Label>
@@ -253,9 +259,11 @@ export function InvoiceProfileEditor({
           Invoice profile saved. Issued invoices were not changed.
         </p>
       )}
-      <Button type="submit" disabled={mutation.isPending}>
-        {mutation.isPending ? "Saving…" : "Save invoice profile"}
-      </Button>
+      {!readOnly && (
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? "Saving…" : "Save invoice profile"}
+        </Button>
+      )}
     </form>
   )
 }

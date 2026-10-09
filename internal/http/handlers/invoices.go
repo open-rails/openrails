@@ -276,7 +276,7 @@ func loadMerchantInvoice(r *httprequest.Request) (*billingservice.Service, *bill
 // invoiceActionRoutes are the routes that perform an invoice's actions.
 var invoiceActionRoutes = map[billing.InvoiceAction]string{
 	billing.InvoiceActionVoid:            "POST /v1/admin/invoices/{id}/void",
-	billing.InvoiceActionUncollectible:   "POST /v1/admin/invoices/{id}/uncollectible",
+	billing.InvoiceActionUncollectible:   "POST /v1/admin/invoices/{id}/mark-uncollectible",
 	billing.InvoiceActionRecordPayment:   "POST /v1/admin/payments",
 	billing.InvoiceActionRetryCollection: "POST /v1/admin/invoices/{id}/retry-collection",
 }

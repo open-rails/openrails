@@ -10,6 +10,7 @@ export type OpenRailsErrorCode =
   | "allowance_source_in_use"
   | "allowance_source_invalid"
   | "already_owned"
+  | "application_required"
   | "as_of_required"
   | "authentication_required"
   | "authentication_unavailable"
@@ -70,6 +71,7 @@ export type OpenRailsErrorCode =
   | "host_event_not_found"
   | "host_merchant_mismatch"
   | "host_principal_invalid"
+  | "idempotency_key_in_progress"
   | "idempotency_key_in_use"
   | "idempotency_key_required"
   | "idempotency_key_reused"
@@ -93,7 +95,6 @@ export type OpenRailsErrorCode =
   | "invoice_retry_outcome_unknown"
   | "invoker_scoped_principal"
   | "merchant_binding_mismatch"
-  | "merchant_configuration_application_conflict"
   | "merchant_configuration_revision_conflict"
   | "merchant_context_mismatch"
   | "merchant_directory_unavailable"
@@ -184,7 +185,6 @@ export type OpenRailsErrorCode =
   | "service_unavailable"
   | "solana_rpc_unavailable"
   | "solana_transaction_refused"
-  | "spend_delegation_not_found"
   | "step_up_required"
   | "step_up_unavailable"
   | "stored_credential_required"
@@ -233,6 +233,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   allowance_source_in_use: { status: 409, type: "invalid_request_error", meaning: "The allowance source is in use." },
   allowance_source_invalid: { status: 409, type: "invalid_request_error", meaning: "The allowance source cannot back this rate card." },
   already_owned: { status: 409, type: "invalid_request_error", meaning: "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume." },
+  application_required: { status: 403, type: "authorization_error", meaning: "The route is your backend's: it takes an application's credential, never a person's." },
   as_of_required: { status: 400, type: "invalid_request_error", meaning: "The import needs as_of, its RFC 3339 evidence horizon." },
   authentication_required: { status: 401, type: "authentication_error", meaning: "No valid credential was presented." },
   authentication_unavailable: { status: 503, type: "api_error", meaning: "The credential could not be verified right now; retry." },
@@ -293,6 +294,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_merchant_mismatch: { status: 403, type: "authorization_error", meaning: "The credential's merchant is not the one this host serves." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
+  idempotency_key_in_progress: { status: 409, type: "invalid_request_error", meaning: "A request with this Idempotency-Key is still running; retry it later." },
   idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },
   idempotency_key_reused: { status: 422, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
@@ -316,7 +318,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invoice_retry_outcome_unknown: { status: 409, type: "invalid_request_error", meaning: "The last collection attempt's outcome is unknown." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   merchant_binding_mismatch: { status: 409, type: "invalid_request_error", meaning: "The selected merchant is not the one the credential, deployment or request is bound to." },
-  merchant_configuration_application_conflict: { status: 409, type: "invalid_request_error", meaning: "The application id already committed with different content." },
   merchant_configuration_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The merchant configuration changed; read its revision before applying." },
   merchant_context_mismatch: { status: 403, type: "authorization_error", meaning: "The authorized merchant is not the one the request resolved." },
   merchant_directory_unavailable: { status: 503, type: "api_error", meaning: "The merchant directory could not be read; retry." },
@@ -407,7 +408,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   service_unavailable: { status: 503, type: "api_error", meaning: "A dependency is temporarily unavailable; retry." },
   solana_rpc_unavailable: { status: 502, type: "api_error", meaning: "The Solana RPC endpoints did not answer; retry." },
   solana_transaction_refused: { status: 400, type: "invalid_request_error", meaning: "The wallet transaction could not be prepared or confirmed; the message says why." },
-  spend_delegation_not_found: { status: 404, type: "invalid_request_error", meaning: "The spend delegation does not exist." },
   step_up_required: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in; metadata carries the challenge." },
   step_up_unavailable: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in and this credential cannot prove one." },
   stored_credential_required: { status: 409, type: "invalid_request_error", meaning: "The card has no active agreement for a merchant-initiated charge; the customer makes this change." },

@@ -15,7 +15,7 @@ to concrete code (enum, table, or manifest key).
 | Trusted issuer | An OAuth 2.0 authorization server whose RFC 9068 access tokens OpenRails accepts: declared under `resource_server.trusted_issuers`, or a merchant's remote application. Bound to its merchants by OpenRails, never by a token claim. |
 | Remote application | AuthKit-registered issuer/JWKS principal nested under a merchant's permission-group: a trusted issuer for that merchant, within its role there. |
 | Federated grant | A merchant role an owner grants by email to a trusted issuer's user, who accepts it with that verified email. |
-| Invoker | The party actually acting (`Identity.Invoker`): the subject itself, or someone acting on its behalf, possibly another issuer's user spending the subject's balance. Spend delegations, spend limits and staff rate limits key on it; usage records it (`invoker`, `invoker_type`). |
+| Invoker | The party actually acting (`Identity.Invoker`): the subject itself, or someone acting on its behalf, possibly another issuer's user spending the subject's balance. Spend limits and staff rate limits key on it; usage records it (`invoker`, `invoker_type`). |
 
 ## Money & access
 

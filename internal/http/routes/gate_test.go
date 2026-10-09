@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -34,7 +35,7 @@ import (
 
 // openTiers are the tiers no Auth runs on: their credential is the request
 // itself (a capability id or a provider signature) or there is none.
-var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession, AuthProvisioning}
+var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession}
 
 // openRoutes is every route no Auth gates. A route that joins it is a
 // reviewed change.
@@ -45,10 +46,6 @@ var openRoutes = []string{
 	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
 	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
-	// SCIM: the provisioning token or client-credentials token is the credential.
-	"GET /scim/v2/ServiceProviderConfig", "GET /scim/v2/ResourceTypes", "GET /scim/v2/ResourceTypes/{id}",
-	"GET /scim/v2/Schemas", "GET /scim/v2/Schemas/{id}", "POST /scim/v2/Bulk",
-	"POST /scim/v2/Users", "GET /scim/v2/Users", "GET /scim/v2/Users/{id}", "PUT /scim/v2/Users/{id}", "PATCH /scim/v2/Users/{id}", "DELETE /scim/v2/Users/{id}",
 }
 
 // sensitiveRoutes are the routes that also ask Auth.Sensitive of a user in
@@ -56,66 +53,51 @@ var openRoutes = []string{
 var sensitiveRoutes = []string{
 	"DELETE /v1/admin/alert-webhooks/{id}",
 	"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
-	"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}",
-	"DELETE /v1/admin/customers/{customer_id}/product-access/{id}",
-	"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
 	"DELETE /v1/admin/provisioning-tokens/{id}",
 	"GET /v1/admin/billing-archive",
+	"PATCH /v1/admin/alert-webhooks/{id}",
 	"PATCH /v1/admin/catalog/prices/{id}",
 	"PATCH /v1/admin/catalog/products/{id}",
+	"PATCH /v1/admin/configuration",
 	"PATCH /v1/admin/customers/{customer_id}",
 	"PATCH /v1/admin/psps/{id}",
-	"POST /v1/admin/admissions",
-	"POST /v1/admin/admissions/extend",
-	"POST /v1/admin/admissions/release",
-	"POST /v1/admin/admissions/{request_id}/capture",
 	"POST /v1/admin/alert-webhooks",
 	"POST /v1/admin/billing-archive",
 	"POST /v1/admin/billing-import",
 	"POST /v1/admin/catalog/applications",
-	"POST /v1/admin/catalog/drift/refresh",
 	"POST /v1/admin/catalog/prices",
 	"POST /v1/admin/catalog/product-archives",
 	"POST /v1/admin/catalog/products",
 	"POST /v1/admin/checkout-sessions",
-	"POST /v1/admin/configuration/applications",
 	"POST /v1/admin/credit-grants",
-	"POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke",
+	"POST /v1/admin/credit-grants/{id}/revoke",
 	"POST /v1/admin/findings/{id}/resolve",
+	"POST /v1/admin/invoices/{id}/mark-uncollectible",
 	"POST /v1/admin/invoices/{id}/retry-collection",
-	"POST /v1/admin/invoices/{id}/uncollectible",
 	"POST /v1/admin/invoices/{id}/void",
 	"POST /v1/admin/payments",
 	"POST /v1/admin/payments/{id}/refunds",
 	"POST /v1/admin/price-migrations",
 	"POST /v1/admin/price-migrations/{id}/cancel",
 	"POST /v1/admin/product-access",
-	"POST /v1/admin/provider-operations",
+	"POST /v1/admin/product-access/{id}/revoke",
 	"POST /v1/admin/provider-operations/{operation_id}/close",
-	"POST /v1/admin/provider-operations/{operation_id}/increment",
-	"POST /v1/admin/provider-operations/{operation_id}/observations",
-	"POST /v1/admin/provider-operations/{operation_id}/release",
 	"POST /v1/admin/provisioning-tokens",
 	"POST /v1/admin/psps",
 	"POST /v1/admin/psps/refresh",
-	"POST /v1/admin/psps/{id}/archive",
 	"POST /v1/admin/subscriptions/{id}/cancel",
 	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
-	"POST /v1/admin/usage-events",
-	"PUT /v1/admin/alert-webhooks/{id}/url",
 	"PUT /v1/admin/catalog/meters/{key}",
-	"PUT /v1/admin/catalog/products/by-key/{product_key}",
 	"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
-	"PUT /v1/admin/customers/{customer_id}/spend-delegations",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
 }
 
 // Every catalog route declares exactly one tier of the closed set, and what
-// that tier checks: a staff route its bundle's permission, a customer route
+// that tier checks: a staff route its group's permission, a customer route
 // none, and no customer path names a customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
-	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthProvider, AuthProvisioning}
+	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning}
 	var open, sensitive []string
 	names := map[string]string{}
 	for _, r := range Catalog() {
@@ -128,18 +110,24 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 			sensitive = append(sensitive, key)
 		}
 		require.False(t, r.Sensitive && r.Auth != AuthMerchant, "%s: only a merchant route steps up", key)
-		if r.Staff() {
-			require.Equal(t, AuthMerchant, r.Auth, key)
-			require.NotEmpty(t, r.Name, key)
+		if r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn {
+			require.NotEmpty(t, r.Name, "%s: a Client method calls it", key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
 			names[r.Name] = key
-			if r.Group != Admin {
-				require.Empty(t, r.Level, "%s: a catalog-edit or configuration route has its bundle's one permission", key)
-			} else {
-				require.Contains(t, []Level{LevelRead, LevelWrite}, r.Level, key)
-			}
 		} else {
 			require.Empty(t, r.Name, key)
+		}
+		if r.Staff() {
+			require.Equal(t, AuthMerchant, r.Auth, key)
+			if r.Group == Admin || r.Group == CatalogAdmin {
+				require.Contains(t, []Level{LevelRead, LevelUpdate}, r.Level, key)
+			} else {
+				require.Empty(t, r.Level, "%s: a configuration or metrics route has its group's one permission", key)
+			}
+		} else if r.Group == App && r.Level != "" {
+			require.Equal(t, LevelRead, r.Level, "%s: only a POST that reads declares a level", key)
+			require.Equal(t, POST, r.Method, key)
+		} else {
 			require.Empty(t, r.Level, key)
 		}
 		switch r.Auth {
@@ -159,8 +147,8 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 	require.Equal(t, sensitiveRoutes, sensitive, "the routes that step up")
 }
 
-// staffPermissions gives each bundle a permission naming it.
-var staffPermissions = Permissions{AdminRead: "staff:read", AdminWrite: "staff:write", CatalogWrite: "staff:catalog", MerchantConfig: "staff:admin"}
+// staffPermissions gives each group a permission naming it.
+var staffPermissions = Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write", Catalog: "staff:catalog", MerchantConfig: "staff:admin", Metrics: "staff:metrics"}
 
 // recordingAuth records which middleware ran, in order, and admits who.
 type recordingAuth struct {
@@ -213,6 +201,7 @@ func everyGatedSurface(t *testing.T, a billingauth.Auth) (*router.Table, *app.Ru
 	table := &router.Table{}
 	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
 	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Permissions: staffPermissions})
+	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a})
 	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
 	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
 	return table, rt
@@ -253,8 +242,14 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			}
 			var want []string
 			switch r.Auth {
-			case AuthCustomer:
+			case AuthCustomer, AuthApplication, AuthProvisioning:
 				want = []string{"Required"}
+			case AuthSignedIn:
+				// The access read asks each mounted group's permission.
+				want = []string{"Required"}
+				for _, perm := range []string{staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics} {
+					want = append(want, "RequirePermission:"+perm)
+				}
 			case AuthMerchant:
 				want = []string{"RequirePermission:" + staffPermissions.For(r)}
 				if Sensitive(r) && billingauth.Interactive(who) {
@@ -283,13 +278,14 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 	h := table.Handler()
 	gated := 0
 	for _, r := range Catalog() {
-		if r.Auth != AuthCustomer && r.Auth != AuthMerchant || !r.Staff() && r.Group != Customer {
+		guarded := r.Auth == AuthCustomer || r.Auth == AuthMerchant && r.Staff() || r.Auth == AuthApplication || r.Auth == AuthProvisioning || r.Auth == AuthSignedIn
+		if !guarded {
 			continue
 		}
 		req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
 		req.Header.Set("Authorization", "Bearer forged")
 		code := serveSafely(h, req)
-		if r.Group == CatalogWrite || code == http.StatusNotFound {
+		if r.CatalogUpdate() || code == http.StatusNotFound {
 			// Unmounted for this configuration (a feature it lacks).
 			if code == http.StatusNotFound {
 				continue
@@ -447,6 +443,20 @@ func TestStaffGate(t *testing.T) {
 		code, _ := run(tc.auth, "POST /v1/admin/payments/{id}/refunds", tc.header)
 		require.Equal(t, tc.status, code, name)
 	}
+	// A programmatic route takes only an application: a person is refused,
+	// whatever their roles grant or their credential is.
+	for _, who := range []billingauth.Identity{person, personalKey} {
+		code, _ = run(&recordingAuth{who: who}, "GET /v1/app/host-events", nil)
+		require.Equal(t, http.StatusForbidden, code, who.Credential.Kind)
+	}
+	code, staff = run(&recordingAuth{who: service}, "GET /v1/app/host-events", nil)
+	require.Equal(t, http.StatusNoContent, code)
+	require.Equal(t, "GET /v1/app/host-events", staff.Route)
+	code, _ = run(&refusingPermission{recordingAuth{who: service}}, "GET /v1/app/host-events", nil)
+	require.Equal(t, http.StatusNoContent, code, "no permission is involved")
+	// Its writes run once per Idempotency-Key.
+	code, _ = run(&recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
+	require.Equal(t, http.StatusBadRequest, code, "a programmatic write without an Idempotency-Key")
 	code, _ = run(&staleAuth{recordingAuth{who: service}}, "POST /v1/admin/payments/{id}/refunds", nil)
 	require.Equal(t, http.StatusNoContent, code, "automation has no sign-in to renew")
 	code, _ = run(&staleAuth{recordingAuth{who: personalKey}}, "POST /v1/admin/payments/{id}/refunds", nil)
@@ -633,3 +643,31 @@ func withInvoker(id billingauth.Identity, invoker billingauth.Invoker) billingau
 }
 
 var _ = merchanttarget.FromContext
+
+// The access read answers, for any signed-in caller, each mounted group the
+// caller holds: none, read or update for customer support, and whether the
+// catalog, merchant config and metrics are theirs.
+func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
+	rt := gatedRuntime(t)
+	read := func(perms Permissions, allowed ...string) billing.AdminAccess {
+		gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}, allowed: map[string]bool{}}
+		for _, perm := range allowed {
+			gate.allowed[perm] = true
+		}
+		table := &router.Table{}
+		RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: gate, Permissions: perms})
+		rec := do(table.Handler(), http.MethodGet, "/v1/admin/access", nil)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var access billing.AdminAccess
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &access))
+		return access
+	}
+	p := staffPermissions
+	none := billing.AdminAccess{Admin: billing.AccessNone}
+	require.Equal(t, none, read(p), "a caller holding nothing")
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessRead}, read(p, p.AdminRead))
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate, Metrics: true}, read(p, p.AdminRead, p.AdminUpdate, p.Metrics))
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessNone, Catalog: true, MerchantConfig: true}, read(p, p.Catalog, p.MerchantConfig))
+	require.Equal(t, none, read(Permissions{MerchantConfig: p.MerchantConfig}, p.AdminRead, p.Metrics), "a group that is off is no one's")
+	require.Equal(t, none, read(Permissions{AdminRead: p.AdminRead}, p.AdminUpdate), "an update without the read is nothing")
+}

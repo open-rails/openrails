@@ -33,8 +33,8 @@ LEFT JOIN LATERAL (
 ) t ON true
 ORDER BY g.created_at DESC, g.id DESC;
 
--- name: ListCustomerCreditGrantsByIDs :many
--- A customer's named credit grants, newest first.
+-- name: ListCreditGrantsByIDs :many
+-- The merchant's named credit grants, newest first.
 SELECT g.id, g.customer_id, COALESCE(g.currency, '')::text AS currency,
        COALESCE(g.amount, 0)::bigint AS amount,
        g.source_type, g.source_id, g.reason, g.starts_at, g.ends_at, g.created_at,
@@ -54,10 +54,10 @@ LEFT JOIN LATERAL (
   FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
 ) t ON true
 WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.id = ANY(sqlc.arg(ids)::uuid[])
-  AND g.customer_id=sqlc.arg(customer_id)::uuid AND g.kind='credit' AND g.event='grant'
+  AND g.kind='credit' AND g.event='grant'
 ORDER BY g.created_at DESC, g.id DESC;
 
--- name: GetCustomerCreditGrant :one
+-- name: GetCreditGrant :one
 SELECT g.id, g.customer_id, COALESCE(g.currency, '')::text AS currency,
        COALESCE(g.amount, 0)::bigint AS amount,
        g.source_type, g.source_id, g.reason, g.starts_at, g.ends_at, g.created_at,
@@ -76,5 +76,5 @@ LEFT JOIN LATERAL (
          sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_expire') AS expired
   FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
 ) t ON true
-WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.customer_id=sqlc.arg(customer_id)::uuid
+WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid
   AND g.id=sqlc.arg(grant_id)::uuid AND g.kind='credit' AND g.event='grant';

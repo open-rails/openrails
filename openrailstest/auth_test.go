@@ -20,7 +20,7 @@ const (
 	write perm = "root:customers:update"
 )
 
-var permissions = openrails.Permissions{AdminRead: read, AdminWrite: write}
+var permissions = openrails.Permissions{AdminRead: read, AdminUpdate: write}
 
 func request(token string) func() *http.Request {
 	return func() *http.Request {
@@ -58,6 +58,38 @@ func TestCheckAuthPassesAConformingAuth(t *testing.T) {
 		StaleStaff: request(stale),
 		Machine:    request(fake.Machine("key_1", read.String(), write.String())),
 	})
+	// The programmatic routes take an application with no permission at all.
+	openrailstest.CheckAuth(t, fake, openrailstest.AuthCases{
+		Programmatic: true,
+		Customer:     request(fake.Person("11111111-1111-4111-8111-111111111111")),
+		Staff:        request(fake.Person("22222222-2222-4222-8222-222222222222", read.String())),
+		Machine:      request(fake.Machine("svc_1")),
+	})
+}
+
+// A person passed as the backend fails, and so does staff an Auth reports as
+// an application: the programmatic routes admit by subject kind alone.
+func TestCheckAuthCatchesASubjectKindMixUp(t *testing.T) {
+	fake := &authtest.Fake{}
+	for name, cases := range map[string]openrailstest.AuthCases{
+		"a person as the application": {
+			Programmatic: true,
+			Customer:     request(fake.Person("11111111-1111-4111-8111-111111111111")),
+			Staff:        request(fake.Person("22222222-2222-4222-8222-222222222222", read.String())),
+			Machine:      request(fake.Person("33333333-3333-4333-8333-333333333333")),
+		},
+		"staff as an application": {
+			Permissions: openrails.Permissions{AdminRead: read},
+			Customer:    request(fake.Person("11111111-1111-4111-8111-111111111111")),
+			Staff:       request(fake.Machine("svc_2", read.String())),
+		},
+	} {
+		r := &recorder{TB: t}
+		openrailstest.CheckAuth(r, fake, cases)
+		if len(r.failures) == 0 {
+			t.Fatalf("%s passed", name)
+		}
+	}
 }
 
 func TestCheckAuthCatchesAPassThroughAuth(t *testing.T) {

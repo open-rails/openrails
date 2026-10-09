@@ -122,7 +122,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 		require.Equal(t, http.StatusOK, answer.status, answer.body)
 	}
 	deliver(provider.paid(t, 1, "evt_credit_duplicate"))
-	lots, err := client.ListCreditGrants(ctx, customer, billing.CreditGrantListParams{})
+	lots, err := client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: customer})
 	require.NoError(t, err)
 	require.Len(t, lots.Items, 1)
 	first := lots.Items[0]
@@ -139,7 +139,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 
 	buy()
 	deliver(provider.paid(t, 2, "evt_credit_second"))
-	lots, err = client.ListCreditGrants(ctx, customer, billing.CreditGrantListParams{})
+	lots, err = client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: customer})
 	require.NoError(t, err)
 	require.Len(t, lots.Items, 2)
 	for _, lot := range lots.Items {

@@ -16,8 +16,8 @@ export const listCreditGrants = (
   cursor: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<CreditGrant>>(`${customerPath(customer)}/credit-grants`, {
-    query: { currency, limit, cursor },
+  api<ListPage<CreditGrant>>("/admin/credit-grants", {
+    query: { customer_id: customer, currency, limit, cursor },
     signal,
   })
 
@@ -33,13 +33,9 @@ export const createCreditGrant = async (
   return out.items[0]
 }
 
-export const revokeCreditGrant = (
-  customer: string,
-  grant: string,
-  reason: string
-) =>
+export const revokeCreditGrant = (grant: string, reason: string) =>
   api<CreditGrant>(
-    `${customerPath(customer)}/credit-grants/${encodeURIComponent(grant)}/revoke`,
+    `/admin/credit-grants/${encodeURIComponent(grant)}/revoke`,
     { method: "POST", body: { reason } }
   )
 

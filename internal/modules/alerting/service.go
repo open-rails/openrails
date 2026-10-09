@@ -197,12 +197,53 @@ func webhookSecretVersion(version int) (int32, error) {
 	return int32(version), nil
 }
 
-// SetWebhookURL replaces only the credential, retaining the webhook and all
+// UpdateWebhook changes a webhook's URL, name, format or enabled state;
+// omitted fields keep their values and a null name clears it.
+func (s *Service) UpdateWebhook(ctx context.Context, webhookID billing.AlertWebhookID, in billing.UpdateAlertWebhookParams) (billing.AlertWebhook, error) {
+	ve := &ValidationError{}
+	if in.URL.Set && (in.URL.Null || strings.TrimSpace(in.URL.Value) == "") {
+		ve.add("url", "required", "url cannot be cleared")
+	}
+	if in.Name.Set && !in.Name.Null && strings.TrimSpace(in.Name.Value) == "" {
+		ve.add("name", "invalid", "name must not be empty; null clears it")
+	}
+	if in.Format.Set && (in.Format.Null || !WebhookFormat(in.Format.Value).valid()) {
+		ve.add("format", "invalid", "format must be generic, discord or slack", string(FormatGeneric), string(FormatDiscord), string(FormatSlack))
+	}
+	if in.Enabled.Set && in.Enabled.Null {
+		ve.add("enabled", "invalid", "enabled must be true or false")
+	}
+	if v := ve.orNil(); v != nil {
+		return billing.AlertWebhook{}, v
+	}
+	if in.URL.Set {
+		if _, err := s.setWebhookURL(ctx, webhookID, in.URL.Value); err != nil {
+			return billing.AlertWebhook{}, err
+		}
+	}
+	var name, format *string
+	var enabled *bool
+	if in.Name.Set && !in.Name.Null {
+		value := strings.TrimSpace(in.Name.Value)
+		name = &value
+	}
+	if in.Format.Set {
+		value := string(in.Format.Value)
+		format = &value
+	}
+	if in.Enabled.Set {
+		enabled = &in.Enabled.Value
+	}
+	webhook, err := s.store.updateWebhook(ctx, webhookID.UUID(), in.Name.Set, name, format, enabled)
+	return webhook.API(), err
+}
+
+// setWebhookURL replaces only the credential, retaining the webhook and all
 // delivery identity. A failed metadata write leaves delivery fail-closed on the
 // version mismatch; retrying the same URL repairs that pending rotation.
-func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, in billing.SetAlertWebhookURLParams) (billing.AlertWebhook, error) {
+func (s *Service) setWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, rawURL string) (billing.AlertWebhook, error) {
 	id := webhookID.UUID()
-	rawURL := strings.TrimSpace(in.URL)
+	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" || s.outbound.ValidateURL(rawURL) != nil {
 		return billing.AlertWebhook{}, singleFieldError("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
 	}

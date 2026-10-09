@@ -92,7 +92,8 @@ func TestCaptchaDiscoveryRoutes(t *testing.T) {
 
 func TestStandaloneMetaRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	srv := &Server{}
+	groups := config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
+	srv := &Server{groups: groups, permissions: staffPermissionsFor(groups)}
 	srv.registerStandaloneMetaRoutes(mux)
 	require.True(t, srv.nativeBrowser["GET /v1/config"], "a browser reads the configuration from any origin")
 	require.False(t, srv.nativeBrowser["GET /health/live"])
@@ -109,13 +110,13 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Contains(t, ready.Body.String(), `"service_unavailable"`)
 	require.NotContains(t, ready.Body.String(), "postgres")
 
-	// #623: the standalone server publishes every bundle; a request that
-	// resolves no merchant has no payment setup.
+	// #623: the standalone server publishes the route groups it turns on; a
+	// request that resolves no merchant has no payment setup.
 	doc := get("/v1/config")
 	require.Equal(t, http.StatusOK, doc.Code)
 	var served billing.PublicConfig
 	require.NoError(t, json.Unmarshal(doc.Body.Bytes(), &served), doc.Body.String())
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true, "provisioning": true}, served.Capabilities.RouteGroups)
+	require.Equal(t, map[string]bool{"admin": true, "catalog": true, "merchant_config": true, "metrics": true, "app": true}, served.Capabilities.RouteGroups)
 	require.Nil(t, served.Payment)
 	require.Contains(t, doc.Body.String(), `"payment":null`)
 	require.Equal(t, "public, max-age=300", doc.Header().Get("Cache-Control"))
@@ -123,11 +124,12 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	revalidate.Header.Set("If-None-Match", doc.Header().Get("ETag"))
 	require.Equal(t, http.StatusNotModified, serve(t, mux, revalidate).Code)
 
-	// Provider credential writes are advertised only for a writable DB backend.
+	// Provider credential writes are advertised only for a writable DB backend,
+	// with the merchant-config group on.
 	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, writable := range []bool{false, true} {
 			mux := http.NewServeMux()
-			(&Server{cfg: &config.Config{}, runtime: &app.Runtime{
+			(&Server{cfg: &config.Config{}, groups: groups, permissions: staffPermissionsFor(groups), runtime: &app.Runtime{
 				Config:            &config.Config{SecretBackend: source},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}}).registerStandaloneMetaRoutes(mux)

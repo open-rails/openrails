@@ -21,11 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
-	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 // AdmitInput is the host's admission request for payer capacity and delegated
@@ -97,11 +95,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 	}
 
 	gate := s.spendGate()
-	loader := admission.NewSpendgatePolicyLoader(
-		admission.NewBillingPolicyStore(s.rt.DB),
-		admission.NewInvokerSpendLimitStore(s.rt.DB),
-		s.rt.FXProvider,
-	)
+	loader := admission.NewSpendgatePolicyLoader(admission.NewBillingPolicyStore(s.rt.DB), s.rt.FXProvider)
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
 		WithFailedUsageCutoff(failedUsageCutoff{s}).
 		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
@@ -183,20 +177,6 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 	return accountCapacity - activeHeld
 }
 
-// ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
-// errors so HTTP and embedded transports can map the shared service result to
-// the same 400/ErrInvalid contract.
-var ErrInvalidInvokerSpendLimit = errors.New("invalid invoker spend limit")
-
-type invokerSpendLimitValidationError struct{ message string }
-
-func (e *invokerSpendLimitValidationError) Error() string { return e.message }
-func (e *invokerSpendLimitValidationError) Unwrap() error { return ErrInvalidInvokerSpendLimit }
-
-func invalidInvokerSpendLimit(message string) error {
-	return &invokerSpendLimitValidationError{message: message}
-}
-
 func budgetScopeWindowModels(ws []billing.BudgetWindow) []models.BudgetWindowPolicy {
 	out := make([]models.BudgetWindowPolicy, 0, len(ws))
 	for _, w := range ws {
@@ -213,260 +193,6 @@ func spendLimitWindowInputs(ws []models.BudgetWindowPolicy) []billing.BudgetWind
 		})
 	}
 	return out
-}
-
-func invokerSpendLimitKey(scope, scopeKey string) string {
-	return budgets.NormalizeScope(scope) + "\x00" + strings.TrimSpace(scopeKey)
-}
-
-// ValidateSpendDelegations validates and canonicalizes a complete
-// payer-owned spend-delegation document. Duplicate detection happens after
-// scope and scope_key are normalized, so every transport has identical
-// replacement semantics. or#893 deleted the role_id alias: a role delegation is
-// {scope:"role", scope_key:"<role uuid>"} and nothing else.
-func ValidateSpendDelegations(in []billing.SpendDelegation) ([]billing.SpendDelegation, error) {
-	out := make([]billing.SpendDelegation, 0, len(in))
-	seen := make(map[string]struct{}, len(in))
-	for i, item := range in {
-		scope := budgets.NormalizeScope(string(item.Scope))
-		scopeKey := strings.TrimSpace(item.ScopeKey)
-		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
-			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
-			Provenance: normalize.FromPtr(item.Provenance),
-		})
-		if err != nil {
-			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].%s", i, err))
-		}
-		key := invokerSpendLimitKey(row.Scope, row.ScopeKey)
-		if _, duplicate := seen[key]; duplicate {
-			return nil, invalidInvokerSpendLimit(fmt.Sprintf("duplicate delegation for %s", key))
-		}
-		seen[key] = struct{}{}
-		out = append(out, billing.SpendDelegation{
-			Scope: billing.SpendDelegationScope(row.Scope), ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
-			Provenance: normalize.OptionalString(row.Provenance),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return invokerSpendLimitKey(string(out[i].Scope), out[i].ScopeKey) < invokerSpendLimitKey(string(out[j].Scope), out[j].ScopeKey)
-	})
-	return out, nil
-}
-
-func invokerSpendLimitRow(in billing.SpendDelegation) admission.InvokerSpendLimit {
-	return admission.InvokerSpendLimit{
-		Scope: string(in.Scope), ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
-		Provenance: normalize.FromPtr(in.Provenance),
-	}
-}
-
-// InvokerSpendWindowsInput names the invoker whose live spend windows to read.
-// The caller supplies the identity from its AUTH seam, never from the wire —
-// this read answers "what am I metered against", so an invoker the caller could
-// name would be somebody else's budget.
-type InvokerSpendWindowsInput struct {
-	Invoker string
-	// Roles are the invoker's immutable role UUIDs, so role-scoped grants it
-	// holds are included exactly as the admit path includes them (#473).
-	Roles []uuid.UUID
-	// Currency the limits are reported in; the spendgate meters one currency per
-	// payer, and a window declared in another is FX-converted the same way admit
-	// converts it. Defaults to the service currency.
-	Currency string
-	// TrustLevel selects invoker_tier grants; empty resolves the payer's live
-	// level exactly as admission does.
-	TrustLevel string
-}
-
-// InvokerSpendWindows returns the spend windows a delegated invoker is enforced
-// against on payer's account, with their live metering (or#930).
-//
-// It is a READ over the accounting admission already keeps: the same grants the
-// admit path resolves (LoadDelegatedWindows), metered by the same durable SQL operations
-// and hold records the gate writes. Nothing here counts anything.
-//
-// PAYER-SCOPE WINDOWS ARE DELIBERATELY ABSENT. The payer's own caps and product
-// usage limits gate the whole account, not this invoker; showing them to one
-// delegated user would report a budget it neither owns nor can act on, and would
-// leak the account's aggregate posture. The payer reads those as the payer.
-func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.CustomerID, in InvokerSpendWindowsInput) ([]billing.SpendWindow, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	invoker := strings.TrimSpace(in.Invoker)
-	if invoker == "" {
-		return nil, fmt.Errorf("invoker required")
-	}
-	currency, err := requireCurrency(in.Currency)
-	if err != nil {
-		return nil, err
-	}
-	_, err = merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	trustLevel := strings.TrimSpace(in.TrustLevel)
-	if trustLevel == "" {
-		if t, terr := s.moneyService().GetTrustLevel(ctx, payer, currency); terr == nil && t != "" {
-			trustLevel = t
-		}
-		if trustLevel == "" {
-			trustLevel = admission.DefaultTrustLevel
-		}
-	}
-
-	roles := make([]string, 0, len(in.Roles))
-	for _, role := range in.Roles {
-		roles = append(roles, role.String())
-	}
-	req := spendgate.Request{Invoker: invoker, TrustLevel: trustLevel, Roles: roles}
-	loader := admission.NewSpendgatePolicyLoader(
-		admission.NewBillingPolicyStore(s.rt.DB),
-		admission.NewInvokerSpendLimitStore(s.rt.DB),
-		s.rt.FXProvider,
-	)
-	scopes, _, err := loader.LoadDelegatedWindows(ctx, payer, trustLevel, currency, req)
-	if err != nil {
-		return nil, err
-	}
-
-	gate := s.spendGate()
-	usage, err := gate.WindowUsage(
-		ctx, payer.UUID(), currency, spendgate.Policy{Scopes: scopes}, req)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make([]billing.SpendWindow, 0, len(usage))
-	for _, u := range usage {
-		remaining := u.Limit - u.Used
-		if remaining < 0 {
-			remaining = 0
-		}
-		out = append(out, billing.SpendWindow{
-			Scope:         spendWindowScope(u.Scope),
-			Key:           u.Key,
-			WindowSeconds: int64(u.Duration / time.Second),
-			Limit:         u.Limit,
-			Currency:      currency,
-			Used:          u.Used,
-			Reserved:      u.Reserved,
-			Remaining:     remaining,
-			ResetsAt:      u.ResetsAt,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Scope != out[j].Scope {
-			return out[i].Scope < out[j].Scope
-		}
-		return out[i].Key < out[j].Key
-	})
-	return out, nil
-}
-
-// spendWindowScope names a metered window by the delegation scope that
-// declared it.
-func spendWindowScope(scope spendgate.Scope) billing.SpendDelegationScope {
-	if scope == spendgate.ScopeTrustLevel {
-		return billing.SpendDelegationInvokerTier
-	}
-	return billing.SpendDelegationScope(scope)
-}
-
-// InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
-func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]billing.SpendDelegation, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	rows, err := admission.NewInvokerSpendLimitStore(s.rt.DB).LoadAll(ctx, payer)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]billing.SpendDelegation, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, billing.SpendDelegation{Scope: billing.SpendDelegationScope(budgets.NormalizeScope(r.Scope)), ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: normalize.OptionalString(r.Provenance)})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return invokerSpendLimitKey(string(out[i].Scope), out[i].ScopeKey) < invokerSpendLimitKey(string(out[j].Scope), out[j].ScopeKey)
-	})
-	return out, nil
-}
-
-// DeleteInvokerSpendLimit revokes exactly ONE addressed delegation (or#911) and
-// leaves every sibling untouched — the single-grant delete a replace-all cannot
-// express without clobbering unrelated grants, and the zero-limit-window
-// workaround existed to approximate. Returns whether a grant existed at
-// (scope, scope_key); false is a real answer (already revoked or never
-// granted), not an error.
-func (s *Service) DeleteInvokerSpendLimit(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) (bool, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return false, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return false, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return false, fmt.Errorf("payer required")
-	}
-	scope = budgets.NormalizeScope(scope)
-	switch scope {
-	case budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel:
-	default:
-		return false, invalidInvokerSpendLimit(fmt.Sprintf("scope must be %q, %q, or %q", budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel))
-	}
-	scopeKey = strings.TrimSpace(scopeKey)
-	if scopeKey == "" {
-		return false, invalidInvokerSpendLimit("scope_key required")
-	}
-	return admission.NewInvokerSpendLimitStore(s.rt.DB).Delete(ctx, payer, scope, scopeKey)
-}
-
-// ReplaceInvokerSpendLimits fully replaces the payer-owned delegated-spend
-// policy document.
-func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.CustomerID, next []billing.SpendDelegation) error {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	normalized, err := ValidateSpendDelegations(next)
-	if err != nil {
-		return err
-	}
-	rows := make([]admission.InvokerSpendLimit, 0, len(normalized))
-	for _, in := range normalized {
-		rows = append(rows, invokerSpendLimitRow(in))
-	}
-	return admission.NewInvokerSpendLimitStore(s.rt.DB).Replace(ctx, payer, rows)
 }
 
 // BillingPolicy declares one named billing policy (or#897). Window entries

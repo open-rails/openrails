@@ -14,7 +14,6 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/scim"
 )
 
 // registerUserRoutesAt mounts the buyer-facing checkout/catalog surface —
@@ -42,19 +41,9 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
-// registerProvisioningRoutes mounts SCIM 2.0 at /scim/v2: a merchant's
-// provisioning token, or a client-credentials access token with scope scim
-// from its trusted issuer, names the merchant.
-func (s *Server) registerProvisioningRoutes(mux router.Registrar) {
-	auth := scim.Authenticator{Tokens: scim.Tokens{DB: s.runtime.DB}}
-	if s.controlPlane != nil {
-		auth.Resource = s.controlPlane.ResolveProvisioningToken
-	}
-	httproutes.RegisterProvisioningRoutes(router.NewMuxRecorded(mux, "/scim/v2", s.runtime, s.recordRoute), s.runtime, httproutes.Options{Provisioning: auth.Authenticate})
-}
-
-// registerStandaloneMetaRoutes registers health, the standalone server's
-// process surface, and the public configuration, which is browser tier.
+// registerStandaloneMetaRoutes registers health and metrics, the standalone
+// server's process surface, and the public configuration, which is browser
+// tier.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +56,7 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 
 // capabilities is what the standalone server serves: every bundle.
 func (s *Server) capabilities() *billing.Capabilities {
-	caps := embedhttp.CapabilitiesFor(s.runtime, staffPermissions, embedhttp.ProviderRoutesForRuntime(s.runtime, nil), nil)
-	caps.RouteGroups[string(httproutes.Provisioning)] = true
+	caps := embedhttp.CapabilitiesFor(s.runtime, s.permissions, s.groups.Programmatic, embedhttp.ProviderRoutesForRuntime(s.runtime, nil), nil)
 	return &caps
 }
 

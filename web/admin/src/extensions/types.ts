@@ -50,7 +50,7 @@ export interface ConsoleNavItem {
   useVisible?: () => boolean
   // Position within its group; the console's own items use 0–90 in tens.
   order?: number
-  items?: { title: string; path: string }[]
+  items?: { title: string; path: string; useVisible?: () => boolean }[]
 }
 
 export interface ConsoleRoute {

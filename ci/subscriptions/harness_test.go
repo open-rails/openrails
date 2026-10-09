@@ -58,7 +58,7 @@ const (
 	remote   topology = "remote"
 )
 
-// The harness host's own permissions, for the staff bundles it mounts.
+// The harness host's own permissions, for the staff route groups it mounts.
 type perm string
 
 func (p perm) String() string { return string(p) }
@@ -68,9 +68,13 @@ const (
 	staffWrites  perm = "e2e:billing:write"
 	staffCatalog perm = "e2e:catalog:write"
 	staffConfig  perm = "e2e:billing:admin"
+	staffMetrics perm = "e2e:billing:metrics"
 )
 
-var permissions = openrails.Permissions{AdminRead: staffReads, AdminWrite: staffWrites, CatalogWrite: staffCatalog, MerchantConfig: staffConfig}
+var permissions = openrails.Permissions{AdminRead: staffReads, AdminUpdate: staffWrites, Catalog: staffCatalog, MerchantConfig: staffConfig, Metrics: staffMetrics}
+
+// routeGroups turns on every route group the harness mounts.
+var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 
 // verifier is a neutral host's Auth: HS256 tokens. "staff" is a user holding
 // every permission, "support" the staff reads and writes but not the
@@ -369,7 +373,7 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
-	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Permissions: permissions}
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
 	if w.mount != nil {
 		w.mount(&routes)
 	}
@@ -401,8 +405,7 @@ func (w *world) start() {
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config, err := local.GetPublicConfig(t.Context())
-	require.NoError(t, err)
+	config := publicConfig(t, local)
 	w.psp = map[string]billing.PSPID{}
 	for _, psp := range config.Payment.PSPs {
 		w.psp[psp.Rail] = psp.PSPID
@@ -445,7 +448,7 @@ func (w *world) applySettings(ctx context.Context, settings billing.MerchantSett
 	if err != nil {
 		return err
 	}
-	_, err = client.ApplyMerchantConfiguration(ctx, billing.ApplyMerchantConfigurationParams{ApplicationID: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{IdempotencyKey: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
 	return err
 }
 

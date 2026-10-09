@@ -415,3 +415,47 @@ func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMercha
 	)
 	return i, err
 }
+
+const updateMerchantWebhook = `-- name: UpdateMerchantWebhook :one
+UPDATE billing.merchant_webhooks
+   SET name = CASE WHEN $1::boolean THEN $2::text ELSE name END,
+       format = COALESCE($3::text, format),
+       enabled = COALESCE($4::boolean, enabled),
+       updated_at = current_timestamp
+ WHERE merchant_webhooks.merchant_id = $5::uuid AND id = $6::uuid
+RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
+`
+
+type UpdateMerchantWebhookParams struct {
+	SetName    bool
+	Name       *string
+	Format     *string
+	Enabled    *bool
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// A null set_name keeps the name; name null with set_name clears it.
+func (q *Queries) UpdateMerchantWebhook(ctx context.Context, arg UpdateMerchantWebhookParams) (BillingMerchantWebhook, error) {
+	row := q.db.QueryRow(ctx, updateMerchantWebhook,
+		arg.SetName,
+		arg.Name,
+		arg.Format,
+		arg.Enabled,
+		arg.MerchantID,
+		arg.ID,
+	)
+	var i BillingMerchantWebhook
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Name,
+		&i.DestinationHost,
+		&i.SecretVersion,
+		&i.Format,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

@@ -48,7 +48,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}
-	selection := config.Routes{Auth: authtest.Deny{}, Permissions: authtest.Permissions()}
+	selection := config.Routes{Auth: authtest.Deny{}, RouteGroups: authtest.Groups(), Permissions: authtest.Permissions()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -153,51 +153,6 @@ func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 	require.Error(t, nilBundle.Mount(engine))
 	require.Error(t, (&Bundle{}).Mount(nil))
 	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "client")
-}
-
-// Configured customer prefixes may use a merchant parameter; a literal prefix
-// must never become a Fiber wildcard or greedy parameter.
-func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
-	rt := &app.Runtime{Config: cfg}
-	rt.SetConfiguredMerchant(testMerchant)
-	graph := &app.App{Config: cfg, Runtime: rt}
-	for _, prefix := range []string{"/portal/*audience", "/portal/+audience", "/api/v1/merchants/{slug}/billing/me"} {
-		fake := &authtest.Fake{}
-		profiles := []config.CustomerRoutes{{Prefix: prefix, Auth: fake}}
-		hosted := strings.Contains(prefix, "{slug}")
-		if err := embedhttp.ValidateRoutes(config.Routes{Auth: fake, CustomerProfiles: profiles}); err != nil {
-			require.False(t, hosted, err)
-			continue
-		}
-		table, err := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
-		require.NoError(t, err)
-		if err := embedhttp.ValidateRouteTable(table); err != nil {
-			require.False(t, hosted, err)
-			continue
-		}
-		engine := strictApp()
-		if err := (&Bundle{routes: toRoutes(routebundle.FromTable(table))}).Mount(engine); err != nil {
-			require.False(t, hosted, err)
-			continue
-		}
-		require.Equal(t, http.StatusNotFound, status(t, engine, http.MethodPost, "/portal/unconfiguredaudience/subscriptions/not-id/cancel", nil),
-			"%s broadened to an undeclared customer audience", prefix)
-		if !hosted {
-			continue
-		}
-		for _, request := range []struct {
-			method, path string
-			status       int
-		}{
-			{http.MethodPost, "/api/v1/merchants/acme/billing/me/subscriptions/not-id/cancel", http.StatusUnauthorized},
-			{http.MethodOptions, "/api/v1/merchants/acme/billing/me/subscriptions/not-id/cancel", http.StatusNoContent},
-			{http.MethodPost, "/api/v1/merchants/acme/billing/me/checkout", http.StatusNotFound},
-		} {
-			require.Equal(t, request.status, status(t, engine, request.method, request.path, nil), request.method+" "+request.path)
-		}
-		require.Equal(t, 1, fake.Refused("Required"))
-	}
 }
 
 // A client that serves no payment page lets only itself frame one.

@@ -44,7 +44,6 @@ var ownedTables = []string{
 	"invoice_collection_cadence",
 	"invoice_items",
 	"invoices",
-	"invoker_spend_limits",
 	"ledger_accounts",
 	"ledger_transfers",
 	"maintenance_runs",

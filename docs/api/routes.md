@@ -2,13 +2,13 @@
 
 # Routes
 
-Every route of the HTTP API (182), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (171), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
-**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks.
+**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.
 
-**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
+**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
 ## Process
 
@@ -60,8 +60,6 @@ A customer acting on its own account.
 | POST | `/v1/me/subscriptions/{id}/change` | customer | — | `CustomerChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | `Idempotency-Key` |
 | POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `PreviewSubscriptionChangeParams` | 200 `SubscriptionChangePreview` |  |
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
-| GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` |  |
-| GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` |  |
 | GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
@@ -81,120 +79,96 @@ A customer acting on its own account.
 | POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `PaymentMethodSetup` | `Idempotency-Key` |
 | GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `PaymentMethodSetup` |  |
 | POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `PaymentMethodSetup` |  |
-| POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
+| POST | `/v1/me/billing-portal-sessions` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` |  |
 | POST | `/v1/me/notifications/read` | customer | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` |  |
 
-## Admin
+## Admin: customer support
 
-Staff work on customers: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, a write its `Permissions.AdminWrite`.
+Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, an update its `Permissions.AdminUpdate`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/admin/config` | merchant | `AdminRead` | — | 200 `PublicConfig` |  |
-| POST | `/v1/admin/checkout-sessions` | merchant | `AdminWrite` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
+| POST | `/v1/admin/checkout-sessions` | merchant | `AdminUpdate` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
 | GET | `/v1/admin/checkout-options` | merchant | `AdminRead` | — | 200 `ListPage<CheckoutOption>` |  |
 | GET | `/v1/admin/orders` | merchant | `AdminRead` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `AdminRead` | — | 200 `Order` |  |
-| GET | `/v1/admin/catalog/revision` | merchant | `AdminRead` | — | 200 `CatalogRevision` |  |
-| GET | `/v1/admin/catalog/meters` | merchant | `AdminRead` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/admin/catalog/meters/{key}` | merchant | `AdminRead` | — | 200 `Meter` |  |
-| GET | `/v1/admin/catalog/rate-overrides` | merchant | `AdminRead` | — | 200 `ListPage<RateOverride>` |  |
-| GET | `/v1/admin/catalog/product-archives/{id}` | merchant | `AdminRead` | — | 200 `ProductArchive` |  |
-| POST | `/v1/admin/catalog/ask` | merchant | `AdminRead` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
-| GET | `/v1/admin/catalog/products` | merchant | `AdminRead` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/admin/catalog/products/{id}` | merchant | `AdminRead` | — | 200 `Product` |  |
-| GET | `/v1/admin/catalog/prices` | merchant | `AdminRead` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/admin/catalog/prices/{id}` | merchant | `AdminRead` | — | 200 `Price` |  |
-| GET | `/v1/admin/catalog/prices/{id}/history` | merchant | `AdminRead` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | GET | `/v1/admin/subscriptions` | merchant | `AdminRead` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `AdminRead` | — | 200 `Subscription` |  |
-| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `AdminWrite` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
-| POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `AdminWrite` | — | 200 `Subscription` | sensitive |
-| POST | `/v1/admin/subscriptions/{id}/change` | merchant | `AdminWrite` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `AdminUpdate` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
+| POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `AdminUpdate` | — | 200 `Subscription` | sensitive |
+| POST | `/v1/admin/subscriptions/{id}/change` | merchant | `AdminUpdate` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `AdminRead` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
-| PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `AdminWrite` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
-| POST | `/v1/admin/price-migrations` | merchant | `AdminWrite` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive |
-| POST | `/v1/admin/price-migrations/preview` | merchant | `AdminRead` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
-| GET | `/v1/admin/price-migrations` | merchant | `AdminRead` | — | 200 `ListPage<PriceMigration>` |  |
-| GET | `/v1/admin/price-migrations/{id}` | merchant | `AdminRead` | — | 200 `PriceMigration` |  |
-| POST | `/v1/admin/price-migrations/{id}/cancel` | merchant | `AdminWrite` | — | 200 `PriceMigrationCancel` | sensitive |
+| PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `AdminUpdate` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
 | GET | `/v1/admin/entitlements` | merchant | `AdminRead` | — | 200 `ListPage<CustomerEntitlement>` |  |
-| POST | `/v1/admin/tiers/lookup` | merchant | `AdminRead` | `GetEffectiveTiersParams` | 200 `EffectiveTierLookup` |  |
 | GET | `/v1/admin/product-access` | merchant | `AdminRead` | — | 200 `ListPage<ProductAccessGrant>` |  |
-| POST | `/v1/admin/product-access` | merchant | `AdminWrite` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
-| DELETE | `/v1/admin/customers/{customer_id}/product-access/{id}` | merchant | `AdminWrite` | — | 204 — | sensitive; limit `destructive` |
+| POST | `/v1/admin/product-access` | merchant | `AdminUpdate` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
+| POST | `/v1/admin/product-access/{id}/revoke` | merchant | `AdminUpdate` | `RevokeProductAccessParams` | 204 — | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers` | merchant | `AdminRead` | — | 200 `ListPage<Customer>` |  |
 | GET | `/v1/admin/customers/{customer_id}` | merchant | `AdminRead` | — | 200 `Customer` |  |
-| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `AdminWrite` | `UpdateCustomerParams` | 200 `Customer` | sensitive; limit `grant` |
-| POST | `/v1/admin/credit-grants` | merchant | `AdminWrite` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
-| GET | `/v1/admin/customers/{customer_id}/credit-grants` | merchant | `AdminRead` | — | 200 `ListPage<CreditGrant>` |  |
-| GET | `/v1/admin/customers/{customer_id}/credit-grants/{id}` | merchant | `AdminRead` | — | 200 `CreditGrant` |  |
-| POST | `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `AdminWrite` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
+| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `AdminUpdate` | `UpdateCustomerParams` | 200 `Customer` | sensitive; limit `grant` |
+| POST | `/v1/admin/credit-grants` | merchant | `AdminUpdate` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
+| GET | `/v1/admin/credit-grants` | merchant | `AdminRead` | — | 200 `ListPage<CreditGrant>` |  |
+| GET | `/v1/admin/credit-grants/{id}` | merchant | `AdminRead` | — | 200 `CreditGrant` |  |
+| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `AdminUpdate` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `AdminRead` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `AdminRead` | — | 200 `Balance` |  |
-| GET | `/v1/admin/customers/{customer_id}/spend-delegations` | merchant | `AdminRead` | — | 200 `ListPage<SpendDelegation>` |  |
-| PUT | `/v1/admin/customers/{customer_id}/spend-delegations` | merchant | `AdminWrite` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` | sensitive |
-| DELETE | `/v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `AdminWrite` | — | 204 — | sensitive |
-| POST | `/v1/admin/admissions` | merchant | `AdminWrite` | `AdmitBatchParams` | 200 `AdmitBatchResult` | sensitive |
-| GET | `/v1/admin/admissions/{request_id}` | merchant | `AdminRead` | — | 200 `Admission` |  |
-| POST | `/v1/admin/admissions/{request_id}/capture` | merchant | `AdminWrite` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | sensitive |
-| POST | `/v1/admin/admissions/release` | merchant | `AdminWrite` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
-| POST | `/v1/admin/admissions/extend` | merchant | `AdminWrite` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
-| POST | `/v1/admin/usage-events` | merchant | `AdminWrite` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | sensitive |
-| POST | `/v1/admin/provider-operations` | merchant | `AdminWrite` | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | sensitive |
 | GET | `/v1/admin/provider-operations` | merchant | `AdminRead` | — | 200 `ListPage<ProviderOperation>` |  |
 | GET | `/v1/admin/provider-operations/{operation_id}` | merchant | `AdminRead` | — | 200 `ProviderOperation` |  |
-| POST | `/v1/admin/provider-operations/{operation_id}/increment` | merchant | `AdminWrite` | `IncrementProviderOperationParams` | 200 `ProviderOperation` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/release` | merchant | `AdminWrite` | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/observations` | merchant | `AdminWrite` | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminWrite` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
+| POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminUpdate` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
 | GET | `/v1/admin/invoices` | merchant | `AdminRead` | — | 200 `ListPage<Invoice>` |  |
 | GET | `/v1/admin/invoices/{id}` | merchant | `AdminRead` | — | 200 `Invoice` |  |
-| POST | `/v1/admin/invoices/{id}/void` | merchant | `AdminWrite` | — | 200 `Invoice` | sensitive; limit `destructive` |
-| POST | `/v1/admin/invoices/{id}/uncollectible` | merchant | `AdminWrite` | — | 200 `Invoice` | sensitive; limit `destructive` |
-| POST | `/v1/admin/invoices/{id}/retry-collection` | merchant | `AdminWrite` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| POST | `/v1/admin/payments` | merchant | `AdminWrite` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
+| POST | `/v1/admin/invoices/{id}/void` | merchant | `AdminUpdate` | — | 200 `Invoice` | sensitive; limit `destructive` |
+| POST | `/v1/admin/invoices/{id}/mark-uncollectible` | merchant | `AdminUpdate` | — | 200 `Invoice` | sensitive; limit `destructive` |
+| POST | `/v1/admin/invoices/{id}/retry-collection` | merchant | `AdminUpdate` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/admin/payments` | merchant | `AdminUpdate` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `AdminRead` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `AdminRead` | — | 200 `Payment` |  |
-| POST | `/v1/admin/payments/{id}/refunds` | merchant | `AdminWrite` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |
+| POST | `/v1/admin/payments/{id}/refunds` | merchant | `AdminUpdate` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |
 | GET | `/v1/admin/payment-attempts` | merchant | `AdminRead` | — | 200 `ListPage<PaymentAttempt>` |  |
 | GET | `/v1/admin/payment-attempts/{id}` | merchant | `AdminRead` | — | 200 `PaymentAttempt` |  |
-| GET | `/v1/admin/rebill-cycles` | merchant | `AdminRead` | — | 200 `ListPage<RebillCycle>` |  |
-| GET | `/v1/admin/rebill-cycles/{id}` | merchant | `AdminRead` | — | 200 `RebillCycle` |  |
+| GET | `/v1/admin/renewals` | merchant | `AdminRead` | — | 200 `ListPage<Renewal>` |  |
+| GET | `/v1/admin/renewals/{id}` | merchant | `AdminRead` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `AdminRead` | — | 200 `ListPage<PaymentMethod>` |  |
-| DELETE | `/v1/admin/customers/{customer_id}/payment-methods/{id}` | merchant | `AdminWrite` | — | 202 —<br>204 — | sensitive; limit `destructive` |
-| GET | `/v1/admin/host-events` | merchant | `AdminRead` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/admin/host-events/acknowledge` | merchant | `AdminWrite` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
-| POST | `/v1/admin/metrics/query` | merchant | `AdminRead` | `MetricsQuery` | 200 `MetricsResult` |  |
-| GET | `/v1/admin/metrics/schema` | merchant | `AdminRead` | — | 200 `MetricsSchema` |  |
-| GET | `/v1/admin/dashboard` | merchant | `AdminRead` | — | 200 `Dashboard` |  |
+| POST | `/v1/admin/psps/refresh` | merchant | `AdminUpdate` | — | 202 `PSPRefresh` | sensitive |
 | GET | `/v1/admin/findings` | merchant | `AdminRead` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/admin/findings/{id}` | merchant | `AdminRead` | — | 200 `Finding` |  |
-| POST | `/v1/admin/findings/{id}/resolve` | merchant | `AdminWrite` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
-| POST | `/v1/admin/metrics/ask` | merchant | `AdminRead` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
+| POST | `/v1/admin/findings/{id}/resolve` | merchant | `AdminUpdate` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
 
-## Catalog edits
+## Catalog
 
-Every catalog edit and document application, behind the host's `Permissions.CatalogWrite`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on.
+The catalog, with `RouteGroups.Catalog`: its reads and edits and price migrations, every route behind the host's `Permissions.Catalog`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/admin/catalog/applications` | merchant | `CatalogWrite` | `Application` | 200 `CatalogApplicationReceipt` | sensitive |
-| POST | `/v1/admin/catalog/drift/refresh` | merchant | `CatalogWrite` | — | 200 `CatalogDriftRefresh` | sensitive |
-| PUT | `/v1/admin/catalog/meters/{key}` | merchant | `CatalogWrite` | `SetMeterParams` | 200 `Meter` | sensitive |
-| PUT | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `CatalogWrite` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; limit `grant` |
-| DELETE | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `CatalogWrite` | — | 204 — | sensitive; limit `destructive` |
-| POST | `/v1/admin/catalog/product-archives` | merchant | `CatalogWrite` | `ArchiveProductParams` | 200 `ProductArchive` | sensitive; `Idempotency-Key` |
-| POST | `/v1/admin/catalog/products` | merchant | `CatalogWrite` | `CreateProductParams` | 201 `Product` | sensitive |
-| PATCH | `/v1/admin/catalog/products/{id}` | merchant | `CatalogWrite` | `UpdateProductParams` | 200 `Product` | sensitive |
-| PUT | `/v1/admin/catalog/products/by-key/{product_key}` | merchant | `CatalogWrite` | `CreateProductParams` | 200 `Product` | sensitive |
-| POST | `/v1/admin/catalog/prices` | merchant | `CatalogWrite` | `CreatePriceParams` | 201 `Price` | sensitive |
-| PATCH | `/v1/admin/catalog/prices/{id}` | merchant | `CatalogWrite` | `UpdatePriceParams` | 200 `Price` | sensitive |
+| GET | `/v1/admin/catalog/revision` | merchant | `Catalog` | — | 200 `CatalogRevision` |  |
+| POST | `/v1/admin/catalog/applications` | merchant | `Catalog` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
+| GET | `/v1/admin/catalog/meters` | merchant | `Catalog` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/admin/catalog/meters/{key}` | merchant | `Catalog` | — | 200 `Meter` |  |
+| PUT | `/v1/admin/catalog/meters/{key}` | merchant | `Catalog` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
+| GET | `/v1/admin/catalog/rate-overrides` | merchant | `Catalog` | — | 200 `ListPage<RateOverride>` |  |
+| PUT | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `Catalog` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; catalog update; limit `grant` |
+| DELETE | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `Catalog` | — | 204 — | sensitive; catalog update; limit `destructive` |
+| POST | `/v1/admin/catalog/product-archives` | merchant | `Catalog` | `ArchiveProductParams` | 200 `ProductArchive` | sensitive; catalog update; `Idempotency-Key` |
+| POST | `/v1/admin/catalog/ask` | merchant | `Catalog` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| POST | `/v1/admin/catalog/products` | merchant | `Catalog` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
+| GET | `/v1/admin/catalog/products` | merchant | `Catalog` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/admin/catalog/products/{id}` | merchant | `Catalog` | — | 200 `Product` |  |
+| PATCH | `/v1/admin/catalog/products/{id}` | merchant | `Catalog` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
+| POST | `/v1/admin/catalog/prices` | merchant | `Catalog` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
+| GET | `/v1/admin/catalog/prices` | merchant | `Catalog` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/admin/catalog/prices/{id}` | merchant | `Catalog` | — | 200 `Price` |  |
+| GET | `/v1/admin/catalog/prices/{id}/history` | merchant | `Catalog` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| PATCH | `/v1/admin/catalog/prices/{id}` | merchant | `Catalog` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
+| POST | `/v1/admin/price-migrations` | merchant | `Catalog` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
+| POST | `/v1/admin/price-migrations/preview` | merchant | `Catalog` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/admin/price-migrations` | merchant | `Catalog` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/admin/price-migrations/{id}` | merchant | `Catalog` | — | 200 `PriceMigration` |  |
+| POST | `/v1/admin/price-migrations/{id}/cancel` | merchant | `Catalog` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
 
 ## Merchant configuration
 
-The merchant's own configuration, every route behind the host's `Permissions.MerchantConfig`.
+The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route behind the host's `Permissions.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
@@ -202,24 +176,72 @@ The merchant's own configuration, every route behind the host's `Permissions.Mer
 | POST | `/v1/admin/psps` | merchant | `MerchantConfig` | `CreatePSPParams` | 201 `PSP` | sensitive |
 | GET | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | — | 200 `PSP` |  |
 | PATCH | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | `UpdatePSPParams` | 200 `PSP` | sensitive |
-| POST | `/v1/admin/psps/{id}/archive` | merchant | `MerchantConfig` | `ArchivePSPParams` | 200 `PSP` | sensitive |
 | POST | `/v1/admin/psps/routing-preview` | merchant | `MerchantConfig` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
-| POST | `/v1/admin/psps/refresh` | merchant | `MerchantConfig` | — | 202 `PSPRefresh` | sensitive |
 | GET | `/v1/admin/configuration` | merchant | `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
-| POST | `/v1/admin/configuration/applications` | merchant | `MerchantConfig` | `ApplyMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive |
+| PATCH | `/v1/admin/configuration` | merchant | `MerchantConfig` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive; `Idempotency-Key` |
 | GET | `/v1/admin/api-host` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
 | GET | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | sensitive |
 | DELETE | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
-| PUT | `/v1/admin/alert-webhooks/{id}/url` | merchant | `MerchantConfig` | `SetAlertWebhookURLParams` | 200 `AlertWebhook` | sensitive |
+| PATCH | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | sensitive |
 | GET | `/v1/admin/billing-archive` | merchant | `MerchantConfig` | — | 200 `application/x-ndjson` | sensitive |
 | POST | `/v1/admin/billing-archive` | merchant | `MerchantConfig` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
 | POST | `/v1/admin/billing-import` | merchant | `MerchantConfig` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
 | PUT | `/v1/admin/dashboard` | merchant | `MerchantConfig` | `SetDashboardParams` | 200 `Dashboard` |  |
-| POST | `/v1/admin/dashboard/widgets/generate` | merchant | `MerchantConfig` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
 | GET | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | — | 200 `ListPage<ProvisioningToken>` |  |
 | POST | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
 | DELETE | `/v1/admin/provisioning-tokens/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
+
+## Business metrics
+
+Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`, every route behind the host's `Permissions.Metrics`.
+
+| Method | Path | Tier | Permission | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| POST | `/v1/admin/metrics/query` | merchant | `Metrics` | `MetricsQuery` | 200 `MetricsResult` |  |
+| GET | `/v1/admin/metrics/schema` | merchant | `Metrics` | — | 200 `MetricsSchema` |  |
+| GET | `/v1/admin/dashboard` | merchant | `Metrics` | — | 200 `Dashboard` |  |
+| POST | `/v1/admin/metrics/ask` | merchant | `Metrics` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
+| POST | `/v1/admin/dashboard/widgets/generate` | merchant | `Metrics` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
+
+## Access
+
+What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group.
+
+| Method | Path | Tier | Permission | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| GET | `/v1/admin/access` | signed_in | — | — | 200 `AdminAccess` |  |
+
+## Programmatic (`/v1/app`)
+
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, and no permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`.
+
+| Method | Path | Tier | Permission | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| POST | `/v1/app/entitlements/check` | application | — | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
+| POST | `/v1/app/admissions` | application | — | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/{request_id}/capture` | application | — | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/release` | application | — | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/extend` | application | — | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/usage-events` | application | — | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations` | application | — | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/increment` | application | — | `IncrementProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/release` | application | — | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/observations` | application | — | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| GET | `/v1/app/host-events` | application | — | — | 200 `ListPage<HostEvent>` |  |
+| POST | `/v1/app/host-events/acknowledge` | application | — | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
+| GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| POST | `/v1/app/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| PUT | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| PATCH | `/v1/app/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| DELETE | `/v1/app/scim/v2/Users/{id}` | provisioning | — | — | 204 — |  |
+| POST | `/v1/app/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
 
 ## Provider webhooks
 
@@ -228,22 +250,3 @@ Inbound provider callbacks.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | `application/json` | 200 `WebhookReceipt` |  |
-
-## Provisioning (SCIM 2.0)
-
-A merchant's directory (AuthKit, Okta, Entra ID) pushing its users, which become its customers' contacts (RFC 7643, RFC 7644). Each request carries the merchant's provisioning token, or a client-credentials access token with scope `scim` from its trusted issuer. Bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves these routes out. The standalone server serves them; an embedded host with `Routes.Provisioning`.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| GET | `/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| POST | `/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` |  |
-| GET | `/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` |  |
-| GET | `/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
-| PUT | `/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| PATCH | `/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
-| DELETE | `/scim/v2/Users/{id}` | provisioning | — | — | 204 — |  |
-| POST | `/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |

@@ -16,6 +16,16 @@ UPDATE billing.merchant_webhooks
    AND secret_version <= sqlc.arg(secret_version)::integer
 RETURNING *;
 
+-- name: UpdateMerchantWebhook :one
+-- A null set_name keeps the name; name null with set_name clears it.
+UPDATE billing.merchant_webhooks
+   SET name = CASE WHEN sqlc.arg(set_name)::boolean THEN sqlc.narg(name)::text ELSE name END,
+       format = COALESCE(sqlc.narg(format)::text, format),
+       enabled = COALESCE(sqlc.narg(enabled)::boolean, enabled),
+       updated_at = current_timestamp
+ WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+RETURNING *;
+
 -- name: GetMerchantWebhook :one
 SELECT * FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -22,10 +21,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
-// wrapCustomerRoutes applies the browser-tier base chain to customer
+// wrapCustomerRoutes applies the browser-tier base chain to the customer
 // routes: permissive CORS, body limits, credential admission, merchant
 // resolution and the rate limiter. Each route's own gate runs inside it.
-func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, selfPrefix string) *router.Table {
+func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -50,16 +49,8 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	}
 	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, windows, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
-		canonical := entry.Path
-		if selfPrefix != "" {
-			if strings.HasPrefix(entry.Path, selfPrefix+"/") {
-				canonical = EmbeddedV1Prefix + "/me" + strings.TrimPrefix(entry.Path, selfPrefix)
-			} else {
-				canonical = "/billing" + entry.Path
-			}
-		}
 		return middleware.ChainHTTP(entry.Handler,
-			middleware.WithRoutePath(canonical),
+			middleware.WithRoutePath(embeddedMount+entry.Path),
 			middleware.RecoverHTTP(),
 			middleware.SecurityHeadersHTTP(),
 			// #765: this handler's entire surface is browser tier — always the
