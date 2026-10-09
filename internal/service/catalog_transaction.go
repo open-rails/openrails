@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // catalogMutation serializes catalog changes per merchant. Nested writes share
@@ -33,7 +37,12 @@ func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Con
 	}
 	var committedWork []func(context.Context, *Service)
 	err = s.catalogDatabase().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := gen.New(tx).LockCatalogRevision(ctx, mid.UUID()); err != nil {
+		q := gen.New(tx)
+		if _, err := q.LockCatalogRevision(ctx, mid.UUID()); err != nil {
+			return err
+		}
+		before, err := q.ListRecurringBenefitOverlaps(ctx, mid.UUID())
+		if err != nil {
 			return err
 		}
 		scoped := *s
@@ -41,8 +50,10 @@ func catalogMutation[T any](ctx context.Context, s *Service, fn func(context.Con
 		scoped.catalogWriteLocked = true
 		scoped.catalogCommittedWork = &committedWork
 		var callErr error
-		out, callErr = fn(ctx, &scoped)
-		return callErr
+		if out, callErr = fn(ctx, &scoped); callErr != nil {
+			return callErr
+		}
+		return refuseNewBenefitOverlap(ctx, q, mid.UUID(), before)
 	})
 	if err == nil {
 		for _, work := range committedWork {
@@ -92,4 +103,29 @@ func (s *Service) CatalogRevision(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	return s.catalogDatabase().Gen(ctx).GetCatalogRevision(ctx, mid.UUID())
+}
+
+// ErrCatalogBenefitOverlap refuses a catalog change that lets two recurring
+// products grant one entitlement outside a shared tier group.
+func errCatalogBenefitOverlap(o gen.ListRecurringBenefitOverlapsRow) error {
+	return apperr.New(http.StatusConflict, billing.CodeCatalogBenefitOverlap, fmt.Sprintf("products %q and %q both grant %q on a recurring price; put them in one tier group so a customer cannot pay for it twice", o.FirstProduct, o.SecondProduct, o.Entitlement))
+}
+
+// refuseNewBenefitOverlap refuses an overlap the mutation created. An overlap
+// the catalog already held does not block unrelated edits.
+func refuseNewBenefitOverlap(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, before []gen.ListRecurringBenefitOverlapsRow) error {
+	after, err := q.ListRecurringBenefitOverlaps(ctx, merchantID)
+	if err != nil {
+		return err
+	}
+	known := make(map[gen.ListRecurringBenefitOverlapsRow]bool, len(before))
+	for _, o := range before {
+		known[o] = true
+	}
+	for _, o := range after {
+		if !known[o] {
+			return errCatalogBenefitOverlap(o)
+		}
+	}
+	return nil
 }

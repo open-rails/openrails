@@ -31,6 +31,7 @@ export type OpenRailsErrorCode =
   | "card_declined"
   | "card_not_saved"
   | "card_requires_https"
+  | "catalog_benefit_overlap"
   | "catalog_revision_conflict"
   | "catalog_updates_disabled"
   | "checkout_attempt_closed"
@@ -273,6 +274,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   card_declined: { status: 402, type: "card_error", meaning: "The provider declined the card; metadata.decline_reason says why." },
   card_not_saved: { status: 409, type: "api_error", meaning: "The card was not saved; enter it again." },
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
+  catalog_benefit_overlap: { status: 409, type: "invalid_request_error", meaning: "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group." },
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
   catalog_updates_disabled: { status: 403, type: "invalid_request_error", meaning: "Catalog updates over HTTP are disabled in this deployment." },
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },

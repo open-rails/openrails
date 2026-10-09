@@ -59,6 +59,11 @@ products:
         billing_interval: 30 days
 ```
 
+Two products with recurring prices that grant one entitlement must share a
+`tier_group`; otherwise a customer could hold both and pay twice for it, and the
+catalog change is refused with `409 catalog_benefit_overlap`. Repeated purchases
+of one timed pass stack: each window starts when the previous one ends.
+
 Catalog prices accept `amount: 9.99 USD`, `amount: 1 SOL`, or `amount: 10 USDC`.
 The currency is required and must be registered. Amounts convert exactly at that
 currency's precision; values that require rounding are rejected.

@@ -53,6 +53,10 @@ const (
 	CodeSubscriptionPaidThrough = "subscription_paid_through"
 )
 
+// CodeCatalogBenefitOverlap: two recurring products would grant one
+// entitlement outside a shared tier group.
+const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
+
 // Request-shape codes: the request never reached its operation.
 const (
 	// CodeUnknownField: the JSON body names a field the route does not
@@ -223,6 +227,7 @@ var errorCodes = []ErrorCode{
 	{"checkout_offer_unavailable", 422, invalid, "The purchase is not available."},
 
 	// Subscriptions and tier changes.
+	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},
 	{"subscription_not_found", 404, invalid, "The subscription does not exist."},
 	{"subscription_not_active", 409, invalid, "The subscription is not active."},
 	{"cancel_unsupported_on_rail", 400, invalid, "This rail has no cancel operation."},

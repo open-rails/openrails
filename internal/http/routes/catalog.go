@@ -12,8 +12,8 @@ var page = []Param{text("cursor"), integer("limit")}
 
 // Error codes of the catalog's nouns.
 var (
-	productErrors = []string{"product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict"}
-	priceErrors   = []string{"price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "trial_unsupported_on_rail"}
+	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict"}
+	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
 		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found", "default_rate_card_required",
 		"meter_in_use", "meter_rate_card_conflict", "rate_card_currency_mismatch", "rate_card_has_overrides", "rate_card_product_not_found",

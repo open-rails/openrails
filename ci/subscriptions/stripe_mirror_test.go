@@ -27,7 +27,8 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", Entitlements: []string{l.ent, premium}})
+	group := benefitGroup(l.ent)
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", TierGroup: &group, TierRank: 2, Entitlements: []string{l.ent, premium}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
@@ -64,7 +65,8 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	w.converge()
 	client := w.client[embedded]
 	premium := "content:premium"
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", Entitlements: []string{l.ent, premium}})
+	group := benefitGroup(l.ent)
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "premium-" + uuid.NewString()[:8], DisplayName: "Premium", TierGroup: &group, TierRank: 2, Entitlements: []string{l.ent, premium}})
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]

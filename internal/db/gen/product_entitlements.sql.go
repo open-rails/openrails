@@ -97,6 +97,49 @@ func (q *Queries) ListLiveProductEntitlements(ctx context.Context, arg ListLiveP
 	return items, nil
 }
 
+const listRecurringBenefitOverlaps = `-- name: ListRecurringBenefitOverlaps :many
+SELECT a.entitlement, pa.key AS first_product, pb.key AS second_product
+FROM billing.product_entitlements a
+JOIN billing.product_entitlements b ON b.merchant_id = a.merchant_id AND b.entitlement = a.entitlement
+ AND b.product_id > a.product_id AND b.removed_at IS NULL
+JOIN billing.products pa ON pa.merchant_id = a.merchant_id AND pa.id = a.product_id
+JOIN billing.products pb ON pb.merchant_id = b.merchant_id AND pb.id = b.product_id
+WHERE a.merchant_id = $1::uuid AND a.removed_at IS NULL
+  AND (pa.tier_group IS NULL OR pb.tier_group IS NULL OR pa.tier_group <> pb.tier_group)
+  AND EXISTS (SELECT 1 FROM billing.prices x WHERE x.merchant_id = pa.merchant_id AND x.product_id = pa.id AND x.billing_interval_hours IS NOT NULL)
+  AND EXISTS (SELECT 1 FROM billing.prices y WHERE y.merchant_id = pb.merchant_id AND y.product_id = pb.id AND y.billing_interval_hours IS NOT NULL)
+ORDER BY a.entitlement, pa.key, pb.key
+LIMIT 1000
+`
+
+type ListRecurringBenefitOverlapsRow struct {
+	Entitlement   string
+	FirstProduct  string
+	SecondProduct string
+}
+
+// Two recurring products granting one entitlement outside a shared tier
+// group: a customer could hold both and pay twice for that benefit.
+func (q *Queries) ListRecurringBenefitOverlaps(ctx context.Context, merchantID uuid.UUID) ([]ListRecurringBenefitOverlapsRow, error) {
+	rows, err := q.db.Query(ctx, listRecurringBenefitOverlaps, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecurringBenefitOverlapsRow
+	for rows.Next() {
+		var i ListRecurringBenefitOverlapsRow
+		if err := rows.Scan(&i.Entitlement, &i.FirstProduct, &i.SecondProduct); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeProductEntitlements = `-- name: RemoveProductEntitlements :many
 UPDATE billing.product_entitlements pe
 SET removed_at = GREATEST($1::timestamptz, pe.added_at), removed_by = $2::text

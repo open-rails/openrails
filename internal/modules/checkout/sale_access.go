@@ -56,10 +56,22 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	ledger := grants.New(q, mid.UUID())
 	ledger.SetClock(s.now)
 	if recorded != nil {
-		if !grants.Migrated(*recorded) && !grants.SameWindow(*recorded, window) {
+		if !grants.Migrated(*recorded) && !grants.SameWindow(*recorded, window) && !stackedWindow(*recorded, window) {
 			return errors.New("original access window contradicts accepted purchase")
 		}
 		return ledger.MaterializeGrant(ctx, *recorded)
+	}
+	// Purchases of one timed product settle in turn under the timeline lock:
+	// a window frozen at admission starts after whatever an earlier
+	// settlement granted meanwhile, so two purchases never pay for one window.
+	if window.End != nil {
+		tail, err := entitlements.GetAccessTimelineTailEnd(ctx, s.transactionDB.Qx(ctx), customer, product)
+		if err != nil {
+			return err
+		}
+		if tail != nil && tail.After(window.Start) {
+			window = grants.AccessWindow(duration, *tail)
+		}
 	}
 	g, _, err := ledger.GrantAccessOnce(ctx, grants.GrantInput{
 		Customer: customer, Product: &product, Kind: grants.Access, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment,
@@ -69,4 +81,10 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 		return err
 	}
 	return ledger.MaterializeGrant(ctx, g)
+}
+
+// stackedWindow: a recorded grant of the accepted duration that starts after
+// the accepted window, because settlement stacked it on an earlier purchase.
+func stackedWindow(g gen.BillingGrant, w grants.PurchaseWindow) bool {
+	return w.End != nil && g.EndsAt != nil && g.StartsAt.After(w.Start) && g.EndsAt.Sub(g.StartsAt) == w.End.Sub(w.Start)
 }

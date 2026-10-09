@@ -986,6 +986,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "catalog_revision_conflict",
           "price_not_sellable",
           "product_not_found",
@@ -1907,6 +1908,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "idempotency_key_required",
           "idempotency_key_reused",
           "invalid_param",
@@ -2076,6 +2078,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2194,6 +2197,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2247,6 +2251,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2308,6 +2313,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2362,6 +2368,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2423,6 +2430,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
@@ -2478,6 +2486,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2598,6 +2607,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2660,6 +2670,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2724,6 +2735,7 @@
         "x-openrails-sensitive": true,
         "x-openrails-catalog-write": true,
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2788,6 +2800,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -2882,6 +2895,7 @@
           "StaffReads"
         ],
         "x-openrails-errors": [
+          "catalog_benefit_overlap",
           "price_key_cadence_conflict",
           "price_key_not_found",
           "price_not_found",
@@ -26109,6 +26123,11 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "Card data is accepted only over HTTPS."
+    },
+    "catalog_benefit_overlap": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."
     },
     "catalog_revision_conflict": {
       "status": 409,

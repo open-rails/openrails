@@ -694,6 +694,7 @@ pkg openrails/billing, const CodeAuthenticationRequired untyped string = "authen
 pkg openrails/billing, const CodeAuthenticationUnavailable untyped string = "authentication_unavailable"
 pkg openrails/billing, const CodeAuthorizationUnavailable untyped string = "authorization_unavailable"
 pkg openrails/billing, const CodeCardDeclined untyped string = "card_declined"
+pkg openrails/billing, const CodeCatalogBenefitOverlap untyped string = "catalog_benefit_overlap"
 pkg openrails/billing, const CodeCollectionPaymentMethodInvalid untyped string = "collection_payment_method_invalid"
 pkg openrails/billing, const CodeCollectionPaymentMethodRequired untyped string = "collection_payment_method_required"
 pkg openrails/billing, const CodeCredentialExpired untyped string = "credential_expired"

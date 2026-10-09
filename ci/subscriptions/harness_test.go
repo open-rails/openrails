@@ -918,12 +918,17 @@ func (w *world) membership(entitlement string, unitAmount int64) *billing.Price 
 func (w *world) membershipEvery(entitlement string, unitAmount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[embedded]
-	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", Entitlements: []string{entitlement}})
+	group := benefitGroup(entitlement)
+	product, err := client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "member-" + uuid.NewString()[:8], DisplayName: "Membership", TierGroup: &group, Entitlements: []string{entitlement}})
 	require.NoError(w.t, err)
 	price, err := client.CreatePrice(w.t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: unitAmount, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours})
 	require.NoError(w.t, err)
 	return price
 }
+
+// benefitGroup is the tier group of the harness's recurring products granting
+// entitlement: recurring products sharing a benefit must share a group.
+func benefitGroup(entitlement string) string { return "e2e:" + entitlement }
 
 func (w *world) subscription(tp topology, id billing.SubscriptionID) *billing.Subscription {
 	w.t.Helper()

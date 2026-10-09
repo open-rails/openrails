@@ -330,6 +330,7 @@
       "const (\n\tSyncStatusUnknown      SyncStatus = \"unknown\"\n\tSyncStatusInSync       SyncStatus = \"in_sync\"\n\tSyncStatusDrifted      SyncStatus = \"drifted\"\n\tSyncStatusMissing      SyncStatus = \"missing\"\n\tSyncStatusNeverSynced  SyncStatus = \"never_synced\"\n\tSyncStatusSyncDisabled SyncStatus = \"sync_disabled\"\n)",
       "const (\n\tUsageByEventType UsageGroupBy = \"event_type\"\n\tUsageByResource  UsageGroupBy = \"resource\"\n\tUsageByInvoker   UsageGroupBy = \"invoker\"\n\n\tUsageByFunction UsageGroupBy = \"function\"\n\tUsageByTier     UsageGroupBy = \"tier\"\n)",
       "const (\n\tWastedSpendIgnored WastedSpendAction = \"ignored\"\n\n\tWastedSpendForgiven WastedSpendAction = \"forgiven\"\n\n\tWastedSpendCharged WastedSpendAction = \"charged\"\n\n\tWastedSpendInvokerCutoffTracked WastedSpendAction = \"invoker_cutoff_tracked\"\n\n\tWastedSpendDuplicate WastedSpendAction = \"duplicate\"\n)",
+      "const CodeCatalogBenefitOverlap = \"catalog_benefit_overlap\"",
       "const CodeCustomerActionRequired = \"customer_action_required\"",
       "const CodePaymentMethodPSPMismatch = \"payment_method_psp_mismatch\"",
       "const FindingIDPrefix = \"fnd_\"",

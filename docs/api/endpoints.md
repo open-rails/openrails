@@ -46,7 +46,13 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   collection. Each such operation keeps its own durable receipt: the same key
   with the same terms answers the original result, and with other terms
   `409 idempotency_key_reused`. There is no generic response cache; every
-  request authenticates and authorizes again.
+  request authenticates and authorizes again. One key names one purchase:
+  generate it when the buyer decides to buy, store it with the order, and send
+  the same key on every retry of that request (timeouts, network errors,
+  restarts). A new key, or a new checkout session per click, is a new
+  purchase: a subscription or permanent product is refused as a duplicate, but
+  a timed pass is sold again (it starts when the previous one ends) and a
+  credit pack grants its credits again.
 - **Discovery.** `GET /v1/config` (public, cacheable) is the deployment's
   configuration (see [below](#public-configuration)). Its `capabilities` list
   the route groups the mount serves and its features (`stripe_billing_portal`,

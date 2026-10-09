@@ -36,6 +36,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `card_declined` | 402 | `card_error` | The provider declined the card; metadata.decline_reason says why. |
 | `card_not_saved` | 409 | `api_error` | The card was not saved; enter it again. |
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
+| `catalog_benefit_overlap` | 409 | `invalid_request_error` | Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group. |
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
 | `catalog_updates_disabled` | 403 | `invalid_request_error` | Catalog updates over HTTP are disabled in this deployment. |
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
