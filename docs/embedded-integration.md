@@ -235,6 +235,11 @@ required secret is declared but not armed, in Go as in YAML.
 | `ccbill` | `salt`; `datalink_username`, `datalink_password` | |
 | `solana` | `private_key` (or `signer: {mode: vault_transit, key: …}`) | `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet` |
 
+A `settings` or `secrets` key outside its rail's row, in YAML or in a
+`PSPConfig` built by hand, is refused by the parser and by `openrails.New`,
+naming the PSP, the key and the keys the rail takes. A standalone manifest
+refuses it the same way.
+
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving
 archived accounts. Deliberate metadata changes use

@@ -14,8 +14,10 @@ import (
 	"context"
 
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 
@@ -176,6 +178,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	}
 	if !reflect.ValueOf(cfg.Merchant).IsZero() && strings.TrimSpace(cfg.Merchant.Slug) == "" {
 		return fmt.Errorf("openrails: Config.Merchant.Slug is required")
+	}
+	for _, key := range slices.Sorted(maps.Keys(cfg.Merchant.PSPs)) {
+		if err := config.ValidatePSPKeys(key, cfg.Merchant.PSPs[key]); err != nil {
+			return fmt.Errorf("openrails: Config.Merchant.%w", err)
+		}
 	}
 	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {

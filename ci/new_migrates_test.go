@@ -74,6 +74,29 @@ func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 	require.NoError(t, client.Close(t.Context()))
 }
 
+// A misspelled PSP setting or secret refuses New, naming the PSP, the key and
+// the keys its rail takes, before anything is migrated.
+func TestNewRefusesUnknownPSPKeys(t *testing.T) {
+	pool := openPool(t, emptyDatabase(t))
+	for want, psp := range map[string]openrails.PSPConfig{
+		`openrails: Config.Merchant.psps.p.settings: unknown field "tokenisation_key" (nmi takes card_entry, endpoint_deployment, tokenization_key, tokenization_url, webhook_overlap_expires_at)`: {
+			Rail: "nmi", AccountID: "100001", Settings: map[string]any{"tokenisation_key": "tk"},
+		},
+		`openrails: Config.Merchant.psps.p.secrets: unknown field "secret_kye" (stripe takes secret_key, webhook_signing_secret, webhook_signing_secret_previous, webhook_signing_secret_thin)`: {
+			Rail: "stripe", AccountID: "acct_1", Secrets: map[string]string{"secret_kye": "sk_test_1"},
+		},
+	} {
+		_, err := openrails.New(t.Context(), openrails.Config{
+			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			Merchant: openrails.MerchantDeclaration{Slug: "host-one", DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{"p": psp}},
+		}, openrails.Deps{Postgres: pool})
+		require.EqualError(t, err, want)
+	}
+	var found *string
+	require.NoError(t, pool.QueryRow(t.Context(), "SELECT to_regclass('billing.merchants')::text").Scan(&found))
+	require.Nil(t, found, "refused before migrating")
+}
+
 // Replicas boot together on an empty database: each New migrates, migratekit
 // and River serialize them, and every one comes up. Booting together into a
 // new month, they race to create the same partitions.

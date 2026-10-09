@@ -61,17 +61,15 @@ func ValidateManifestPSP(slug string, key string, cfg config.PSPConfig) error {
 	if rail == "" {
 		return fmt.Errorf("merchant %q psps.%s.rail is required", slug, key)
 	}
-	for secretKey := range cfg.Secrets {
-		if _, err := merchants.NormalizePSPSecretKey(rail, secretKey); err != nil {
-			return fmt.Errorf("merchant %q psps.%s: %w", slug, key, err)
-		}
-	}
 	// #710: the per-merchant CCBill webhook IP allowlist is retired (it was
 	// parsed and never enforced); the built-in documented CCBill ranges apply.
 	if rail == "ccbill" {
 		if _, ok := cfg.Settings["allowed_cidrs"]; ok {
 			return fmt.Errorf("merchant %q psps.%s.settings.allowed_cidrs was removed (#710): CCBill webhook source IPs are the built-in documented ranges — delete the key", slug, key)
 		}
+	}
+	if err := config.ValidatePSPKeys(key, cfg); err != nil {
+		return fmt.Errorf("merchant %q %w", slug, err)
 	}
 	if rail == "solana" {
 		// Solana never needs account_id — it is always derived from the signer's

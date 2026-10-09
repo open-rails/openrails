@@ -58,8 +58,9 @@ psps:
     signer: { mode: vault_transit, key: openrails-solana-<slug> }
 ```
 
-`settings` keys are strictly validated: a typo'd key fails the manifest push
-loudly. Known keys: `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet`.
+`settings` and `secrets` keys are strictly validated: a typo'd key fails the
+manifest load loudly. Known settings: `rpc_provider`, `rpc_api_key`, `tokens`,
+`recipient_wallet`; the one secret is `private_key`.
 
 #### Accepted tokens
 

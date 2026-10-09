@@ -2110,6 +2110,11 @@
       "billing": "github.com/open-rails/openrails/billing",
       "fmt": "fmt",
       "go-yaml": "github.com/goccy/go-yaml",
+      "maps": "maps",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "slices": "slices",
+      "strconv": "strconv",
       "strings": "strings"
     },
     "internal/config/naming.go": {

@@ -2,11 +2,16 @@ package config
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // MerchantDeclaration declares one merchant: the embedded engine's merchant
@@ -57,6 +62,60 @@ type PSPConfig struct {
 	// Solana: rpc_provider, rpc_api_key, tokens,
 	// recipient_wallet).
 	Settings map[string]any `yaml:"settings,omitempty"`
+}
+
+// ValidatePSPKeys refuses a rail that does not exist and a settings or
+// secrets key the rail does not take, naming the PSP and the keys it does: a
+// misspelled key would otherwise be stored inert. Secret keys match as the
+// secret store reads them (case and surrounding space ignored), settings
+// exactly.
+func ValidatePSPKeys(psp string, p PSPConfig) error {
+	d, ok := rails.Lookup(models.Rail(p.Rail))
+	if !ok {
+		all := rails.All()
+		names := make([]string, 0, len(all))
+		for _, r := range all {
+			names = append(names, string(r.Rail))
+		}
+		slices.Sort(names)
+		if strings.TrimSpace(string(p.Rail)) == "" {
+			return fmt.Errorf("psps.%s.rail is required (%s)", psp, strings.Join(names, ", "))
+		}
+		return fmt.Errorf("psps.%s.rail: unknown rail %q (%s)", psp, p.Rail, strings.Join(names, ", "))
+	}
+	if err := unknownPSPKeys(psp, "settings", d.Rail, slices.Collect(maps.Keys(p.Settings)), d.SettingKeys, false); err != nil {
+		return err
+	}
+	secrets := make([]string, 0, len(d.CredentialKeys))
+	for _, k := range d.CredentialKeys {
+		secrets = append(secrets, k.Name)
+	}
+	return unknownPSPKeys(psp, "secrets", d.Rail, slices.Collect(maps.Keys(p.Secrets)), secrets, true)
+}
+
+func unknownPSPKeys(psp, section string, rail models.Rail, declared, allowed []string, fold bool) error {
+	var unknown []string
+	for _, key := range declared {
+		match := key
+		if fold {
+			match = strings.ToLower(strings.TrimSpace(key))
+		}
+		if !slices.Contains(allowed, match) {
+			unknown = append(unknown, strconv.Quote(key))
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	slices.Sort(unknown)
+	field, takes := "field", "no "+section
+	if len(unknown) > 1 {
+		field = "fields"
+	}
+	if len(allowed) > 0 {
+		takes = strings.Join(slices.Sorted(slices.Values(allowed)), ", ")
+	}
+	return fmt.Errorf("psps.%s.%s: unknown %s %s (%s takes %s)", psp, section, field, strings.Join(unknown, ", "), rail, takes)
 }
 
 // CustodianConfig is one declared custodian: the merchant's account with a
@@ -115,6 +174,11 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 	}
 	m := f.MerchantDeclaration
+	for _, key := range slices.Sorted(maps.Keys(m.PSPs)) {
+		if err := ValidatePSPKeys(key, m.PSPs[key]); err != nil {
+			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+		}
+	}
 	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
 }
