@@ -60,9 +60,9 @@ type Subscription struct {
 	// serve the subscription on the wire; it is not a column.
 	ScheduledChange *ScheduledChange `json:"-"`
 
-	// Quantity is the seats each period bills; above 1 only on an engine
-	// NMI or Stripe subscription.
-	Quantity int `json:"quantity"`
+	// Quantity is the seats each period bills: set only for a per-seat price,
+	// on an engine NMI or Stripe subscription.
+	Quantity *int `json:"quantity"`
 
 	// AccessDurationHoursSnapshot is the accepted access duration for this paid phase.
 	// nil has no scheduled expiry; changing price does not change past promises.

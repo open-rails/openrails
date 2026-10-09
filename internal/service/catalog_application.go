@@ -472,6 +472,7 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 	req = billing.CreatePriceParams{ProductID: product.ID, Key: key}
 	if current != nil {
 		req.CustomerAmount = current.CustomerAmount
+		req.Quantity = current.Quantity
 		req.UnitAmount = current.UnitAmount
 		req.Currency = current.Currency
 		req.AccessDurationHours = current.AccessDurationHours
@@ -495,6 +496,12 @@ func catalogApplicationPriceRequest(product *billing.Product, key string, decl c
 		req.CustomerAmount = nil
 		if !decl.CustomerAmount.Null {
 			req.CustomerAmount = &decl.CustomerAmount.Value
+		}
+	}
+	if decl.Quantity.Set {
+		req.Quantity = nil
+		if !decl.Quantity.Null {
+			req.Quantity = &decl.Quantity.Value
 		}
 	}
 	if decl.Currency.Set {

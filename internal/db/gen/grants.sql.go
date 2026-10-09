@@ -83,7 +83,7 @@ func (q *Queries) CountUnpaidEngineRenewalGrants(ctx context.Context, merchantID
 }
 
 const getAccessGrantByIdempotencyKey = `-- name: GetAccessGrantByIdempotencyKey :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid AND kind = 'access' AND event = 'grant'
   AND source_type = 'grant' AND source_id = $2::text AND grant_reason <> 'migration'
 `
@@ -116,12 +116,13 @@ func (q *Queries) GetAccessGrantByIdempotencyKey(ctx context.Context, arg GetAcc
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
 
 const getAccessGrantByPurchase = `-- name: GetAccessGrantByPurchase :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid AND kind = 'access' AND event = 'grant'
   AND source_type = 'purchase' AND payment_id = $2::uuid AND product_id = $3::uuid
 `
@@ -155,12 +156,13 @@ func (q *Queries) GetAccessGrantByPurchase(ctx context.Context, arg GetAccessGra
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
 
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND kind = 'credit' AND event = 'grant'
@@ -200,6 +202,7 @@ func (q *Queries) GetCreditGrantBySourceID(ctx context.Context, arg GetCreditGra
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -232,7 +235,7 @@ func (q *Queries) GetCreditLotRemaining(ctx context.Context, arg GetCreditLotRem
 }
 
 const getGrant = `-- name: GetGrant :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -264,6 +267,7 @@ func (q *Queries) GetGrant(ctx context.Context, arg GetGrantParams) (BillingGran
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -312,15 +316,15 @@ func (q *Queries) HasInitialMembershipGrant(ctx context.Context, arg HasInitialM
 const insertAccessGrantOnce = `-- name: InsertAccessGrantOnce :one
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, starts_at, ends_at, reason, actor, grant_reason
+    event, starts_at, ends_at, reason, actor, grant_reason, quantity
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     'access', $4::text, $5::text, $6::uuid,
     'grant', $7::timestamptz, $8::timestamptz,
-    $9::text, $10::text, $11::text
+    $9::text, $10::text, $11::text, $12::int
 )
 ON CONFLICT DO NOTHING
-RETURNING id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason
+RETURNING id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity
 `
 
 type InsertAccessGrantOnceParams struct {
@@ -335,6 +339,7 @@ type InsertAccessGrantOnceParams struct {
 	Reason      *string
 	Actor       *string
 	GrantReason *string
+	Quantity    *int32
 }
 
 // An access grant at its natural key: a replay returns no row and the caller
@@ -352,6 +357,7 @@ func (q *Queries) InsertAccessGrantOnce(ctx context.Context, arg InsertAccessGra
 		arg.Reason,
 		arg.Actor,
 		arg.GrantReason,
+		arg.Quantity,
 	)
 	var i BillingGrant
 	err := row.Scan(
@@ -374,6 +380,7 @@ func (q *Queries) InsertAccessGrantOnce(ctx context.Context, arg InsertAccessGra
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -382,16 +389,16 @@ const insertGrant = `-- name: InsertGrant :one
 
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason, quantity
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::text, $5::text, NULLIF($6::text, ''), $7::uuid,
     $8::text, $9::uuid, $10::jsonb,
     $11::timestamptz, $12::timestamptz,
     $13::bigint, $14::text, $15::text,
-    $16::text, $17::text
+    $16::text, $17::text, $18::int
 )
-RETURNING id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason
+RETURNING id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity
 `
 
 type InsertGrantParams struct {
@@ -412,6 +419,7 @@ type InsertGrantParams struct {
 	Reason       *string
 	Actor        *string
 	GrantReason  *string
+	Quantity     *int32
 }
 
 // #514 append-only grant ledger (billing.grants). derive-1 appends events here;
@@ -436,6 +444,7 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (Billi
 		arg.Reason,
 		arg.Actor,
 		arg.GrantReason,
+		arg.Quantity,
 	)
 	var i BillingGrant
 	err := row.Scan(
@@ -458,6 +467,7 @@ func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (Billi
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -484,7 +494,7 @@ func (q *Queries) IsGrantTerminated(ctx context.Context, arg IsGrantTerminatedPa
 }
 
 const listAccessGrantsAt = `-- name: ListAccessGrantsAt :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND product_id = $3::uuid AND kind = 'access' AND event = 'grant'
   AND source_type = $4::text AND source_id = $5::text
@@ -538,6 +548,7 @@ func (q *Queries) ListAccessGrantsAt(ctx context.Context, arg ListAccessGrantsAt
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -601,7 +612,7 @@ func (q *Queries) ListCustomersWithLapsedCreditLots(ctx context.Context, arg Lis
 }
 
 const listGrantsByCustomer = `-- name: ListGrantsByCustomer :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND event = 'grant'
@@ -644,6 +655,7 @@ func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCust
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -656,7 +668,7 @@ func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCust
 }
 
 const listInitialMembershipGrants = `-- name: ListInitialMembershipGrants :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='subscription'
   AND source_id=$2::uuid::text AND event='grant'
   AND starts_at < $3::timestamptz
@@ -706,6 +718,7 @@ func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListIniti
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -815,7 +828,7 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 }
 
 const listLiveGrantsByCustomer = `-- name: ListLiveGrantsByCustomer :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason FROM billing.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.event = 'grant'
@@ -862,6 +875,7 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -874,7 +888,7 @@ func (q *Queries) ListLiveGrantsByCustomer(ctx context.Context, arg ListLiveGran
 }
 
 const listLiveGrantsBySource = `-- name: ListLiveGrantsBySource :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason FROM billing.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.customer_id = $2::uuid
   AND g.kind = $3::text AND g.event = 'grant'
   AND g.source_type = ANY($4::text[]) AND g.source_id = $5::text
@@ -928,6 +942,7 @@ func (q *Queries) ListLiveGrantsBySource(ctx context.Context, arg ListLiveGrants
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -940,7 +955,7 @@ func (q *Queries) ListLiveGrantsBySource(ctx context.Context, arg ListLiveGrants
 }
 
 const listLiveGrantsMissingEffects = `-- name: ListLiveGrantsMissingEffects :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason FROM billing.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
@@ -998,6 +1013,7 @@ func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLive
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -1065,7 +1081,7 @@ func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg Lis
 }
 
 const listOriginalPurchaseGrants = `-- name: ListOriginalPurchaseGrants :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='purchase'
   AND source_id=$2::uuid::text AND event='grant'
 ORDER BY id LIMIT $3::int
@@ -1108,6 +1124,7 @@ func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOrigin
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -1120,7 +1137,7 @@ func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOrigin
 }
 
 const listRenewalGrantsForArchive = `-- name: ListRenewalGrantsForArchive :many
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id=$1::uuid AND source_type='subscription'
   AND source_id=$2::uuid::text AND event='grant'
   AND starts_at=$3::timestamptz
@@ -1168,6 +1185,7 @@ func (q *Queries) ListRenewalGrantsForArchive(ctx context.Context, arg ListRenew
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -1472,7 +1490,7 @@ func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngra
 }
 
 const listUnretractedTerminations = `-- name: ListUnretractedTerminations :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason FROM billing.grants g
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
   AND g.event = 'grant'
@@ -1535,6 +1553,7 @@ func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnret
 			&i.CreatedAt,
 			&i.Actor,
 			&i.GrantReason,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}

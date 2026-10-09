@@ -15,14 +15,14 @@ import (
 var (
 	// ErrTierChangeCycleUnknown: the target price has no positive billing
 	// cycle, so the reset period it would start is undefined.
-	ErrTierChangeCycleUnknown = &TierChangeError{Code: billing.CodeTierChangeCycleUnknown, Message: "target price has no positive billing cycle"}
+	ErrTierChangeCycleUnknown = &TierChangeError{Code: billing.CodeSubscriptionChangeCycleUnknown, Message: "target price has no positive billing cycle"}
 	// ErrTierChangePeriodUnknown: the subscription has no open current period
 	// to measure the old plan's unused value against.
-	ErrTierChangePeriodUnknown = &TierChangeError{Code: billing.CodeTierChangePeriodUnknown, Message: "subscription has no valid current period"}
+	ErrTierChangePeriodUnknown = &TierChangeError{Code: billing.CodeSubscriptionChangePeriodUnknown, Message: "subscription has no valid current period"}
 	// ErrTierChangeCreditExceedsPrice: the old plan's unused value is larger
 	// than the new plan's price. Model B has no stored balance to carry the
 	// excess, so the change is refused rather than forfeiting it.
-	ErrTierChangeCreditExceedsPrice = &TierChangeError{Code: billing.CodeTierChangeCreditExceedsPrice, Message: "unused value of the current plan exceeds the new plan's price; change at period end instead"}
+	ErrTierChangeCreditExceedsPrice = &TierChangeError{Code: billing.CodeSubscriptionChangeCreditExceedsPrice, Message: "unused value of the current plan exceeds the new plan's price; change at period end instead"}
 )
 
 // ModelBUpgrade is one reset-period upgrade: the subscription's current paid
@@ -126,6 +126,23 @@ func QuoteKeepBoundaryUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuot
 	return ModelBUpgradeQuote{Credit: credit, ChargeNow: max(share-credit, 0), PeriodStart: now, PeriodEnd: *u.PeriodEnd}, nil
 }
 
+// QuoteSeatIncrease prices added seats (their unit price × count) for the rest
+// of the period [start, end) from now, rounded down to a rail minor unit
+// (customer-favored).
+func QuoteSeatIncrease(added PriceAmount, start, end, now time.Time) (int64, error) {
+	if !end.After(start) {
+		return 0, ErrTierChangePeriodUnknown
+	}
+	if added.Micros < 0 {
+		return 0, errors.New("prices must be nonnegative")
+	}
+	from := now
+	if from.Before(start) {
+		from = start
+	}
+	return prorate(added, max(end.Sub(from), 0), end.Sub(start), false)
+}
+
 // prorate is amount × remaining / period in rail minor units, rounded up
 // (ceil) or down, widened back to internal units and capped at amount.
 func prorate(amount PriceAmount, remaining, period time.Duration, ceil bool) (int64, error) {
@@ -165,12 +182,12 @@ func abs(v int) int {
 // modelBUpgradeOf reads the upgrade inputs from the subscription's current
 // period on its current price and seats, and the target price's cycle at
 // quantity seats.
-func modelBUpgradeOf(sub *models.Subscription, current, target *models.Price, quantity int) (ModelBUpgrade, error) {
-	old, err := seatPriceAmount(current, sub.Quantity)
+func modelBUpgradeOf(sub *models.Subscription, current, target *models.Price, quantity *int) (ModelBUpgrade, error) {
+	old, err := seatPriceAmount(current, subscriptions.SeatCount(sub.Quantity))
 	if err != nil {
 		return ModelBUpgrade{}, err
 	}
-	next, err := seatPriceAmount(target, quantity)
+	next, err := seatPriceAmount(target, subscriptions.SeatCount(quantity))
 	if err != nil {
 		return ModelBUpgrade{}, err
 	}
@@ -192,7 +209,7 @@ func providerUpgradeOf(sub *models.Subscription, current, target *models.Price) 
 // seatPriceAmount is a price for quantity seats.
 func seatPriceAmount(p *models.Price, quantity int) (PriceAmount, error) {
 	amount := PriceAmountOf(p)
-	total, err := subscriptions.SeatAmount(amount.Micros, quantity)
+	total, err := subscriptions.Seats(amount.Micros, quantity)
 	amount.Micros = total
 	return amount, err
 }

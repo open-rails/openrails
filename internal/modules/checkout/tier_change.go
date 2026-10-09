@@ -13,10 +13,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-type TierChangeRequest struct {
-	PriceID        string    `json:"price_id"`
-	SubscriptionID uuid.UUID `json:"-"`
-	IdempotencyKey string    `json:"-"`
+// SubscriptionChangeRequest changes a subscription's price, seats or both.
+// PriceID "" keeps the price; Quantity nil keeps the seats. Staff changes
+// never charge: they wait for the next renewal.
+type SubscriptionChangeRequest struct {
+	PriceID        string
+	Quantity       *int
+	SubscriptionID uuid.UUID
+	IdempotencyKey string
+	Staff          bool
 }
 
 var (
@@ -105,14 +110,14 @@ func (e *TierChangeError) Is(target error) bool {
 // Idempotency-Key before anything is admitted or mutated: the key is the only
 // handle a client has to read back a lost response.
 func tierChangeKeyRequired() error {
-	return &TierChangeError{Code: billing.CodeTierChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
+	return &TierChangeError{Code: billing.CodeSubscriptionChangeIdempotencyKeyRequired, Message: "Idempotency-Key is required for a tier change"}
 }
 
 // tierChangeIdempotencyConflict refuses a key that already names a different
 // tier change (another customer, subscription or target). It never carries
 // that operation's result or identity.
 func tierChangeIdempotencyConflict() error {
-	return &TierChangeError{Code: billing.CodeTierChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
+	return &TierChangeError{Code: billing.CodeSubscriptionChangeIdempotencyConflict, Message: "Idempotency-Key already names a different tier change; use a new key"}
 }
 
 // TierChangeInFlightError: an unresolved tier change already owns the

@@ -491,7 +491,25 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			return h.projectInitialMembershipSession(ctx, d, current, p, success)
 
 		}
-		if success {
+		if success && p.Terms.Adds != nil {
+			transaction := ""
+			if paid {
+				transaction = receipt.TransactionID()
+			}
+			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"] = p.Terms.SubscriptionID.String(), "", transaction, "success"
+			evidence["message"] = fmt.Sprintf("Now %d seats", p.Terms.Quantity)
+			if receipt.ReversalKind() != "" {
+				// The provider already reversed the charge: no seats were bought.
+				evidence["message"] = "Payment reversed by the provider; seats unchanged"
+			} else if err := h.Checkout.Lifecycle.AddSeatsTx(ctx, d, p.Terms, models.Rail(in.Rail), transaction, p.Instrument.Custodian); err != nil {
+				return err
+			}
+			if paid {
+				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: transaction, PaymentID: &p.Terms.PaymentID}, h.Checkout.now()); err != nil {
+					return err
+				}
+			}
+		} else if success {
 			if p.Upgrade() {
 				if err := h.Checkout.Lifecycle.SupersedeForUpgradeTx(ctx, d, p.Terms, models.Rail(in.Rail)); err != nil {
 					return err
@@ -735,7 +753,7 @@ func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context
 func recordInitialAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p InitialMembershipPayload, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Terms.CustomerID, *in.PspID, in.Rail
 	a.Kind, a.Owner, a.At, a.Target, a.Step = attempts.Initial, attempts.OwnerOf(p.Terms.CollectionPolicy), at, p.Terms.PriceID.String(), "charge"
-	if p.Upgrade() {
+	if p.Change() {
 		a.Kind = attempts.Upgrade
 	}
 	a.Amount, a.Currency = p.Terms.Amount, p.Terms.Currency

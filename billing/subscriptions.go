@@ -53,10 +53,9 @@ type Subscription struct {
 	CustomerID CustomerID     `json:"customer_id"`
 	ProductID  ProductID      `json:"product_id"`
 	PriceID    PriceID        `json:"price_id"`
-	// Quantity is the seats each period bills: the price's unit amount times
-	// Quantity. Only an engine-owned NMI or Stripe subscription has more than
-	// one.
-	Quantity           int                `json:"quantity"`
+	// Quantity is the seats of a per-seat price: each period bills the unit
+	// amount times Quantity. Null unless the price is sold per seat.
+	Quantity           *int               `json:"quantity"`
 	PSPID              PSPID              `json:"psp_id"`
 	Rail               string             `json:"rail"`
 	RailSubscriptionID *string            `json:"rail_subscription_id"`

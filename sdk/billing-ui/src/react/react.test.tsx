@@ -219,7 +219,7 @@ describe("plan change", () => {
     const id = result.current.subscriptions![0].id
     server.fail[`POST /me/subscriptions/${id}/change-tier`] = apiError(
       409,
-      "tier_change_renewal_due"
+      "subscription_change_renewal_due"
     )
     const refused = await act(() =>
       result.current.changeTier(id, {
@@ -230,7 +230,7 @@ describe("plan change", () => {
     expect(isBillingError(refused)).toBe(true)
     expect(refused).toMatchObject({
       status: 409,
-      code: "tier_change_renewal_due",
+      code: "subscription_change_renewal_due",
     })
     expect(onChange).not.toHaveBeenCalled()
   })

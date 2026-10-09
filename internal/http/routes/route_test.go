@@ -242,7 +242,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	mount(edits, Permissions{AdminRead: "r", CatalogWrite: "e"})
 	mount(configuration, Permissions{MerchantConfig: "c"})
 	require.Contains(t, reads, "GET /v1/admin/payments")
-	require.Contains(t, reads, "POST /v1/admin/subscriptions/{id}/change-tier/preview", "a preview is a read")
+	require.Contains(t, reads, "POST /v1/admin/subscriptions/{id}/change/preview", "a preview is a read")
 	require.NotContains(t, reads, "POST /v1/admin/payments/{id}/refunds", "a write needs AdminWrite")
 	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds")
 	require.NotContains(t, staff, "POST /v1/admin/catalog/products")

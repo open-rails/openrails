@@ -141,21 +141,21 @@ func TestSecurityConcurrentUpgradesChargeOnce(t *testing.T) {
 		charges := len(w.railLedger(rail))
 		g := w.chargeGate(rail)
 		var first, racers sync.WaitGroup
-		change := func(wg *sync.WaitGroup, client *openrails.Client, target tier) {
+		change := func(wg *sync.WaitGroup, server string, target tier) {
 			defer wg.Done()
-			_, err := client.ChangeTier(context.WithoutCancel(t.Context()), sub, billing.ChangeTierParams{PriceID: target.ID, IdempotencyKey: "upgrade-" + uuid.NewString()})
+			_, err := c.changeAt(server, sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "upgrade-" + uuid.NewString()})
 			t.Logf("upgrade to %s: %v", target.ent, err)
 		}
 		first.Add(1)
-		go change(&first, w.client[embedded], plus)
+		go change(&first, w.server.URL, plus)
 		select {
 		case <-g.arrived:
 		case <-time.After(20 * time.Second):
 			t.Fatal("the first upgrade never reached the provider")
 		}
 		racers.Add(2)
-		go change(&racers, replica.client, pro)
-		go change(&racers, w.client[remote], pro)
+		go change(&racers, replica.server.URL, pro)
+		go change(&racers, w.server.URL, pro)
 		releaseAfterRacers(t, g, &racers)
 		first.Wait()
 		w.stripe.unhold()
@@ -194,9 +194,9 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 		target billing.PriceID
 	}{{sub, loose.ID}, {looseSub, basic.ID}} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].ChangeTier(t.Context(), tc.sub, billing.ChangeTierParams{PriceID: tc.target, IdempotencyKey: "cross-" + uuid.NewString()})
+			_, err := w.client[tp].ChangeSubscription(t.Context(), tc.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(tc.target), IdempotencyKey: "cross-" + uuid.NewString()})
 			require.Error(t, err)
-			_, err = w.client[tp].PreviewTierChange(t.Context(), tc.sub, billing.ChangeTierParams{PriceID: tc.target})
+			_, err = w.client[tp].PreviewSubscriptionChange(t.Context(), tc.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(tc.target)})
 			require.Error(t, err)
 		}
 	}
@@ -220,7 +220,7 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	bot := w.auth.apiKeyToken(t, c.id)
 	charges := len(w.railLedger("nmi"))
 
-	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
+	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
 	// An automation credential cannot mint a session that pays with the
 	// customer's saved card.
@@ -230,7 +230,7 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	require.Len(t, w.railLedger("nmi"), charges, "no charge from an automation credential")
 	require.False(t, c.entitled("content:post"))
 
-	status, body = w.callAt(self.server.URL, c.token, http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", "user-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
+	status, body = w.callAt(self.server.URL, c.token, http.MethodPost, "/subscriptions/"+sub.String()+"/change", "user-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
 	require.Less(t, status, 300, "%v", body)
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges+1, "the customer's own session upgrades")

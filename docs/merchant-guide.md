@@ -188,7 +188,7 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   billing date. Finite windows expire by the clock; null means no scheduled expiry.
   Normal cancellation stops future billing and preserves purchased windows.
   Refunds or explicit revocations can remove access.
-- Tier changes go through `POST /v1/me/subscriptions/{id}/change-tier` (target price
+- Tier changes go through `POST /v1/me/subscriptions/{id}/change` (target price
   must share the tier group). Stripe and NMI upgrade immediately with proration;
   downgrades are scheduled for period end (`delayed_start`, `effective:
   "period_end"`), with no refund. On engine-owned subscriptions the upgrade is one
@@ -204,9 +204,9 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
   time left / current period length`, measured on the subscription's actual current
   period to the nanosecond and rounded once, up to a whole minor unit (never above
   what was paid). Cadences may differ (1h → 30d, 30d → 7d, 90d → 365d). Refusals
-  are typed: `422 tier_change_cycle_unknown` (target has no positive cycle),
-  `422 tier_change_period_unknown` (no valid current period) and `409
-  tier_change_credit_exceeds_price` (the unused credit is larger than the target
+  are typed: `422 subscription_change_cycle_unknown` (target has no positive cycle),
+  `422 subscription_change_period_unknown` (no valid current period) and `409
+  subscription_change_credit_exceeds_price` (the unused credit is larger than the target
   price, e.g. a monthly plan early in its period moving to a cheaper weekly one;
   credit is never forfeited — change at period end instead).
 

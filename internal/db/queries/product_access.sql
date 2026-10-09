@@ -5,11 +5,11 @@
 -- name: MaterializeProductAccess :exec
 -- Concurrent replay of one immutable grant cannot duplicate its projection.
 INSERT INTO billing.product_access (
-    merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at
+    merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, quantity
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(product_id)::uuid, sqlc.arg(grant_id)::uuid,
     sqlc.arg(source_type)::text, sqlc.arg(source_id)::text, sqlc.narg(payment_id)::uuid,
-    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz
+    sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz, sqlc.narg(quantity)::int
 )
 ON CONFLICT (merchant_id, grant_id) WHERE deleted_at IS NULL DO NOTHING;
 
@@ -241,36 +241,35 @@ WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
 -- name: CheckProductAccess :many
--- Whether the customer holds each product at at: one indexed probe each (a
--- LATERAL with LIMIT, which the planner cannot turn into a scan of every
--- window the customer holds).
-SELECT candidate.product_id::uuid AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+-- Whether the customer holds each product at at, and the most seats a live
+-- window gives: one indexed range of the customer's windows of each product.
+SELECT candidate.product_id::uuid AS product_id, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id)
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_access pa
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
       AND pa.product_id = candidate.product_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-    LIMIT 1
-) held ON true;
+) held;
 
 -- name: CheckProductAccessKeys :many
 -- Resolve product keys and current access in one bounded query. Archived
 -- products stay readable for their holders.
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest(sqlc.arg(product_keys)::text[]) AS candidate(product_key)
 LEFT JOIN billing.products p ON p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.key = candidate.product_key
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_access pa
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
       AND pa.product_id = p.id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-    LIMIT 1
-) held ON true;
+) held;
 
 -- name: HasPermanentProductAccess :one
 -- Whether the customer holds the product indefinitely from at on.

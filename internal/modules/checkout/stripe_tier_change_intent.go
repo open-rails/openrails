@@ -770,8 +770,8 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 	subID := billing.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Action: p.Action, PriceID: billing.PriceID(p.PriceID),
-		Rail: string(models.RailStripe), SubscriptionID: &subID,
+		PriceID: billing.PriceID(p.PriceID),
+		Rail:    string(models.RailStripe), SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: billing.PaymentOperationID(in.ID), Effective: effectiveOf(p.Action),
 	}
@@ -794,14 +794,14 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 		}
 		if p.Action == "downgrade" {
 			resp.DelayedStart = &end
-			resp.Message = fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", p.ProductName, end.UTC().Format("January 2, 2006"))
+			resp.Message = fmt.Sprintf("Change to %s scheduled. The current plan stays active until %s.", p.ProductName, end.UTC().Format("January 2, 2006"))
 		} else {
 			resp.Message = "Plan updated"
 		}
 		return resp, nil
 	case intents.StatusFailedTerminal:
 		// Stripe's own 402 is a decline; any other refusal, or an operator
-		// closure, is tier_change_refused.
+		// closure, is subscription_change_refused.
 		var progress stripeTierChangeProgress
 		_ = json.Unmarshal(in.ResultEvidence, &progress)
 		if step := progress.refused(); step != nil {

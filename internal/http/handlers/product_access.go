@@ -34,7 +34,7 @@ func productAccessGrant(row gen.ListProductAccessPageRow, now time.Time) billing
 		ProductID: billing.ProductID(row.ProductID), ProductKey: row.ProductKey, ProductName: row.ProductName,
 		SourceType: billing.ProductAccessSourceType(row.SourceType), SourceID: billing.SourceRef(row.SourceType, row.SourceID),
 		StartsAt: row.StartsAt, EndsAt: row.EndsAt, RevokedAt: row.RevokedAt, RevokeReason: row.RevokeReason,
-		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Quantity: models.DerefIntPtr(row.Quantity),
 	}
 	if row.PaymentID != nil {
 		pid := billing.PaymentID(*row.PaymentID)
@@ -206,7 +206,7 @@ func CheckProductAccess(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	access := map[string]bool{}
+	access, quantities := map[string]bool{}, map[string]*int{}
 	if req.ProductKeys != nil {
 		decisions, err := svc.CheckProductKeys(r.Request.Context(), customer.String(), req.ProductKeys)
 		if err != nil {
@@ -214,7 +214,7 @@ func CheckProductAccess(r *httprequest.Request) {
 			return
 		}
 		for key, decision := range decisions {
-			access[key] = decision.HasAccess
+			access[key], quantities[key] = decision.HasAccess, decision.Quantity
 		}
 	} else {
 		decisions, err := svc.CheckProducts(r.Request.Context(), customer.String(), products)
@@ -222,11 +222,12 @@ func CheckProductAccess(r *httprequest.Request) {
 			r.InternalError("failed to check product access", err)
 			return
 		}
-		for id, has := range decisions {
-			access[billing.ProductID(id).String()] = has
+		for id, decision := range decisions {
+			key := billing.ProductID(id).String()
+			access[key], quantities[key] = decision.HasAccess, decision.Quantity
 		}
 	}
-	r.SuccessJSON(billing.ProductAccessCheck{Access: access})
+	r.SuccessJSON(billing.ProductAccessCheck{Access: access, Quantities: quantities})
 }
 
 // CreateProductAccess grants a batch of products free, across any customers,

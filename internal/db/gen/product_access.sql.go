@@ -24,17 +24,17 @@ func (q *Queries) AcquireAccessTimelineLock(ctx context.Context, key int64) erro
 }
 
 const checkProductAccess = `-- name: CheckProductAccess :many
-SELECT candidate.product_id::uuid AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+SELECT candidate.product_id::uuid AS product_id, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest($1::uuid[]) AS candidate(product_id)
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_access pa
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
       AND pa.product_id = candidate.product_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= $4::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-    LIMIT 1
-) held ON true
+) held
 `
 
 type CheckProductAccessParams struct {
@@ -47,11 +47,11 @@ type CheckProductAccessParams struct {
 type CheckProductAccessRow struct {
 	ProductID uuid.UUID
 	HasAccess bool
+	Quantity  int32
 }
 
-// Whether the customer holds each product at at: one indexed probe each (a
-// LATERAL with LIMIT, which the planner cannot turn into a scan of every
-// window the customer holds).
+// Whether the customer holds each product at at, and the most seats a live
+// window gives: one indexed range of the customer's windows of each product.
 func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccessParams) ([]CheckProductAccessRow, error) {
 	rows, err := q.db.Query(ctx, checkProductAccess,
 		arg.ProductIds,
@@ -66,7 +66,7 @@ func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccess
 	var items []CheckProductAccessRow
 	for rows.Next() {
 		var i CheckProductAccessRow
-		if err := rows.Scan(&i.ProductID, &i.HasAccess); err != nil {
+		if err := rows.Scan(&i.ProductID, &i.HasAccess, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -78,18 +78,18 @@ func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccess
 }
 
 const checkProductAccessKeys = `-- name: CheckProductAccessKeys :many
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.found IS NOT NULL)::boolean AS has_access
+SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest($1::text[]) AS candidate(product_key)
 LEFT JOIN billing.products p ON p.merchant_id = $2::uuid AND p.key = candidate.product_key
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_access pa
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
       AND pa.product_id = p.id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= $4::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-    LIMIT 1
-) held ON true
+) held
 `
 
 type CheckProductAccessKeysParams struct {
@@ -103,6 +103,7 @@ type CheckProductAccessKeysRow struct {
 	ProductKey string
 	ProductID  *uuid.UUID
 	HasAccess  bool
+	Quantity   int32
 }
 
 // Resolve product keys and current access in one bounded query. Archived
@@ -121,7 +122,12 @@ func (q *Queries) CheckProductAccessKeys(ctx context.Context, arg CheckProductAc
 	var items []CheckProductAccessKeysRow
 	for rows.Next() {
 		var i CheckProductAccessKeysRow
-		if err := rows.Scan(&i.ProductKey, &i.ProductID, &i.HasAccess); err != nil {
+		if err := rows.Scan(
+			&i.ProductKey,
+			&i.ProductID,
+			&i.HasAccess,
+			&i.Quantity,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -262,7 +268,7 @@ func (q *Queries) GetLatestLiveProductEnd(ctx context.Context, arg GetLatestLive
 }
 
 const getLatestProductAccessBySource = `-- name: GetLatestProductAccessBySource :one
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access
+SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND product_id = $3::uuid
@@ -307,12 +313,13 @@ func (q *Queries) GetLatestProductAccessBySource(ctx context.Context, arg GetLat
 		&i.DestructiveRunClass,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Quantity,
 	)
 	return i, err
 }
 
 const getProductAccessByGrant = `-- name: GetProductAccessByGrant :one
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access
+SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access
 WHERE merchant_id = $1::uuid AND grant_id = $2::uuid AND deleted_at IS NULL
 `
 
@@ -342,12 +349,13 @@ func (q *Queries) GetProductAccessByGrant(ctx context.Context, arg GetProductAcc
 		&i.DestructiveRunClass,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Quantity,
 	)
 	return i, err
 }
 
 const getProductAccessByID = `-- name: GetProductAccessByID :one
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access
+SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access
 WHERE merchant_id = $1::uuid AND id = $2::uuid AND deleted_at IS NULL
 `
 
@@ -377,6 +385,7 @@ func (q *Queries) GetProductAccessByID(ctx context.Context, arg GetProductAccess
 		&i.DestructiveRunClass,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -412,7 +421,7 @@ func (q *Queries) HasPermanentProductAccess(ctx context.Context, arg HasPermanen
 }
 
 const listCustomerProductAccessByIDs = `-- name: ListCustomerProductAccessByIDs :many
-SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
+SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, pa.quantity, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
 FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
@@ -445,6 +454,7 @@ type ListCustomerProductAccessByIDsRow struct {
 	DestructiveRunClass *string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	Quantity            *int32
 	ProductKey          string
 	ProductName         string
 	GrantReason         *string
@@ -480,6 +490,7 @@ func (q *Queries) ListCustomerProductAccessByIDs(ctx context.Context, arg ListCu
 			&i.DestructiveRunClass,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Quantity,
 			&i.ProductKey,
 			&i.ProductName,
 			&i.GrantReason,
@@ -497,7 +508,7 @@ func (q *Queries) ListCustomerProductAccessByIDs(ctx context.Context, arg ListCu
 }
 
 const listLiveAccessBySubscriptions = `-- name: ListLiveAccessBySubscriptions :many
-SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access pa
+SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access pa
 WHERE pa.merchant_id = $1::uuid
   AND pa.source_type IN ('subscription', 'grace') AND pa.source_id = ANY($2::text[])
   AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
@@ -540,6 +551,7 @@ func (q *Queries) ListLiveAccessBySubscriptions(ctx context.Context, arg ListLiv
 			&i.DestructiveRunClass,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Quantity,
 		); err != nil {
 			return nil, err
 		}
@@ -587,7 +599,7 @@ func (q *Queries) ListLiveProductsBySource(ctx context.Context, arg ListLiveProd
 }
 
 const listProductAccessPage = `-- name: ListProductAccessPage :many
-SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
+SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, pa.quantity, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
 FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
@@ -628,6 +640,7 @@ type ListProductAccessPageRow struct {
 	DestructiveRunClass *string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	Quantity            *int32
 	ProductKey          string
 	ProductName         string
 	GrantReason         *string
@@ -671,6 +684,7 @@ func (q *Queries) ListProductAccessPage(ctx context.Context, arg ListProductAcce
 			&i.DestructiveRunClass,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Quantity,
 			&i.ProductKey,
 			&i.ProductName,
 			&i.GrantReason,
@@ -688,7 +702,7 @@ func (q *Queries) ListProductAccessPage(ctx context.Context, arg ListProductAcce
 }
 
 const listProductAccessViews = `-- name: ListProductAccessViews :many
-SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
+SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, pa.quantity, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
 FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
@@ -718,6 +732,7 @@ type ListProductAccessViewsRow struct {
 	DestructiveRunClass *string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	Quantity            *int32
 	ProductKey          string
 	ProductName         string
 	GrantReason         *string
@@ -752,6 +767,7 @@ func (q *Queries) ListProductAccessViews(ctx context.Context, arg ListProductAcc
 			&i.DestructiveRunClass,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Quantity,
 			&i.ProductKey,
 			&i.ProductName,
 			&i.GrantReason,
@@ -771,11 +787,11 @@ func (q *Queries) ListProductAccessViews(ctx context.Context, arg ListProductAcc
 const materializeProductAccess = `-- name: MaterializeProductAccess :exec
 
 INSERT INTO billing.product_access (
-    merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at
+    merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, quantity
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::uuid,
-    $8::timestamptz, $9::timestamptz
+    $8::timestamptz, $9::timestamptz, $10::int
 )
 ON CONFLICT (merchant_id, grant_id) WHERE deleted_at IS NULL DO NOTHING
 `
@@ -790,6 +806,7 @@ type MaterializeProductAccessParams struct {
 	PaymentID  *uuid.UUID
 	StartsAt   time.Time
 	EndsAt     *time.Time
+	Quantity   *int32
 }
 
 // billing.product_access: the product windows customers hold, projected from
@@ -807,6 +824,7 @@ func (q *Queries) MaterializeProductAccess(ctx context.Context, arg MaterializeP
 		arg.PaymentID,
 		arg.StartsAt,
 		arg.EndsAt,
+		arg.Quantity,
 	)
 	return err
 }

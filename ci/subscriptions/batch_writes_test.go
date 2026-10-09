@@ -64,7 +64,7 @@ func TestProductAccessGrantBatches(t *testing.T) {
 	for _, c := range []*customer{a, b} {
 		access, err := w.client[embedded].CheckProductAccess(t.Context(), c.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{price.ProductID}})
 		require.NoError(t, err)
-		require.True(t, access[price.ProductID.String()])
+		require.True(t, access.Access[price.ProductID.String()])
 	}
 	_, err = w.client[embedded].CheckProductAccess(t.Context(), a.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{}})
 	require.ErrorIs(t, err, billing.ErrInvalid, "a check names at least one product")

@@ -369,7 +369,7 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 }
 
 const getInvoicePayment = `-- name: GetInvoicePayment :one
-SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, invoice_id, ledger_transfer_id FROM billing.payments
+SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, invoice_id, ledger_transfer_id, quantity FROM billing.payments
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND invoice_id = $3::uuid AND id = $4::uuid
 `
@@ -425,6 +425,7 @@ func (q *Queries) GetInvoicePayment(ctx context.Context, arg GetInvoicePaymentPa
 		&i.OrderID,
 		&i.InvoiceID,
 		&i.LedgerTransferID,
+		&i.Quantity,
 	)
 	return i, err
 }

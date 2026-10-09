@@ -193,7 +193,7 @@ func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (b
 	err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		gl := grants.New(gen.New(tx), tid.UUID())
 		gl.SetClock(w.now)
-		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.ProductID, grants.Subscription, a.StartsAt, a.EndsAt)
+		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.ProductID, grants.Subscription, a.StartsAt, a.EndsAt, nil)
 		return err
 	})
 	return granted, err
@@ -209,9 +209,7 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	if err != nil {
 		return MaterializeResult{}, err
 	}
-	// A provider-owned subscription bills one seat.
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		Quantity:           1,
 		MerchantID:         tid.UUID(),
 		Status:             string(a.Status),
 		Rail:               a.Rail,

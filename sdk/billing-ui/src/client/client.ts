@@ -399,7 +399,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * Moves the subscription to another price of its tier group: an upgrade
      * charges the saved card now, a downgrade applies at period end.
      * `idempotencyKey` identifies this attempt; reuse it until the change
-     * resolves (`processing`, a `tier_change_in_flight` refusal or a lost
+     * resolves (`processing`, a `subscription_change_in_flight` refusal or a lost
      * response) so the stored result replays instead of charging twice. A
      * wallet next action (Solana) is completed with `signWalletAction` and
      * the change repeated with `signature`.

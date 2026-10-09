@@ -54,8 +54,11 @@ type CheckEntitlementsParams struct {
 
 // EntitlementCheck answers every requested key, and every requested prefix in
 // Held ({} when none was asked).
+// Quantities answers every requested key with the most seats a held per-seat
+// product grants it: null when it is not held per seat. Prefixes carry none.
 type EntitlementCheck struct {
 	Entitlements map[string]bool             `json:"entitlements"`
+	Quantities   map[string]*int             `json:"quantities"`
 	Held         map[string]HeldEntitlements `json:"held"`
 }
 
@@ -144,24 +147,27 @@ const (
 // idempotency key of a free grant). GrantReason, GrantedBy and Note are set
 // for a free grant.
 type ProductAccessGrant struct {
-	ID           ProductAccessID         `json:"id"`
-	CustomerID   CustomerID              `json:"customer_id"`
-	ProductID    ProductID               `json:"product_id"`
-	ProductKey   string                  `json:"product_key"`
-	ProductName  string                  `json:"product_name"`
-	SourceType   ProductAccessSourceType `json:"source_type"`
-	SourceID     string                  `json:"source_id"`
-	PaymentID    *PaymentID              `json:"payment_id"`
-	GrantReason  *GrantReason            `json:"grant_reason"`
-	GrantedBy    *string                 `json:"granted_by"`
-	Note         *string                 `json:"note"`
-	Status       string                  `json:"status"`
-	StartsAt     time.Time               `json:"starts_at"`
-	EndsAt       *time.Time              `json:"ends_at"`
-	RevokedAt    *time.Time              `json:"revoked_at"`
-	RevokeReason *string                 `json:"revoke_reason"`
-	CreatedAt    time.Time               `json:"created_at"`
-	UpdatedAt    time.Time               `json:"updated_at"`
+	ID          ProductAccessID         `json:"id"`
+	CustomerID  CustomerID              `json:"customer_id"`
+	ProductID   ProductID               `json:"product_id"`
+	ProductKey  string                  `json:"product_key"`
+	ProductName string                  `json:"product_name"`
+	SourceType  ProductAccessSourceType `json:"source_type"`
+	SourceID    string                  `json:"source_id"`
+	PaymentID   *PaymentID              `json:"payment_id"`
+	// Quantity is the seats the window gives: its per-seat subscription's;
+	// null otherwise.
+	Quantity     *int         `json:"quantity"`
+	GrantReason  *GrantReason `json:"grant_reason"`
+	GrantedBy    *string      `json:"granted_by"`
+	Note         *string      `json:"note"`
+	Status       string       `json:"status"`
+	StartsAt     time.Time    `json:"starts_at"`
+	EndsAt       *time.Time   `json:"ends_at"`
+	RevokedAt    *time.Time   `json:"revoked_at"`
+	RevokeReason *string      `json:"revoke_reason"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 // MaxProductAccessChecks bounds one product-access check.
@@ -175,9 +181,11 @@ type CheckProductAccessParams struct {
 }
 
 // ProductAccessCheck answers every requested product, keyed by the id or key
-// the request named.
+// the request named: whether the customer holds it, and the most seats a live
+// window gives (null when not held per seat).
 type ProductAccessCheck struct {
-	Access map[string]bool `json:"access"`
+	Access     map[string]bool `json:"access"`
+	Quantities map[string]*int `json:"quantities"`
 }
 
 // CreateProductAccessParams grants a customer a product free. At most one of

@@ -249,7 +249,7 @@ OpenRails.
    plan, so such a schedule switches `plan_id` to the target price's linked NMI
    plan, which must exist on the account with the target's exact amount and
    cycle; otherwise the change is refused before any charge with
-   `409 tier_change_requires_linked_plan`. Link each tier price of a named-plan
+   `409 subscription_change_requires_linked_plan`. Link each tier price of a named-plan
    book to its NMI plan (price `psp_links` `plan_id`) before offering tier
    changes. An upgrade charges now the
    new price's share of the time left to E less the old price's unused credit,
@@ -259,7 +259,7 @@ OpenRails.
    second charge). A downgrade charges nothing, updates the schedule amount
    now (NMI applies it from the next charge) and the mirrored renewal at E
    opens the lower tier. Another billing cycle answers
-   `409 tier_change_cadence_unsupported`; drift checks expect these amounts.
+   `409 subscription_change_cadence_unsupported`; drift checks expect these amounts.
    A stuck update (`life.tier_change.provider_update_stuck`, e.g. an upgrade
    admitted by v0.178.0 on a named-plan schedule) re-reads the schedule on
    every retry: link the target price to an NMI plan of its amount and cycle

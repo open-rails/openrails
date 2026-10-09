@@ -5,14 +5,14 @@
 -- name: InsertGrant :one
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason, quantity
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(product_id)::uuid,
     sqlc.arg(kind)::text, sqlc.arg(source_type)::text, NULLIF(sqlc.arg(source_id)::text, ''), sqlc.narg(payment_id)::uuid,
     sqlc.arg(event)::text, sqlc.narg(supersedes_id)::uuid, sqlc.narg(spec_snapshot)::jsonb,
     sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
     sqlc.narg(amount)::bigint, sqlc.narg(currency)::text, sqlc.narg(reason)::text,
-    sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text
+    sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text, sqlc.narg(quantity)::int
 )
 RETURNING *;
 
@@ -21,12 +21,12 @@ RETURNING *;
 -- reads the recorded grant.
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, starts_at, ends_at, reason, actor, grant_reason
+    event, starts_at, ends_at, reason, actor, grant_reason, quantity
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(product_id)::uuid,
     'access', sqlc.arg(source_type)::text, sqlc.arg(source_id)::text, sqlc.narg(payment_id)::uuid,
     'grant', sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
-    sqlc.narg(reason)::text, sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text
+    sqlc.narg(reason)::text, sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text, sqlc.narg(quantity)::int
 )
 ON CONFLICT DO NOTHING
 RETURNING *;

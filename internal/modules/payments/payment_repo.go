@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -98,6 +99,14 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	if p.PriceID != uuid.Nil {
 		price = &p.PriceID
 	}
+	var quantity *int32
+	if p.Quantity != nil {
+		if *p.Quantity < 1 || *p.Quantity > math.MaxInt32 {
+			return gen.CreatePaymentParams{}, fmt.Errorf("payment quantity %d is out of range", *p.Quantity)
+		}
+		q := int32(*p.Quantity) // #nosec G115 -- range checked above
+		quantity = &q
+	}
 	return gen.CreatePaymentParams{
 		ID:                  p.ID,
 		PriceID:             price,
@@ -129,6 +138,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
 		InvoiceID:           p.InvoiceID,
+		Quantity:            quantity,
 	}, nil
 }
 

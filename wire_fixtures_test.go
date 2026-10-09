@@ -119,7 +119,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 	scheduled.ID, scheduled.Key = scheduledPriceFixture, "pro-annual"
 	return billing.Subscription{
 		CollectionPolicy: "nmi_schedule",
-		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, Quantity: 1, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
+		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
 		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "past_due", PaymentMethodID: &methodFixture,
 		Dunning:   &billing.SubscriptionDunning{Attempts: 2, RetriesLeft: ptr(3), NextRetryAt: &when, FinalRetryAt: &when, LastFailureReason: ptr(billing.DeclineInsufficientFunds)},
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,

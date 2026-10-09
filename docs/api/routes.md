@@ -58,8 +58,8 @@ A customer acting on its own account.
 | GET | `/v1/me/subscriptions` | customer | — | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/me/subscriptions/{id}` | customer | — | — | 200 `Subscription` |  |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowParams` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` |  |
-| POST | `/v1/me/subscriptions/{id}/change-tier` | customer | — | `CustomerChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | `Idempotency-Key` |
-| POST | `/v1/me/subscriptions/{id}/change-tier/preview` | customer | — | `ChangeTierParams` | 200 `TierChangePreview` |  |
+| POST | `/v1/me/subscriptions/{id}/change` | customer | — | `CustomerChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | `Idempotency-Key` |
+| POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` |  |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` |  |
@@ -114,8 +114,8 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `AdminRead` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `AdminWrite` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
 | POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `AdminWrite` | — | 200 `Subscription` | sensitive |
-| POST | `/v1/admin/subscriptions/{id}/change-tier` | merchant | `AdminWrite` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| POST | `/v1/admin/subscriptions/{id}/change-tier/preview` | merchant | `AdminRead` | `ChangeTierParams` | 200 `TierChangePreview` |  |
+| POST | `/v1/admin/subscriptions/{id}/change` | merchant | `AdminWrite` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `AdminRead` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
 | PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `AdminWrite` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
 | POST | `/v1/admin/price-migrations` | merchant | `AdminWrite` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive |
 | POST | `/v1/admin/price-migrations/preview` | merchant | `AdminRead` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |

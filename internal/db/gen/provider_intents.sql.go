@@ -1627,7 +1627,9 @@ SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id
 WHERE merchant_id=$1::uuid AND status='succeeded'
   AND ((intent_type='initial_membership'
         AND payload->'terms'->>'subscription_id'=$2::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz)
+        AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz
+        -- A seat increase changes the agreement's seats, not its price.
+        AND NOT payload->'terms' ? 'adds')
     OR (intent_type='subscription_collection'
         AND subscription_id=$2::uuid
         AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz)

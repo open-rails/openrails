@@ -58,7 +58,7 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 			Kind: attempts.Rebill, Owner: owner, ProviderSchedule: true, ObservedVia: via,
 			Approved: t.Success, Answer: answer,
 			TransactionID: t.TransactionID, Amount: amount, Currency: currency, At: t.OccurredAt,
-			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due}, PaymentMethodID: sub.PaymentMethodID,
+			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due, Quantity: sub.Quantity}, PaymentMethodID: sub.PaymentMethodID,
 		}
 		if owner == attempts.OwnerNMISchedule {
 			a.TokenType = charge.TokenTypePSPToken

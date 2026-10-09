@@ -163,7 +163,7 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			require.False(t, next.entitled("post:202"))
 			access, err := client.CheckProductAccess(t.Context(), customer.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
 			require.NoError(t, err)
-			require.True(t, access[product.ID.String()], "the customer still holds the product")
+			require.True(t, access.Access[product.ID.String()], "the customer still holds the product")
 		})
 	}
 }

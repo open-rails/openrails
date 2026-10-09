@@ -283,7 +283,7 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 	got := render(t, func(r *httprequest.Request) {
 		writeChangeTierError(r, &checkout.TierChangeInFlightError{OperationID: op})
 	})
-	require.Equal(t, []any{409, billing.CodeTierChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
+	require.Equal(t, []any{409, billing.CodeSubscriptionChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
 
 	got = render(t, func(r *httprequest.Request) {
 		writeChangeTierError(r, &checkout.TierChangeDeclinedError{Rail: "stripe", FailureCode: "insufficient_funds", Message: "raw provider text"})
@@ -293,11 +293,11 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 
 	// A tier change refusal's code fixes its status.
 	for code, status := range map[string]int{
-		billing.CodeTierChangeRefused:           409,
-		billing.CodeTierChangeTargetInactive:    422,
-		billing.CodeTierChangeUnsupportedOnRail: 400,
-		billing.CodeTierChangeProviderConflict:  409,
-		billing.CodeCustomerActionRequired:      403,
+		billing.CodeSubscriptionChangeRefused:           409,
+		billing.CodeSubscriptionChangeTargetInactive:    422,
+		billing.CodeSubscriptionChangeUnsupportedOnRail: 400,
+		billing.CodeSubscriptionChangeProviderConflict:  409,
+		billing.CodeCustomerActionRequired:              403,
 	} {
 		got = render(t, func(r *httprequest.Request) {
 			writeChangeTierError(r, &checkout.TierChangeError{Code: code, Message: "x"})

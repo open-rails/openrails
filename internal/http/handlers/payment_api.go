@@ -43,6 +43,7 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		AmountRefunded: amountRefunded,
 		Currency:       p.Currency,
 		CustomerID:     billing.CustomerID(p.CustomerID),
+		Quantity:       p.Quantity,
 		Channel:        billing.ChannelRail,
 		TransactionID:  p.TransactionID,
 		CreatedAt:      p.CreatedAt,

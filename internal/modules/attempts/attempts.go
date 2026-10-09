@@ -7,6 +7,7 @@ package attempts
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -114,6 +115,8 @@ type Attempt struct {
 type Cycle struct {
 	SubscriptionID uuid.UUID
 	DueAt          time.Time
+	// Quantity is the seats the cycle bills; nil unless per seat.
+	Quantity *int
 }
 
 // RebillKind is a cycle charge's kind: the customer paying now, the cycle's
@@ -210,12 +213,13 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 		row.ResponseCode = optional(verdict.Code)
 	}
 	if a.Cycle != nil {
-		if row.Currency == nil || row.Owner == string(OwnerNone) {
+		if row.Currency == nil || row.Owner == string(OwnerNone) || a.Cycle.Quantity != nil && (*a.Cycle.Quantity < 1 || *a.Cycle.Quantity > math.MaxInt32) {
 			return errors.New("attempt: a rebill needs its currency and owner")
 		}
 		cycle, err := q.UpsertRebillCycle(ctx, gen.UpsertRebillCycleParams{
 			ID: uuidutil.NewV7(), MerchantID: a.MerchantID, SubscriptionID: a.Cycle.SubscriptionID, CustomerID: a.CustomerID, PspID: a.PSPID,
 			Rail: rail, Owner: row.Owner, DueAt: a.Cycle.DueAt.UTC(), Amount: a.Amount, Currency: *row.Currency,
+			Quantity: models.IntPtrTo32(a.Cycle.Quantity),
 		})
 		if err != nil {
 			return err

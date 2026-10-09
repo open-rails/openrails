@@ -334,6 +334,9 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.Custo
 	if out.Entitlements == nil {
 		out.Entitlements = map[string]bool{}
 	}
+	if out.Quantities == nil {
+		out.Quantities = map[string]*int{}
+	}
 	if out.Held == nil {
 		out.Held = map[string]billing.HeldEntitlements{}
 	}

@@ -20,12 +20,12 @@ import (
 )
 
 // A durable tier change — an NMI upgrade (nmi_upgrade_intent.go) or a Stripe
-// tier change (stripe_tier_change_intent.go) — answers the change-tier routes
+// tier change (stripe_tier_change_intent.go) — answers the change routes
 // with one contract on every rail: the request's Idempotency-Key names the
 // operation and replays its stored result; an unresolved provider outcome
 // answers "processing" (HTTP 202) with operation_id; another key while one is
-// unresolved is refused tier_change_in_flight naming it; a terminal operation
-// is a coded tier_change_refused.
+// unresolved is refused subscription_change_in_flight naming it; a terminal operation
+// is a coded subscription_change_refused.
 
 // tierChangeSubjectConstraint is the one-unresolved-tier-change-per-
 // subscription unique index shared by every durable tier change type.
@@ -58,6 +58,7 @@ type tierChangeSubject struct {
 	SubscriptionID uuid.UUID
 	RequestedPrice string
 	PriceID        uuid.UUID
+	Quantity       *int
 }
 
 func nmiUpgradeSubject(p subscriptions.NMIUpgradePayload) tierChangeSubject {
@@ -87,8 +88,8 @@ func decodeTierChangeSubject(in gen.BillingProviderIntent) (tierChangeSubject, e
 		if err != nil {
 			return tierChangeSubject{}, err
 		}
-		if p.Upgrade() {
-			return tierChangeSubject{UserID: p.Terms.CustomerID.String(), SubscriptionID: p.Terms.Replaces.SubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.Terms.PriceID}, nil
+		if changed, ok := p.Terms.Changed(); ok {
+			return tierChangeSubject{UserID: p.Terms.CustomerID.String(), SubscriptionID: changed, RequestedPrice: p.RequestedPrice, PriceID: p.Terms.PriceID, Quantity: p.Terms.Quantity}, nil
 		}
 	}
 	return tierChangeSubject{}, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
@@ -101,7 +102,7 @@ func decodeTierChangeSubject(in gen.BillingProviderIntent) (tierChangeSubject, e
 // customer, subscription or target.
 func tierChangeOwnedBy(row gen.BillingProviderIntent, want tierChangeSubject) error {
 	got, err := decodeTierChangeSubject(row)
-	if err != nil || !sameCustomer(got.UserID, want.UserID) || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
+	if err != nil || !sameCustomer(got.UserID, want.UserID) || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID || !subscriptions.SameQuantity(got.Quantity, want.Quantity) {
 		return tierChangeIdempotencyConflict()
 	}
 	return nil
@@ -113,7 +114,7 @@ func tierChangeOwnedBy(row gen.BillingProviderIntent, want tierChangeSubject) er
 // key is new. A tier change without a key is refused here, before any
 // admission or mutation: the key is the client's only handle on a lost
 // response.
-func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, false, tierChangeKeyRequired()
 	}
@@ -140,7 +141,7 @@ func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeR
 // replayTierChangeOperation answers a request that names an existing
 // operation: its stored result, or its live state after claiming committed
 // work that is still runnable. The frozen payload is never refreshed.
-func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.BillingProviderIntent, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.BillingProviderIntent, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
 	subject, err := decodeTierChangeSubject(in)
 	if err != nil {
 		return nil, err
@@ -148,7 +149,8 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 	price := strings.TrimSpace(req.PriceID)
 	if user == nil || !sameCustomer(subject.UserID, user.ID) ||
 		(req.SubscriptionID != uuid.Nil && req.SubscriptionID != subject.SubscriptionID) ||
-		(price != subject.RequestedPrice && price != billing.PriceID(subject.PriceID).String()) {
+		(price != subject.RequestedPrice && (price == "" || price != billing.PriceID(subject.PriceID).String())) ||
+		(req.Quantity != nil && !subscriptions.SameQuantity(req.Quantity, subject.Quantity)) {
 		return nil, tierChangeIdempotencyConflict()
 	}
 	if s.Intents != nil && (in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable) {
@@ -171,23 +173,32 @@ func tierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, erro
 	case TypeStripeTierChange:
 		return stripeTierChangeResponse(in)
 	case TypeInitialMembership:
-		return engineUpgradeTierChangeResponse(in)
+		return engineChangeResponse(in)
 	}
 	return nil, fmt.Errorf("intent %s (%s) is not a tier change", in.ID, in.IntentType)
+}
+
+// effectiveOf is when a provider tier change takes effect: an upgrade now, a
+// downgrade (or a change by staff) at the end of the current period.
+func effectiveOf(action string) string {
+	if action == "downgrade" {
+		return "period_end"
+	}
+	return "now"
 }
 
 // tierChangeProcessing marks a rendered operation as accepted but unresolved
 // (HTTP 202): the same Idempotency-Key reads the result once it settles.
 func tierChangeProcessing(resp *TierChangeResponse) (*TierChangeResponse, error) {
 	resp.Status = "processing"
-	resp.Message = "Tier change is being confirmed with the provider; retry with the same Idempotency-Key to read the result"
+	resp.Message = "The change is being confirmed with the provider; retry with the same Idempotency-Key to read the result"
 	return resp, nil
 }
 
 // tierChangeRefused renders a terminal operation. A provider payment refusal
 // (402) is a decline; NMI's attested non-execution keeps its code
 // (payment_duplicate_refused); any other refusal, or one before submission
-// (providerStatus 0), is tier_change_refused: the change did not happen and a
+// (providerStatus 0), is subscription_change_refused: the change did not happen and a
 // new request needs a new key.
 func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus int, code string) error {
 	message := "tier change was not executed"
@@ -200,7 +211,7 @@ func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus
 	case providerStatus == http.StatusConflict && code == billing.CodePaymentDuplicateRefused:
 		return &TierChangeError{Code: code, Message: message}
 	}
-	return &TierChangeError{Code: billing.CodeTierChangeRefused, Message: message}
+	return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: message}
 }
 
 // refuseTierChangeInFlight points a new request at the unresolved tier change

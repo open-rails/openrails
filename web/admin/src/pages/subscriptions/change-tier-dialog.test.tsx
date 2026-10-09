@@ -135,9 +135,9 @@ describe("the mounted tier-change dialog", () => {
   )
 
   it.each([
-    [409, "tier_change_refused", false],
-    [409, "tier_change_idempotency_conflict", false],
-    [409, "tier_change_in_flight", true],
+    [409, "subscription_change_refused", false],
+    [409, "subscription_change_idempotency_conflict", false],
+    [409, "subscription_change_in_flight", true],
     [409, "unknown_conflict", true],
     [403, "permission_denied", true],
     [503, "provider_unavailable", true],

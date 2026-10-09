@@ -12,7 +12,7 @@ import (
 )
 
 const getPurchasedCreditGrant = `-- name: GetPurchasedCreditGrant :one
-SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason FROM billing.grants
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at, actor, grant_reason, quantity FROM billing.grants
 WHERE merchant_id=$1::uuid AND payment_id=$2::uuid
   AND kind='credit' AND event='grant'
   AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
@@ -46,6 +46,7 @@ func (q *Queries) GetPurchasedCreditGrant(ctx context.Context, arg GetPurchasedC
 		&i.CreatedAt,
 		&i.Actor,
 		&i.GrantReason,
+		&i.Quantity,
 	)
 	return i, err
 }

@@ -163,7 +163,7 @@ func TestClientRequestShapes(t *testing.T) {
 		{"access check keeps duplicates", func() error {
 			id, _ := billing.ParseProductID(product)
 			got, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{id, id}})
-			if err == nil && !got[product] {
+			if err == nil && !got.Access[product] {
 				err = errors.New("access not decoded")
 			}
 			return err
@@ -456,16 +456,16 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.SetSubscriptionPaymentMethod(ctx, subscription, billing.SetSubscriptionPaymentMethodParams{})
 			return err
 		},
-		"tier preview subscription": func() error {
-			_, err := c.PreviewTierChange(ctx, billing.SubscriptionID{}, billing.ChangeTierParams{PriceID: price})
+		"change preview subscription": func() error {
+			_, err := c.PreviewSubscriptionChange(ctx, billing.SubscriptionID{}, billing.ChangeSubscriptionParams{PriceID: &price})
 			return err
 		},
-		"tier preview price": func() error {
-			_, err := c.PreviewTierChange(ctx, subscription, billing.ChangeTierParams{})
+		"change preview of nothing": func() error {
+			_, err := c.PreviewSubscriptionChange(ctx, subscription, billing.ChangeSubscriptionParams{})
 			return err
 		},
-		"tier change price": func() error {
-			_, err := c.ChangeTier(ctx, subscription, billing.ChangeTierParams{IdempotencyKey: "key"})
+		"change of nothing": func() error {
+			_, err := c.ChangeSubscription(ctx, subscription, billing.ChangeSubscriptionParams{IdempotencyKey: "key"})
 			return err
 		},
 		"delete payment method": func() error {

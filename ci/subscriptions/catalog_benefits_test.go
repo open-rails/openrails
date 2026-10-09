@@ -161,7 +161,7 @@ func TestPendingSubscriptionAccessFollowsTheProduct(t *testing.T) {
 			ctx := db.WithPSPID(merchant.WithID(t.Context(), c.MerchantID()), w.psp["nmi"].UUID())
 			lifecycle := engine.Graph(w.rt).Runtime.SubscriptionLifecycleService
 			accepted := &subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyNMISchedule, SubscriptionID: uuid.New(), CustomerID: buyer.cid().UUID(), PSPID: w.psp["nmi"].UUID(),
-				ProductID: product.ID.UUID(), PriceID: price.ID.UUID(), PaymentMethodID: method.UUID(), ProductName: product.DisplayName, Quantity: 1, RecurringAmount: price.UnitAmount, Currency: "USD",
+				ProductID: product.ID.UUID(), PriceID: price.ID.UUID(), PaymentMethodID: method.UUID(), ProductName: product.DisplayName, RecurringAmount: price.UnitAmount, Currency: "USD",
 				AcceptedAt: w.clock.Now(), PeriodStart: start, PeriodEnd: end, Pending: true}
 			pending, err := lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{Prepared: accepted, UserID: buyer.id, PriceID: price.ID.UUID(), Rail: models.RailNMI, RailSubscriptionID: &railSub})
 			require.NoError(t, err)

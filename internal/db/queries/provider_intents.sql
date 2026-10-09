@@ -757,7 +757,9 @@ SELECT * FROM billing.provider_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
   AND ((intent_type='initial_membership'
         AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
-        AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+        AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz
+        -- A seat increase changes the agreement's seats, not its price.
+        AND NOT payload->'terms' ? 'adds')
     OR (intent_type='subscription_collection'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
         AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)

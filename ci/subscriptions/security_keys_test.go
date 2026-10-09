@@ -15,7 +15,7 @@ import (
 // SEC-33: tier-change idempotency keys belong to one customer. Another
 // customer who guesses or observes a key cannot pre-claim it and turn the
 // victim's upgrade into a conflict; each customer's change runs once under the
-// same key, on the embedded and the remote Client.
+// same key.
 func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 	t.Parallel()
 	forEachRail(t, func(t *testing.T, rail string) {
@@ -25,8 +25,8 @@ func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 		to := w.tierPrice(group, 2, 2000, 720, false)
 		const key = "upgrade-1"
 		for _, tp := range []topology{embedded, remote} {
-			_, sub := w.engineMember(rail, tp, from)
-			done, err := w.client[tp].ChangeTier(t.Context(), sub, billing.ChangeTierParams{PriceID: to.ID, IdempotencyKey: key})
+			c, sub := w.engineMember(rail, tp, from)
+			done, err := c.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: key})
 			require.NoError(t, err, "%s: a key another customer used is still this customer's", tp)
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.NotEqual(t, sub, *done.SubscriptionID)

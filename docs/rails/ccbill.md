@@ -85,7 +85,7 @@ one-time price or a new subscription, and catalog application refuses a price
 that only CCBill could sell (`price_not_sellable`). Subscriptions that already
 bill at CCBill keep renewing there and stay mirrored.
 
-A customer's tier upgrade (`POST /v1/me/subscriptions/{id}/change-tier`)
+A customer's tier upgrade (`POST /v1/me/subscriptions/{id}/change`)
 answers `requires_action` with a `redirect_to_url` next action, a FlexForm URL
 carrying the subscription being upgraded:
 

@@ -206,6 +206,9 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						if request.CustomerAmount != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
 							return nil, apperr.Invalidf("customer_amount requires Stripe or NMI checkout without provider catalog links")
 						}
+						if request.Quantity != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
+							return nil, apperr.Invalidf(errQuantityRail)
+						}
 						declaredRails = append(declaredRails, rail)
 						continue
 					}
@@ -218,6 +221,9 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						rail = account.Rail
 					}
 					declaredRails = append(declaredRails, rail)
+					if request.Quantity != nil && (rail != "stripe" && rail != "nmi" || len(link) > 0) {
+						return nil, apperr.Invalidf(errQuantityRail)
+					}
 					if (request.TrialUnitAmount != nil || request.TrialDurationHours != nil) && !railreg.SupportsCatalogTrial(models.Rail(rail)) {
 						return nil, fmt.Errorf("%w: PSP %q on rail %s cannot execute trial first-phase terms", ErrTrialUnsupportedOnRail, key, rail)
 					}

@@ -204,7 +204,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Before | After |
 |---|---|
 | `CancelSubscription`, `ResumeSubscription`, `UpdateSubscriptionPaymentMethod` returned `error` | `client.CancelSubscription(`, `client.ResumeSubscription(` and `client.SetSubscriptionPaymentMethod(` each return the `billing.Subscription` |
-| `ChangeTier(ctx, id, idempotencyKey, ChangeTierRequest)` | `client.ChangeTier(` and `client.PreviewTierChange(` take `billing.ChangeTierParams` (`PriceID`, `IdempotencyKey`) |
+| `ChangeTier(ctx, id, idempotencyKey, ChangeTierRequest)` | `client.ChangeSubscription(` and `client.PreviewSubscriptionChange(` take `billing.ChangeSubscriptionParams` (`PriceID`, `Quantity`, `IdempotencyKey`) |
 | `ListSubscriptions(ctx, SubscriptionFilter)` with a total | `client.ListSubscriptions(` with `billing.SubscriptionListParams`, a cursor page, newest first |
 | `Subscription.CustomerID`, `ProductID`, `PriceID` as strings; `SubscriptionPrice` | Typed ids; `price` is the catalog `billing.Price` |
 | `models.StatusCancelled`, `cancelled_at` | `billing.SubscriptionCanceled`, `canceled_at` |
@@ -314,7 +314,7 @@ fields (`400 unknown_field`), and every error code is in
 | `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and collection cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/admin/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
-| `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
+| `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/admin/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
@@ -355,7 +355,7 @@ fields (`400 unknown_field`), and every error code is in
   `active` and `providers` are gone.
 - **Subscriptions.** Cancel, resume and the payment-method switch answer the
   `Subscription` in the request (200). A merchant tier change on CCBill or
-  Solana is 403 `customer_action_required`. A `TierChange` has no `mode`, `url`
+  Solana is 403 `customer_action_required`. A `SubscriptionChange` has no `mode`, `url`
   or `payment`: a redirect is `next_action.url`.
 - **`object`.** The `object` member is gone from the public configuration, checkout
   attempts, the currency registry and tier changes.
@@ -371,9 +371,9 @@ fields (`400 unknown_field`), and every error code is in
   without a recommendation is 422 `finding_not_actionable`, and a failed run
   502 `finding_action_failed`. A tier change answers 404 `price_not_found`,
   404 `product_not_found`, 404 `subscription_not_found`, 409
-  `subscription_not_active`, 422 `tier_change_target_inactive`, 409
-  `tier_change_requires_linked_plan`, 400 `tier_change_unsupported_on_rail`, 409
-  `tier_change_provider_conflict` or 400 `customer_email_required` where it
+  `subscription_not_active`, 422 `subscription_change_target_inactive`, 409
+  `subscription_change_requires_linked_plan`, 400 `subscription_change_unsupported_on_rail`, 409
+  `subscription_change_provider_conflict` or 400 `customer_email_required` where it
   answered a bare 400, 404 or 409, and a declined charge is 402 `card_declined`
   or 502 `payment_provider_rejected` with `decline_reason`. A Solana wallet step
   the chain refuses is 400 `solana_transaction_refused`; an unreachable RPC is
@@ -402,7 +402,7 @@ fields (`400 unknown_field`), and every error code is in
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
   `ntf_`, `fnd_`, `hev_`, `par_`, `pop_` (payment operations, as in
-  `TierChange.operation_id`). An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
+  `SubscriptionChange.operation_id`). An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
   carries `checkout_session_id` in its metadata: let open ones expire first.
 
 ### New limits

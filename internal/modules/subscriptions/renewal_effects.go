@@ -18,8 +18,10 @@ type renewalEffects struct {
 	PeriodStart, PeriodEnd       time.Time
 	Downgrade, PreserveLifecycle bool
 	// Reinstate reactivates a decided cancellation on an explicit override.
-	Reinstate   bool
-	ProductName string
+	Reinstate bool
+	// SeatsChanged ends access of the old seats where the new period starts.
+	SeatsChanged bool
+	ProductName  string
 }
 
 // applyRenewalEffects owns the local projection for both observed provider
@@ -48,7 +50,11 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	}
 	entitlementsService := s.newLifecycleEntitlementService(d)
 	if !effects.PreserveLifecycle {
-		if err := entitlementsService.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, effects.PeriodStart, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
+		sources := []models.AccessSourceType{models.AccessSourceGrace}
+		if effects.SeatsChanged {
+			sources = append(sources, models.AccessSourceSubscription)
+		}
+		if err := entitlementsService.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, effects.PeriodStart, models.AccessRevokeSuperseded, sources...); err != nil {
 			return nil, err
 		}
 	}

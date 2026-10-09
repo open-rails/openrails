@@ -285,6 +285,12 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 				return fmt.Errorf("decode price %q customer amount: %w", row.Key, err)
 			}
 		}
+		if len(row.Quantity) > 0 && string(row.Quantity) != "null" {
+			price.Quantity = catalog.Field[catalog.Quantity]{Set: true}
+			if err := json.Unmarshal(row.Quantity, &price.Quantity.Value); err != nil {
+				return fmt.Errorf("decode price %q quantity: %w", row.Key, err)
+			}
+		}
 		links, err := providerLinks(row.PspLinks)
 		if err != nil {
 			return fmt.Errorf("decode price %q provider links: %w", row.Key, err)

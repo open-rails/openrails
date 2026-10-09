@@ -164,7 +164,7 @@ const change = await billing.changeTier(sub.id, {
 
 - `changeTier` is a money write. Mint one `idempotencyKey` per attempt and
   reuse it until the change resolves (`status: "processing"`, a
-  `tier_change_in_flight` refusal naming `metadata.operation_id`, a 5xx or a
+  `subscription_change_in_flight` refusal naming `metadata.operation_id`, a 5xx or a
   lost response), so OpenRails replays the stored result instead of charging
   twice. `requires_action` carries `operation_id` for `authenticatePayment`;
   replay the same key afterwards.

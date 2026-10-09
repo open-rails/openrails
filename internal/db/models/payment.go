@@ -86,6 +86,10 @@ type Payment struct {
 	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`
 
+	// Quantity is the seats a subscription payment billed; nil on a payment
+	// that bills no seats.
+	Quantity *int `json:"quantity,omitempty"`
+
 	// MoneyMovement declares whether this row records money that actually
 	// moved at the rail (or#827). It is the ONLY thing the host settlement
 	// feed keys on, so it is a required declaration on any completed

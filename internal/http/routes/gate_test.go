@@ -110,7 +110,7 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/psps/refresh",
 	"POST /v1/admin/psps/{id}/archive",
 	"POST /v1/admin/subscriptions/{id}/cancel",
-	"POST /v1/admin/subscriptions/{id}/change-tier",
+	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
 	"POST /v1/admin/usage-events",
 	"POST /v1/merchant/api-keys",

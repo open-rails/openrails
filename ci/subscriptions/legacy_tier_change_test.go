@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -90,7 +88,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID})
+			preview, err := l.c.previewChange(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID)})
 			require.NoError(t, err)
 			require.Equal(t, "now", preview.Effective)
 			require.Positive(t, preview.AmountDueNow)
@@ -101,7 +99,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.Contains(t, preview.Message, fmt.Sprintf("$%d.%02d now", charged/100, charged%100), "money in the currency's minor units")
 			require.Contains(t, preview.Message, end.UTC().Format("January 2, 2006"))
 			key := "up-" + uuid.NewString()
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
+			done, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: key})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -126,7 +124,7 @@ func TestLegacyNMITierChange(t *testing.T) {
 			require.False(t, l.c.entitled(old.ent), "the old tier ends now")
 
 			// Replay: the same key answers the same result and sends nothing.
-			again, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
+			again, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: key})
 			require.NoError(t, err)
 			require.Equal(t, done.AmountDueNow, again.AmountDueNow)
 			require.Len(t, l.tierSales(), sales+1)
@@ -162,11 +160,11 @@ func TestLegacyNMITierChange(t *testing.T) {
 			end := l.periodEnd()
 			sales := len(l.tierSales())
 
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierParams{PriceID: lower.ID})
+			preview, err := l.c.previewChange(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(lower.ID)})
 			require.NoError(t, err)
 			require.Equal(t, "period_end", preview.Effective)
 			require.Zero(t, preview.AmountDueNow)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: lower.ID, IdempotencyKey: "down-" + uuid.NewString()})
+			done, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(lower.ID), IdempotencyKey: "down-" + uuid.NewString()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -215,7 +213,7 @@ func TestLegacyNMITierUpgradeDeclined(t *testing.T) {
 			l := w.legacyOnTier(tp, old, 999, monthHours, 10*day)
 			sales := len(l.tierSales())
 			w.nmi.SetDecline(visa.Last4, "202")
-			_, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "up-" + uuid.NewString()})
+			_, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "up-" + uuid.NewString()})
 			var status *billing.StatusError
 			require.True(t, errors.As(err, &status), "%v", err)
 			require.Equal(t, http.StatusPaymentRequired, status.Status, "%v", err)
@@ -254,7 +252,7 @@ func TestLegacyNMITierUpgradeScheduleUpdateRetried(t *testing.T) {
 			sales := len(l.tierSales())
 			w.nmi.FailScheduleUpdates(row.fails)
 			key := "up-" + uuid.NewString()
-			_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: key})
+			_, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: key})
 			require.NoError(t, err)
 			w.settle()
 			if row.name == "stuck" {
@@ -289,18 +287,14 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	sales := len(l.tierSales())
 	second := w.startReplica()
-	staff := w.auth.token(t, "staff")
-	other, err := openrails.NewRemote(second.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return staff, nil }))
-	require.NoError(t, err)
-	clients := []*openrails.Client{w.client[embedded], other}
-	errs := make([]error, len(clients))
+	servers := []string{w.server.URL, second.server.URL}
+	errs := make([]error, len(servers))
 	var wg sync.WaitGroup
-	for i, client := range clients {
+	for i, server := range servers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = client.ChangeTier(context.WithoutCancel(t.Context()), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: fmt.Sprintf("race-%d-%s", i, uuid.NewString())})
+			_, errs[i] = l.c.changeAt(server, l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: fmt.Sprintf("race-%d-%s", i, uuid.NewString())})
 		}()
 	}
 	wg.Wait()
@@ -322,7 +316,7 @@ func TestLegacyNMITierChangeReplicaRace(t *testing.T) {
 }
 
 // A target of another billing cycle cannot keep NMI's billing date: refused
-// typed on preview and change, both topologies, and nothing is sent.
+// typed on preview and change, and nothing is sent.
 func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -331,12 +325,10 @@ func TestLegacyNMITierChangeCrossCadenceRefused(t *testing.T) {
 	weekly := w.tierPrice(group, 2, 1999, 168, true)
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	sales := len(l.tierSales())
-	for _, tp := range []topology{embedded, remote} {
-		_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierParams{PriceID: weekly.ID})
-		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
-		_, err = w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: weekly.ID, IdempotencyKey: "x-" + uuid.NewString()})
-		requireCode(t, err, http.StatusConflict, billing.CodeTierChangeCadenceUnsupported)
-	}
+	_, err := l.c.previewChange(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(weekly.ID)})
+	requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeCadenceUnsupported)
+	_, err = l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(weekly.ID), IdempotencyKey: "x-" + uuid.NewString()})
+	requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeCadenceUnsupported)
 	w.settle()
 	require.Len(t, l.tierSales(), sales)
 	require.Empty(t, w.nmi.ScheduleUpdates(l.railSub))
@@ -353,7 +345,7 @@ func (w *world) accessEndedNotices(customerID string) int {
 
 // A named-plan schedule changes only by switching plans, so a target price
 // without a linked NMI plan of its amount and cycle is refused before any
-// charge, on preview and change, both topologies.
+// charge, on preview and change, by the customer and by staff.
 func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -364,12 +356,13 @@ func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	l := w.legacyOnTier(embedded, old, 999, monthHours, 10*day)
 	sales := len(l.tierSales())
 	for _, target := range []tier{unlinked, lower} {
-		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierParams{PriceID: target.ID})
-			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
-			_, err = w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: target.ID, IdempotencyKey: "x-" + uuid.NewString()})
-			requireCode(t, err, http.StatusConflict, billing.CodeTierChangeRequiresLinkedPlan)
-		}
+		_, err := l.c.previewChange(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID)})
+		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
+		_, err = l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "x-" + uuid.NewString()})
+		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
+		// Staff take the same provider path, deferred.
+		_, err = w.client[remote].ChangeSubscription(t.Context(), l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "staff-" + uuid.NewString()})
+		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales, "nothing charged")
@@ -393,9 +386,9 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 			w.nmi.customSchedule(l.railSub)
 			end := l.periodEnd()
 			sales := len(l.tierSales())
-			preview, err := w.client[tp].PreviewTierChange(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID})
+			preview, err := l.c.previewChange(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID)})
 			require.NoError(t, err)
-			done, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "up-" + uuid.NewString()})
+			done, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "up-" + uuid.NewString()})
 			require.NoError(t, err)
 			w.settle()
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
@@ -429,7 +422,7 @@ func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	w.nmi.customSchedule(l.railSub)
 	sales := len(l.tierSales())
 	w.nmi.FailScheduleUpdates(1000)
-	_, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "up-" + uuid.NewString()})
+	_, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "up-" + uuid.NewString()})
 	require.NoError(t, err)
 	w.settle()
 	w.until(func() bool { return len(w.openFindings(tierUpdateStuck)) > 0 }, "the stuck update raises a finding")

@@ -31,13 +31,13 @@ import (
 // future charges only — and schedules the local price; the mirrored renewal at
 // E opens the new tier. Both prices must share the period's cadence.
 
-var errTierChangeLinkedPlan = &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan,
+var errTierChangeLinkedPlan = &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan,
 	Message: "this subscription is on a named NMI plan, which changes only by switching plans; link the new price to an NMI plan of the same amount and billing cycle"}
 
-var errTierChangeScheduleUnavailable = &TierChangeError{Code: billing.CodeTierChangeRefused,
+var errTierChangeScheduleUnavailable = &TierChangeError{Code: billing.CodeSubscriptionChangeRefused,
 	Message: "the provider's billing schedule for this subscription could not be read; try again later"}
 
-var errTierChangeCadence = &TierChangeError{Code: billing.CodeTierChangeCadenceUnsupported,
+var errTierChangeCadence = &TierChangeError{Code: billing.CodeSubscriptionChangeCadenceUnsupported,
 	Message: "this subscription is billed on the provider's schedule, which keeps its billing date; change to a price of the same billing cycle"}
 
 // providerNMITierAdmissible refuses what an in-place change cannot honour.
@@ -116,22 +116,22 @@ func (s *CheckoutService) previewProviderNMITierChange(ctx context.Context, resp
 	end := sub.CurrentPeriodEndsAt.UTC()
 	resp.NextChargeDate = &end
 	if downgrade {
-		resp.Action, resp.Effective = "downgrade", "period_end"
-		resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then renews at %s.", product.DisplayName, end.UTC().Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
+		resp.Effective = "period_end"
+		resp.Message = fmt.Sprintf("No charge now. The plan changes to %s on %s, then renews at %s.", product.DisplayName, end.UTC().Format("January 2, 2006"), formatMinorAmount(target.Amount, target.Currency))
 		return resp, nil
 	}
 	quote, err := QuoteKeepBoundaryUpgrade(providerUpgradeOf(sub, current, target), now)
 	if err != nil {
 		return nil, err
 	}
-	resp.Action, resp.Effective, resp.AmountDueNow = "upgrade", "now", quote.ChargeNow
+	resp.Effective, resp.AmountDueNow = "now", quote.ChargeNow
 	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.", formatMinorAmount(quote.ChargeNow, target.Currency), formatMinorAmount(target.Amount, target.Currency), end.UTC().Format("January 2, 2006"))
 	return resp, nil
 }
 
 // processProviderNMITierChange freezes the change and runs it as one durable
 // operation (nmi_upgrade_intent.go). The same Idempotency-Key replays it.
-func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
+func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, sub *models.Subscription, action string) (*TierChangeResponse, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	database := s.SubscriptionService.Database()
 	if prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key); err == nil {
-		return s.replayTierChangeOperation(ctx, prior, &TierChangeRequest{SubscriptionID: sub.ID, PriceID: billing.PriceID(newPrice.ID).String()}, user)
+		return s.replayTierChangeOperation(ctx, prior, &SubscriptionChangeRequest{SubscriptionID: sub.ID, PriceID: billing.PriceID(newPrice.ID).String()}, user)
 	} else if !db.IsNotFound(err) {
 		return nil, err
 	}

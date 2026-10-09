@@ -18,7 +18,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -36,7 +35,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
@@ -44,13 +42,13 @@ import (
 
 // TierChangeResponse represents the response from a tier change operation.
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
-type TierChangeResponse = billing.TierChange
+type TierChangeResponse = billing.SubscriptionChange
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
 // reports what a confirm WOULD charge now and at the next renewal, without
 // touching Stripe or the local subscription. The frontend renders it as a
-// "Right now: $X / On <date>: $Y" confirmation before calling change-tier.
-type TierChangePreviewResponse = billing.TierChangePreview
+// "Right now: $X / On <date>: $Y" confirmation before calling change.
+type TierChangePreviewResponse = billing.SubscriptionChangePreview
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
@@ -290,16 +288,16 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 					Message: "You already have an active subscription to this plan",
 				}, nil
 			} else if existingProduct.TierRank < product.TierRank {
-				// Upgrade detected - direct to change-tier endpoint
+				// Upgrade detected - direct to the change endpoint
 				return &CheckoutResponse{
 					Status:  "blocked",
-					Message: "Use POST /v1/me/subscriptions/change-tier for tier upgrades",
+					Message: "Use POST /v1/me/subscriptions/{id}/change for tier upgrades",
 				}, nil
 			} else if existingProduct.TierRank > product.TierRank {
-				// Downgrade detected - direct to change-tier endpoint
+				// Downgrade detected - direct to the change endpoint
 				return &CheckoutResponse{
 					Status:  "blocked",
-					Message: "Use POST /v1/me/subscriptions/change-tier for tier downgrades",
+					Message: "Use POST /v1/me/subscriptions/{id}/change for tier downgrades",
 				}, nil
 			} else {
 				// Same tier rank but different product - treat as duplicate
@@ -1056,267 +1054,12 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
 
-// TierChange processes a subscription tier change (upgrade or downgrade).
-// This is the unified entry point that routes to rail-specific implementations.
-// TierChange runs a tier change; every instant in the answer is UTC.
-func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
-	resp, err := s.tierChange(ctx, req, user)
-	if resp != nil {
-		resp.DelayedStart, resp.NextChargeDate = utcPtr(resp.DelayedStart), utcPtr(resp.NextChargeDate)
-	}
-	return resp, err
-}
-
-func (s *CheckoutService) tierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
-	if response, found, err := s.ReplayTierChange(ctx, req, user); found || err != nil {
-		return response, err
-	}
-	// 1. Resolve the typed target price ID.
-	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, "", req.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{Code: codePriceNotFound, Message: "price not found"}
-	}
-	if !newPrice.IsPurchasable() {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeTargetInactive, Message: "price is not available"}
-	}
-
-	newProduct, err := s.ProductService.GetByID(ctx, newPrice.ProductID)
-	if err != nil {
-		return nil, &TierChangeError{Code: codeProductNotFound, Message: "product not found"}
-	}
-	if !newProduct.IsPurchasable() {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeTargetInactive, Message: "product is not available"}
-	}
-
-	// 2. Get subscription (by ID if provided, otherwise active subscription)
-	var existingSub *models.Subscription
-	if req.SubscriptionID != uuid.Nil {
-		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
-		if err != nil {
-			return nil, &TierChangeError{Code: codeSubscriptionNotFound, Message: "subscription not found"}
-		}
-		// Verify ownership: compare PARSED subject ids, not raw strings — the
-		// caller's id is a UUID (boundary-enforced, #364) but may differ in
-		// case/format from the canonical String() form.
-		if payer := identity.CustomerIDFromString(user.ID); payer.IsZero() || existingSub.CustomerID != payer.UUID() {
-			return nil, &TierChangeError{Code: codeSubscriptionNotFound, Message: "subscription not found"}
-		}
-	} else {
-		existingSub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID)
-		if err != nil {
-			return nil, ErrTierChangeNoSubscription
-		}
-	}
-	if err := validateTierChangeSubscriptionStatus(existingSub); err != nil {
-		return nil, err
-	}
-	// One unresolved tier change owns the subscription on every rail: a
-	// request under another key is pointed at it.
-	if err := s.refuseTierChangeInFlight(ctx, existingSub); err != nil {
-		return nil, err
-	}
-
-	// 3. Load current price and product
-	currentPrice, err := s.PriceService.GetByID(ctx, existingSub.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current price not found"}
-	}
-	existingSub.Price = currentPrice // Attach for downstream use
-
-	currentProduct, err := s.ProductService.GetByID(ctx, currentPrice.ProductID)
-	if err != nil {
-		return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current product not found"}
-	}
-
-	// 4. Validate tier group compatibility
-	if currentProduct.ID == newProduct.ID {
-		return nil, ErrTierChangeSameProduct
-	}
-	if !sameTierGroup(currentProduct, newProduct) {
-		return nil, ErrTierChangeDifferentGroup
-	}
-	// A tier group may mix currencies (the catalog allows a per-currency price
-	// per plan), but a SUBSCRIPTION cannot move across one: proration would
-	// subtract across an FX boundary on the way up, and the schedule would
-	// silently change currency on the way down (#820).
-	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
-		return nil, err
-	}
-
-	// 5. Determine action (upgrade vs downgrade)
-	action := "upgrade"
-	if newProduct.TierRank < currentProduct.TierRank {
-		action = "downgrade"
-	}
-
-	// 6. Engine-owned subscriptions have no provider schedule on any rail.
-	if existingSub.CollectionPolicy == models.CollectionPolicyEngine {
-		if action == "downgrade" {
-			return s.processEngineDowngrade(ctx, newPrice, newProduct, existingSub)
-		}
-		return s.processEngineUpgrade(ctx, req, user, newPrice, newProduct, existingSub, currentPrice)
-	}
-
-	// 7. Route to rail-specific handler based on config type detection
-	// This allows adding new NMI providers via config without code changes
-	rail := string(existingSub.Rail)
-
-	switch {
-	case rail == "stripe":
-		return s.processTierChangeStripe(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case rails.IsNMI(models.Rail(rail)):
-		return s.processProviderNMITierChange(ctx, req, user, newPrice, newProduct, existingSub, action)
-	case rail == "ccbill":
-		return s.processTierChangeCCBill(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	case rail == "solana":
-		return s.processTierChangeSolana(ctx, req, user, newPrice, newProduct, existingSub, currentProduct, action)
-	default:
-		return nil, &TierChangeError{Code: billing.CodeTierChangeUnsupportedOnRail, Message: fmt.Sprintf("unsupported rail: %s", rail)}
-	}
-}
-
-// TierChangePreview computes what a tier change WOULD charge, without mutating
-// anything (no Stripe call, no DB write). It mirrors TierChange's resolution and
-// validation, then derives the money summary from the universal Model B math so
-// the preview and the eventual charge agree:
-//
-//   - upgrade:   charged now = QuoteModelBUpgrade(...).ChargeNow; the
-//     cycle resets, so the next charge (new full price) is now + cycle.
-//   - downgrade: nothing now; the change applies at the current period end, where
-//     the next charge is the new (lower) full price.
-//
-// For Stripe upgrades the returned now-amount is an ESTIMATE (IsEstimate=true):
-// Stripe finalizes the exact proration per-second on its side. NMI/Solana charge
-// the local math exactly, so it is not an estimate there.
-func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
-	resp, err := s.tierChangePreview(ctx, req, user)
-	if resp != nil {
-		resp.NextChargeDate = utcPtr(resp.NextChargeDate)
-	}
-	return resp, err
-}
-
 func utcPtr(t *time.Time) *time.Time {
 	if t == nil {
 		return nil
 	}
 	u := t.UTC()
 	return &u
-}
-
-func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangePreviewResponse, error) {
-	// Resolve the typed target price ID.
-	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, "", req.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{Code: codePriceNotFound, Message: "price not found"}
-	}
-	if !newPrice.IsPurchasable() {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeTargetInactive, Message: "price is not available"}
-	}
-	newProduct, err := s.ProductService.GetByID(ctx, newPrice.ProductID)
-	if err != nil {
-		return nil, &TierChangeError{Code: codeProductNotFound, Message: "product not found"}
-	}
-	if !newProduct.IsPurchasable() {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeTargetInactive, Message: "product is not available"}
-	}
-
-	var existingSub *models.Subscription
-	if req.SubscriptionID != uuid.Nil {
-		existingSub, err = s.SubscriptionService.GetByID(ctx, req.SubscriptionID)
-		if payer := identity.CustomerIDFromString(user.ID); err != nil || payer.IsZero() || existingSub.CustomerID != payer.UUID() {
-			return nil, &TierChangeError{Code: codeSubscriptionNotFound, Message: "subscription not found"}
-		}
-	} else {
-		existingSub, err = s.SubscriptionService.GetActiveSubscription(ctx, user.ID)
-		if err != nil {
-			return nil, ErrTierChangeNoSubscription
-		}
-	}
-	if err := validateTierChangeSubscriptionStatus(existingSub); err != nil {
-		return nil, err
-	}
-
-	currentPrice, err := s.PriceService.GetByID(ctx, existingSub.PriceID)
-	if err != nil {
-		return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current price not found"}
-	}
-	currentProduct, err := s.ProductService.GetByID(ctx, currentPrice.ProductID)
-	if err != nil {
-		return nil, &TierChangeError{Code: billing.CodeInternalError, Message: "current product not found"}
-	}
-
-	if currentProduct.ID == newProduct.ID {
-		return nil, ErrTierChangeSameProduct
-	}
-	if !sameTierGroup(currentProduct, newProduct) {
-		return nil, ErrTierChangeDifferentGroup
-	}
-	// Same FX refusal as TierChange (#820) — the preview must never quote a
-	// number the charge would refuse to honour.
-	if err := RequireSameCurrency(PriceAmountOf(currentPrice), PriceAmountOf(newPrice)); err != nil {
-		return nil, err
-	}
-
-	rail := string(existingSub.Rail)
-	now := s.now()
-	resp := &TierChangePreviewResponse{
-		PriceID:          billing.PriceID(newPrice.ID),
-		Rail:             rail,
-		Currency:         newPrice.Currency,
-		NextChargeAmount: newPrice.Amount,
-	}
-
-	if existingSub.CollectionPolicy == models.CollectionPolicyEngine {
-		return s.previewEngineTierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
-	}
-	if rails.IsNMI(existingSub.Rail) {
-		return s.previewProviderNMITierChange(ctx, resp, existingSub, currentPrice, newPrice, newProduct, newProduct.TierRank < currentProduct.TierRank)
-	}
-	if newProduct.TierRank < currentProduct.TierRank {
-		if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "downgrade"); err != nil {
-			return nil, err
-		}
-		// Downgrade: scheduled for period end, nothing charged now.
-		if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), existingSub.ID); err != nil {
-			return nil, err
-		} else if pending != nil {
-			return nil, ErrTierChangePending
-		}
-		resp.Action = "downgrade"
-		resp.AmountDueNow = 0
-		resp.Effective = "period_end"
-		resp.NextChargeDate = existingSub.CurrentPeriodEndsAt
-		resp.IsEstimate = false
-		if existingSub.CurrentPeriodEndsAt != nil {
-			resp.Message = fmt.Sprintf("No charge now. Your plan changes to %s on %s, then %s.",
-				newProduct.DisplayName,
-				cadence.FormatInstant(*existingSub.CurrentPeriodEndsAt, cadence.Period(existingSub.CurrentPeriodStartsAt, existingSub.CurrentPeriodEndsAt)),
-				formatMinorAmount(newPrice.Amount, newPrice.Currency))
-		}
-		return resp, nil
-	}
-
-	if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "upgrade"); err != nil {
-		return nil, err
-	}
-
-	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	quote, err := QuoteModelBUpgrade(providerUpgradeOf(existingSub, currentPrice, newPrice), now)
-	if err != nil {
-		return nil, err
-	}
-	firstCharge, nextDate := quote.ChargeNow, quote.PeriodEnd
-	resp.Action = "upgrade"
-	resp.AmountDueNow = firstCharge
-	resp.Effective = "now"
-	resp.NextChargeDate = &nextDate
-	resp.IsEstimate = rail == "stripe"
-	resp.Message = fmt.Sprintf("You'll be charged %s now and %s on %s.",
-		formatMinorAmount(firstCharge, newPrice.Currency),
-		formatMinorAmount(newPrice.Amount, newPrice.Currency),
-		nextDate.UTC().Format("January 2, 2006"))
-	return resp, nil
 }
 
 func validateTierChangeSubscriptionStatus(subscription *models.Subscription) error {
@@ -1336,11 +1079,11 @@ func (s *CheckoutService) validateTierChangePreviewTarget(
 	switch {
 	case existingSub.Rail == models.RailStripe:
 		if _, ok := newPrice.GetStripeConfig(); !ok {
-			return &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
 		}
 		if action == "downgrade" {
 			if _, ok := currentPrice.GetStripeConfig(); !ok {
-				return &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "current price not configured for Stripe"}
+				return &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "current price not configured for Stripe"}
 			}
 		}
 	case rails.IsNMI(existingSub.Rail):
@@ -1353,20 +1096,20 @@ func (s *CheckoutService) validateTierChangePreviewTarget(
 		}
 	case existingSub.Rail == models.RailCCBill:
 		if action == "downgrade" {
-			return &TierChangeError{Code: billing.CodeTierChangeUnsupportedOnRail, Message: "CCBill subscription downgrades are not supported"}
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: "CCBill subscription downgrades are not supported"}
 		}
 		if _, _, ok := newPrice.GetCCBillFlexForm(); !ok {
-			return &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan, Message: "target price is not configured for CCBill"}
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for CCBill"}
 		}
 		if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
 			return &TierChangeError{Code: codeCustomerEmailRequired, Message: "verified customer email and username are required for CCBill"}
 		}
 	case existingSub.Rail == models.RailSolana:
 		if !priceHasSolanaRecurring(newPrice) {
-			return &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
+			return &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
 		}
 	default:
-		return &TierChangeError{Code: billing.CodeTierChangeUnsupportedOnRail, Message: fmt.Sprintf("unsupported rail: %s", existingSub.Rail)}
+		return &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: fmt.Sprintf("unsupported rail: %s", existingSub.Rail)}
 	}
 	return nil
 }
@@ -1393,7 +1136,7 @@ func formatMinorAmount(micros int64, currency string) string {
 // the customer keeps the tier already paid for.
 func (s *CheckoutService) processTierChangeStripe(
 	ctx context.Context,
-	req *TierChangeRequest,
+	req *SubscriptionChangeRequest,
 	user *UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
@@ -1403,10 +1146,10 @@ func (s *CheckoutService) processTierChangeStripe(
 ) (*TierChangeResponse, error) {
 	stripePriceID, ok := newPrice.GetStripeConfig()
 	if !ok || strings.TrimSpace(stripePriceID) == "" {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price not configured for Stripe"}
 	}
 	if strings.TrimSpace(existingSub.RailSubscriptionID) == "" {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "subscription missing Stripe reference"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "subscription missing Stripe reference"}
 	}
 	currentPrice := existingSub.Price
 	if currentPrice == nil {
@@ -1417,13 +1160,13 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 	currentStripePriceID, ok := currentPrice.GetStripeConfig()
 	if !ok || strings.TrimSpace(currentStripePriceID) == "" {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "current price not configured for Stripe"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "current price not configured for Stripe"}
 	}
 	if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), existingSub.ID); err != nil {
 		return nil, err
 	} else if pending != nil {
 		return &TierChangeResponse{
-			Status: "blocked", Action: action,
+			Status:  "blocked",
 			PriceID: billing.PriceID(newPrice.ID), Rail: "stripe",
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
@@ -1438,13 +1181,13 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 	switch {
 	case !found:
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "stripe subscription not found"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe subscription not found"}
 	case state.ItemID == "":
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "stripe subscription item not found"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe subscription item not found"}
 	case state.ScheduleID != "":
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "subscription is managed by a Stripe schedule; release it before changing tier"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "subscription is managed by a Stripe schedule; release it before changing tier"}
 	case state.PriceID != currentStripePriceID:
-		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "stripe bills a different price than the local subscription; reconcile before changing tier"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "stripe bills a different price than the local subscription; reconcile before changing tier"}
 	}
 	now := s.now().UTC()
 	payload := StripeTierChangePayload{
@@ -1456,14 +1199,14 @@ func (s *CheckoutService) processTierChangeStripe(
 	}
 	if action == "downgrade" {
 		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
-			return nil, &TierChangeError{Code: billing.CodeTierChangePeriodUnknown, Message: "subscription missing current period end"}
+			return nil, &TierChangeError{Code: billing.CodeSubscriptionChangePeriodUnknown, Message: "subscription missing current period end"}
 		}
 		periodStart := existingSub.StartedAt
 		if existingSub.CurrentPeriodStartsAt != nil && !existingSub.CurrentPeriodStartsAt.IsZero() {
 			periodStart = *existingSub.CurrentPeriodStartsAt
 		}
 		if !existingSub.CurrentPeriodEndsAt.After(periodStart) {
-			return nil, &TierChangeError{Code: billing.CodeTierChangePeriodUnknown, Message: "subscription current period is not open"}
+			return nil, &TierChangeError{Code: billing.CodeSubscriptionChangePeriodUnknown, Message: "subscription current period is not open"}
 		}
 		payload.ProrationBehavior, payload.PeriodStart, payload.PeriodEnd = "none", periodStart.UTC(), existingSub.CurrentPeriodEndsAt.UTC()
 		payload.BillingCycleDays = newPrice.RecurringCycleDays()
@@ -1507,7 +1250,7 @@ func (s *CheckoutService) processTierChangeStripe(
 // until the on-chain switch is confirmed).
 func (s *CheckoutService) processTierChangeSolana(
 	ctx context.Context,
-	req *TierChangeRequest,
+	req *SubscriptionChangeRequest,
 	user *UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
@@ -1518,11 +1261,11 @@ func (s *CheckoutService) processTierChangeSolana(
 	// Target price must carry a published Solana recurring plan, else the wallet
 	// has nothing valid to subscribe to (upgrade) / no terms to schedule (downgrade).
 	if !priceHasSolanaRecurring(newPrice) {
-		return nil, &TierChangeError{Code: billing.CodeTierChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
+		return nil, &TierChangeError{Code: billing.CodeSubscriptionChangeRequiresLinkedPlan, Message: "target price is not configured for Solana recurring billing"}
 	}
 
 	// A Solana tier change is one atomic on-chain transaction the customer's
-	// wallet signs: POST /v1/me/subscriptions/{id}/change-tier answers it as
+	// wallet signs: POST /v1/me/subscriptions/{id}/change answers it as
 	// next_action. Nothing server-side can make it.
 	return nil, &TierChangeError{Code: billing.CodeCustomerActionRequired, Message: "a Solana tier change is signed by the customer's wallet"}
 }
@@ -1532,7 +1275,7 @@ func (s *CheckoutService) processTierChangeSolana(
 // Downgrades: blocked (CCBill doesn't support programmatic downgrades)
 func (s *CheckoutService) processTierChangeCCBill(
 	ctx context.Context,
-	req *TierChangeRequest,
+	req *SubscriptionChangeRequest,
 	user *UserIdentity,
 	newPrice *models.Price,
 	newProduct *models.Product,
@@ -1543,7 +1286,6 @@ func (s *CheckoutService) processTierChangeCCBill(
 	if action == "downgrade" {
 		return &TierChangeResponse{
 			Status:  "blocked",
-			Action:  action,
 			PriceID: billing.PriceID(newPrice.ID),
 			Rail:    "ccbill",
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
@@ -1560,7 +1302,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 	subID := billing.SubscriptionID(existingSub.ID)
 	resp := &TierChangeResponse{
 		Status:         "requires_action",
-		Action:         action,
+		Effective:      "now",
 		PriceID:        billing.PriceID(newPrice.ID),
 		SubscriptionID: &subID,
 		Rail:           "ccbill",

@@ -222,7 +222,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	// checkout session.
 	a, sub := w.engineMember("stripe", embedded, from)
 	w.stripe.setDecline(visa.Last4, "auth")
-	pending, err := w.client[embedded].ChangeTier(ctx, sub, billing.ChangeTierParams{PriceID: to.ID, IdempotencyKey: "idor-" + uuid.NewString()})
+	pending, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: "idor-" + uuid.NewString()})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status)
 	aCard := a.saveCard("nmi", visa)
@@ -264,8 +264,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"PUT /v1/me/subscriptions/{id}/payment-method":               {"/subscriptions/" + sub.String() + "/payment-method", map[string]any{"payment_method_id": bCard}},
 		"GET /v1/me/subscriptions/{id}":                              {"/subscriptions/" + sub.String(), nil},
 		"POST /v1/me/subscriptions/{id}/retry-now":                   {"/subscriptions/" + sub.String() + "/retry-now", map[string]any{}},
-		"POST /v1/me/subscriptions/{id}/change-tier":                 {"/subscriptions/" + sub.String() + "/change-tier", map[string]any{"price_id": to.ID}},
-		"POST /v1/me/subscriptions/{id}/change-tier/preview":         {"/subscriptions/" + sub.String() + "/change-tier/preview", map[string]any{"price_id": to.ID}},
+		"POST /v1/me/subscriptions/{id}/change":                      {"/subscriptions/" + sub.String() + "/change", map[string]any{"price_id": to.ID}},
+		"POST /v1/me/subscriptions/{id}/change/preview":              {"/subscriptions/" + sub.String() + "/change/preview", map[string]any{"price_id": to.ID}},
 		"GET /v1/me/payment-operations/{id}/authentication":          {"/payment-operations/" + op + "/authentication", nil},
 		"POST /v1/me/payment-operations/{id}/authentication/confirm": {"/payment-operations/" + op + "/authentication/confirm", map[string]any{}},
 		"GET /v1/me/invoices/{id}":                                   {"/invoices/" + invoice, nil},

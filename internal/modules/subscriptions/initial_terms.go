@@ -28,9 +28,9 @@ type InitialMembershipTerms struct {
 	PriceID             uuid.UUID               `json:"price_id"`
 	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
 	ProductName         string                  `json:"product_name"`
-	// Quantity is the seats the membership bills; RecurringAmount is the unit
-	// price times Quantity.
-	Quantity        int       `json:"quantity"`
+	// Quantity is the seats of a per-seat price, nil otherwise;
+	// RecurringAmount is the unit price times Quantity.
+	Quantity        *int      `json:"quantity,omitempty"`
 	Amount          int64     `json:"amount,string"`
 	RecurringAmount int64     `json:"recurring_amount,string"`
 	Currency        string    `json:"currency"`
@@ -45,6 +45,27 @@ type InitialMembershipTerms struct {
 	// supersedes that one. Amount is then the prorated charge and
 	// RecurringAmount the new price every renewal bills.
 	Replaces *ReplacedMembership `json:"replaces,omitempty"`
+	// Adds is set on a seat increase: SubscriptionID is the membership itself,
+	// which keeps its period. Amount is the added seats' prorated charge for
+	// [PeriodStart, PeriodEnd) and RecurringAmount every renewal's.
+	Adds *AddedSeats `json:"adds,omitempty"`
+}
+
+// AddedSeats freezes the membership a seat increase changes as the customer
+// saw it: completion refuses if it moved since.
+type AddedSeats struct {
+	FromQuantity int `json:"from_quantity"`
+}
+
+// Changed is the existing membership this operation changes, if any.
+func (t InitialMembershipTerms) Changed() (uuid.UUID, bool) {
+	switch {
+	case t.Replaces != nil:
+		return t.Replaces.SubscriptionID, true
+	case t.Adds != nil:
+		return t.SubscriptionID, true
+	}
+	return uuid.Nil, false
 }
 
 // ReplacedMembership freezes the engine membership an upgrade supersedes as
@@ -74,7 +95,7 @@ func (t InitialMembershipTerms) Validate() error {
 			return errors.New("initial membership instants must have PostgreSQL microsecond precision")
 		}
 	}
-	if t.Quantity < 1 || (t.Quantity > 1 && t.CollectionPolicy != models.CollectionPolicyEngine) || t.RecurringAmount%int64(t.Quantity) != 0 {
+	if t.Quantity != nil && (*t.Quantity < 1 || t.CollectionPolicy != models.CollectionPolicyEngine) || t.RecurringAmount%int64(SeatCount(t.Quantity)) != 0 {
 		return errors.New("initial membership quantity contradicts its recurring amount")
 	}
 	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) || (t.Amount > 0) != (t.PaymentID != uuid.Nil) || (t.Pending && (t.Amount != 0 || !t.PeriodStart.After(t.AcceptedAt))) {
@@ -82,6 +103,15 @@ func (t InitialMembershipTerms) Validate() error {
 	}
 	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
 		return err
+	}
+	if a := t.Adds; a != nil {
+		if t.Quantity == nil {
+			return errors.New("seat increase terms name no seats")
+		}
+		added, err := Seats(t.UnitAmount(), *t.Quantity-a.FromQuantity)
+		if t.Replaces != nil || t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || t.CancelAfterInitial || a.FromQuantity < 1 || a.FromQuantity >= *t.Quantity || err != nil || t.Amount <= 0 || t.Amount > added {
+			return errors.New("seat increase terms contradict the membership they change")
+		}
 	}
 	if r := t.Replaces; r != nil {
 		if t.CollectionPolicy != models.CollectionPolicyEngine || t.Pending || r.SubscriptionID == uuid.Nil || r.SubscriptionID == t.SubscriptionID || r.PriceID == uuid.Nil || r.PriceID == t.PriceID || !r.PeriodEnd.After(t.AcceptedAt) || !r.PeriodEnd.Equal(r.PeriodEnd.Truncate(time.Microsecond)) || t.Amount <= 0 || r.Credit < 0 || t.Amount+r.Credit != t.RecurringAmount {
@@ -94,12 +124,11 @@ func (t InitialMembershipTerms) Validate() error {
 
 // UnitAmount is the price of one seat.
 func (t InitialMembershipTerms) UnitAmount() int64 {
-	return t.RecurringAmount / int64(max(t.Quantity, 1))
+	return t.RecurringAmount / int64(SeatCount(t.Quantity))
 }
 
 // UnmarshalJSON preserves already accepted operations from before access and billing were separated.
 // Only an absent access field uses that operation's original billing period; explicit null is indefinite.
-// An operation accepted before seats bills one.
 func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	type plain InitialMembershipTerms
 	var decoded plain
@@ -116,9 +145,6 @@ func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	if _, present := fields["access_duration_hours"]; !present {
 		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
 		decoded.AccessDurationHours = &hours
-	}
-	if _, present := fields["quantity"]; !present {
-		decoded.Quantity = 1
 	}
 	*t = InitialMembershipTerms(decoded)
 	return nil

@@ -289,7 +289,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 				}
 				return sub, nil, nil
 			}
-			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || sub.Quantity != terms.Quantity || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
+			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || !SameQuantity(sub.Quantity, terms.Quantity) || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
 				return nil, nil, errors.New("pending membership contradicts accepted first paid period")
 			}
 		}
@@ -518,11 +518,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			CurrentPeriodStartsAt: &periodStartsAt,
 			CurrentPeriodEndsAt:   &periodEndsAt,
 			StartedAt:             periodStartsAt,
-			Quantity:              1,
 		}
 
 		if terms := params.Prepared; terms != nil {
-			subscription.ID, subscription.PspID, subscription.Quantity = terms.SubscriptionID, terms.PSPID, terms.Quantity
+			subscription.ID, subscription.PspID, subscription.Quantity = terms.SubscriptionID, terms.PSPID, CloneQuantity(terms.Quantity)
 			subscription.CollectionPolicy = terms.CollectionPolicy
 			subscription.PaymentMethodID = &terms.PaymentMethodID
 			metadata, err := json.Marshal(params.PaymentMetadata)
@@ -677,6 +676,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			MoneyMovement: models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
 			PurchasedAt:   purchasedAt,
 			CreatedAt:     now,
+			Quantity:      CloneQuantity(subscription.Quantity),
 		}
 		if params.Prepared != nil {
 			payment.ID = params.Prepared.PaymentID
@@ -770,6 +770,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			Metadata:      metadata,
 			AttemptKind:   func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
+			Quantity: CloneQuantity(subscription.Quantity),
 		}
 		if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 			payment.TokenType = &tt
@@ -843,6 +844,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		var price *models.Price
 		var newProduct *models.Product
+		fromQuantity := CloneQuantity(subscription.Quantity)
 		applyingDowngrade := false
 		preserveLifecycle := false
 		var acceptedPayment *models.Payment
@@ -958,6 +960,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				MoneyMovement:  models.MoneyMovementRail, // or#827: the rebill settled at the rail.
 				PurchasedAt:    purchasedAt,
 				CreatedAt:      now,
+				Quantity:       CloneQuantity(subscription.Quantity),
 			}
 			if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 				payment.TokenType = &tt
@@ -1028,6 +1031,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
 			Downgrade: applyingDowngrade, ProductName: productName,
 			PreserveLifecycle: preserveLifecycle, Reinstate: params.AllowTerminalReactivation,
+			SeatsChanged: !SameQuantity(subscription.Quantity, fromQuantity),
 		})
 		if err != nil {
 			return err
@@ -2270,7 +2274,7 @@ func (s *SubscriptionLifecycleService) dunningAccess(ctx context.Context, d *db.
 		return nil
 	}
 	start := *accessEnd(*sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot)
-	if _, err := ent.PushAccess(ctx, entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, Indefinite: true, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String()}); err != nil {
+	if _, err := ent.PushAccess(ctx, entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, Indefinite: true, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String(), Quantity: sub.Quantity}); err != nil {
 		return fmt.Errorf("keep access through dunning for %s: %w", sub.ID, err)
 	}
 	return nil

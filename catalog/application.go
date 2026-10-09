@@ -137,6 +137,7 @@ type ApplyPrice struct {
 	TrialUnitAmount      Field[int64]                        `json:"trial_unit_amount,omitzero"`
 	TrialDurationHours   Field[int]                          `json:"trial_duration_hours,omitzero"`
 	CustomerAmount       Field[CustomerAmount]               `json:"customer_amount,omitzero"`
+	Quantity             Field[Quantity]                     `json:"quantity,omitzero"`
 	PSPs                 Field[[]string]                     `json:"psps,omitzero"`
 	PSPLinks             Field[map[string]map[string]string] `json:"psp_links,omitzero"`
 }
@@ -185,6 +186,11 @@ func (a Application) Validate() error {
 			}
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
 				return fmt.Errorf("price %q: money cannot be negative", priceKey)
+			}
+			if price.Quantity.Set && !price.Quantity.Null {
+				if err := price.Quantity.Value.Validate(); err != nil {
+					return fmt.Errorf("price %q: %w", priceKey, err)
+				}
 			}
 			for _, duration := range []Field[int]{price.BillingIntervalHours, price.AccessDurationHours, price.TrialDurationHours} {
 				if duration.Set && !duration.Null && (duration.Value <= 0 || duration.Value > MaxDurationHours) {

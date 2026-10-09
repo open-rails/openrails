@@ -82,6 +82,15 @@ func DerefUUID(u *uuid.UUID) uuid.UUID {
 // of wrapping if a caller ever hands it a value outside int32's range (none
 // of today's callers — retry counts, duration hours — can, but the helper is
 // shared and should never truncate silently).
+// SeatsOf is a seat count a query answers as zero when it has none.
+func SeatsOf(v int32) *int {
+	if v <= 0 {
+		return nil
+	}
+	n := int(v)
+	return &n
+}
+
 func IntPtrTo32(v *int) *int32 {
 	if v == nil {
 		return nil
@@ -122,6 +131,7 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		ReversalKind:      p.ReversalKind,
 		TokenType:         p.TokenType,
 		MoneyMovement:     MoneyMovement(p.MoneyMovement),
+		Quantity:          DerefIntPtr(p.Quantity),
 		DiscountCode:      p.DiscountCode,
 		DiscountReason:    p.DiscountReason,
 		PurchasedAt:       p.PurchasedAt,
@@ -173,6 +183,9 @@ func PriceFromGen(p gen.BillingPrice) (*Price, error) {
 	if err := FromJSONB(p.CustomerAmount, &m.CustomerAmount, "prices.customer_amount"); err != nil {
 		return nil, err
 	}
+	if err := FromJSONB(p.Quantity, &m.Quantity, "prices.quantity"); err != nil {
+		return nil, err
+	}
 	return m, nil
 }
 
@@ -204,7 +217,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		CustomerID:                  s.CustomerID,
 		ProductID:                   s.ProductID,
 		PriceID:                     DerefUUID(s.PriceID),
-		Quantity:                    int(s.Quantity),
+		Quantity:                    DerefIntPtr(s.Quantity),
 		Status:                      SubscriptionStatus(s.Status),
 		StartedAt:                   s.StartedAt,
 		EndedAt:                     s.EndedAt,

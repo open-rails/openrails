@@ -958,7 +958,7 @@ func (s *CCBillWebhookService) updateAccessForUpgrade(
 	}
 	params := entitlements.PushAccessParams{
 		UserID: subscription.CustomerID.String(), CustomerID: subscription.CustomerID, ProductID: newPrice.ProductID,
-		NotBefore: &now, Indefinite: true, SourceType: st, SourceID: sid,
+		NotBefore: &now, Indefinite: true, SourceType: st, SourceID: sid, Quantity: subscription.Quantity,
 	}
 	if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
 		end := subscription.CurrentPeriodEndsAt.UTC()
@@ -1783,7 +1783,7 @@ func (s *CCBillWebhookService) recordCCBillAttempt(ctx context.Context, d *db.DB
 		MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(models.RailCCBill),
 		Kind: attempts.Rebill, Owner: attempts.OwnerOf(sub.CollectionPolicy), ProviderSchedule: true, ObservedVia: "webhook",
 		Approved: approved, Answer: answer, TransactionID: strings.TrimSpace(transactionID), Amount: sub.Price.Amount, Currency: sub.Price.Currency,
-		At: s.now(), SubscriptionID: &sub.ID, PaymentMethodID: sub.PaymentMethodID, Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due},
+		At: s.now(), SubscriptionID: &sub.ID, PaymentMethodID: sub.PaymentMethodID, Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due, Quantity: sub.Quantity},
 	})
 }
 

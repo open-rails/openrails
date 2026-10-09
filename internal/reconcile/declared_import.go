@@ -444,7 +444,6 @@ func insertDeclaredCanceled(
 		CreatedAt:                   f.StartedAt.UTC(),
 		UpdatedAt:                   canceledAt,
 		PspID:                       f.PspID,
-		Quantity:                    1,
 	}); err != nil {
 		// A race with a concurrent writer trips the (merchant, rail, sub-id)
 		// unique index — a loud blocked row, never silent corruption.
@@ -465,7 +464,6 @@ func materializeDeclaredUnknown(
 ) (uuid.UUID, error) {
 	started := f.StartedAt.UTC()
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
-		Quantity:           1,
 		CollectionPolicy:   string(f.CollectionPolicy),
 		MerchantID:         merchantID,
 		Status:             string(models.StatusUnverified),

@@ -173,7 +173,7 @@ checkout only, across every merchant and PSP.
 - **RPC/gas failures** are operational: retried next run, never held against the
   subscriber.
 - **Cancels and tier changes are on-chain and signed by the subscriber.**
-  `POST /v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier`
+  `POST /v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change`
   answer `next_action: {type: "solana_sign_transactions", transactions}`; the
   wallet signs and sends them, and the same request repeated with `signature`
   mirrors the landed transaction. A cancel is immediate: there is no card-style

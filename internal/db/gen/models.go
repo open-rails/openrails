@@ -405,6 +405,8 @@ type BillingCustomerEntitlementCache struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	Entitlement string
+	// The most seats of the key a held per-seat product gives; NULL when none is per seat.
+	Quantity *int32
 }
 
 // When a heavy buyer's cached keys are valid: built at entitlement_generation and access_version, for instants in [valid_from, valid_until), the next start or end of one of their windows. Derived; rebuilt on read.
@@ -529,6 +531,8 @@ type BillingGrant struct {
 	Actor *string
 	// Why a free product was granted: comp, staff, import or migration. Required on grant-sourced access grants; reason stays a free-text note.
 	GrantReason *string
+	// Seats an access grant gives: its per-seat subscription's quantity; NULL otherwise.
+	Quantity *int32
 }
 
 // Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes and order transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
@@ -1113,6 +1117,8 @@ type BillingPayment struct {
 	// The invoice this payment paid, with ledger_transfer_id the owed payment that settled it. A balance repayment moves no money and is only its ledger transfer.
 	InvoiceID        *uuid.UUID
 	LedgerTransferID *uuid.UUID
+	// Seats a per-seat subscription payment billed: a period at that many seats, or the seats a mid-period increase added. NULL otherwise.
+	Quantity *int32
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1249,6 +1255,8 @@ type BillingPrice struct {
 	CustomerAmount []byte
 	// Recurring billing cadence in hours; NULL means one-time. Recurring subscriptions bill until canceled.
 	BillingIntervalHours *int32
+	// Seat bounds {min, max} of a recurring price sold per seat; amount is per seat. NULL: the price has no quantity.
+	Quantity []byte
 }
 
 // Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
@@ -1335,6 +1343,8 @@ type BillingProductAccess struct {
 	DestructiveRunClass *string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// Seats the window gives, from its grant; NULL unless per seat.
+	Quantity *int32
 }
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.
@@ -1528,6 +1538,8 @@ type BillingRebillCycle struct {
 	// When the cycle passed its owner's deadline with no attempt; a later attempt still attaches to the cycle.
 	MissedAt   *time.Time
 	MissReason *string
+	// Seats the cycle bills; NULL unless the subscription is per seat.
+	Quantity *int32
 }
 
 // Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, psp_id, subject_key): catalog and pull.* findings name the PSP whose read raised them. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored. Retention: resolved findings are deleted 12 months (366 days) after they were resolved and last seen.
@@ -1702,8 +1714,8 @@ type BillingSubscription struct {
 	DunningPolicy       []byte
 	// Access duration accepted for the current paid phase in hours; NULL means no scheduled expiry. Retained independently of repricing.
 	AccessDurationHoursSnapshot *int32
-	// Seats: renewals bill the unit price times this. Above 1 only on an engine-owned NMI or Stripe subscription; provider-owned and Solana subscriptions bill one unit.
-	Quantity int32
+	// Seats of a per-seat price: renewals bill the unit price times this. NULL unless the price is sold per seat; only an engine-owned NMI or Stripe subscription has seats.
+	Quantity *int32
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

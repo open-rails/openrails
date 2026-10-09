@@ -204,7 +204,7 @@ func (q *Queries) ListDefaultCatalogRateCards(ctx context.Context, merchantID uu
 
 const listLiveCatalogPricesWithPSPLinks = `-- name: ListLiveCatalogPricesWithPSPLinks :many
 SELECT p.product_id, p.key, p.amount, p.currency, p.access_duration_hours, p.billing_interval_hours,
-       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount,
+       p.trial_unit_amount, p.trial_duration_hours, p.customer_amount, p.quantity,
        COALESCE((
            SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
                'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
@@ -231,6 +231,7 @@ type ListLiveCatalogPricesWithPSPLinksRow struct {
 	TrialUnitAmount      *int64
 	TrialDurationHours   *int32
 	CustomerAmount       []byte
+	Quantity             []byte
 	PspLinks             []byte
 	Archived             bool
 }
@@ -254,6 +255,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 			&i.TrialUnitAmount,
 			&i.TrialDurationHours,
 			&i.CustomerAmount,
+			&i.Quantity,
 			&i.PspLinks,
 			&i.Archived,
 		); err != nil {

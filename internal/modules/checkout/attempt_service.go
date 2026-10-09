@@ -828,7 +828,15 @@ func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt
 	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
 		return ErrCheckoutAttemptExpired
 	}
-	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Quantity: 1, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour)}
+	// A session buys one seat of a per-seat price; more seats are an order's.
+	var quantity *int
+	if price.Quantity != nil {
+		if price.Quantity.Min != 1 {
+			return ErrCheckoutAttemptValidation
+		}
+		quantity = new(1)
+	}
+	terms := subscriptions.InitialMembershipTerms{Quantity: quantity, CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour)}
 	if err := terms.Validate(); err != nil {
 		return err
 	}
@@ -1538,7 +1546,7 @@ func (s *CheckoutAttemptService) initializeSolanaSubscriptionSession(ctx context
 
 	// Duplicate-billing guard (issue #269): a user must never hold two concurrent
 	// non-terminal subscriptions in the same product/tier-group (even at different
-	// tiers — that is double-billing; the correct operation is change-tier). Run
+	// tiers — that is double-billing; the correct operation is a subscription change). Run
 	// this BEFORE preparing any on-chain transaction so we neither create the
 	// session nor ask the wallet to sign anything for a duplicate. A tier change on
 	// an EXISTING Solana subscription does NOT go through this subscribe flow — it

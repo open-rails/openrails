@@ -75,7 +75,7 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	}
 	start := *accessEnd(periodStart, sub.AccessDurationHoursSnapshot)
 	end := start.Add(grace)
-	p := entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, EndsAt: &end, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String()}
+	p := entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, EndsAt: &end, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String(), Quantity: sub.Quantity}
 	if !policy.SuspendWhenHeld {
 		p.EndsAt, p.Indefinite = nil, true
 	}

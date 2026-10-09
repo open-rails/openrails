@@ -32,7 +32,7 @@ func subscriptionAccess(sub *models.Subscription, start time.Time) entitlements.
 	return entitlements.PushAccessParams{
 		UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start,
 		EndsAt: end, Indefinite: end == nil,
-		SourceType: models.AccessSourceSubscription, SourceID: sub.ID.String(),
+		SourceType: models.AccessSourceSubscription, SourceID: sub.ID.String(), Quantity: sub.Quantity,
 	}
 }
 

@@ -66,7 +66,7 @@ PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}:
 GET  /v1/me/subscriptions[/{id}]          own subscriptions (cursor page): typed ids, price/product, scheduled change, card, access
 POST /v1/me/subscriptions/{id}/cancel      body {"reason": "..."} → the Subscription (next_action when the wallet must sign)
 POST /v1/me/subscriptions/{id}/resume      undo a scheduled cancel → the Subscription
-POST /v1/me/subscriptions/{id}/change-tier body {"price_id":"price_..."} → a TierChange (upgrades/downgrades)
+POST /v1/me/subscriptions/{id}/change body {"price_id":"price_...", "quantity": 3} → a SubscriptionChange (plan or seats)
 PUT  /v1/me/subscriptions/{id}/payment-method  swap the saved card → the Subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
@@ -153,7 +153,7 @@ Rail-specific gotchas the UI must handle:
   carries a `next_action`: a `redirect_to_url` (CCBill), wallet transactions to sign
   (Solana), or a card challenge (`payment_authentication` with `operation_id`).
 - Paying a checkout session for a second subscription in the same tier group
-  answers `status: "blocked"` — send those users to `change-tier`.
+  answers `status: "blocked"` — send those users to `change`.
 
 ### Which rails sell what
 

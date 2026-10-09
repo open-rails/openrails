@@ -218,9 +218,15 @@ func (w *RebillWatchWorker) miss(ctx context.Context, sub *models.Subscription, 
 	return w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := w.DB.NewWithPgxTx(tx)
 		q := txdb.Gen(ctx)
+		quantity := sub.Quantity
+		amount, err := subscriptions.SeatAmount(sub.Price.Amount, quantity)
+		if err != nil {
+			return err
+		}
 		cycle, err := q.UpsertRebillCycle(ctx, gen.UpsertRebillCycleParams{
 			ID: uuidutil.NewV7(), MerchantID: sub.MerchantID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, PspID: sub.PspID, Rail: string(sub.Rail),
-			Owner: string(attempts.OwnerOf(sub.CollectionPolicy)), DueAt: due, Amount: sub.Price.Amount, Currency: sub.Price.Currency,
+			Owner: string(attempts.OwnerOf(sub.CollectionPolicy)), DueAt: due, Amount: amount, Currency: sub.Price.Currency,
+			Quantity: models.IntPtrTo32(quantity),
 		})
 		if err != nil {
 			return err

@@ -49,10 +49,12 @@ func (p *Product) IsPurchasable() bool { return !p.Archived }
 // This represents pricing options similar to Stripe's pricing model
 type Price struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
-	Revision       int64                   `json:"revision"`
-	ID             uuid.UUID               `json:"id"`
-	MerchantID     uuid.UUID               `json:"merchant_id"`
-	ProductID      uuid.UUID               `json:"product_id"`
+	// Quantity makes a recurring price per seat; nil: no quantity.
+	Quantity   *catalog.Quantity `json:"quantity,omitempty"`
+	Revision   int64             `json:"revision"`
+	ID         uuid.UUID         `json:"id"`
+	MerchantID uuid.UUID         `json:"merchant_id"`
+	ProductID  uuid.UUID         `json:"product_id"`
 	// Archived: retired. Not purchasable, but grandfathered subscriptions keep
 	// billing it indefinitely.
 	Archived bool `json:"archived"`
@@ -356,7 +358,7 @@ func (p *Price) View() billing.Price {
 	out := billing.Price{Revision: p.Revision,
 		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
 		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours,
-		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount,
+		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount, Quantity: p.Quantity,
 		PSPs: make(map[string]billing.PSPLinkState, len(p.PSPLinks)), PendingManualActions: []billing.PendingAction{},
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}

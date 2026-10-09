@@ -245,7 +245,7 @@ export function fakeBilling(
         if (!sub) return apiError(404, "resource_not_found")
         // Like OpenRails: a tier change without a client key is refused.
         if (!new Headers(init.headers).get("Idempotency-Key"))
-          return apiError(400, "tier_change_idempotency_key_required")
+          return apiError(400, "subscription_change_idempotency_key_required")
         const target = state.products.find((p) =>
           (p.prices as Row[]).some((price) => price.id === body?.price_id)
         )

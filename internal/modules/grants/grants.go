@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -134,6 +135,21 @@ type GrantInput struct {
 	// Actor and GrantReason attribute a free product grant (Source Granted).
 	Actor       string
 	GrantReason GrantReason
+	// Quantity is the seats an access grant gives: a per-seat subscription's;
+	// nil otherwise.
+	Quantity *int
+}
+
+// seats is a grant's quantity column.
+func seats(quantity *int) (*int32, error) {
+	if quantity == nil {
+		return nil, nil
+	}
+	if *quantity < 1 || *quantity > math.MaxInt32 {
+		return nil, fmt.Errorf("grants: quantity %d is out of range", *quantity)
+	}
+	q := int32(*quantity) // #nosec G115 -- range checked above
+	return &q, nil
 }
 
 // Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
@@ -159,7 +175,12 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, er
 		r := string(in.GrantReason)
 		reason = &r
 	}
+	quantity, err := seats(in.Quantity)
+	if err != nil {
+		return gen.BillingGrant{}, err
+	}
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
+		Quantity:   quantity,
 		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: in.Product,
 		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
 		Event: "grant", SupersedesID: nil, SpecSnapshot: spec,
@@ -187,7 +208,12 @@ func (l *Ledger) GrantAccessOnce(ctx context.Context, in GrantInput) (g gen.Bill
 		r := string(in.GrantReason)
 		reason = &r
 	}
+	quantity, err := seats(in.Quantity)
+	if err != nil {
+		return g, false, err
+	}
 	g, err = l.q.InsertAccessGrantOnce(ctx, gen.InsertAccessGrantOnceParams{
+		Quantity:   quantity,
 		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: *in.Product,
 		SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
 		StartsAt: starts, EndsAt: in.EndsAt, Reason: in.Reason, Actor: actor, GrantReason: reason,
@@ -257,6 +283,7 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	sup := grantID
 	r := reason
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
+		Quantity:   g.Quantity,
 		MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: g.ProductID,
 		Kind: g.Kind, SourceType: g.SourceType, SourceID: sourceIDOf(g), PaymentID: g.PaymentID,
 		Event: event, SupersedesID: &sup, SpecSnapshot: g.SpecSnapshot,
@@ -291,7 +318,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		if err := l.q.MaterializeProductAccess(ctx, gen.MaterializeProductAccessParams{
 			MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: *g.ProductID, GrantID: g.ID,
 			SourceType: g.SourceType, SourceID: *g.SourceID, PaymentID: g.PaymentID,
-			StartsAt: g.StartsAt, EndsAt: g.EndsAt,
+			StartsAt: g.StartsAt, EndsAt: g.EndsAt, Quantity: g.Quantity,
 		}); err != nil {
 			return fmt.Errorf("grants: materialize product access: %w", err)
 		}
@@ -485,8 +512,8 @@ func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngran
 // GrantSubscriptionWindow records a subscription's access grant for one
 // window of its product and projects it, skipping a window already on the
 // ledger. It reports whether it materialized one.
-func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscription, product uuid.UUID, source SourceType, start time.Time, end *time.Time) (bool, error) {
-	return l.deriveAccessWindow(ctx, customerWindow{Customer: customer, Product: product, Source: source, SourceID: subscription.String(), Start: start.UTC(), End: end})
+func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscription, product uuid.UUID, source SourceType, start time.Time, end *time.Time, quantity *int) (bool, error) {
+	return l.deriveAccessWindow(ctx, customerWindow{Customer: customer, Product: product, Source: source, SourceID: subscription.String(), Start: start.UTC(), End: end, Quantity: quantity})
 }
 
 // DeriveWalletGrant creates the access grant and window for a solana wallet
@@ -531,6 +558,7 @@ type customerWindow struct {
 	Payment  *uuid.UUID
 	Start    time.Time
 	End      *time.Time
+	Quantity *int
 }
 
 // deriveAccessWindow records the source's access grant and asks derive-2 to
@@ -551,7 +579,7 @@ func (l *Ledger) deriveAccessWindow(ctx context.Context, w customerWindow) (bool
 	product := w.Product
 	g, created, err := l.GrantAccessOnce(ctx, GrantInput{
 		Customer: w.Customer, Product: &product, Kind: Access, Source: w.Source, SourceID: w.SourceID, Payment: w.Payment,
-		StartsAt: w.Start, EndsAt: w.End,
+		StartsAt: w.Start, EndsAt: w.End, Quantity: w.Quantity,
 	})
 	if err != nil {
 		return false, fmt.Errorf("grants: derive-1 grant %s: %w", w.SourceID, err)

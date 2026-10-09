@@ -24,7 +24,7 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/http/handlers/invoices.go":                      true,
 	"internal/http/handlers/admin_metering.go":                true,
 	"internal/http/handlers/admissions.go":                    true,
-	"internal/http/handlers/change_tier.go":                   true,
+	"internal/http/handlers/subscription_change.go":           true,
 	"internal/http/handlers/orders.go":                        true,
 	"internal/http/handlers/merchant_api_host.go":             true,
 	"internal/http/handlers/provider_operations.go":           true,

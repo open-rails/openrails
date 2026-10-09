@@ -89,7 +89,7 @@ func (q *Queries) GetCustomerCreditGrant(ctx context.Context, arg GetCustomerCre
 const listCustomerCreditGrants = `-- name: ListCustomerCreditGrants :many
 
 WITH page AS (
-  SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason FROM billing.grants g
+  SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at, g.actor, g.grant_reason, g.quantity FROM billing.grants g
   WHERE g.merchant_id = $1::uuid
     AND g.customer_id = $2::uuid
     AND ($3::text IS NULL OR g.currency = $3::text)

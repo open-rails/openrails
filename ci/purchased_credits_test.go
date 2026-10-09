@@ -135,7 +135,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	require.EqualValues(t, 2_000_000, balance.BalanceAmount)
 	access, err := client.CheckProductAccess(ctx, customer, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
 	require.NoError(t, err)
-	require.False(t, access[product.ID.String()], "a purchased credit pack is not permanent ownership")
+	require.False(t, access.Access[product.ID.String()], "a purchased credit pack is not permanent ownership")
 
 	buy()
 	deliver(provider.paid(t, 2, "evt_credit_second"))

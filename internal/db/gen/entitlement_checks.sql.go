@@ -14,10 +14,11 @@ import (
 
 const checkDerivedEntitlements = `-- name: CheckDerivedEntitlements :many
 
-SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access
+SELECT k.key::text AS entitlement, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest($1::text[]) AS k(key)
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_entitlements pe
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
     WHERE pe.merchant_id = $2::uuid AND pe.entitlement = k.key
       AND pe.added_at <= $3::timestamptz
@@ -26,8 +27,7 @@ LEFT JOIN LATERAL (
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= $3::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
-    LIMIT 1
-) held ON true
+) held
 `
 
 type CheckDerivedEntitlementsParams struct {
@@ -40,15 +40,16 @@ type CheckDerivedEntitlementsParams struct {
 type CheckDerivedEntitlementsRow struct {
 	Entitlement string
 	HasAccess   bool
+	Quantity    int32
 }
 
 // Derived entitlements: a customer holds a key at an instant when a live
 // product_access window of theirs covers it and the product granted the key
 // then (product_entitlements valid time). Nothing per customer stores keys.
-// Key-first: for each key, the products granting it, then one probe of the
-// customer's windows of each. Cost: keys x products granting each key. The
-// LATERAL with LIMIT keeps the planner from scanning every window the
-// customer holds instead.
+// Key-first: for each key, the products granting it, then the customer's
+// live windows of each, for the most seats one gives. Cost: keys x products
+// granting each key; the LATERAL keeps the planner from scanning every window
+// the customer holds instead.
 func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerivedEntitlementsParams) ([]CheckDerivedEntitlementsRow, error) {
 	rows, err := q.db.Query(ctx, checkDerivedEntitlements,
 		arg.Entitlements,
@@ -63,7 +64,7 @@ func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerived
 	var items []CheckDerivedEntitlementsRow
 	for rows.Next() {
 		var i CheckDerivedEntitlementsRow
-		if err := rows.Scan(&i.Entitlement, &i.HasAccess); err != nil {
+		if err := rows.Scan(&i.Entitlement, &i.HasAccess, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

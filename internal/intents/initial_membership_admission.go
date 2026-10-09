@@ -66,19 +66,24 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		// An upgrade replaces exactly one live membership of its tier group; the
-		// partial unique index admits no second one, so that row is the only
-		// conflict it may name.
-		if terms.Upgrade() {
-			if p.SubscriptionID == nil || *p.SubscriptionID != terms.Terms.Replaces.SubscriptionID {
-				return errors.New("engine upgrade must name the membership it replaces")
+		// An upgrade replaces, and a seat increase changes, exactly one live
+		// membership of its tier group; the partial unique index admits no
+		// second one, so that row is the only conflict it may name.
+		changed, change := terms.Terms.Changed()
+		if change {
+			if p.SubscriptionID == nil || *p.SubscriptionID != changed {
+				return errors.New("engine change must name the membership it changes")
 			}
-			if _, err := subscriptions.LockReplacedMembership(ctx, d, terms.Terms, models.Rail(p.Provider), true); err != nil {
+			lock := subscriptions.LockReplacedMembership
+			if !terms.Upgrade() {
+				lock = subscriptions.LockSeatMembership
+			}
+			if _, err := lock(ctx, d, terms.Terms, models.Rail(p.Provider), true); err != nil {
 				return err
 			}
 		}
 		conflict, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
-		if err == nil && (!terms.Upgrade() || conflict.ID != terms.Terms.Replaces.SubscriptionID) {
+		if err == nil && (!change || conflict.ID != changed) {
 			if conflict.Status == string(models.StatusCanceled) {
 				return apperr.Conflictf("the customer's canceled subscription for this product or tier group may still bill at its provider until its stop is confirmed; resume it, or retry once the stop completes")
 			}
@@ -87,7 +92,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if !terms.Upgrade() {
+		if !change {
 			runway, err := d.Gen(ctx).GetPaidRunwaySubscription(ctx, gen.GetPaidRunwaySubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID, Now: terms.Terms.AcceptedAt})
 			if err == nil {
 				sub, err := models.SubscriptionFromGen(runway)

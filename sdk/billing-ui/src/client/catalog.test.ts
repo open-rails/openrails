@@ -1,5 +1,5 @@
 // Catalog, plan-change and Solana calls. Bodies mirror the Go wire types
-// (billing.Product, billing.Price, billing.TierChange*Response,
+// (billing.Product, billing.Price, billing.SubscriptionChange*Response,
 // handlers.SolanaRuntimeConfigResponse).
 import { describe, expect, it, vi } from "vitest"
 
@@ -244,7 +244,7 @@ describe("tier change", () => {
       json(409, {
         error: {
           type: "invalid_request_error",
-          code: "tier_change_in_flight",
+          code: "subscription_change_in_flight",
           message: "tier change op_1 is unresolved",
           metadata: { operation_id: "op_1" },
         },
@@ -263,7 +263,7 @@ describe("tier change", () => {
     })
     await expect(client.changeTier("sub_1", input)).rejects.toMatchObject({
       status: 409,
-      code: "tier_change_in_flight",
+      code: "subscription_change_in_flight",
       metadata: { operation_id: "op_1" },
     })
     // A write is never retried: the caller replays its key.

@@ -33,16 +33,22 @@ type RenewalTerms struct {
 	PriceID             uuid.UUID       `json:"price_id"`
 	ProductID           uuid.UUID       `json:"product_id"`
 	ProductName         string          `json:"product_name"`
-	Amount              int64           `json:"amount,string"`
-	Currency            string          `json:"currency"`
-	PeriodStart         time.Time       `json:"period_start"`
-	PeriodEnd           time.Time       `json:"period_end"`
+	// Quantity is the seats of a per-seat price, nil otherwise; Amount is the
+	// unit price times Quantity.
+	Quantity    *int      `json:"quantity,omitempty"`
+	Amount      int64     `json:"amount,string"`
+	Currency    string    `json:"currency"`
+	PeriodStart time.Time `json:"period_start"`
+	PeriodEnd   time.Time `json:"period_end"`
 	// Entitlements is the keys a renewal admitted before product access, kept
 	// only to reproduce its provider binding. Access follows ProductID.
 	Entitlements json.RawMessage `json:"entitlements,omitempty"`
 	// ScheduledChangeID is the scheduled change this renewal applies.
 	ScheduledChangeID *uuid.UUID `json:"scheduled_change_id,omitempty"`
 }
+
+// UnitAmount is the price of one seat.
+func (t RenewalTerms) UnitAmount() int64 { return t.Amount / int64(SeatCount(t.Quantity)) }
 
 func (t RenewalTerms) Validate() error {
 	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
@@ -53,6 +59,9 @@ func (t RenewalTerms) Validate() error {
 	}
 	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) {
 		return errors.New("renewal currency must be canonical")
+	}
+	if t.Quantity != nil && *t.Quantity < 1 || t.Amount%int64(SeatCount(t.Quantity)) != 0 {
+		return errors.New("renewal seats contradict its amount")
 	}
 	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
 		return fmt.Errorf("renewal amount: %w", err)
@@ -78,6 +87,7 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	terms = RenewalTerms{
 		PSPID: sub.PspID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, FromPriceID: sub.PriceID, FromProductID: sub.ProductID,
 		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot,
+		Quantity: CloneQuantity(sub.Quantity),
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		if agreement == nil {
@@ -90,7 +100,12 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		if agreement.SubscriptionID != sub.ID || agreement.CustomerID != sub.CustomerID || agreement.PSPID != sub.PspID || agreement.PriceID != sub.PriceID || agreement.ProductID != sub.ProductID || !agreement.PeriodEnd.Equal(*sub.CurrentPeriodEndsAt) || sub.CurrentPeriodStartsAt == nil || !agreement.PeriodStart.Equal(*sub.CurrentPeriodStartsAt) || !agreement.PeriodStart.Add(duration).Equal(agreement.PeriodEnd) {
 			return terms, ErrEngineAgreementMismatch
 		}
-		terms.Amount, terms.Currency, terms.ProductName = agreement.Amount, agreement.Currency, agreement.ProductName
+		// The agreement fixes the unit price; seats are the subscription's.
+		amount, err := SeatAmount(agreement.UnitAmount(), terms.Quantity)
+		if err != nil {
+			return terms, err
+		}
+		terms.Amount, terms.Currency, terms.ProductName = amount, agreement.Currency, agreement.ProductName
 		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
 	} else if agreement != nil {
@@ -107,6 +122,9 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		}
 		terms.ScheduledChangeID = &change.ID
 		terms.PriceID = change.PriceID
+		if change.Quantity != nil {
+			terms.Quantity = CloneQuantity(change.Quantity)
+		}
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && terms.ScheduledChangeID == nil {
 		return terms, terms.Validate()
@@ -119,7 +137,19 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	if cycle == nil || *cycle <= 0 || int64(*cycle) > math.MaxInt64/int64(time.Hour) {
 		return terms, errors.New("renewal price has no valid recurring cadence")
 	}
-	terms.ProductID, terms.Amount, terms.Currency = price.ProductID, price.Amount, price.Currency
+	// The renewal's price decides whether it has seats: a price newly per seat
+	// starts at its minimum, one without seats drops them.
+	switch {
+	case price.Quantity == nil || !SeatsChangeable(sub):
+		terms.Quantity = nil
+	case terms.Quantity == nil:
+		terms.Quantity = CloneQuantity(&price.Quantity.Min)
+	}
+	amount, err := SeatAmount(price.Amount, terms.Quantity)
+	if err != nil {
+		return terms, err
+	}
+	terms.ProductID, terms.Amount, terms.Currency = price.ProductID, amount, price.Currency
 	terms.AccessDurationHours = price.AccessDurationHours
 	terms.PeriodEnd = terms.PeriodStart.Add(time.Duration(*cycle) * time.Hour)
 	product, err := catalog.NewProductService(d).GetByID(ctx, terms.ProductID)
@@ -148,7 +178,7 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	} else if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		return nil, false, errors.New("engine renewal requires its accepted previous boundary")
 	}
-	alreadyAdvanced := sub.CurrentPeriodEndsAt.Equal(terms.PeriodEnd) && sub.PriceID == terms.PriceID && sub.ProductID == terms.ProductID
+	alreadyAdvanced := sub.CurrentPeriodEndsAt.Equal(terms.PeriodEnd) && sub.PriceID == terms.PriceID && sub.ProductID == terms.ProductID && SameQuantity(sub.Quantity, terms.Quantity)
 	if !alreadyAdvanced && (!sub.CurrentPeriodEndsAt.Equal(previous) || sub.PriceID != terms.FromPriceID || sub.ProductID != terms.FromProductID) {
 		return nil, false, errors.New("subscription period no longer matches the accepted renewal")
 	}
@@ -170,7 +200,7 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 			}
 		}
 	}
-	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
+	sub.PriceID, sub.ProductID, sub.Quantity = terms.PriceID, terms.ProductID, CloneQuantity(terms.Quantity)
 	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
 	return applied, alreadyAdvanced, nil
 }

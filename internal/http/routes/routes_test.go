@@ -135,8 +135,8 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/payments/{id}/refunds":                                           write,
 		"GET /v1/admin/subscriptions":                                                    read,
 		"POST /v1/admin/subscriptions/{id}/cancel":                                       write,
-		"POST /v1/admin/subscriptions/{id}/change-tier":                                  write,
-		"POST /v1/admin/subscriptions/{id}/change-tier/preview":                          read,
+		"POST /v1/admin/subscriptions/{id}/change":                                       write,
+		"POST /v1/admin/subscriptions/{id}/change/preview":                               read,
 		"POST /v1/admin/price-migrations/preview":                                        read,
 		"POST /v1/admin/customers/{customer_id}/entitlements/check":                      read,
 		"POST /v1/admin/customers/{customer_id}/product-access/check":                    read,
@@ -254,12 +254,12 @@ func TestAdminOperationLimits(t *testing.T) {
 	table := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil), Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
 	h := table.Handler()
-	preview := "/m/admin/subscriptions/" + userA + "/change-tier/preview"
+	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.
 	for range 12 {
 		require.NotEqual(t, http.StatusTooManyRequests, doBody(h, http.MethodPost, preview, "{", nil).Code)
 	}
-	action := "/m/admin/subscriptions/" + userA + "/change-tier"
+	action := "/m/admin/subscriptions/" + userA + "/change"
 	for range 10 {
 		require.NotEqual(t, http.StatusTooManyRequests, doBody(h, http.MethodPost, action, "{", nil).Code)
 	}

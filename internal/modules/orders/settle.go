@@ -267,7 +267,7 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 			CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), CustomerID: order.CustomerID, PSPID: charge.PSPID,
 			ProductID: line.ProductID, PriceID: line.PriceID, PaymentMethodID: charge.PaymentMethodID, ProductName: line.Description,
 			RecurringAmount: line.Amount, Currency: order.Currency, AccessDurationHours: intPtr(line.AccessDurationHours),
-			AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: seats(line.Quantity),
+			AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(interval), Quantity: models.DerefIntPtr(line.Quantity),
 		}
 		sub, _, err := s.Memberships.CreateMembershipTx(db.WithPSPID(ctx, charge.PSPID), d, &subscriptions.CreateMembershipParams{
 			Prepared: &terms, UserID: order.CustomerID.String(), PriceID: line.PriceID, Rail: models.Rail(charge.Rail), PurchasedAt: &now,

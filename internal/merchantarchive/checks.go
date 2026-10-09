@@ -82,7 +82,7 @@ var excludedColumns = map[string]string{
 	"card_attempt_failures":         "merchant_id subject bucket_at failures",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
 	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id invoice_id order_id",
-	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
+	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity",
 	"payment_method_updates":        "id merchant_id payment_method_id customer_id psp_id source kind event_ref occurred_at created_at",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
 	"checkout_sessions":             "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
@@ -114,7 +114,7 @@ var excludedColumns = map[string]string{
 	"cost_refusals":                 "merchant_id operation_id reason qualification_state detail refused_at",
 
 	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
-	"customer_entitlement_cache":         "id merchant_id customer_id entitlement",
+	"customer_entitlement_cache":         "id merchant_id customer_id entitlement quantity",
 	"customer_entitlement_cache_stamps":  "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
 }
 

@@ -11,8 +11,9 @@ import (
 
 // CheckProductAccess reports, for each product named by exactly one of
 // params.ProductIDs and params.ProductKeys, whether the customer has access to
-// it now. Keys of the result are the ids or keys the request named.
-func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CheckProductAccessParams, requestOptions ...RequestOption) (map[string]bool, error) {
+// it now and the seats they hold. Keys of the result are the ids or keys the
+// request named.
+func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CheckProductAccessParams, requestOptions ...RequestOption) (*billing.ProductAccessCheck, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
@@ -32,7 +33,7 @@ func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.Cust
 	if err := c.do(ctx, http.MethodPost, path+"/product-access/check", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return out.Access, nil
+	return &out, nil
 }
 
 // ListProductAccess returns one page of the customer's product-access

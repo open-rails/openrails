@@ -16,10 +16,11 @@ SELECT EXISTS (
 
 -- name: CheckCachedEntitlements :many
 -- One probe of the cache index per key.
-SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access
+SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
 LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.customer_entitlement_cache ec
+    SELECT true AS found, ec.quantity FROM billing.customer_entitlement_cache ec
     WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
       AND ec.entitlement = k.key
     LIMIT 1
@@ -83,18 +84,20 @@ DELETE FROM billing.customer_entitlement_cache
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid;
 
 -- name: SyncEntitlementCache :one
--- Makes the cache the keys the customer holds at at_time, writing only the
--- difference from what it held: one probe of each held product, one full
--- join of held and cached keys (a hash or merge join, never a nested loop,
--- whatever the cache's statistics say) and one index probe per stale key.
+-- Makes the cache the keys the customer holds at at_time and their seats,
+-- writing only the difference from what it held: one probe of each held
+-- product, one full join of held and cached keys (a hash or merge join, never
+-- a nested loop, whatever the cache's statistics say) and one index probe per
+-- stale or changed key.
 WITH owned AS MATERIALIZED (
-    SELECT DISTINCT pa.product_id FROM billing.product_access pa
+    SELECT pa.product_id, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
+    GROUP BY pa.product_id
 ), held AS MATERIALIZED (
-    SELECT DISTINCT k.entitlement FROM owned o
+    SELECT k.entitlement, max(o.quantity) AS quantity FROM owned o
     CROSS JOIN LATERAL (
         SELECT pe.entitlement FROM billing.product_entitlements pe
         WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = o.product_id
@@ -102,21 +105,23 @@ WITH owned AS MATERIALIZED (
           AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
         OFFSET 0
     ) k
+    GROUP BY k.entitlement
 ), cached AS MATERIALIZED (
-    SELECT ec.entitlement FROM billing.customer_entitlement_cache ec
+    SELECT ec.entitlement, ec.quantity FROM billing.customer_entitlement_cache ec
     WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
 ), diff AS MATERIALIZED (
-    SELECT coalesce(held.entitlement, cached.entitlement) AS entitlement, held.entitlement IS NULL AS stale
+    SELECT coalesce(held.entitlement, cached.entitlement) AS entitlement, held.quantity, held.entitlement IS NULL AS stale
     FROM held FULL JOIN cached ON cached.entitlement = held.entitlement
-    WHERE held.entitlement IS NULL OR cached.entitlement IS NULL
+    WHERE held.entitlement IS NULL OR cached.entitlement IS NULL OR cached.quantity IS DISTINCT FROM held.quantity
 ), dropped AS (
     DELETE FROM billing.customer_entitlement_cache ec
     WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
       AND ec.entitlement = ANY (ARRAY(SELECT diff.entitlement FROM diff WHERE diff.stale))
     RETURNING 1
 ), added AS (
-    INSERT INTO billing.customer_entitlement_cache (merchant_id, customer_id, entitlement)
-    SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, diff.entitlement FROM diff WHERE NOT diff.stale
+    INSERT INTO billing.customer_entitlement_cache (merchant_id, customer_id, entitlement, quantity)
+    SELECT sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, diff.entitlement, diff.quantity FROM diff WHERE NOT diff.stale
+    ON CONFLICT (merchant_id, customer_id, entitlement) DO UPDATE SET quantity = EXCLUDED.quantity
     RETURNING 1
 )
 SELECT (SELECT count(*) FROM held)::int AS keys, (SELECT count(*) FROM dropped)::int AS dropped, (SELECT count(*) FROM added)::int AS added;

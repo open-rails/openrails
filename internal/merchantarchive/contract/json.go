@@ -13,7 +13,8 @@ import (
 )
 
 var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
-	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue})})
+	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue}),
+	"adds":     object(map[string]jsonRule{"from_quantity": integerValue})})
 
 var creditGrantJSON = nullable(func(v any) bool {
 	if !object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue, "starts_at": textValue, "expires_at": nullable(textValue)})(v) {
@@ -37,7 +38,7 @@ var acceptedPurchaseJSON = object(map[string]jsonRule{
 var acceptedRenewalJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
 	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
-	"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
+	"product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "currency": textValue,
 	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue),
 	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
 	"scheduled_change_id": uuidValue,
@@ -214,6 +215,7 @@ var captureJSON = object(map[string]jsonRule{
 var jsonRules = map[string]jsonRule{
 	"products.credit_grant":                             nullable(object(map[string]jsonRule{"currency": textValue, "amount": nullable(moneyStringValue), "from_payment": booleanValue, "expires_after_days": integerValue})),
 	"prices.customer_amount":                            nullable(object(map[string]jsonRule{"min_amount": moneyStringValue, "max_amount": moneyStringValue})),
+	"prices.quantity":                                   nullable(object(map[string]jsonRule{"min": integerValue, "max": integerValue})),
 	"payments.credit_grant_snapshot":                    creditGrantJSON,
 	"provider_intents.nmi_vault_delete.payload":         object(map[string]jsonRule{"billing_entry_only": booleanValue, "user_id": uuidValue, "payment_method_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
 	"provider_intents.nmi_vault_delete.result_evidence": object(map[string]jsonRule{"deleted": booleanValue, "verified_absent": booleanValue, "verified_entry_absent": booleanValue, "already_absent": booleanValue, "no_rail_customer_ref": booleanValue, "vault_id": textValue, "billing_id": textValue, "scoped_to_billing_entry": textValue}),

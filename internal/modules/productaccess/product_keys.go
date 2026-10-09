@@ -9,12 +9,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
 type KeyDecision struct {
 	ProductID uuid.UUID
 	HasAccess bool
+	Quantity  *int
 }
 
 // CheckProductKeys resolves one bounded key batch in the authorized merchant
@@ -51,7 +53,7 @@ func (s *Service) CheckProductKeys(ctx context.Context, userID string, keys []st
 		return nil, err
 	}
 	for _, row := range rows {
-		decision := KeyDecision{HasAccess: row.HasAccess}
+		decision := KeyDecision{HasAccess: row.HasAccess, Quantity: models.SeatsOf(row.Quantity)}
 		if row.ProductID != nil {
 			decision.ProductID = *row.ProductID
 		}

@@ -676,8 +676,8 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/subscriptions/{id}` | one subscription |
 | `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
 | `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier` | upgrade or downgrade |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier/preview` | what that change would cost |
+| `POST /billing/v1/me/subscriptions/{id}/change` | change plan or seats |
+| `POST /billing/v1/me/subscriptions/{id}/change/preview` | what that change would cost |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
@@ -1026,6 +1026,28 @@ mount fails. The startup example above gives no
 `CatalogWrite` and applies `catalog.yaml` through `Config.Catalog` on every
 boot. On the standalone server catalog writes follow `secret_backend`: a
 `vault` or `db` backend edits over HTTP, a `snapshot` one is read-only.
+
+---
+
+### Per-seat prices
+
+A recurring price is sold per seat when it declares `quantity`: its amount is
+one seat's, a subscription holds `min` to `max` seats, and renewals bill each.
+More seats charge now for the rest of the period; fewer take effect at the next
+renewal (`POST /billing/v1/me/subscriptions/{id}/change`). Seats are billed only
+by OpenRails on NMI or Stripe; any other price has no quantity.
+
+```yaml
+products:
+  team:
+    display_name: Team
+    entitlements: [team]
+    prices:
+      monthly:
+        amount: 10 USD
+        billing_interval: 30 days
+        quantity: {min: 1, max: 50}
+```
 
 ---
 

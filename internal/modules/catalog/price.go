@@ -59,7 +59,12 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 	if err != nil {
 		return err
 	}
+	quantity, err := models.PointerToJSONB(price.Quantity)
+	if err != nil {
+		return err
+	}
 	row, err := s.db.Gen(ctx).CreatePrice(ctx, gen.CreatePriceParams{
+		Quantity:             quantity,
 		ID:                   price.ID,
 		MerchantID:           price.MerchantID,
 		ProductID:            price.ProductID,
@@ -564,7 +569,12 @@ func (s *PriceService) FindByTerms(ctx context.Context, req billing.CreatePriceP
 	if err != nil {
 		return nil, err
 	}
+	quantity, err := models.PointerToJSONB(req.Quantity)
+	if err != nil {
+		return nil, err
+	}
 	row, err := s.db.Gen(ctx).GetPriceByTerms(ctx, gen.GetPriceByTermsParams{
+		Quantity:   quantity,
 		MerchantID: mid.UUID(), ProductID: req.ProductID.UUID(), Key: key,
 		Amount: req.UnitAmount, Currency: req.Currency, AccessDurationHours: models.IntPtrTo32(req.AccessDurationHours), BillingIntervalHours: models.IntPtrTo32(req.BillingIntervalHours),
 		TrialUnitAmount: req.TrialUnitAmount, TrialDurationHours: models.IntPtrTo32(req.TrialDurationHours), CustomerAmount: customAmount,

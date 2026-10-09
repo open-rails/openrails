@@ -3,14 +3,15 @@
 -- then (product_entitlements valid time). Nothing per customer stores keys.
 
 -- name: CheckDerivedEntitlements :many
--- Key-first: for each key, the products granting it, then one probe of the
--- customer's windows of each. Cost: keys x products granting each key. The
--- LATERAL with LIMIT keeps the planner from scanning every window the
--- customer holds instead.
-SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access
+-- Key-first: for each key, the products granting it, then the customer's
+-- live windows of each, for the most seats one gives. Cost: keys x products
+-- granting each key; the LATERAL keeps the planner from scanning every window
+-- the customer holds instead.
+SELECT k.key::text AS entitlement, (held.windows > 0)::boolean AS has_access,
+       COALESCE(held.quantity, 0)::int AS quantity
 FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
-LEFT JOIN LATERAL (
-    SELECT true AS found FROM billing.product_entitlements pe
+CROSS JOIN LATERAL (
+    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = k.key
       AND pe.added_at <= sqlc.arg(at_time)::timestamptz
@@ -19,8 +20,7 @@ LEFT JOIN LATERAL (
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-    LIMIT 1
-) held ON true;
+) held;
 
 -- name: ListDerivedEntitlementsByPrefix :many
 -- Customer-first, one pass: the products the customer holds, then one probe

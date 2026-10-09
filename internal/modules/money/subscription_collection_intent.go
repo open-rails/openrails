@@ -544,7 +544,7 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, in.Rail
 	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerEngine, at, "charge"
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
-	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
+	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd, Quantity: p.Renewal.Quantity}
 	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
 	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)

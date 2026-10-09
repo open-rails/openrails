@@ -357,8 +357,8 @@ function ChangeTierForm({
                     error instanceof ApiError &&
                     (error.status === 402 ||
                       (error.status === 409 &&
-                        (error.code === "tier_change_refused" ||
-                          error.code === "tier_change_idempotency_conflict")))
+                        (error.code === "subscription_change_refused" ||
+                          error.code === "subscription_change_idempotency_conflict")))
                   ) {
                     completeAttempt()
                   }

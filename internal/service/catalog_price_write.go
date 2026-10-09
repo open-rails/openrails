@@ -94,6 +94,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 				Archived:             req.Archived,
 				Amount:               req.UnitAmount,
 				CustomerAmount:       req.CustomerAmount,
+				Quantity:             req.Quantity,
 				Currency:             req.Currency,
 				AccessDurationHours:  req.AccessDurationHours,
 				BillingIntervalHours: req.BillingIntervalHours,

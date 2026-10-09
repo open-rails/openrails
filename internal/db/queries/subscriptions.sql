@@ -25,7 +25,7 @@ INSERT INTO billing.subscriptions (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(collection_policy)::text, ''), 'provider'),
-    sqlc.arg(quantity)::int
+    sqlc.narg(quantity)::int
 );
 
 -- name: UpdateSubscriptionAt :execrows
@@ -53,6 +53,7 @@ UPDATE billing.subscriptions SET
     canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
+    quantity = sqlc.narg(quantity)::int,
     dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
@@ -86,6 +87,7 @@ UPDATE billing.subscriptions SET
     canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
+    quantity = sqlc.narg(quantity)::int,
     dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at),
     lifecycle_rev = lifecycle_rev + 1

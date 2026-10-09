@@ -140,8 +140,15 @@ func (s *Service) RevokeProductAccess(ctx context.Context, customer, accessID uu
 	return true, ents.RevokeGrantedAccess(ctx, window, reason)
 }
 
+// ProductDecision is whether the customer holds a product now, and the most
+// seats a live per-seat window gives.
+type ProductDecision struct {
+	HasAccess bool
+	Quantity  *int
+}
+
 // CheckProducts answers, for each product, whether the customer holds it now.
-func (s *Service) CheckProducts(ctx context.Context, userID string, products []uuid.UUID) (map[uuid.UUID]bool, error) {
+func (s *Service) CheckProducts(ctx context.Context, userID string, products []uuid.UUID) (map[uuid.UUID]ProductDecision, error) {
 	if len(products) > 100 {
 		return nil, errors.New("at most 100 product IDs are allowed")
 	}
@@ -150,7 +157,7 @@ func (s *Service) CheckProducts(ctx context.Context, userID string, products []u
 			return nil, errors.New("product ID is required")
 		}
 	}
-	result := make(map[uuid.UUID]bool, len(products))
+	result := make(map[uuid.UUID]ProductDecision, len(products))
 	if len(products) == 0 {
 		return result, nil
 	}
@@ -167,7 +174,7 @@ func (s *Service) CheckProducts(ctx context.Context, userID string, products []u
 		return nil, err
 	}
 	for _, row := range rows {
-		result[row.ProductID] = row.HasAccess
+		result[row.ProductID] = ProductDecision{HasAccess: row.HasAccess, Quantity: models.SeatsOf(row.Quantity)}
 	}
 	return result, nil
 }

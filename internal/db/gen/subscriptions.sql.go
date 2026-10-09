@@ -195,7 +195,7 @@ type CreateSubscriptionParams struct {
 	UpdatedAt                   time.Time
 	PspID                       uuid.UUID
 	CollectionPolicy            string
-	Quantity                    int32
+	Quantity                    *int32
 }
 
 // billing.subscriptions. tier_group is set by the
@@ -2074,10 +2074,11 @@ UPDATE billing.subscriptions SET
     canceled_at = $20,
     deletion_scheduled_at = $21,
     gateway_response = $22,
-    dunning_policy = $23::jsonb,
-    updated_at = $24
-WHERE subscriptions.merchant_id = $25::uuid AND id = $1
-  AND row_version = $26
+    quantity = $23::int,
+    dunning_policy = $24::jsonb,
+    updated_at = $25
+WHERE subscriptions.merchant_id = $26::uuid AND id = $1
+  AND row_version = $27
   AND deleted_at IS NULL
 `
 
@@ -2104,6 +2105,7 @@ type UpdateSubscriptionAtParams struct {
 	CanceledAt                  *time.Time
 	DeletionScheduledAt         *time.Time
 	GatewayResponse             []byte
+	Quantity                    *int32
 	DunningPolicy               []byte
 	UpdatedAt                   time.Time
 	MerchantID                  uuid.UUID
@@ -2136,6 +2138,7 @@ func (q *Queries) UpdateSubscriptionAt(ctx context.Context, arg UpdateSubscripti
 		arg.CanceledAt,
 		arg.DeletionScheduledAt,
 		arg.GatewayResponse,
+		arg.Quantity,
 		arg.DunningPolicy,
 		arg.UpdatedAt,
 		arg.MerchantID,
@@ -2170,15 +2173,16 @@ UPDATE billing.subscriptions SET
     canceled_at = $20,
     deletion_scheduled_at = $21,
     gateway_response = $22,
-    dunning_policy = $23::jsonb,
-    updated_at = $24,
+    quantity = $23::int,
+    dunning_policy = $24::jsonb,
+    updated_at = $25,
     lifecycle_rev = lifecycle_rev + 1
-WHERE subscriptions.merchant_id = $25::uuid AND id = $1
-  AND lifecycle_rev = $26
-  AND row_version = $27
+WHERE subscriptions.merchant_id = $26::uuid AND id = $1
+  AND lifecycle_rev = $27
+  AND row_version = $28
   AND deleted_at IS NULL
   -- The status-transition audit records this decision's name (0021).
-  AND set_config('openrails.subscription_decision', $28::text, true) IS NOT NULL
+  AND set_config('openrails.subscription_decision', $29::text, true) IS NOT NULL
 `
 
 type UpdateSubscriptionDecidedParams struct {
@@ -2204,6 +2208,7 @@ type UpdateSubscriptionDecidedParams struct {
 	CanceledAt                  *time.Time
 	DeletionScheduledAt         *time.Time
 	GatewayResponse             []byte
+	Quantity                    *int32
 	DunningPolicy               []byte
 	UpdatedAt                   time.Time
 	MerchantID                  uuid.UUID
@@ -2240,6 +2245,7 @@ func (q *Queries) UpdateSubscriptionDecided(ctx context.Context, arg UpdateSubsc
 		arg.CanceledAt,
 		arg.DeletionScheduledAt,
 		arg.GatewayResponse,
+		arg.Quantity,
 		arg.DunningPolicy,
 		arg.UpdatedAt,
 		arg.MerchantID,

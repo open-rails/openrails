@@ -131,7 +131,7 @@ route must be explicit to end it now. Resume undoes a scheduled cancel where
 the rail can (not on CCBill or Solana).
 
 A Solana subscription is changed and canceled in the customer's wallet: cancel
-and change-tier answer `next_action: {type: "solana_sign_transactions",
+and change answer `next_action: {type: "solana_sign_transactions",
 transactions}`; the wallet signs and sends them, and the same request repeated
 with `signature` mirrors the landed transaction. Nothing changes before the
 chain confirms it, and a merchant cannot do it for the customer
@@ -154,40 +154,52 @@ raises a `life.charge_after_cancel` finding. An OpenRails-billed subscription
 whose renewal charge was sent and is not yet settled refuses a cancel with
 `409 payment_in_progress`; cancel again once it settles.
 
-### Tier changes
+### Subscription changes
 
-`POST /v1/me/subscriptions/{id}/change-tier` (and its merchant twin) moves a
-subscription to another price of its tier group. It answers a `TierChange`:
-`status` (`succeeded`, `processing`, `requires_action`, `blocked`), `action`
-(`upgrade`, `downgrade`), `effective` (`now`, `period_end`), `amount_due_now`,
-`next_charge_amount`, `next_charge_date`, and a `next_action` or `operation_id`
-when the customer must act. `…/change-tier/preview` answers the same numbers
-and changes nothing.
+`POST /v1/me/subscriptions/{id}/change` (and its admin twin) moves a
+subscription to another price of its tier group, to other seats, or both:
+`{price_id?, quantity?}`. It answers a `SubscriptionChange`: `status`
+(`succeeded`, `processing`, `requires_action`, `blocked`), `effective` (`now`,
+`period_end`), `price_id`, `quantity`, `amount_due_now`, `next_charge_amount`,
+`next_charge_date`, and a `next_action` or `operation_id` when the customer
+must act. `…/change/preview` answers the same numbers and changes nothing.
 
-- **`Idempotency-Key` is required** (`400 tier_change_idempotency_key_required`):
+- **Seats** exist only on a price sold per seat: its catalog `quantity: {min,
+  max}`. Its unit amount is one seat's, and `quantity` stays within the bounds.
+  A quantity for any other price is `422 quantity_not_allowed`; seats are
+  billed only by OpenRails on NMI or Stripe
+  (`400 subscription_change_unsupported_on_rail` otherwise).
+- **`Idempotency-Key` is required** (`400 subscription_change_idempotency_key_required`):
   it is the client's only handle on a lost response. The same key replays the
   stored result (`200`); while the provider outcome is unresolved it answers
   `202` with `status: "processing"`; a key that names a different change is
-  `409 tier_change_idempotency_conflict`; another key while one is unresolved
-  is `409 tier_change_in_flight`.
-- **An upgrade** is effective now. The customer pays the new price less the
-  unused share of the current period, for a fresh period of the new price's
-  cycle. A declined charge changes nothing (`402` with the decline reason); a
+  `409 subscription_change_idempotency_conflict`; another key while one is
+  unresolved is `409 subscription_change_in_flight`.
+- **More seats** are effective now: the customer pays the unit price for the
+  added seats over the rest of the period, and renewals bill every seat.
+- **An upgrade** is effective now. The customer pays the new price × seats
+  less the unused share of the current period, for a fresh period of the new
+  price's cycle; a tier change keeps the seats unless the request names
+  others. A declined charge changes nothing (`402` with the decline reason); a
   card challenge answers `requires_action` with `next_action.type:
   "payment_authentication"` and `operation_id` (authenticate at
   `/v1/me/payment-operations/{id}/authentication`, then repeat the request).
-- **A downgrade** is effective at period end: nothing is charged or refunded,
-  and the next renewal bills the new price. Another pending change is
-  `409 tier_change_already_scheduled`.
-- **Refusals.** `409 tier_change_renewal_due` while the period has ended or its
-  renewal is unresolved; `422 tier_change_cycle_unknown` and
-  `422 tier_change_period_unknown` when proration has nothing to measure;
-  `409 tier_change_credit_exceeds_price` when the unused credit is larger than
-  the target price.
+- **Fewer seats and a downgrade** are effective at period end: nothing is
+  charged or refunded, and the next renewal bills them; the subscription shows
+  `scheduled_price_id` and `scheduled_quantity`. Another pending price change
+  is `409 subscription_change_already_scheduled`.
+- **Staff never purchase for others**: an admin change charges nothing and
+  always takes effect at period end.
+- **Refusals.** `409 subscription_change_renewal_due` while the period has
+  ended or its renewal is unresolved; `422 subscription_change_cycle_unknown`
+  and `422 subscription_change_period_unknown` when proration has nothing to
+  measure; `409 subscription_change_credit_exceeds_price` when the unused
+  credit is larger than the target price.
 - **NMI-scheduled subscriptions** keep their billing date: the schedule's
   amount changes in place, so only a price of the same billing cycle qualifies
-  (`409 tier_change_cadence_unsupported`), and a schedule on a named NMI plan
-  needs a linked plan on the target price (`409 tier_change_requires_linked_plan`).
+  (`409 subscription_change_cadence_unsupported`), and a schedule on a named
+  NMI plan needs a linked plan on the target price
+  (`409 subscription_change_requires_linked_plan`).
 - **CCBill** upgrades answer a `redirect_to_url`; downgrades are `blocked`.
 
 ## Payment methods

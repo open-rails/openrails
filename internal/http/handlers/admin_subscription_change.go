@@ -16,12 +16,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// AdminChangeTier changes a subscription's tier on the customer's behalf. The
-// staff route's permission authorizes the operator; CheckoutService still runs
-// as the subscription customer so ownership and rail behavior stay identical
-// to self-service tier changes.
-func AdminChangeTier(r *httprequest.Request) {
-	req, customer, subscription, ok := adminTierChangeRequest(r)
+// AdminChangeSubscription changes a subscription's price or seats on the
+// customer's behalf. Staff never purchase for others: the change charges
+// nothing and applies at the next renewal. The staff route's permission authorizes
+// the operator; CheckoutService runs as the subscription's customer so
+// ownership and rail behavior match the customer's own change.
+func AdminChangeSubscription(r *httprequest.Request) {
+	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok {
 		return
 	}
@@ -33,7 +34,7 @@ func AdminChangeTier(r *httprequest.Request) {
 		if !adminTierChangeAdmissible(r, subscription) {
 			return
 		}
-		resp, err = r.State.CheckoutService.TierChange(r.Request.Context(), req, customer)
+		resp, err = r.State.CheckoutService.ChangeSubscription(r.Request.Context(), req, customer)
 	}
 	if err != nil {
 		logAdminTierChange(r, req, nil, err)
@@ -45,15 +46,15 @@ func AdminChangeTier(r *httprequest.Request) {
 	writeTierChangeResponse(r, resp)
 }
 
-// AdminChangeTierPreview returns the same non-mutating proration preview as the
-// customer self-service route.
-func AdminChangeTierPreview(r *httprequest.Request) {
-	req, customer, subscription, ok := adminTierChangeRequest(r)
+// AdminPreviewSubscriptionChange previews a staff change: nothing now, the
+// new price and seats from the next renewal.
+func AdminPreviewSubscriptionChange(r *httprequest.Request) {
+	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok || !adminTierChangeAdmissible(r, subscription) {
 		return
 	}
 
-	resp, err := r.State.CheckoutService.TierChangePreview(r.Request.Context(), req, customer)
+	resp, err := r.State.CheckoutService.PreviewSubscriptionChange(r.Request.Context(), req, customer)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -62,41 +63,34 @@ func AdminChangeTierPreview(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
-func adminTierChangeRequest(
+func adminChangeRequest(
 	r *httprequest.Request,
-) (*checkout.TierChangeRequest, *checkout.UserIdentity, *models.Subscription, bool) {
-	var body ChangeTierRequest
+) (*checkout.SubscriptionChangeRequest, *checkout.UserIdentity, *models.Subscription, bool) {
+	var body ChangeSubscriptionRequest
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
 	}
-	if body.PriceID.IsZero() {
-		r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
+	req, ok := changeRequest(r, body.PriceID, body.Quantity)
+	if !ok {
 		return nil, nil, nil, false
 	}
-
-	typedSubscriptionID, err := billing.ParseSubscriptionID(r.Param("id"))
-	if err != nil || typedSubscriptionID.IsZero() {
-		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
-		return nil, nil, nil, false
-	}
-	subscriptionID := typedSubscriptionID.UUID()
+	req.Staff = true
 	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil {
 		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
 		return nil, nil, nil, false
 	}
-
-	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
+	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), req.SubscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
 			r.ErrorCode(billing.CodeResourceNotFound, "subscription not found")
 			return nil, nil, nil, false
 		}
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load subscription")
+		log.WithError(err).WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: load subscription")
 		r.ErrorCode(billing.CodeInternalError, "failed to retrieve subscription")
 		return nil, nil, nil, false
 	}
 	if subscription.CustomerID == uuid.Nil {
-		log.WithField("subscription_id", subscriptionID).Error("admin tier change: subscription has no customer")
+		log.WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: subscription has no customer")
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
@@ -104,7 +98,7 @@ func adminTierChangeRequest(
 	if r.State.Contacts != nil {
 		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
 		if err != nil {
-			log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: customer contact")
+			log.WithError(err).WithField("subscription_id", req.SubscriptionID).Error("admin subscription change: customer contact")
 			r.ErrorCode(billing.CodeServiceUnavailable, "the customer directory is unavailable")
 			return nil, nil, nil, false
 		}
@@ -112,10 +106,7 @@ func adminTierChangeRequest(
 			user.Email = &email
 		}
 	}
-	return &checkout.TierChangeRequest{
-		PriceID:        body.PriceID.String(),
-		SubscriptionID: subscriptionID,
-	}, user, subscription, true
+	return req, user, subscription, true
 }
 
 // adminTierChangeAdmissible applies the operator-route guards to a new tier
@@ -123,12 +114,12 @@ func adminTierChangeRequest(
 func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subscription) bool {
 	subscriptionID := subscription.ID
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
-		r.ErrorCode(billing.CodeResourceConflict, "only active or past-due subscriptions can change tier")
+		r.ErrorCode(billing.CodeResourceConflict, "only active or past-due subscriptions can change")
 		return false
 	}
 	pending, err := subscriptions.PendingChange(r.Request.Context(), r.State.SubscriptionService.Database(), subscriptionID)
 	if err != nil {
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check the scheduled change")
+		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin subscription change: check the scheduled change")
 		r.ErrorCode(billing.CodeInternalError, "failed to check the scheduled change")
 		return false
 	}
@@ -139,7 +130,7 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	// An engine subscription's service answers its own schedule: the same
 	// downgrade replays, another is a typed refusal, an upgrade replaces it.
 	if pending != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeSubscriptionChangeAlreadyScheduled, "subscription already has a change scheduled"))
 		return false
 	}
 	// CCBill changes on its own hosted page and Solana in the customer's
@@ -153,21 +144,24 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 
 func logAdminTierChange(
 	r *httprequest.Request,
-	req *checkout.TierChangeRequest,
+	req *checkout.SubscriptionChangeRequest,
 	resp *checkout.TierChangeResponse,
 	err error,
 ) {
 	fields := log.Fields{
 		"actor":           resolveActorIdentity(r),
-		"event":           "admin_subscription_tier_change",
+		"event":           "admin_subscription_change",
 		"subscription_id": req.SubscriptionID,
 		"target_price_id": req.PriceID,
+	}
+	if req.Quantity != nil {
+		fields["target_quantity"] = *req.Quantity
 	}
 	if merchantID, merchantErr := merchant.Require(r.Request.Context()); merchantErr == nil {
 		fields["merchant_id"] = merchantID
 	}
 	if resp != nil {
-		fields["action"] = resp.Action
+		fields["effective"] = resp.Effective
 		fields["rail"] = resp.Rail
 		fields["status"] = resp.Status
 		if !resp.OperationID.IsZero() {
@@ -175,8 +169,8 @@ func logAdminTierChange(
 		}
 	}
 	if err != nil {
-		log.WithError(err).WithFields(fields).Warn("admin subscription tier change failed")
+		log.WithError(err).WithFields(fields).Warn("admin subscription change failed")
 		return
 	}
-	log.WithFields(fields).Info("admin subscription tier change processed")
+	log.WithFields(fields).Info("admin subscription change processed")
 }

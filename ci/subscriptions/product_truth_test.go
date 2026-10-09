@@ -169,7 +169,7 @@ func TestProductAccessCoversSubscriptionsArchivesAndHistory(t *testing.T) {
 	sub := w.subscription(embedded, e.sub)
 	access, err := client.CheckProductAccess(t.Context(), e.c.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{sub.ProductID}})
 	require.NoError(t, err)
-	require.True(t, access[sub.ProductID.String()], "a subscription is product access")
+	require.True(t, access.Access[sub.ProductID.String()], "a subscription is product access")
 	live, err := client.ListProductAccess(t.Context(), e.c.customerID(), billing.ProductAccessListParams{LiveOnly: true})
 	require.NoError(t, err)
 	require.Len(t, live.Items, 1)

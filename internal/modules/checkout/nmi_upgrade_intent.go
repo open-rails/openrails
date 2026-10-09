@@ -299,7 +299,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingPro
 	out := evidence()
 	out["subscription_id"] = p.OldSubscriptionID.String()
 	if p.Downgrade() {
-		out["message"] = "Downgrade to " + p.ProductName + " scheduled for the end of the current period"
+		out["message"] = "Change to " + p.ProductName + " scheduled for the end of the current period"
 	} else {
 		out["message"] = "Upgraded to " + p.ProductName
 	}
@@ -647,7 +647,7 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 		action = "downgrade"
 	}
 	resp := &TierChangeResponse{
-		Action: action, Effective: effectiveOf(action), PriceID: billing.PriceID(p.PriceID),
+		Effective: effectiveOf(action), PriceID: billing.PriceID(p.PriceID),
 		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: billing.PaymentOperationID(in.ID),

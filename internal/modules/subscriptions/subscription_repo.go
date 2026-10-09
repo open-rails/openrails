@@ -47,10 +47,6 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		ct := string(*s.CancelType)
 		cancelType = &ct
 	}
-	quantity, err := safecast.Convert[int32](s.Quantity)
-	if err != nil {
-		return gen.CreateSubscriptionParams{}, fmt.Errorf("subscription quantity: %w", err)
-	}
 	return gen.CreateSubscriptionParams{
 		ID:                          s.ID,
 		CustomerID:                  s.CustomerID,
@@ -59,7 +55,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		AccessDurationHoursSnapshot: models.IntPtrTo32(s.AccessDurationHoursSnapshot),
 		Status:                      string(s.Status),
 		PspID:                       s.PspID,
-		Quantity:                    quantity,
+		Quantity:                    models.IntPtrTo32(s.Quantity),
 		StartedAt:                   s.StartedAt,
 		EndedAt:                     s.EndedAt,
 		CurrentPeriodStartsAt:       s.CurrentPeriodStartsAt,
@@ -183,6 +179,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		CanceledAt:                  s.CanceledAt,
 		DeletionScheduledAt:         s.DeletionScheduledAt,
 		GatewayResponse:             s.Metadata,
+		Quantity:                    models.IntPtrTo32(s.Quantity),
 		UpdatedAt:                   s.UpdatedAt,
 		ExpectedVersion:             s.RowVersion,
 		DunningPolicy:               s.DunningPolicy,
@@ -855,7 +852,7 @@ func decidedParams(p gen.UpdateSubscriptionAtParams, rev int64) gen.UpdateSubscr
 		Rail: p.Rail, RailSubscriptionID: p.RailSubscriptionID, PaymentMethodID: p.PaymentMethodID,
 		LastRetryAt: p.LastRetryAt, RetryAttempts: p.RetryAttempts, TransientRetries: p.TransientRetries, NextRetryAt: p.NextRetryAt,
 		GraceEndsAt: p.GraceEndsAt, CancelFeedback: p.CancelFeedback, CancelType: p.CancelType, CanceledAt: p.CanceledAt,
-		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse,
+		DeletionScheduledAt: p.DeletionScheduledAt, GatewayResponse: p.GatewayResponse, Quantity: p.Quantity,
 		UpdatedAt: p.UpdatedAt, MerchantID: p.MerchantID, ExpectedRev: rev, ExpectedVersion: p.ExpectedVersion, DunningPolicy: p.DunningPolicy,
 	}
 }

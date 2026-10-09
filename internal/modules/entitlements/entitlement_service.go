@@ -182,6 +182,18 @@ type PushAccessParams struct {
 	Actor       string
 	GrantReason grants.GrantReason
 	Note        *string
+
+	// Quantity is the seats the window gives: a per-seat subscription's;
+	// nil otherwise.
+	Quantity *int
+}
+
+// sameSeats compares a window's seats with requested ones.
+func sameSeats(window *int32, seats *int) bool {
+	if window == nil || seats == nil {
+		return window == nil && seats == nil
+	}
+	return int(*window) == *seats
 }
 
 // PushAccess records a source's window of a product. Duration purchases
@@ -212,6 +224,9 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 	}
 	if p.EndsAt != nil && p.EndsAt.IsZero() {
 		return nil, fmt.Errorf("endAt must be non-zero")
+	}
+	if p.Quantity != nil && (*p.Quantity < 1 || p.SourceType != models.AccessSourceSubscription && p.SourceType != models.AccessSourceGrace) {
+		return nil, fmt.Errorf("only a per-seat subscription's access has seats")
 	}
 	now := s.now().UTC()
 	merchantID, err := merchant.Require(ctx)
@@ -252,7 +267,7 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 			if err != nil {
 				return fmt.Errorf("subscription source: %w", err)
 			}
-			if _, err := l.GrantSubscriptionWindow(ctx, p.CustomerID, subscription, p.ProductID, grants.Subscription, start, p.EndsAt); err != nil {
+			if _, err := l.GrantSubscriptionWindow(ctx, p.CustomerID, subscription, p.ProductID, grants.Subscription, start, p.EndsAt, p.Quantity); err != nil {
 				return err
 			}
 			row, err := q.GetLatestProductAccessBySource(ctx, gen.GetLatestProductAccessBySourceParams{
@@ -276,8 +291,9 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 			return err
 		}
 		// A revoked grace allowance (a canceled engine renewal that was then
-		// resumed) is granted again, never replayed as its revoked self.
-		if err == nil && previous.RevokedAt != nil && p.SourceType == models.AccessSourceGrace {
+		// resumed) is granted again, never replayed as its revoked self; a
+		// window of other seats is a new grant.
+		if err == nil && (previous.RevokedAt != nil && p.SourceType == models.AccessSourceGrace || !sameSeats(previous.Quantity, p.Quantity)) {
 			err = pgx.ErrNoRows
 		}
 		if err == nil && (previous.EndsAt == nil || p.Duration != nil ||
@@ -318,6 +334,7 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 			Customer: p.CustomerID, Product: &product, Kind: grants.Access,
 			Source: grants.SourceType(p.SourceType), SourceID: p.SourceID, Payment: p.PaymentID,
 			StartsAt: start, EndsAt: endAt, Reason: p.Note, Actor: p.Actor, GrantReason: p.GrantReason,
+			Quantity: p.Quantity,
 		}
 		var g gen.BillingGrant
 		if p.SourceType == models.AccessSourceGrace {

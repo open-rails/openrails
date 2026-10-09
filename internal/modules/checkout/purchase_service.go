@@ -35,7 +35,7 @@ type checkoutSubscriptionAccess interface {
 // nonTerminalSubscriptionStatuses is the single source of truth for which
 // subscription statuses still bill or grant access (issue #269). A user must
 // never hold two of these concurrently in the same product/tier-group — that is
-// double-billing; the correct operation is change-tier, not a second subscribe.
+// double-billing; the correct operation is a subscription change, not a second subscribe.
 //
 // Terminal statuses (canceled — which the model also uses for expired/failed/
 // max-retries per its own docs) are excluded: a user with only a terminal
@@ -172,7 +172,7 @@ const (
 	// plan/tier already exists — re-purchasing would double-bill.
 	ConflictCodeDuplicateSubscription = "duplicate_subscription"
 	// ConflictCodeChangeTierRequired: the conflict is a tier change — use the
-	// change-tier endpoint, not a second subscribe.
+	// change endpoint, not a second subscribe.
 	ConflictCodeChangeTierRequired = "change_tier_required"
 	// ConflictCodeMembershipPendingVerification (#691): the customer holds an
 	// `unknown` subscription for this product/tier-group — an existing membership
@@ -185,7 +185,7 @@ const (
 // blocks a new subscribe for the same product/tier-group (issue #269).
 type SubscriptionConflict struct {
 	// Blocked is true when a second subscribe must be rejected and the caller
-	// directed to change-tier instead.
+	// directed to the change endpoint instead.
 	Blocked bool
 	// SamePrice is true when the user already holds a non-terminal subscription
 	// to this exact price (idempotent re-subscribe — no second charge).
@@ -205,7 +205,7 @@ type SubscriptionConflict struct {
 //   - is to this exact price (idempotent re-subscribe; no second sub/charge), or
 //   - shares the target product's tier-group (any tier — stacking a $20 and a
 //     $50 sub for the same product is double-billing; the correct operation is
-//     upgrade/downgrade via change-tier).
+//     upgrade/downgrade via the change endpoint).
 //
 // It returns Blocked=false (no conflict) when the user has no such subscription,
 // so a first-time subscribe and a DIFFERENT tier-group are both allowed.
@@ -254,21 +254,21 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 					Blocked:  true,
 					Existing: existing,
 					Code:     ConflictCodeChangeTierRequired,
-					Message:  "Use POST /v1/me/subscriptions/change-tier for tier upgrades",
+					Message:  "Use POST /v1/me/subscriptions/{id}/change for tier upgrades",
 				}, nil
 			case existingProduct != nil && existingProduct.TierRank > product.TierRank:
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
 					Code:     ConflictCodeChangeTierRequired,
-					Message:  "Use POST /v1/me/subscriptions/change-tier for tier downgrades",
+					Message:  "Use POST /v1/me/subscriptions/{id}/change for tier downgrades",
 				}, nil
 			default:
 				return &SubscriptionConflict{
 					Blocked:  true,
 					Existing: existing,
 					Code:     ConflictCodeChangeTierRequired,
-					Message:  "You already have an active subscription in this tier group. Use POST /v1/me/subscriptions/change-tier to change tiers.",
+					Message:  "You already have an active subscription in this tier group. Use POST /v1/me/subscriptions/{id}/change to change tiers.",
 				}, nil
 			}
 		}

@@ -464,6 +464,9 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 	if req.CustomerAmount != nil {
 		priceID = uuidutil.DeterministicID(priceID, "customer_amount", strconv.FormatInt(req.CustomerAmount.MinAmount, 10), strconv.FormatInt(req.CustomerAmount.MaxAmount, 10))
 	}
+	if req.Quantity != nil {
+		priceID = uuidutil.DeterministicID(priceID, "quantity", strconv.Itoa(req.Quantity.Min), strconv.Itoa(req.Quantity.Max))
+	}
 	existing, err := prices.FindByTerms(ctx, req, key)
 	if err == nil {
 		priceID = existing.ID
@@ -795,6 +798,14 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 			}
 		}
 	}
+	if req.Quantity != nil {
+		if req.BillingIntervalHours == nil || req.CustomerAmount != nil {
+			return apperr.Invalidf("quantity sells a recurring price per seat; a one-off price has none")
+		}
+		if err := req.Quantity.Validate(); err != nil {
+			return apperr.Invalidf("%v", err)
+		}
+	}
 	if req.UnitAmount < 0 {
 		return apperr.Invalidf("unit_amount must be non-negative")
 	}
@@ -840,5 +851,9 @@ func validateCatalogPriceTerms(req billing.CreatePriceParams) error {
 func samePriceTerms(p billing.Price, req billing.CreatePriceParams) bool {
 	return p.ProductID == req.ProductID && p.Key == req.Key && p.UnitAmount == req.UnitAmount && strings.EqualFold(p.Currency, req.Currency) &&
 		reflect.DeepEqual(p.BillingIntervalHours, req.BillingIntervalHours) && reflect.DeepEqual(p.AccessDurationHours, req.AccessDurationHours) &&
-		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount)
+		reflect.DeepEqual(p.TrialUnitAmount, req.TrialUnitAmount) && reflect.DeepEqual(p.TrialDurationHours, req.TrialDurationHours) && reflect.DeepEqual(p.CustomerAmount, req.CustomerAmount) &&
+		reflect.DeepEqual(p.Quantity, req.Quantity)
 }
+
+// errQuantityRail refuses a per-seat price on a rail that cannot bill seats.
+const errQuantityRail = "quantity requires Stripe or NMI billed by OpenRails, without provider catalog links: provider schedules, CCBill and Solana bill one amount per period"

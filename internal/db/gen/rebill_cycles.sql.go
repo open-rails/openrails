@@ -522,10 +522,10 @@ func (q *Queries) MarkRebillCycleMissed(ctx context.Context, arg MarkRebillCycle
 }
 
 const upsertRebillCycle = `-- name: UpsertRebillCycle :one
-INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
+INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, quantity)
 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::uuid, $6::text, $7::text, $8::timestamptz,
-    $9::bigint, $10::text)
+    $9::bigint, $10::text, $11::int)
 ON CONFLICT (merchant_id, subscription_id, due_at) DO UPDATE SET due_at = EXCLUDED.due_at
 RETURNING id
 `
@@ -541,6 +541,7 @@ type UpsertRebillCycleParams struct {
 	DueAt          time.Time
 	Amount         int64
 	Currency       string
+	Quantity       *int32
 }
 
 // #1111: the cycle for a subscription's period that came due at due_at.
@@ -556,6 +557,7 @@ func (q *Queries) UpsertRebillCycle(ctx context.Context, arg UpsertRebillCyclePa
 		arg.DueAt,
 		arg.Amount,
 		arg.Currency,
+		arg.Quantity,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)

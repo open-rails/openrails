@@ -32,7 +32,7 @@ func TestNMIPaidUpgradeRecoversMoneyBeforeScheduleWrite(t *testing.T) {
 			// A successful POST cannot yet be qualified by the independent read.
 			// Retain the operation across a stale restart, with no fabricated fence.
 			w.nmi.QueryUnavailable(true)
-			answer, err := w.client[tp].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "held-upgrade"})
+			answer, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "held-upgrade"})
 			require.NoError(t, err)
 			require.NotEqual(t, billing.PaymentOperationID{}, answer.OperationID)
 			require.Len(t, l.tierSales(), sales+1)
@@ -83,7 +83,7 @@ func TestNMIUpgradeHiddenChargeNeverReleasesAnotherOrder(t *testing.T) {
 	paid := len(completed(w.payments(embedded, l.c.id)))
 	w.nmi.HideSales(1)
 	w.nmi.DropSaleResponses(1)
-	answer, err := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "hidden-upgrade"})
+	answer, err := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "hidden-upgrade"})
 	require.NoError(t, err)
 	require.Len(t, l.tierSales(), sales+1)
 	require.NoError(t, w.jobs.Stop(t.Context()))
@@ -93,7 +93,7 @@ func TestNMIUpgradeHiddenChargeNeverReleasesAnotherOrder(t *testing.T) {
 	runner := runtime.IntentRunner()
 	row, err := runner.VerifyByID(ctx, answer.OperationID.UUID())
 	require.NoError(t, err)
-	_, retryErr := w.client[embedded].ChangeTier(t.Context(), l.sub, billing.ChangeTierParams{PriceID: next.ID, IdempotencyKey: "another-upgrade-order"})
+	_, retryErr := l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(next.ID), IdempotencyKey: "another-upgrade-order"})
 	require.Len(t, l.tierSales(), sales+1, "an empty lookup must not free a second order that charges again")
 	require.Error(t, retryErr, "the unresolved operation keeps ownership of the tier change")
 	require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status, "empty Query after the settle interval is not proof of non-execution")

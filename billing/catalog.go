@@ -90,6 +90,10 @@ type ProductListParams struct {
 // it is linked to.
 type Price struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
+	// Quantity makes a recurring price per seat: UnitAmount is one seat's, and
+	// a subscription holds Quantity.Min to Quantity.Max seats. Null: the price
+	// has no quantity.
+	Quantity *catalog.Quantity `json:"quantity"`
 	// Revision is assigned automatically within this product/key, starting at zero.
 	Revision             int64                   `json:"revision"`
 	ID                   PriceID                 `json:"id"`
@@ -182,12 +186,14 @@ var ErrPriceKeyCadenceConflict error = newCodedError("price_key_cadence_conflict
 // {plan_pda}. A PSP named in PSPLinks is sold on too.
 type CreatePriceParams struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
-	ProductID      ProductID               `json:"product_id,omitzero"`
-	ProductKey     string                  `json:"product_key,omitempty"`
-	ProductData    *CreatePriceProduct     `json:"product_data,omitempty"`
-	Key            string                  `json:"key,omitempty"`
-	UnitAmount     int64                   `json:"unit_amount,string"`
-	Currency       string                  `json:"currency"`
+	// Quantity sells a recurring price per seat within its bounds.
+	Quantity    *catalog.Quantity   `json:"quantity,omitempty"`
+	ProductID   ProductID           `json:"product_id,omitzero"`
+	ProductKey  string              `json:"product_key,omitempty"`
+	ProductData *CreatePriceProduct `json:"product_data,omitempty"`
+	Key         string              `json:"key,omitempty"`
+	UnitAmount  int64               `json:"unit_amount,string"`
+	Currency    string              `json:"currency"`
 	// AccessDurationHours is the access window (nil: no scheduled expiry),
 	// independently of billing cadence. Credit lot expiry belongs to the product.
 	AccessDurationHours *int `json:"access_duration_hours,omitempty"`

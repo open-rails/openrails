@@ -101,38 +101,51 @@ func (c *Client) subscriptionAction(ctx context.Context, method string, id billi
 	return &out, nil
 }
 
-// PreviewTierChange reports what moving a subscription to another price
-// would charge and when it would take effect, without changing anything.
-func (c *Client) PreviewTierChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeTierParams, requestOptions ...RequestOption) (*billing.TierChangePreview, error) {
-	path, err := subscriptionPath(id)
+// PreviewSubscriptionChange reports what changing a subscription's price or
+// seats would charge and when it would take effect, without changing
+// anything. A staff change charges nothing and waits for the next renewal.
+func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChangePreview, error) {
+	path, err := changePath(id, params)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := requireTypedID("price_id", params.PriceID); err != nil {
-		return nil, err
-	}
-	var out billing.TierChangePreview
-	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", params, &out, requestOptions...); err != nil {
+	var out billing.SubscriptionChangePreview
+	if err := c.do(ctx, http.MethodPost, path+"/change/preview", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// ChangeTier moves a subscription to another price of its tier group. The
-// same IdempotencyKey replays the change.
-func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, params billing.ChangeTierParams, requestOptions ...RequestOption) (*billing.TierChange, error) {
-	path, err := subscriptionPath(id)
+// ChangeSubscription moves a subscription to another price of its tier group,
+// to other seats of a per-seat price, or both. As staff it charges nothing:
+// the change applies at the next renewal. The same IdempotencyKey replays it.
+func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error) {
+	path, err := changePath(id, params)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := requireTypedID("price_id", params.PriceID); err != nil {
-		return nil, err
-	}
-	var out billing.TierChange
-	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	var out billing.SubscriptionChange
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// changePath is a change's subscription path, refusing a change of nothing.
+func changePath(id billing.SubscriptionID, params billing.ChangeSubscriptionParams) (string, error) {
+	path, err := subscriptionPath(id)
+	if err != nil {
+		return "", err
+	}
+	if params.PriceID == nil && params.Quantity == nil {
+		return "", invalidErr("a change names a price_id, a quantity or both")
+	}
+	if params.PriceID != nil {
+		if _, err := requireTypedID("price_id", *params.PriceID); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
 }
 
 // ListPaymentMethods is one page of a customer's saved cards, newest first.

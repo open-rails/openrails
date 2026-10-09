@@ -183,16 +183,16 @@ request;
 after that only `intents resolve` closes it (`--receipt` is the exact
 subscription or schedule id, read back and matched; `--not-executed` is
 refused while the provider shows the change). A parsed Stripe 4xx is a
-definitive refusal (coded `tier_change_refused`, a 402 keeps its decline
+definitive refusal (coded `subscription_change_refused`, a 402 keeps its decline
 code); an operator closure answers `409`. The same key replays the stored
 result byte for byte; another key while the operation is unresolved is
-refused `409 tier_change_in_flight` naming it. One unresolved tier change
+refused `409 subscription_change_in_flight` naming it. One unresolved tier change
 (NMI upgrade or Stripe) owns its subscription. The local commit uses the
 period the receipt carries, so a webhook-first convergence (the converger
 mirrors the price before the verifier runs) settles the operation instead of
 stranding it. Every tier change requires the client's `Idempotency-Key`, and a
 key already naming a different request is refused
-(`409 tier_change_idempotency_conflict`) before that operation can run or
+(`409 subscription_change_idempotency_conflict`) before that operation can run or
 answer.
 
 NMI upgrades use the same intent runner with separate write-ahead step markers
@@ -205,8 +205,8 @@ swap, payment, access effects and predecessor delete intent atomically. A
 parsed proration refusal preserves the old subscription and queues a durable
 delete for the unpaid successor. The route answers exactly as for a Stripe tier
 change: `202` with the operation id while unresolved, the stored result under
-the same key, `409 tier_change_in_flight` under another key, and a coded
-`tier_change_refused` (a card decline keeps its code) once terminal. See
+the same key, `409 subscription_change_in_flight` under another key, and a coded
+`subscription_change_refused` (a card decline keeps its code) once terminal. See
 [upgrade recovery](architecture/upgrade-recovery.md).
 
 ### NMI refund currency and non-execution

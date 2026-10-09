@@ -73,13 +73,13 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		return nil, api.Coded(codeSubscriptionNotFound, "")
 	}
 	if oldSub.Rail != models.RailSolana {
-		return nil, api.Coded(billing.CodeTierChangeUnsupportedOnRail, "subscription is not a Solana subscription")
+		return nil, api.Coded(billing.CodeSubscriptionChangeUnsupportedOnRail, "subscription is not a Solana subscription")
 	}
 
 	// Load the OLD on-chain row (subscriber/merchant identifiers for the atomic tx).
 	oldRow, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
 	if err != nil || oldRow == nil {
-		return nil, api.Coded(billing.CodeTierChangeProviderConflict, "no on-chain record for this subscription")
+		return nil, api.Coded(billing.CodeSubscriptionChangeProviderConflict, "no on-chain record for this subscription")
 	}
 
 	// Resolve the NEW price + its published plan terms.
@@ -93,12 +93,12 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		return nil, api.Coded(codePriceNotFound, "target price not found")
 	}
 	if !newPrice.IsPurchasable() {
-		return nil, api.Coded(billing.CodeTierChangeTargetInactive, "target price is not available")
+		return nil, api.Coded(billing.CodeSubscriptionChangeTargetInactive, "target price is not available")
 	}
 	newCfg := newPrice.ForPSP(oldSub.PspID).PSPLinkForRail(models.RailSolana)
 	newTerms, ok := parseResolvedPlanTerms(newCfg)
 	if !ok {
-		return nil, api.Coded(billing.CodeTierChangeRequiresLinkedPlan, "target price is not configured for Solana recurring billing")
+		return nil, api.Coded(billing.CodeSubscriptionChangeRequiresLinkedPlan, "target price is not configured for Solana recurring billing")
 	}
 
 	// Load OLD + NEW products: SolanaTierChange decides the change.
@@ -217,7 +217,7 @@ func nowOrDefault(r *httprequest.Request) time.Time {
 	return time.Now()
 }
 
-// solanaTierChange is change-tier on the Solana rail: one atomic on-chain
+// solanaTierChange is change on the Solana rail: one atomic on-chain
 // transaction the customer's wallet signs (cancel the old subscription,
 // subscribe to the new plan, and for an upgrade the prorated pull the merchant
 // co-signed). Without a signature it answers requires_action with the
@@ -260,8 +260,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		return
 	}
 
-	out := billing.TierChange{
-		Action:           "downgrade",
+	out := billing.SubscriptionChange{
 		Effective:        "period_end",
 		PriceID:          billing.PriceID(resolved.newPrice.ID),
 		Rail:             string(models.RailSolana),
@@ -275,7 +274,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 			r.ErrorCode(billing.CodeInternalError, "the target plan's period is out of range")
 			return
 		}
-		out.Action, out.Effective, out.AmountDueNow = "upgrade", "now", resolved.firstChargeMicros
+		out.Effective, out.AmountDueNow = "now", resolved.firstChargeMicros
 		next := nowOrDefault(r).Add(time.Duration(periodHours) * time.Hour).UTC()
 		out.NextChargeDate = &next
 	}

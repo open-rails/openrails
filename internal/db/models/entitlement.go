@@ -51,6 +51,8 @@ type ProductAccess struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+	// Quantity is the seats the window gives; nil unless per seat.
+	Quantity *int
 }
 
 // IsActiveAt reports whether the window grants access at t.
@@ -63,7 +65,7 @@ func ProductAccessFromGen(r gen.BillingProductAccess) *ProductAccess {
 		ID: r.ID, MerchantID: r.MerchantID, CustomerID: r.CustomerID, ProductID: r.ProductID, GrantID: r.GrantID,
 		SourceType: AccessSourceType(r.SourceType), SourceID: r.SourceID, PaymentID: r.PaymentID,
 		StartsAt: r.StartsAt, EndsAt: r.EndsAt, RevokedAt: r.RevokedAt,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt, Quantity: DerefIntPtr(r.Quantity),
 	}
 	if r.RevokeReason != nil {
 		reason := AccessRevokeReason(*r.RevokeReason)

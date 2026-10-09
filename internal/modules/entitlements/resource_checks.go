@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -94,7 +95,7 @@ func (s *EntitlementService) Check(ctx context.Context, customerID string, param
 	}
 	err := s.withKeys(ctx, customerID, at, params.At.IsZero(), func(ctx context.Context, r readSnapshot) error {
 		var err error
-		if out.Entitlements, err = checkKeys(ctx, r, params.Entitlements); err != nil {
+		if out.Entitlements, out.Quantities, err = checkKeys(ctx, r, params.Entitlements); err != nil {
 			return err
 		}
 		out.Held, err = heldByPrefix(ctx, r, params.Prefixes, limit)
@@ -103,23 +104,25 @@ func (s *EntitlementService) Check(ctx context.Context, customerID string, param
 	return out, err
 }
 
-func checkKeys(ctx context.Context, r readSnapshot, keys []string) (map[string]bool, error) {
-	result := make(map[string]bool, len(keys))
+// checkKeys answers each key: whether it is held, and the most seats a held
+// product grants it.
+func checkKeys(ctx context.Context, r readSnapshot, keys []string) (map[string]bool, map[string]*int, error) {
+	held, seats := make(map[string]bool, len(keys)), make(map[string]*int, len(keys))
 	if len(keys) == 0 {
-		return result, nil
+		return held, seats, nil
 	}
 	if r.cached {
 		rows, err := r.q.CheckCachedEntitlements(ctx, gen.CheckCachedEntitlementsParams{MerchantID: r.merchant, CustomerID: r.customer, Entitlements: keys})
 		for _, row := range rows {
-			result[row.Entitlement] = row.HasAccess
+			held[row.Entitlement], seats[row.Entitlement] = row.HasAccess, models.SeatsOf(row.Quantity)
 		}
-		return result, err
+		return held, seats, err
 	}
 	rows, err := r.q.CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: r.merchant, CustomerID: r.customer, Entitlements: keys, AtTime: r.at})
 	for _, row := range rows {
-		result[row.Entitlement] = row.HasAccess
+		held[row.Entitlement], seats[row.Entitlement] = row.HasAccess, models.SeatsOf(row.Quantity)
 	}
-	return result, err
+	return held, seats, err
 }
 
 // heldByPrefix answers, for each prefix, the distinct keys held under it in
