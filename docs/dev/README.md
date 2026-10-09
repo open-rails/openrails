@@ -126,8 +126,8 @@ In the root module:
 - `scripts/` — Task-target implementations
 - `web/admin/` — admin console SPA source; `embed.go` embeds its `dist/` build
 
-The root, `billing`, `catalog`, the adapters, `openrailstest`, `web/admin` and
-`server` are the only importable non-`main` packages;
+The root, `billing`, `catalog`, the adapters, `openrailstest` (and its
+`nmimock`), `web/admin` and `server` are the only importable non-`main` packages;
 `internal/contractaudit` `TestPublicPackages` fails on any other.
 
 ## Releases
