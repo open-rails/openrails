@@ -72,7 +72,8 @@ SELECT p.id AS product_id,
 FROM billing.products p
 JOIN billing.entitlements ent
   ON ent.merchant_id = p.merchant_id
- AND ent.entitlement IN (SELECT jsonb_array_elements_text(p.entitlements))
+ AND ent.entitlement IN (SELECT pe.entitlement FROM billing.product_entitlements pe
+   WHERE pe.merchant_id = p.merchant_id AND pe.product_id = p.id AND pe.removed_at IS NULL)
 WHERE p.merchant_id = $1
   AND ent.customer_id = $2
   AND p.tier_group = sqlc.arg(tier_group)::text

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (224), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (225), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -89,6 +89,7 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/checkout-config` | merchant | `merchant:customer-settings:read` | — | 200 `CheckoutConfig` |  |
 | GET | `/v1/merchant/catalog/revision` | merchant | `merchant:catalog:read` | — | 200 `CatalogRevision` |  |
 | POST | `/v1/merchant/catalog/applications` | merchant | `merchant:catalog:update` | `Application` | 200 `CatalogApplicationReceipt` | catalog write |
+| POST | `/v1/merchant/catalog/entitlement-replacements` | merchant | `merchant:catalog:update` | `ReplaceEntitlementsParams` | 200 `CatalogApplicationReceipt` | catalog write |
 | GET | `/v1/merchant/catalog/drift` | merchant | `merchant:catalog:read` | — | 200 `ListPage<CatalogDrift>` |  |
 | POST | `/v1/merchant/catalog/drift/refresh` | merchant | `merchant:catalog:update` | — | 200 `CatalogDriftRefresh` | catalog write |
 | GET | `/v1/merchant/catalog/meters` | merchant | `merchant:catalog:read` | — | 200 `ListPage<Meter>` |  |

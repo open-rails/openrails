@@ -64,6 +64,7 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 		return 0, nil, err
 	}
 	receipt.Replayed = true
+	receipt.EntitlementChanges = []billing.EntitlementChange{}
 	return revision, &receipt, nil
 }
 

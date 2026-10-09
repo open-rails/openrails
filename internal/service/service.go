@@ -27,6 +27,11 @@ type Service struct {
 	catalogWriteLocked   bool
 	catalogCommittedWork *[]func(context.Context, *Service)
 	catalogPreparedLinks map[[2]string]map[string]map[string]string
+	// catalogKeyActor attributes key edits made inside a catalog application.
+	catalogKeyActor string
+	// catalogKeyChanges collects the key changes of existing products made
+	// inside a catalog application, for its receipt.
+	catalogKeyChanges *[]billing.EntitlementChange
 }
 
 func New(rt *app.Runtime) (*Service, error) {

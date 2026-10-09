@@ -321,6 +321,7 @@ export type CatalogApplicationReceipt = {
   replayed: boolean
   products_changed: number
   prices_changed: number
+  entitlement_changes: EntitlementChange[]
 }
 
 export type CatalogDraft = {
@@ -981,6 +982,13 @@ export type EnsureCustomerParams = {
   blocked?: boolean
 }
 
+export type EntitlementChange = {
+  product_id: string
+  product_key: string
+  added: string[]
+  removed: string[]
+}
+
 export type EntitlementCheck = {
   entitlements: Record<string, boolean> | null
   held: Record<string, HeldEntitlements> | null
@@ -1007,6 +1015,11 @@ export type EntitlementRecord = {
   revoke_reason: string | null
   created_at: string
   updated_at: string
+}
+
+export type EntitlementReplacement = {
+  from?: string
+  to?: string
 }
 
 export type EpisodeSummary = {
@@ -2101,6 +2114,10 @@ export type ReleaseOperationAuthorizationParams = {
 
 export type RenameMerchantParams = {
   name?: string
+}
+
+export type ReplaceEntitlementsParams = {
+  pairs?: EntitlementReplacement[]
 }
 
 export type ReplacePaymentMethodCardParams = {

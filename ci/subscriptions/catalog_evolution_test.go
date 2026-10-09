@@ -395,8 +395,9 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	var archive bytes.Buffer
 	require.NoError(t, merchantarchive.Export(t.Context(), source, merchantID, &archive))
 
-	// The pre-revision row format omitted product and price revisions. Rebuild
-	// the footer so the old shape is an intact archive.
+	// The pre-revision row format omitted product and price revisions and
+	// carried each product's keys on the product. Rebuild the footer so the
+	// old shape is an intact archive.
 	var legacy bytes.Buffer
 	var writer *archivewire.Writer
 	table := ""
@@ -407,9 +408,19 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	}, func(record archivewire.Record) error {
 		if record.Kind == "table" {
 			table = record.Table
+			if table == "product_entitlements" {
+				return nil
+			}
 			return writer.Table(table)
 		}
 		values := record.Values
+		switch table {
+		case "product_entitlements":
+			return fmt.Errorf("this fixture's products grant no keys")
+		case "products":
+			keys := "[]"
+			values = append(append(append([]*string{}, values[:6]...), &keys), values[6:]...)
+		}
 		if table == "prices" || table == "products" {
 			values = append(append([]*string{}, values[:1]...), values[2:]...)
 		}

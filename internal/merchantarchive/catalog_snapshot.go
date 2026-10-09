@@ -197,7 +197,11 @@ func RestoreCatalog(ctx context.Context, database *db.DB, id billing.MerchantID,
 	if database == nil || id.IsZero() {
 		return Result{}, &Error{Code: "merchant_mismatch"}
 	}
-	document, count, err := readCatalogSnapshot(in)
+	signed, count, err := readCatalogSnapshot(in)
+	if err != nil {
+		return Result{}, &Error{Code: "invalid_artifact", Err: err}
+	}
+	document, err := upgradeCatalogSnapshot(signed)
 	if err != nil {
 		return Result{}, &Error{Code: "invalid_artifact", Err: err}
 	}

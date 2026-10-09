@@ -1110,6 +1110,53 @@
         ]
       }
     },
+    "/v1/merchant/catalog/entitlement-replacements": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceEntitlementsParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogApplicationReceipt"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:catalog:update",
+        "x-openrails-catalog-write": true,
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request",
+          "catalog_write"
+        ]
+      }
+    },
     "/v1/merchant/catalog/drift": {
       "get": {
         "tags": [
@@ -2080,6 +2127,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "entitlement",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "for_sale",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -14683,6 +14744,12 @@
           },
           "prices_changed": {
             "type": "integer"
+          },
+          "entitlement_changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntitlementChange"
+            }
           }
         },
         "required": [
@@ -14691,7 +14758,8 @@
           "applied_revision",
           "replayed",
           "products_changed",
-          "prices_changed"
+          "prices_changed",
+          "entitlement_changes"
         ]
       },
       "CatalogDraft": {
@@ -17367,6 +17435,35 @@
           }
         }
       },
+      "EntitlementChange": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "product_id",
+          "product_key",
+          "added",
+          "removed"
+        ]
+      },
       "EntitlementCheck": {
         "type": "object",
         "properties": {
@@ -17523,6 +17620,17 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "EntitlementReplacement": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
       },
       "EpisodeSummary": {
         "type": "object",
@@ -22566,6 +22674,17 @@
         "properties": {
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "ReplaceEntitlementsParams": {
+        "type": "object",
+        "properties": {
+          "pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntitlementReplacement"
+            }
           }
         }
       },

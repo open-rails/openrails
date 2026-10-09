@@ -20,7 +20,7 @@ func snapshotWireFixture(t *testing.T) CatalogSnapshot {
 		Dependencies: CatalogDependencies{PSPs: []CatalogPSPIdentity{}, Customers: []string{}},
 		Tables:       map[string][]map[string]json.RawMessage{},
 	}
-	for _, table := range []string{"products", "prices", "price_key_movements", "price_psp_bindings", "catalog_meters", "catalog_rate_cards", "catalog_applications", "product_archive_operations"} {
+	for _, table := range []string{"products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_meters", "catalog_rate_cards", "catalog_applications", "product_archive_operations"} {
 		document.Tables[table] = []map[string]json.RawMessage{}
 	}
 	return document
@@ -111,33 +111,53 @@ func TestCatalogSnapshotHistoricalBillingTerms(t *testing.T) {
 
 func TestCatalogSnapshotHistoricalEntitlementMap(t *testing.T) {
 	document := snapshotWireFixture(t)
+	delete(document.Tables, "product_entitlements")
 	product := snapshotWireProduct(t)
 	product["entitlements_spec"] = json.RawMessage(`{"opaque:z":24,"service:any":null,"article:42":0}`)
 	document.Tables["products"] = []map[string]json.RawMessage{product}
-	restored, _, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
+	signed, count, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
 	require.NoError(t, err)
-	profile := snapshotWireProfile(t, "products")
-	values, err := catalogValues(profile, restored.Tables["products"][0], snapshotTestMerchant)
+	require.EqualValues(t, 4, count, "the product and its three keys")
+	_, historical := signed.Tables["products"][0]["entitlements_spec"]
+	require.True(t, historical, "reading does not rewrite the signed document")
+	_, err = validateCatalogSnapshot(signed)
 	require.NoError(t, err)
-	for i, field := range profile.Columns {
-		if field.Name == "entitlements" {
-			require.JSONEq(t, `["article:42","opaque:z","service:any"]`, *values[i])
+
+	restored, err := upgradeCatalogSnapshot(signed)
+	require.NoError(t, err)
+	_, err = catalogValues(snapshotWireProfile(t, "products"), restored.Tables["products"][0], snapshotTestMerchant)
+	require.NoError(t, err)
+	var keys []string
+	profile := snapshotWireProfile(t, "product_entitlements")
+	for _, row := range restored.Tables["product_entitlements"] {
+		values, err := catalogValues(profile, row, snapshotTestMerchant)
+		require.NoError(t, err)
+		for i, c := range profile.Columns {
+			switch c.Name {
+			case "entitlement":
+				keys = append(keys, *values[i])
+			case "added_at":
+				require.Equal(t, contract.PrehistoricKeyAddedAt, *values[i], "valid from before key history")
+			case "removed_at":
+				require.Nil(t, values[i])
+			}
 		}
 	}
-	_, historical := restored.Tables["products"][0]["entitlements_spec"]
-	require.True(t, historical, "reading does not rewrite the signed document")
-	_, err = validateCatalogSnapshot(restored)
-	require.NoError(t, err)
+	require.Equal(t, []string{"article:42", "opaque:z", "service:any"}, keys)
 }
 
 func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T) {
 	document := snapshotWireFixture(t)
 	document.CatalogRevision = 9007199254740993
 	product := snapshotWireProduct(t)
-	product["entitlements"] = json.RawMessage(`["opaque:name"]`)
 	product["credit_grant"] = json.RawMessage("null")
 	// description is SQL NULL (absent), while credit_grant is JSON null.
 	document.Tables["products"] = []map[string]json.RawMessage{product}
+	document.Tables["product_entitlements"] = []map[string]json.RawMessage{snapshotWireRow(t, "product_entitlements", map[string]string{
+		"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000005",
+		"product_id": "10000000-0000-0000-0000-000000000002", "entitlement": "opaque:name",
+		"added_at": "2026-10-07 12:00:00+00", "added_by": "migration",
+	})}
 	document.Tables["prices"] = []map[string]json.RawMessage{snapshotWireRow(t, "prices", map[string]string{
 		"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000003",
 		"product_id": "10000000-0000-0000-0000-000000000002", "revision": "7", "key": "purchase",
@@ -154,7 +174,7 @@ func TestCatalogSnapshotWireRoundTripPreservesNullAndExactIntegers(t *testing.T)
 	require.NoError(t, WriteCatalogSnapshot(&encoded, document))
 	restored, count, err := readCatalogSnapshot(bytes.NewReader(encoded.Bytes()))
 	require.NoError(t, err)
-	require.EqualValues(t, 3, count)
+	require.EqualValues(t, 4, count)
 	require.Equal(t, document.CatalogRevision, restored.CatalogRevision)
 	require.JSONEq(t, `"9007199254740993"`, string(restored.Tables["prices"][0]["amount"]))
 	var rate struct {

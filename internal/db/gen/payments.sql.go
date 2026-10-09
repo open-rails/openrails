@@ -684,7 +684,7 @@ func (q *Queries) GetPaymentRefundTotals(ctx context.Context, arg GetPaymentRefu
 }
 
 const getPaymentWithPriceProduct = `-- name: GetPaymentWithPriceProduct :one
-SELECT purch.id, purch.price_id, purch.channel, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.psp_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, purch.token_type, purch.deleted_at, purch.destructive_run_id, purch.destructive_run_class, purch.money_movement, purch.credit_grant_snapshot, purch.legacy_entitlement_hours, p.id, p.product_id, p.amount, p.currency, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.trial_unit_amount, p.trial_duration_hours, p.key, p.revision, p.customer_amount, p.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT purch.id, purch.price_id, purch.channel, purch.rail, purch.transaction_id, purch.amount, purch.list_amount, purch.currency, purch.status, purch.subscription_id, purch.refunded_payment_id, purch.discount_code, purch.discount_reason, purch.discount_metadata, purch.entitlements_snapshot, purch.metadata, purch.purchased_at, purch.created_at, purch.card_brand, purch.card_last4, purch.merchant_id, purch.customer_id, purch.psp_id, purch.attempt_kind, purch.failure_code, purch.failure_reason, purch.reversal_kind, purch.token_type, purch.deleted_at, purch.destructive_run_id, purch.destructive_run_class, purch.money_movement, purch.credit_grant_snapshot, purch.legacy_entitlement_hours, p.id, p.product_id, p.amount, p.currency, p.archived, p.created_at, p.updated_at, p.merchant_id, p.access_duration_hours, p.trial_unit_amount, p.trial_duration_hours, p.key, p.revision, p.customer_amount, p.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
 FROM billing.payments purch
 JOIN billing.prices p ON p.id = purch.price_id
 JOIN billing.products prod ON prod.id = p.product_id
@@ -760,7 +760,6 @@ func (q *Queries) GetPaymentWithPriceProduct(ctx context.Context, arg GetPayment
 		&i.BillingProduct.Key,
 		&i.BillingProduct.DisplayName,
 		&i.BillingProduct.Description,
-		&i.BillingProduct.Entitlements,
 		&i.BillingProduct.TierGroup,
 		&i.BillingProduct.TierRank,
 		&i.BillingProduct.Archived,

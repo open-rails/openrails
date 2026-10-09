@@ -106,15 +106,41 @@ func ListOffers(ctx context.Context, database *db.DB, params billing.OfferListPa
 			value := int(*row.AccessDurationHours)
 			offer.AccessDurationHours = &value
 		}
-		if len(row.Entitlements) > 0 {
-			if err := json.Unmarshal(row.Entitlements, &offer.Entitlements); err != nil {
-				return nil, err
-			}
-		}
 		page.Items = append(page.Items, offer)
 		result[row.Entitlement] = page
 	}
-	return result, nil
+	return result, attachOfferEntitlements(ctx, database, mid.UUID(), result)
+}
+
+// attachOfferEntitlements sets each offer's product keys with one query.
+func attachOfferEntitlements(ctx context.Context, database *db.DB, merchantID uuid.UUID, pages map[string]billing.ListPage[billing.Offer]) error {
+	var ids []uuid.UUID
+	seen := map[uuid.UUID]bool{}
+	for _, page := range pages {
+		for _, offer := range page.Items {
+			if id := offer.ProductID.UUID(); !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := database.Gen(ctx).ListLiveProductEntitlements(ctx, gen.ListLiveProductEntitlementsParams{MerchantID: merchantID, ProductIds: ids})
+	if err != nil {
+		return err
+	}
+	keys := map[uuid.UUID][]string{}
+	for _, row := range rows {
+		keys[row.ProductID] = append(keys[row.ProductID], row.Entitlement)
+	}
+	for _, page := range pages {
+		for i := range page.Items {
+			page.Items[i].Entitlements = append([]string{}, keys[page.Items[i].ProductID.UUID()]...)
+		}
+	}
+	return nil
 }
 
 func decodeOfferCursor(raw, scope string) (offerCursor, error) {

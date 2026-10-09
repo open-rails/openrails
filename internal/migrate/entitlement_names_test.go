@@ -73,7 +73,7 @@ func TestEntitlementNamesMigrationPreservesPurchasedWindows(t *testing.T) {
 	var catalogRevision, productRevision int64
 	require.NoError(t, pool.QueryRow(ctx, "SELECT catalog_revision FROM "+schema+".merchants WHERE id=$1", merchant).Scan(&catalogRevision))
 	require.NoError(t, pool.QueryRow(ctx, "SELECT revision FROM "+schema+".products WHERE id=$1", product).Scan(&productRevision))
-	require.NoError(t, migrator.ApplyMigrations(ctx, migrations))
+	require.NoError(t, migrator.ApplyMigrations(ctx, migrations[:10]))
 	var raw string
 	var revision int64
 	require.NoError(t, pool.QueryRow(ctx, "SELECT entitlements::text,revision FROM "+schema+".products WHERE id=$1", product).Scan(&raw, &revision))

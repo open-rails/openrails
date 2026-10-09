@@ -429,12 +429,12 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		}
 		feats, ok := specs[g.Product.UUID()]
 		if !ok {
-			product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{ID: g.Product.UUID(), MerchantID: merchantID})
+			rows, err := q.ListLiveProductEntitlements(ctx, gen.ListLiveProductEntitlementsParams{MerchantID: merchantID, ProductIds: []uuid.UUID{g.Product.UUID()}})
 			if err != nil {
 				return fmt.Errorf("import admin grant %s: load product %s: %w", g.SourceID, g.Product, err)
 			}
-			if err := json.Unmarshal(product.Entitlements, &feats); err != nil {
-				return fmt.Errorf("import admin grant %s: decode product entitlements: %w", g.SourceID, err)
+			for _, row := range rows {
+				feats = append(feats, row.Entitlement)
 			}
 			specs[g.Product.UUID()] = feats
 		}

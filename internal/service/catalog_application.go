@@ -16,7 +16,6 @@ import (
 	catalogwire "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogrules"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -122,7 +121,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		}
 		scoped.localCatalogOnly = true
 		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision}
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision, EntitlementChanges: []billing.EntitlementChange{}}
+		scoped.catalogKeyActor = receipt.ApplicationID
+		scoped.catalogKeyChanges = &receipt.EntitlementChanges
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -144,12 +145,7 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err != nil {
 			return nil, err
 		}
-		result, err := json.Marshal(receipt)
-		if err != nil {
-			return nil, err
-		}
-		err = q.InsertCatalogApplication(ctx, gen.InsertCatalogApplicationParams{MerchantID: mid.UUID(), ApplicationID: receipt.ApplicationID, SchemaVersion: int64(params.SchemaVersion), RequestSha256: digest[:], BaseRevision: revision, AppliedRevision: receipt.AppliedRevision, Result: result})
-		if err != nil {
+		if err := scoped.recordCatalogReceipt(ctx, receipt, params.SchemaVersion, digest); err != nil {
 			return nil, err
 		}
 		if err := q.SetCatalogBatchMerchant(ctx, ""); err != nil {

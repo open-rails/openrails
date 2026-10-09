@@ -97,6 +97,7 @@ var Tables = map[string]Table{
 	"psps":                        {Class: State},
 	"psp_customers":               {Class: State},
 	"products":                    {Permanent, permanent},
+	"product_entitlements":        {Permanent, permanent},
 	"prices":                      {Permanent, permanent},
 	"price_psp_bindings":          {Class: State},
 	"catalog_meters":              {Class: State},

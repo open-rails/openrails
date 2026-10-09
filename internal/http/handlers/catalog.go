@@ -16,7 +16,8 @@ type PublicPriceListQuery struct {
 }
 
 // ListPublicProducts lists the products on sale, each with its current
-// prices, as a buyer sees them.
+// prices, as a buyer sees them. A product no live price sells is granted
+// only and is not listed.
 func ListPublicProducts(r *httprequest.Request) {
 	page, ok := r.Page()
 	if !ok {
@@ -26,8 +27,8 @@ func ListPublicProducts(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	onSale := false
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: &onSale})
+	archived, forSale := false, true
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: &archived, ForSale: &forSale})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

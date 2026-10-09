@@ -23,9 +23,9 @@ func TestEntitlementListCatalogAPI(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, product.Entitlements)
 		require.Empty(t, product.Entitlements)
-		var stored []byte
-		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT entitlements FROM billing.products WHERE id=$1`), product.ID.UUID()).Scan(&stored))
-		require.JSONEq(t, `[]`, string(stored), "new products must store explicit empty lists, not unknown benefits")
+		var stored int
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT count(*) FROM billing.product_entitlements WHERE product_id=$1`), product.ID.UUID()).Scan(&stored))
+		require.Zero(t, stored, "a product without keys stores none")
 	}
 	var explicit billing.Product
 	require.Equal(t, http.StatusCreated, w.staffCall(http.MethodPost, "/v1/merchant/catalog/products", map[string]any{
@@ -33,9 +33,9 @@ func TestEntitlementListCatalogAPI(t *testing.T) {
 	}, &explicit))
 	require.NotNil(t, explicit.Entitlements)
 	require.Empty(t, explicit.Entitlements)
-	var storedEmpty []byte
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT entitlements FROM billing.products WHERE id=$1`), explicit.ID.UUID()).Scan(&storedEmpty))
-	require.JSONEq(t, `[]`, string(storedEmpty))
+	var storedEmpty int
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT count(*) FROM billing.product_entitlements WHERE product_id=$1`), explicit.ID.UUID()).Scan(&storedEmpty))
+	require.Zero(t, storedEmpty)
 	key := "opaque-list-" + uuid.NewString()[:8]
 	document, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:

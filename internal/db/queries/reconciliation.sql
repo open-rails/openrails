@@ -451,7 +451,7 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       p.entitlements, pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = p.merchant_id AND pe.product_id = p.id AND pe.removed_at IS NULL), '[]'::jsonb), pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
@@ -650,7 +650,7 @@ FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 CROSS JOIN LATERAL (
     SELECT jsonb_agg(feat ORDER BY feat) AS spec
-    FROM jsonb_array_elements_text(COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements)) AS feat
+    FROM jsonb_array_elements_text(COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb))) AS feat
     WHERE NOT EXISTS (
         SELECT 1 FROM billing.entitlements e
         WHERE e.merchant_id = s.merchant_id
@@ -667,8 +667,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) IS NOT NULL
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
@@ -862,7 +861,7 @@ WITH win AS (
      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
        AND s.deleted_at IS NULL AND s.status <> 'pending'
        AND s.cancel_type IS DISTINCT FROM 'chargeback'
-       AND ((pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb)
+       AND (EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
             OR (s.entitlements_snapshot IS NOT NULL AND s.entitlements_snapshot <> '[]'::jsonb))
     UNION ALL
     SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
@@ -873,7 +872,7 @@ WITH win AS (
      WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
        AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
        AND pr.access_duration_hours IS NOT NULL
-       AND pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb
+       AND EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
 ), orphaned AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((

@@ -1101,8 +1101,6 @@ type BillingProduct struct {
 	Key         string
 	DisplayName string
 	Description *string
-	// Opaque entitlement names granted for the purchased access duration; canonical sorted JSON array.
-	Entitlements []byte
 	// Semantic group name for mutually-exclusive products (e.g., "premium"). NULL: in no group (an empty name is stored as NULL). Products in same group require upgrade/downgrade, not parallel ownership.
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
@@ -1127,6 +1125,21 @@ type BillingProductArchiveOperation struct {
 	PurchaseWindowStartsAt *time.Time
 	Reason                 *string
 	CreatedAt              time.Time
+}
+
+// The entitlement keys each product grants, with valid-time history: a key holds for [added_at, removed_at). Holders derive their keys from these rows at check time. Rows are never deleted; removal closes a row. Retention: permanent, never pruned.
+type BillingProductEntitlement struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	ProductID   uuid.UUID
+	Entitlement string
+	// When the key started being granted. Keys that predate this history (migrated or restored from older archives) hold from 0001-01-01.
+	AddedAt time.Time
+	// When the key stopped being granted; equal to added_at for a key added and removed at the same instant.
+	RemovedAt *time.Time
+	// Who added the key: a catalog application id (sha256:...), an operator, or migration.
+	AddedBy   string
+	RemovedBy *string
 }
 
 // Durable, effectively-once outbox for outbound provider mutations. One row per logical intent (unique per merchant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads. Retention: finished intents that only instructed a provider (cancel, update, archive, vault, token, account updater) are deleted 25 months (761 days) after they last changed; an intent that moved or refused money, enrolled a membership or erased a card is permanent.

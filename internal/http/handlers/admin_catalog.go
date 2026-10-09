@@ -30,8 +30,10 @@ func writeCatalogError(r *httprequest.Request, err error) {
 
 // ProductListQuery filters ListProducts.
 type ProductListQuery struct {
-	Archived  *bool  `form:"archived"`
-	TierGroup string `form:"tier_group"`
+	Archived    *bool  `form:"archived"`
+	TierGroup   string `form:"tier_group"`
+	Entitlement string `form:"entitlement"`
+	ForSale     *bool  `form:"for_sale"`
 }
 
 // PriceListQuery filters ListPrices.
@@ -104,7 +106,8 @@ func ListProducts(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup)})
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup),
+		Entitlement: query.Entitlement, ForSale: query.ForSale})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

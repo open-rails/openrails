@@ -18,6 +18,7 @@ migration 0014_operation_authorization_extensions.up.sql sha256:7e96a488b7144c28
 migration 0015_owed_repayment.up.sql sha256:54ad22cbf5293b6a00f7cbf18822c8c013f32c6e75a9e910899e7d95f50da460
 migration 0016_identity_facts.up.sql sha256:3ae50466191affffa4e919d8b67f94aac547205e517e7466110e6788e47dbbcb
 migration 0017_entitlement_keyspace_index.up.sql sha256:e7ac741d89b1942109638e7dca67ba964de3ccf8a162905908939804bce142bd
+migration 0018_product_entitlements.up.sql sha256:350b3d0dd394f0ce9089e712635aaa95973482118213cd27610a419ffa289a07
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1598,12 +1599,37 @@ table billing.product_archive_operations
   index CREATE INDEX product_archive_operations_product_id_idx ON billing.product_archive_operations USING btree (merchant_id, product_id)
   trigger CREATE TRIGGER immutable_product_archive_operation BEFORE DELETE OR UPDATE ON billing.product_archive_operations FOR EACH ROW EXECUTE FUNCTION billing.guard_product_archive_operation()
 
+table billing.product_entitlements
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid NOT NULL
+  column product_id uuid NOT NULL
+  column entitlement text COLLATE "C" NOT NULL
+  column added_at timestamp with time zone NOT NULL
+  column removed_at timestamp with time zone
+  column added_by text NOT NULL
+  column removed_by text
+  constraint product_entitlements_added_by_check CHECK (((octet_length(added_by) >= 1) AND (octet_length(added_by) <= 255)))
+  constraint product_entitlements_entitlement_check CHECK ((((octet_length(entitlement) >= 1) AND (octet_length(entitlement) <= 256)) AND (btrim(entitlement) <> ''::text)))
+  constraint product_entitlements_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint product_entitlements_pkey PRIMARY KEY (merchant_id, id)
+  constraint product_entitlements_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint product_entitlements_removed_by_check CHECK (((removed_by IS NULL) OR ((octet_length(removed_by) >= 1) AND (octet_length(removed_by) <= 255))))
+  constraint product_entitlements_removed_check CHECK (((removed_at IS NULL) = (removed_by IS NULL)))
+  constraint product_entitlements_window_check CHECK (((removed_at IS NULL) OR (removed_at >= added_at)))
+  index CREATE INDEX product_entitlements_entitlement_idx ON billing.product_entitlements USING btree (merchant_id, entitlement, product_id) INCLUDE (added_at, removed_at)
+  index CREATE UNIQUE INDEX product_entitlements_live_key ON billing.product_entitlements USING btree (merchant_id, product_id, entitlement) WHERE (removed_at IS NULL)
+  index CREATE UNIQUE INDEX product_entitlements_pkey ON billing.product_entitlements USING btree (merchant_id, id)
+  index CREATE INDEX product_entitlements_product_idx ON billing.product_entitlements USING btree (merchant_id, product_id, entitlement, added_at) INCLUDE (removed_at)
+  trigger CREATE TRIGGER catalog_authored_entitlements_insert AFTER INSERT ON billing.product_entitlements REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.catalog_authored_entitlements()
+  trigger CREATE TRIGGER catalog_authored_entitlements_update AFTER UPDATE ON billing.product_entitlements REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.catalog_authored_entitlements()
+  trigger CREATE TRIGGER immutable_product_entitlement_history BEFORE DELETE OR UPDATE ON billing.product_entitlements FOR EACH ROW EXECUTE FUNCTION billing.guard_product_entitlement_history()
+  trigger CREATE TRIGGER immutable_product_entitlement_history_truncate BEFORE TRUNCATE ON billing.product_entitlements FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.products
   column id uuid NOT NULL DEFAULT uuidv7()
   column key text NOT NULL
   column display_name text NOT NULL
   column description text
-  column entitlements jsonb NOT NULL DEFAULT '[]'::jsonb
   column tier_group text
   column tier_rank integer NOT NULL
   column archived boolean NOT NULL
@@ -1613,7 +1639,6 @@ table billing.products
   column revision bigint NOT NULL DEFAULT 0
   column credit_grant jsonb
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
-  constraint products_entitlements_list_check CHECK (((jsonb_typeof(entitlements) = 'array'::text) AND (NOT jsonb_path_exists(entitlements, '$[*]?(@.type() != "string")'::jsonpath))))
   constraint products_key_key UNIQUE (merchant_id, key)
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_pkey PRIMARY KEY (merchant_id, id)
@@ -1621,7 +1646,6 @@ table billing.products
   constraint products_tier_group_check CHECK (((char_length(tier_group) >= 1) AND (char_length(tier_group) <= 100)))
   index CREATE INDEX products_archived_idx ON billing.products USING btree (archived)
   index CREATE INDEX products_created_at_id_idx ON billing.products USING btree (merchant_id, created_at DESC, id DESC)
-  index CREATE INDEX products_entitlements_idx ON billing.products USING gin (entitlements) WHERE (NOT archived)
   index CREATE INDEX products_key_idx ON billing.products USING btree (key)
   index CREATE UNIQUE INDEX products_key_key ON billing.products USING btree (merchant_id, key)
   index CREATE UNIQUE INDEX products_pkey ON billing.products USING btree (merchant_id, id)
@@ -2278,7 +2302,8 @@ function billing.assign_product_revision()
   BEGIN
       IF TG_OP='INSERT' THEN
           NEW.revision := COALESCE(NEW.revision, 0);
-      ELSIF (to_jsonb(NEW)-ARRAY['updated_at','revision']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['updated_at','revision']) THEN
+      ELSIF NEW.revision IS DISTINCT FROM OLD.revision
+         OR (to_jsonb(NEW)-ARRAY['updated_at','revision']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['updated_at','revision']) THEN
           NEW.revision := OLD.revision + 1;
       ELSE
           NEW.revision := OLD.revision;
@@ -2341,6 +2366,27 @@ function billing.billing_restore_active(uuid)
           AND r.xmin=pg_current_xact_id_if_assigned()::xid);
   END;
   $function$
+
+function billing.catalog_authored_entitlements()
+  CREATE OR REPLACE FUNCTION billing.catalog_authored_entitlements()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE mid uuid;
+  BEGIN
+      FOR mid IN SELECT DISTINCT merchant_id FROM changed LOOP
+          IF current_setting('openrails.catalog_batch_merchant_id',true) IS DISTINCT FROM mid::text THEN
+              BEGIN
+                  PERFORM id FROM billing.merchants WHERE id=mid FOR UPDATE NOWAIT;
+              EXCEPTION WHEN lock_not_available THEN
+                  RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
+              END;
+              UPDATE billing.merchants SET catalog_revision=catalog_revision+1 WHERE id=mid;
+          END IF;
+      END LOOP;
+      RETURN NULL;
+  END $function$
 
 function billing.catalog_authored_write()
   CREATE OR REPLACE FUNCTION billing.catalog_authored_write()
@@ -2639,6 +2685,7 @@ function billing.guard_billing_restore_receipt()
                     'price_psp_bindings',
                     'prices',
                     'product_archive_operations',
+                    'product_entitlements',
                     'products',
                     'provider_intents',
                     'provider_mutation_logs',
@@ -2793,6 +2840,23 @@ function billing.guard_product_archive_operation()
   AS $function$
   BEGIN
    RAISE EXCEPTION 'product archive operations are immutable' USING ERRCODE='23514';
+  END $function$
+
+function billing.guard_product_entitlement_history()
+  CREATE OR REPLACE FUNCTION billing.guard_product_entitlement_history()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF TG_OP='DELETE' THEN
+          RAISE EXCEPTION 'product entitlement history is immutable' USING ERRCODE='23514';
+      END IF;
+      IF OLD.removed_at IS NOT NULL OR NEW.removed_at IS NULL
+         OR (to_jsonb(NEW)-ARRAY['removed_at','removed_by']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['removed_at','removed_by']) THEN
+          RAISE EXCEPTION 'a product entitlement row only closes, once' USING ERRCODE='23514';
+      END IF;
+      RETURN NEW;
   END $function$
 
 function billing.guard_product_identity()

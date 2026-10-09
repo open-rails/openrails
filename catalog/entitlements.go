@@ -10,6 +10,10 @@ import (
 // MaxEntitlementKeyBytes bounds an opaque entitlement key in current APIs.
 const MaxEntitlementKeyBytes = 256
 
+// MaxProductEntitlements bounds the keys one product grants, so one bundle
+// cannot dominate a holder's prefix reads.
+const MaxProductEntitlements = 10000
+
 // NormalizeEntitlements validates opaque entitlement names and sorts a copy.
 // Names retain their exact spelling. Nil remains nil; an empty list remains an
 // explicit empty list, so accepted snapshots can distinguish missing benefits.
@@ -33,4 +37,13 @@ func NormalizeEntitlements(entitlements []string) ([]string, error) {
 	result := slices.Clone(entitlements)
 	slices.Sort(result)
 	return result, nil
+}
+
+// NormalizeProductEntitlements is NormalizeEntitlements for a product's keys,
+// which also bounds their number.
+func NormalizeProductEntitlements(entitlements []string) ([]string, error) {
+	if len(entitlements) > MaxProductEntitlements {
+		return nil, fmt.Errorf("a product grants at most %d entitlements", MaxProductEntitlements)
+	}
+	return NormalizeEntitlements(entitlements)
 }

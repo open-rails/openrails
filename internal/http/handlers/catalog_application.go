@@ -64,3 +64,23 @@ func GetCatalogRevision(r *httprequest.Request) {
 	allowed := catalogpolicy.Check(r.Request.Context(), exposure) == nil
 	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
 }
+
+// ReplaceEntitlements moves keys across every product granting them.
+//
+//	POST /v1/merchant/catalog/entitlement-replacements
+func ReplaceEntitlements(r *httprequest.Request) {
+	var params billing.ReplaceEntitlementsParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	receipt, err := svc.ReplaceEntitlements(r.Request.Context(), params)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, receipt)
+}

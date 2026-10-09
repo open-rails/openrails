@@ -160,7 +160,7 @@ func (a Application) Validate() error {
 		if p.Entitlements.Set && (p.Entitlements.Null || p.Entitlements.Value == nil) {
 			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", key)
 		}
-		if _, err := NormalizeEntitlements(p.Entitlements.Value); err != nil {
+		if _, err := NormalizeProductEntitlements(p.Entitlements.Value); err != nil {
 			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {

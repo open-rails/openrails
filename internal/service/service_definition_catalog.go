@@ -76,7 +76,7 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := products.Create(ctx, p); err != nil {
+	if err := products.Create(ctx, p, s.keyEdit(ctx)); err != nil {
 		return nil, catalogWrite(err)
 	}
 	return productToCatalogProduct(p), nil
@@ -201,7 +201,7 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		}
 	}
 	productID := id.UUID()
-	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
+	p, keys, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:     req.DisplayName,
 		Description:     req.Description,
 		Entitlements:    req.Entitlements,
@@ -210,9 +210,13 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		SetTierGroup: req.SetTierGroup,
 		TierRank:     req.TierRank,
 		Archived:     req.Archived,
+		KeyEdit:      s.keyEdit(ctx),
 	})
 	if err != nil {
 		return nil, productLookup(err)
+	}
+	if keys.Changed() && s.catalogKeyChanges != nil {
+		*s.catalogKeyChanges = append(*s.catalogKeyChanges, entitlementChange(p, keys))
 	}
 
 	s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) {

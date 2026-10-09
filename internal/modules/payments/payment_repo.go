@@ -230,7 +230,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	product, err := models.ProductFromGen(row.BillingProduct)
+	product, err := r.db.ProductFromGen(ctx, row.BillingProduct)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -648,7 +648,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 			if err != nil {
 				return err
 			}
-			product, err := models.ProductFromGen(row.BillingProduct)
+			product, err := r.db.ProductFromGen(ctx, row.BillingProduct)
 			if err != nil {
 				return err
 			}

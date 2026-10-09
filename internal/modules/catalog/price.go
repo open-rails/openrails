@@ -116,7 +116,7 @@ func (s *PriceService) GetWithProductByIDs(ctx context.Context, ids []uuid.UUID)
 		if err != nil {
 			return nil, err
 		}
-		if price.Product, err = models.ProductFromGen(row.BillingProduct); err != nil {
+		if price.Product, err = s.db.ProductFromGen(ctx, row.BillingProduct); err != nil {
 			return nil, err
 		}
 		prices = append(prices, price)
@@ -216,7 +216,7 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 	if err != nil {
 		return nil, err
 	}
-	product, err := models.ProductFromGen(prod)
+	product, err := s.db.ProductFromGen(ctx, prod)
 	if err != nil {
 		return nil, err
 	}

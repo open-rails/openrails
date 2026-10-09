@@ -1253,7 +1253,7 @@ WHERE p.merchant_id = $1::uuid
   AND p.amount > 0
   AND p.subscription_id IS NULL
   AND (
-        (COALESCE(NULLIF(p.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb)
+        (COALESCE(NULLIF(p.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb)
       )
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
@@ -1314,7 +1314,7 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
        s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) AS entitlements
+       COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) AS entitlements
 FROM billing.subscriptions s
 JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = $1::uuid
@@ -1324,8 +1324,7 @@ WHERE s.merchant_id = $1::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) IS NOT NULL
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), pd.entitlements) <> '[]'::jsonb
+  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= $3::timestamptz)
   AND NOT EXISTS (
@@ -1404,7 +1403,7 @@ func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngran
 const listUngrantedWalletPayments = `-- name: ListUngrantedWalletPayments :many
 SELECT p.id, p.customer_id, p.purchased_at,
        (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
-       pd.entitlements
+       COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements
 FROM billing.payments p
 JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
 JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
@@ -1419,7 +1418,7 @@ WHERE p.merchant_id = $1::uuid
   AND p.metadata->>'expiration_rfc3339' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
   AND (p.metadata->>'expiration_rfc3339')::timestamptz > p.purchased_at
   AND (p.metadata->>'expiration_rfc3339')::timestamptz >= $3::timestamptz
-  AND pd.entitlements IS NOT NULL AND pd.entitlements <> '[]'::jsonb
+  AND EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'

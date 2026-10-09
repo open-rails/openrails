@@ -2,12 +2,12 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -43,19 +43,30 @@ func productTierRankInt32(v int) (int32, error) {
 	return int32(v), nil
 }
 
-func productsFromGen(rows []gen.BillingProduct) ([]*models.Product, error) {
-	out := make([]*models.Product, 0, len(rows))
-	for _, r := range rows {
-		p, err := models.ProductFromGen(r)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, nil
+// KeyEdit attributes a change of a product's keys: the valid time it takes
+// effect and who made it.
+type KeyEdit struct {
+	At    time.Time
+	Actor string
 }
 
-func (s *ProductService) Create(ctx context.Context, product *models.Product) error {
+func (e KeyEdit) validate() error {
+	if e.At.IsZero() || strings.TrimSpace(e.Actor) == "" {
+		return fmt.Errorf("a key edit needs its instant and actor")
+	}
+	return nil
+}
+
+// KeyChange is how one edit changed a product's keys.
+type KeyChange struct {
+	Added   []string
+	Removed []string
+}
+
+// Changed reports whether the edit added or removed a key.
+func (c KeyChange) Changed() bool { return len(c.Added) > 0 || len(c.Removed) > 0 }
+
+func (s *ProductService) Create(ctx context.Context, product *models.Product, edit KeyEdit) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -64,18 +75,19 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		return fmt.Errorf("product merchant does not match the authorized merchant")
 	}
 	product.MerchantID = mid.UUID()
-	entitlements, err := catalogwire.NormalizeEntitlements(product.Entitlements)
+	entitlements, err := catalogwire.NormalizeProductEntitlements(product.Entitlements)
 	if err != nil {
 		return apperr.Invalidf("%v", err)
 	}
 	if entitlements == nil {
 		entitlements = []string{}
 	}
-	product.Entitlements = entitlements
-	entitlementsJSON, err := json.Marshal(entitlements)
-	if err != nil {
-		return err
+	if len(entitlements) > 0 {
+		if err := edit.validate(); err != nil {
+			return err
+		}
 	}
+	product.Entitlements = entitlements
 	credit, err := models.PointerToJSONB(product.CreditGrant)
 	if err != nil {
 		return err
@@ -89,17 +101,17 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		return err
 	}
 	rows, err := s.db.Gen(ctx).CreateProduct(ctx, gen.CreateProductParams{
-		ID:           product.ID,
-		MerchantID:   product.MerchantID,
-		Key:          product.Key,
-		DisplayName:  product.DisplayName,
-		Description:  desc,
-		Entitlements: entitlementsJSON, CreditGrant: credit,
-		TierGroup: product.TierGroup,
-		TierRank:  tierRank32,
-		Archived:  product.Archived,
-		CreatedAt: product.CreatedAt,
-		UpdatedAt: product.UpdatedAt,
+		ID:          product.ID,
+		MerchantID:  product.MerchantID,
+		Key:         product.Key,
+		DisplayName: product.DisplayName,
+		Description: desc,
+		CreditGrant: credit,
+		TierGroup:   product.TierGroup,
+		TierRank:    tierRank32,
+		Archived:    product.Archived,
+		CreatedAt:   product.CreatedAt,
+		UpdatedAt:   product.UpdatedAt,
 	})
 	if err != nil {
 		return err
@@ -107,7 +119,13 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 	if rows < 1 {
 		return errors.New("no rows affected")
 	}
-	return nil
+	if len(entitlements) == 0 {
+		return nil
+	}
+	_, err = s.db.Gen(ctx).AddProductEntitlements(ctx, gen.AddProductEntitlementsParams{
+		MerchantID: product.MerchantID, ProductID: product.ID, Entitlements: entitlements, At: edit.At, Actor: edit.Actor,
+	})
+	return err
 }
 
 func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
@@ -120,7 +138,7 @@ func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pro
 	if err != nil {
 		return nil, err
 	}
-	return models.ProductFromGen(row)
+	return s.db.ProductFromGen(ctx, row)
 }
 
 // GetByIDs loads the scoped products among ids in one query; absent IDs are
@@ -138,7 +156,7 @@ func (s *ProductService) GetByIDs(ctx context.Context, ids []uuid.UUID) (map[uui
 	if err != nil {
 		return nil, err
 	}
-	products, err := productsFromGen(rows)
+	products, err := s.db.ProductsFromGen(ctx, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +176,7 @@ func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, erro
 	if err != nil {
 		return nil, err
 	}
-	return productsFromGen(rows)
+	return s.db.ProductsFromGen(ctx, rows)
 }
 
 func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) {
@@ -171,14 +189,18 @@ func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) 
 	if err != nil {
 		return nil, err
 	}
-	return productsFromGen(rows)
+	return s.db.ProductsFromGen(ctx, rows)
 }
 
 // ProductFilter selects products. Archived nil lists every product; false
-// lists live products only; true lists archived products only.
+// lists live products only; true lists archived products only. Entitlement
+// lists the products granting that key now. ForSale true lists products a
+// live price sells; false, products only granted.
 type ProductFilter struct {
-	Archived  *bool
-	TierGroup string
+	Archived    *bool
+	TierGroup   string
+	Entitlement string
+	ForSale     *bool
 }
 
 // List returns one keyset page of products, newest first.
@@ -196,11 +218,12 @@ func (s *ProductService) List(ctx context.Context, filter ProductFilter, page bi
 		return billing.ListPage[*models.Product]{}, err
 	}
 	rows, err := s.db.Gen(ctx).ListProductsFiltered(ctx, gen.ListProductsFilteredParams{MerchantID: queryMerchant.UUID(), Archived: filter.Archived,
-		TierGroup: strings.TrimSpace(filter.TierGroup), AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
+		TierGroup: strings.TrimSpace(filter.TierGroup), Entitlement: filter.Entitlement, ForSale: filter.ForSale,
+		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*models.Product]{}, err
 	}
-	products, err := productsFromGen(rows)
+	products, err := s.db.ProductsFromGen(ctx, rows)
 	if err != nil {
 		return billing.ListPage[*models.Product]{}, err
 	}
@@ -229,7 +252,7 @@ func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Prod
 	if err != nil {
 		return nil, err
 	}
-	return models.ProductFromGen(row)
+	return s.db.ProductFromGen(ctx, row)
 }
 
 // Deactivate archives a product so it won't appear in product listings and
@@ -246,19 +269,19 @@ func (s *ProductService) Activate(ctx context.Context, id uuid.UUID) error {
 
 // SetArchived sets the archived lifecycle flag on a product.
 func (s *ProductService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
-	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Archived: &archived})
+	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Archived: &archived})
 	return err
 }
 
 // UpdateDisplayName changes only the display name.
 func (s *ProductService) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{DisplayName: &displayName})
+	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{DisplayName: &displayName})
 	return err
 }
 
 // UpdateDescription changes only the description; empty clears it.
 func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Description: &description})
+	_, _, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Description: &description})
 	return err
 }
 
@@ -273,55 +296,110 @@ type ProductDefinitionUpdateParams struct {
 	SetTierGroup    bool
 	TierRank        *int
 	Archived        *bool
+	// KeyEdit attributes a change of Entitlements.
+	KeyEdit KeyEdit
 }
 
 // UpdateDefinition atomically applies only the supplied fields. Set flags
 // distinguish omission from clearing nullable definitions; nil scalar pointers
-// leave their columns unchanged. A description of "" clears it.
-func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, error) {
+// leave their columns unchanged. A description of "" clears it. Setting
+// Entitlements closes the keys it omits and opens the ones it adds; the
+// returned change says which.
+func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, KeyChange, error) {
+	var change KeyChange
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
-		return nil, queryScopeErr
+		return nil, change, queryScopeErr
 	}
-	if params.SetEntitlements && params.Entitlements == nil {
-		return nil, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
-	}
-	entitlements, err := catalogwire.NormalizeEntitlements(params.Entitlements)
-	if err != nil {
-		return nil, apperr.Invalidf("%v", err)
-	}
-	entitlementsJSON, err := json.Marshal(entitlements)
-	if err != nil {
-		return nil, err
+	if params.SetEntitlements {
+		if params.Entitlements == nil {
+			return nil, change, apperr.Invalidf("entitlements must be a string list, not null; use [] for none")
+		}
+		keys, err := catalogwire.NormalizeProductEntitlements(params.Entitlements)
+		if err != nil {
+			return nil, change, apperr.Invalidf("%v", err)
+		}
+		if err := params.KeyEdit.validate(); err != nil {
+			return nil, change, err
+		}
+		if _, err := s.db.Gen(ctx).GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: queryMerchant.UUID(), ID: id}); err != nil {
+			return nil, change, err
+		}
+		if change, err = s.setEntitlements(ctx, queryMerchant.UUID(), id, keys, params.KeyEdit); err != nil {
+			return nil, change, err
+		}
 	}
 	credit, err := models.PointerToJSONB(params.CreditGrant)
 	if err != nil {
-		return nil, err
+		return nil, change, err
 	}
 	var rank *int32
 	if params.TierRank != nil {
 		value, err := productTierRankInt32(*params.TierRank)
 		if err != nil {
-			return nil, err
+			return nil, change, err
 		}
 		rank = &value
 	}
 	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{MerchantID: queryMerchant.UUID(),
 		ID: id, DisplayName: params.DisplayName,
 		Description: params.Description, SetDescription: params.Description != nil,
-		Entitlements: entitlementsJSON, SetEntitlements: params.SetEntitlements, CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
+		CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
-		TierRank: rank, Archived: params.Archived,
+		TierRank: rank, Archived: params.Archived, KeysChanged: change.Changed(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "products_live_subscription_tier_group" {
-			return nil, ErrProductTierGroupInUse
+			return nil, change, ErrProductTierGroupInUse
 		}
 		if errors.As(err, &pgErr) && pgErr.ConstraintName == "subscriptions_customer_id_tier_group_key" {
-			return nil, ErrProductTierGroupConflict
+			return nil, change, ErrProductTierGroupConflict
 		}
-		return nil, err
+		return nil, change, err
 	}
-	return models.ProductFromGen(row)
+	product, err := s.db.ProductFromGen(ctx, row)
+	return product, change, err
+}
+
+// setEntitlements makes keys the product's live set: it closes the keys
+// keys omits and opens the ones it adds. Callers hold the catalog lock.
+func (s *ProductService) setEntitlements(ctx context.Context, merchantID, productID uuid.UUID, keys []string, edit KeyEdit) (KeyChange, error) {
+	var change KeyChange
+	q := s.db.Gen(ctx)
+	current, err := q.ListLiveProductEntitlements(ctx, gen.ListLiveProductEntitlementsParams{MerchantID: merchantID, ProductIds: []uuid.UUID{productID}})
+	if err != nil {
+		return change, err
+	}
+	live := make(map[string]bool, len(current))
+	for _, row := range current {
+		live[row.Entitlement] = true
+	}
+	wanted := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		wanted[key] = true
+		if !live[key] {
+			change.Added = append(change.Added, key)
+		}
+	}
+	for _, row := range current {
+		if !wanted[row.Entitlement] {
+			change.Removed = append(change.Removed, row.Entitlement)
+		}
+	}
+	if len(change.Removed) > 0 {
+		if _, err := q.RemoveProductEntitlements(ctx, gen.RemoveProductEntitlementsParams{
+			MerchantID: merchantID, ProductID: productID, Entitlements: change.Removed, At: edit.At, Actor: edit.Actor,
+		}); err != nil {
+			return change, err
+		}
+	}
+	if len(change.Added) > 0 {
+		if _, err := q.AddProductEntitlements(ctx, gen.AddProductEntitlementsParams{
+			MerchantID: merchantID, ProductID: productID, Entitlements: change.Added, At: edit.At, Actor: edit.Actor,
+		}); err != nil {
+			return change, err
+		}
+	}
+	return change, nil
 }

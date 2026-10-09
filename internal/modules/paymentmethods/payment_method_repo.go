@@ -175,11 +175,11 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 		if err != nil {
 			return err
 		}
-		for _, row := range rows {
-			p, err := models.ProductFromGen(row)
-			if err != nil {
-				return err
-			}
+		loaded, err := r.db.ProductsFromGen(ctx, rows)
+		if err != nil {
+			return err
+		}
+		for _, p := range loaded {
 			products[p.ID] = p
 		}
 	}

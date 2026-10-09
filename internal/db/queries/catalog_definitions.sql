@@ -67,7 +67,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND key = sqlc.arg(meter_key)::t
 SELECT catalog_revision FROM billing.merchants WHERE id = sqlc.arg(merchant_id)::uuid FOR SHARE;
 
 -- name: ListLiveCatalogProducts :many
-SELECT id, key, display_name, COALESCE(description, '')::text AS description, entitlements, credit_grant,
+SELECT id, key, display_name, COALESCE(description, '')::text AS description,
+       COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = products.merchant_id AND pe.product_id = products.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements, credit_grant,
        tier_group, tier_rank, archived
 FROM billing.products
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived

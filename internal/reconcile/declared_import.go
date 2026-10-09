@@ -436,6 +436,10 @@ func insertDeclaredCanceled(
 	}
 	feedback := "imported: declared " + string(f.CancelKind)
 
+	keys, err := db.LiveProductEntitlementsJSON(ctx, q, merchantID, product.ID)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	id := uuid.New()
 	priceID := f.PriceID
 	if _, err := q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
@@ -445,7 +449,7 @@ func insertDeclaredCanceled(
 		CustomerID:                  f.Customer,
 		ProductID:                   price.ProductID,
 		PriceID:                     &priceID,
-		EntitlementsSnapshot:        product.Entitlements,
+		EntitlementsSnapshot:        keys,
 		AccessDurationHoursSnapshot: price.AccessDurationHours,
 		Status:                      string(models.StatusCanceled),
 		StartedAt:                   f.StartedAt.UTC(),

@@ -78,7 +78,7 @@ func (s *Service) ListProducts(ctx context.Context, params billing.ProductListPa
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err
 	}
-	filter := catalog.ProductFilter{Archived: params.Archived, TierGroup: params.TierGroup}
+	filter := catalog.ProductFilter{Archived: params.Archived, TierGroup: params.TierGroup, Entitlement: params.Entitlement, ForSale: params.ForSale}
 	page, err := products.List(ctx, filter, params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err

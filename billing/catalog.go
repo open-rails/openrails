@@ -61,11 +61,15 @@ type UpdateProductParams struct {
 }
 
 // ProductListParams filters ListProducts. A nil Archived lists both live and
-// archived products.
+// archived products. Entitlement lists the products granting that key now.
+// ForSale true lists products some live price sells; false lists products
+// that are only granted.
 type ProductListParams struct {
 	PageRequest
-	Archived  *bool
-	TierGroup string
+	Archived    *bool
+	TierGroup   string
+	Entitlement string
+	ForSale     *bool
 }
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for

@@ -199,9 +199,6 @@ func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
 	}
-	if err := FromJSONB(p.Entitlements, &m.Entitlements, "products.entitlements"); err != nil {
-		return nil, err
-	}
 	if err := FromJSONB(p.CreditGrant, &m.CreditGrant, "products.credit_grant"); err != nil {
 		return nil, err
 	}

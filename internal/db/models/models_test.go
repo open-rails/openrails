@@ -26,10 +26,10 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 	_, err = PaymentFromGen(gen.BillingPayment{Metadata: []byte(`{`)})
 	require.ErrorContains(t, err, "payments.metadata")
 
-	product, err := ProductFromGen(gen.BillingProduct{TierRank: 3, Entitlements: []byte(`["day","forever"]`)})
+	product, err := ProductFromGen(gen.BillingProduct{TierRank: 3})
 	require.NoError(t, err)
 	require.Equal(t, 3, product.TierRank)
-	require.Equal(t, []string{"day", "forever"}, product.Entitlements)
+	product.Entitlements = []string{"day", "forever"}
 
 	sub, err := SubscriptionFromGen(gen.BillingSubscription{RetryAttempts: ptr(int32(2)), CancelType: ptr("user"), CollectionPolicy: "engine"})
 	require.NoError(t, err)

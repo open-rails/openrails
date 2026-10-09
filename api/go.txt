@@ -192,6 +192,7 @@ pkg openrails, method (*Client) RefundPayment(context.Context, billing.PaymentID
 pkg openrails, method (*Client) ReleaseAdmission(context.Context, string, ...RequestOption) (*billing.Admission, error)
 pkg openrails, method (*Client) ReleaseOperationAuthorization(context.Context, billing.ReleaseOperationAuthorizationParams, ...RequestOption) (*billing.OperationAuthorization, error)
 pkg openrails, method (*Client) ReleaseOperationAuthorizationTx(context.Context, pgx.Tx, billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error)
+pkg openrails, method (*Client) ReplaceEntitlements(context.Context, billing.ReplaceEntitlementsParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*Client) ReportWastedSpend(context.Context, billing.ReportWastedSpendParams, ...RequestOption) (*billing.WastedSpendReport, error)
 pkg openrails, method (*Client) ResolveAuthorizedMerchant(context.Context, *http.Request, string, string) (billing.MerchantID, string, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingParams, ...RequestOption) (*billing.FindingResolution, error)
@@ -803,6 +804,7 @@ pkg openrails/billing, const MaxCustomerLookup untyped int = 500
 pkg openrails/billing, const MaxEntitlementChecks untyped int = 100
 pkg openrails/billing, const MaxEntitlementLookupCustomers untyped int = 500
 pkg openrails/billing, const MaxEntitlementPrefixes untyped int = 10
+pkg openrails/billing, const MaxEntitlementReplacements untyped int = 100
 pkg openrails/billing, const MaxHeldEntitlements untyped int = 10000
 pkg openrails/billing, const MaxMerchantConfigurationBytes untyped int = 1048576
 pkg openrails/billing, const MaxPageLimit untyped int = 500
@@ -1358,6 +1360,7 @@ pkg openrails/billing, type CatalogApplicationReceipt struct
 pkg openrails/billing, type CatalogApplicationReceipt struct, ApplicationID string `json:"application_id"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, AppliedRevision int64 `json:"applied_revision"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, BaseRevision int64 `json:"base_revision"`
+pkg openrails/billing, type CatalogApplicationReceipt struct, EntitlementChanges []EntitlementChange `json:"entitlement_changes"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, PricesChanged int `json:"prices_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, ProductsChanged int `json:"products_changed"`
 pkg openrails/billing, type CatalogApplicationReceipt struct, Replayed bool `json:"replayed"`
@@ -1814,6 +1817,11 @@ pkg openrails/billing, type EnsureCustomerParams struct, Blocked bool `json:"blo
 pkg openrails/billing, type EnsureCustomerParams struct, Email *string `json:"email"`
 pkg openrails/billing, type EnsureCustomerParams struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type EnsureCustomerParams struct, Username *string `json:"username"`
+pkg openrails/billing, type EntitlementChange struct
+pkg openrails/billing, type EntitlementChange struct, Added []string `json:"added"`
+pkg openrails/billing, type EntitlementChange struct, ProductID ProductID `json:"product_id"`
+pkg openrails/billing, type EntitlementChange struct, ProductKey string `json:"product_key"`
+pkg openrails/billing, type EntitlementChange struct, Removed []string `json:"removed"`
 pkg openrails/billing, type EntitlementCheck struct
 pkg openrails/billing, type EntitlementCheck struct, Entitlements map[string]bool `json:"entitlements"`
 pkg openrails/billing, type EntitlementCheck struct, Held map[string]HeldEntitlements `json:"held"`
@@ -1838,6 +1846,9 @@ pkg openrails/billing, type EntitlementRecord struct, SourceID string `json:"sou
 pkg openrails/billing, type EntitlementRecord struct, SourceType EntitlementSourceType `json:"source_type"`
 pkg openrails/billing, type EntitlementRecord struct, StartsAt time.Time `json:"starts_at"`
 pkg openrails/billing, type EntitlementRecord struct, UpdatedAt time.Time `json:"updated_at"`
+pkg openrails/billing, type EntitlementReplacement struct
+pkg openrails/billing, type EntitlementReplacement struct, From string `json:"from"`
+pkg openrails/billing, type EntitlementReplacement struct, To string `json:"to"`
 pkg openrails/billing, type EntitlementSourceType string
 pkg openrails/billing, type EpisodeSummary struct
 pkg openrails/billing, type EpisodeSummary struct, Open int64 `json:"open"`
@@ -2684,6 +2695,8 @@ pkg openrails/billing, type ProductArchiveID [16]byte
 pkg openrails/billing, type ProductID [16]byte
 pkg openrails/billing, type ProductListParams struct
 pkg openrails/billing, type ProductListParams struct, Archived *bool
+pkg openrails/billing, type ProductListParams struct, Entitlement string
+pkg openrails/billing, type ProductListParams struct, ForSale *bool
 pkg openrails/billing, type ProductListParams struct, TierGroup string
 pkg openrails/billing, type ProductListParams struct, embedded PageRequest
 pkg openrails/billing, type ProductSummary struct
@@ -2822,6 +2835,8 @@ pkg openrails/billing, type ReleaseOperationAuthorizationParams struct, Operatio
 pkg openrails/billing, type ReleaseOperationAuthorizationParams struct, ReleaseReference string `json:"release_reference"`
 pkg openrails/billing, type RenameMerchantParams struct
 pkg openrails/billing, type RenameMerchantParams struct, Name string `json:"name"`
+pkg openrails/billing, type ReplaceEntitlementsParams struct
+pkg openrails/billing, type ReplaceEntitlementsParams struct, Pairs []EntitlementReplacement `json:"pairs"`
 pkg openrails/billing, type ReplacePaymentMethodCardParams struct
 pkg openrails/billing, type ReplacePaymentMethodCardParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 pkg openrails/billing, type ReplacePaymentMethodCardParams struct, Card *Card `json:"card,omitempty"`
@@ -3231,6 +3246,7 @@ pkg openrails/catalog, const MaxApplicationBytes untyped int = 1048576
 pkg openrails/catalog, const MaxApplicationItems untyped int = 2000
 pkg openrails/catalog, const MaxDurationHours int = 2562047
 pkg openrails/catalog, const MaxEntitlementKeyBytes untyped int = 256
+pkg openrails/catalog, const MaxProductEntitlements untyped int = 10000
 pkg openrails/catalog, const ModelFlat Model = "flat"
 pkg openrails/catalog, const ModelPackage Model = "package"
 pkg openrails/catalog, const ModelPerUnit Model = "per_unit"
@@ -3243,6 +3259,7 @@ pkg openrails/catalog, const RoundUp Round = "up"
 pkg openrails/catalog, const TierModeGraduated TierMode = "graduated"
 pkg openrails/catalog, const TierModeVolume TierMode = "volume"
 pkg openrails/catalog, func NormalizeEntitlements([]string) ([]string, error)
+pkg openrails/catalog, func NormalizeProductEntitlements([]string) ([]string, error)
 pkg openrails/catalog, func Null[T any]() Field[T]
 pkg openrails/catalog, func ParseApplicationJSON([]byte) (*Application, error)
 pkg openrails/catalog, func ParseApplicationYAML([]byte) (*Application, error)

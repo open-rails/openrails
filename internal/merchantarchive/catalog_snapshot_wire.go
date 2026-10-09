@@ -10,6 +10,7 @@ import (
 	"maps"
 
 	"github.com/goccy/go-yaml"
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/configdocument"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
@@ -41,11 +42,11 @@ type CatalogPSPIdentity struct {
 	AccountID   string `json:"account_id"`
 }
 
-// The order is also the foreign-key insertion order. These are all eight
+// The order is also the foreign-key insertion order. These are all nine
 // persisted catalog tables; product/rate-card state prior to updates was never
 // retained and cannot be reconstructed by an export.
 var catalogProfiles = func() []contract.Profile {
-	names := []string{"catalog_meters", "products", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_applications"}
+	names := []string{"catalog_meters", "products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_applications"}
 	out := make([]contract.Profile, 0, len(names)+1)
 	for _, name := range names {
 		for _, p := range contract.Profiles {
@@ -81,26 +82,6 @@ func catalogRow(p contract.Profile, values []*string) (map[string]json.RawMessag
 	return row, nil
 }
 func catalogValues(p contract.Profile, row map[string]json.RawMessage, merchantID string) ([]*string, error) {
-	if p.Name == "products" {
-		if old, legacy := row["entitlements_spec"]; legacy {
-			if _, mixed := row["entitlements"]; mixed {
-				return nil, fmt.Errorf("catalog product mixes legacy and current entitlements")
-			}
-			names, _, err := contract.LegacyEntitlementNames(string(old))
-			if err != nil {
-				return nil, err
-			}
-			row = maps.Clone(row)
-			delete(row, "entitlements_spec")
-			if names == "null" {
-				names = "[]"
-			}
-			row["entitlements"] = json.RawMessage(names)
-		} else if _, exists := row["entitlements"]; !exists {
-			row = maps.Clone(row)
-			row["entitlements"] = json.RawMessage("[]")
-		}
-	}
 	// Historical snapshots carry auto_renew in place of billing cadence. Read
 	// those exact persisted terms without changing the document or its digest.
 	if raw, legacy := row["auto_renew"]; p.Name == "prices" && legacy {
@@ -185,10 +166,73 @@ func catalogDigest(document CatalogSnapshot) (string, error) {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
 }
+
+// upgradeCatalogSnapshot converts a snapshot preceding product_entitlements:
+// each product's keys become rows valid from before key history, as
+// migration 15 converts them. The digest is the original document's.
+func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
+	if _, current := document.Tables["product_entitlements"]; current {
+		return document, nil
+	}
+	tables := maps.Clone(document.Tables)
+	products := make([]map[string]json.RawMessage, 0, len(tables["products"]))
+	keys := []map[string]json.RawMessage{}
+	for _, row := range tables["products"] {
+		row = maps.Clone(row)
+		raw, spec := row["entitlements_spec"]
+		if listed, ok := row["entitlements"]; ok {
+			if spec {
+				return document, fmt.Errorf("catalog product mixes legacy and current entitlements")
+			}
+			raw = listed
+		}
+		delete(row, "entitlements_spec")
+		delete(row, "entitlements")
+		products = append(products, row)
+		if raw == nil {
+			continue
+		}
+		listed, _, err := contract.LegacyEntitlementNames(string(raw))
+		if err != nil {
+			return document, err
+		}
+		var names []string
+		if err := json.Unmarshal([]byte(listed), &names); err != nil {
+			return document, fmt.Errorf("invalid legacy catalog entitlements")
+		}
+		var id string
+		if err := json.Unmarshal(row["id"], &id); err != nil {
+			return document, fmt.Errorf("legacy catalog product lacks its id")
+		}
+		for _, name := range names {
+			entitlement, _ := json.Marshal(name)
+			key, _ := json.Marshal(uuid.NewSHA1(uuid.NameSpaceOID, []byte("openrails.product_entitlement\x00"+id+"\x00"+name)).String())
+			keys = append(keys, map[string]json.RawMessage{
+				"merchant_id": row["merchant_id"], "id": key, "product_id": row["id"], "entitlement": entitlement,
+				"added_at": json.RawMessage(`"` + contract.PrehistoricKeyAddedAt + `"`), "added_by": json.RawMessage(`"migration"`),
+			})
+		}
+	}
+	tables["products"] = products
+	tables["product_entitlements"] = keys
+	document.Tables = tables
+	return document, nil
+}
+
 func validateCatalogSnapshot(document CatalogSnapshot) (int64, error) {
 	mid, err := billing.ParseMerchantID(document.MerchantID)
 	if err != nil || mid.IsZero() || mid.String() != document.MerchantID || document.Kind != "catalog_snapshot" || document.SchemaVersion != 1 || document.CatalogRevision < 0 {
 		return 0, fmt.Errorf("invalid catalog snapshot header")
+	}
+	digest, err := catalogDigest(document)
+	if err != nil {
+		return 0, err
+	}
+	if document.SHA256 != digest {
+		return 0, fmt.Errorf("catalog snapshot digest mismatch")
+	}
+	if document, err = upgradeCatalogSnapshot(document); err != nil {
+		return 0, err
 	}
 	if len(document.Tables) != len(catalogProfiles) {
 		return 0, fmt.Errorf("catalog snapshot requires every catalog table")
@@ -205,13 +249,6 @@ func validateCatalogSnapshot(document CatalogSnapshot) (int64, error) {
 			}
 			count++
 		}
-	}
-	digest, err := catalogDigest(document)
-	if err != nil {
-		return 0, err
-	}
-	if document.SHA256 != digest {
-		return 0, fmt.Errorf("catalog snapshot digest mismatch")
 	}
 	return count, nil
 }

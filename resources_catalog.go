@@ -78,6 +78,10 @@ func (c *Client) ListProducts(ctx context.Context, params billing.ProductListPar
 	if params.TierGroup != "" {
 		q.Set("tier_group", params.TierGroup)
 	}
+	if params.Entitlement != "" {
+		q.Set("entitlement", params.Entitlement)
+	}
+	setBool(q, "for_sale", params.ForSale)
 	var out billing.ListPage[billing.Product]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

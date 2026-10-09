@@ -14,12 +14,17 @@ type Profile struct {
 	Columns []Column
 }
 
+// LegacyProducts is the products row of archives that preceded
+// product_entitlements: the keys were a column of the product.
+var LegacyProducts = Profile{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"revision", "bigint"}, {"id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"entitlements", "jsonb"}, {"tier_group", "text"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"credit_grant", "jsonb"}}}
+
 var Profiles = []Profile{
 	{Name: "customers", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"issuer", "text"}, {"email", "text"}, {"created_at", "timestamp with time zone"}, {"last_seen_at", "timestamp with time zone"}, {"username", "text"}, {"blocked", "boolean"}}},
 	{Name: "custodians", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"kind", "text"}, {"environment", "text"}, {"account_id", "text"}, {"settings", "jsonb"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "merchant_configuration_applications", Columns: []Column{{"merchant_id", "uuid"}, {"application_id", "text"}, {"request_sha256", "bytea"}, {"result", "jsonb"}, {"applied_at", "timestamp with time zone"}}},
 	{Name: "catalog_applications", Columns: []Column{{"merchant_id", "uuid"}, {"application_id", "text"}, {"schema_version", "bigint"}, {"request_sha256", "bytea"}, {"base_revision", "bigint"}, {"applied_revision", "bigint"}, {"result", "jsonb"}, {"applied_at", "timestamp with time zone"}}},
-	{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"revision", "bigint"}, {"id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"entitlements", "jsonb"}, {"tier_group", "text"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"credit_grant", "jsonb"}}},
+	{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"revision", "bigint"}, {"id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"tier_group", "text"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"credit_grant", "jsonb"}}},
+	{Name: "product_entitlements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"product_id", "uuid"}, {"entitlement", "text"}, {"added_at", "timestamp with time zone"}, {"removed_at", "timestamp with time zone"}, {"added_by", "text"}, {"removed_by", "text"}}},
 	{Name: "billing_policies", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"name", "text"}, {"policy", "jsonb"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "catalog_meters", Columns: []Column{{"merchant_id", "uuid"}, {"key", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"event_type", "text"}, {"value_property", "text"}, {"aggregation", "text"}, {"unit", "text"}, {"group_by", "jsonb"}}},
 	{Name: "merchant_configurations", Columns: []Column{{"merchant_id", "uuid"}, {"config", "jsonb"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},

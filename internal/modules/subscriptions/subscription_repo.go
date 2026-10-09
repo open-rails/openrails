@@ -287,7 +287,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 				if err != nil {
 					return err
 				}
-				product, err := models.ProductFromGen(row.BillingProduct)
+				product, err := r.db.ProductFromGen(ctx, row.BillingProduct)
 				if err != nil {
 					return err
 				}
