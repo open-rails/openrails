@@ -220,6 +220,17 @@ only into Collect.js fields. Sandboxes generally cannot advance time, so
 scheduling behavior is proven with deterministic transports, not by waiting
 for a provider billing period.
 
+Your own end-to-end tests need no NMI account: package
+`openrailstest/nmimock` is a fake gateway on loopback. Set
+`Config.ProviderSandbox.NMIGatewayURL` to its `URL()` under
+`TestMode: openrails.Sandbox`, declare an NMI PSP with any credentials, and
+give the gateway the clock you pass as `Deps.Clock`, so a renewal is a clock
+step. `Tokenize(card)` is the Collect.js token a customer saves or pays with;
+`SetDecline(last4, nmimock.InsufficientFunds)` declines that card's next
+charge, which sends a renewal into dunning; `Ledger`, `Charged`, `LastSale`
+and `LastDecline` read what it was charged. The package comment has the
+wiring.
+
 ### Quirks worth knowing
 
 Verified against the live gateway (the docs at docs.nmi.com diverge in places);

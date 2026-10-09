@@ -5,16 +5,18 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-// Only tests, test harnesses and the sandbox command may import the mock:
-// production code paths must never reach a fake gateway.
+// Only tests, test harnesses and the sandbox command may import the mock or
+// its public face, openrailstest/nmimock: production code paths must never
+// reach a fake gateway.
 func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
-	const self = "github.com/open-rails/openrails/internal/nmimock"
-	allowed := []string{"internal/nmimock/", "cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
+	mocks := []string{"github.com/open-rails/openrails/internal/nmimock", "github.com/open-rails/openrails/openrailstest/nmimock"}
+	allowed := []string{"internal/nmimock/", "openrailstest/nmimock/", "cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +41,7 @@ func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
 		for _, imp := range f.Imports {
-			if p, _ := strconv.Unquote(imp.Path.Value); p != self && !strings.HasPrefix(p, self+"/") {
+			if p, _ := strconv.Unquote(imp.Path.Value); !slices.Contains(mocks, p) {
 				continue
 			}
 			ok := false

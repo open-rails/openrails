@@ -515,7 +515,9 @@ never revokes an entitlement for an unpaid arrears bill. Full boundary and polic
 Point each rail's webhook at the webhook routes on **your** server, under your mount
 prefix (`/v1/webhooks/{rail}/{account_id}`; see [the API guide](api/endpoints.md#provider-webhooks)). OpenRails verifies rail
 signatures and updates subscriptions/entitlements; your app just reads the results.
-Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md).
+Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md). In your
+end-to-end tests, `openrailstest/nmimock` stands in for NMI on loopback (see
+[NMI sandbox testing](rails/nmi.md#sandbox-testing)).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,
 dunning, the intents ledger), [billing-policies.md](billing-policies.md)

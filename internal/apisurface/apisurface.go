@@ -29,7 +29,7 @@ const (
 
 // Packages are the covered packages, relative to Module.
 var Packages = []string{
-	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "server", "web/admin",
+	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "server", "web/admin",
 }
 
 // Surface is the covered API.

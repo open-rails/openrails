@@ -3543,6 +3543,47 @@ pkg openrails/openrailstest, type AuthCases struct, OtherMerchantStaff func() *h
 pkg openrails/openrailstest, type AuthCases struct, Refused map[string]func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Staff func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, StaleStaff func() *http.Request
+pkg openrails/openrailstest/nmimock, const InsufficientFunds untyped string = "202"
+pkg openrails/openrailstest/nmimock, func New(Options) *Mock
+pkg openrails/openrailstest/nmimock, method (*Mock) Charged(string, string) int64
+pkg openrails/openrailstest/nmimock, method (*Mock) Close()
+pkg openrails/openrailstest/nmimock, method (*Mock) LastDecline() *Sale
+pkg openrails/openrailstest/nmimock, method (*Mock) LastSale() *Sale
+pkg openrails/openrailstest/nmimock, method (*Mock) Ledger(string) []LedgerEntry
+pkg openrails/openrailstest/nmimock, method (*Mock) SetDecline(string, string)
+pkg openrails/openrailstest/nmimock, method (*Mock) Tokenize(Card) string
+pkg openrails/openrailstest/nmimock, method (*Mock) URL() string
+pkg openrails/openrailstest/nmimock, method (*Mock) Unexpected() []string
+pkg openrails/openrailstest/nmimock, type Card = nmimock.Card
+pkg openrails/openrailstest/nmimock, type Card struct
+pkg openrails/openrailstest/nmimock, type Card struct, AVS string
+pkg openrails/openrailstest/nmimock, type Card struct, BIN string
+pkg openrails/openrailstest/nmimock, type Card struct, Brand string
+pkg openrails/openrailstest/nmimock, type Card struct, CVV string
+pkg openrails/openrailstest/nmimock, type Card struct, Decline string
+pkg openrails/openrailstest/nmimock, type Card struct, Exp string
+pkg openrails/openrailstest/nmimock, type Card struct, Last4 string
+pkg openrails/openrailstest/nmimock, type Card struct, NetworkToken bool
+pkg openrails/openrailstest/nmimock, type LedgerEntry = nmimock.LedgerEntry
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, Cents int64
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, Last4 string
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, OrderID string
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, RefundedCents int64
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, TransactionID string
+pkg openrails/openrailstest/nmimock, type LedgerEntry struct, Vault string
+pkg openrails/openrailstest/nmimock, type Mock struct
+pkg openrails/openrailstest/nmimock, type Options struct
+pkg openrails/openrailstest/nmimock, type Options struct, Clock func() time.Time
+pkg openrails/openrailstest/nmimock, type Sale struct
+pkg openrails/openrailstest/nmimock, type Sale struct, Amount string
+pkg openrails/openrailstest/nmimock, type Sale struct, At time.Time
+pkg openrails/openrailstest/nmimock, type Sale struct, Currency string
+pkg openrails/openrailstest/nmimock, type Sale struct, Declined string
+pkg openrails/openrailstest/nmimock, type Sale struct, Last4 string
+pkg openrails/openrailstest/nmimock, type Sale struct, OrderID string
+pkg openrails/openrailstest/nmimock, type Sale struct, TransactionID string
+pkg openrails/openrailstest/nmimock, type Sale struct, Vault string
 pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"
