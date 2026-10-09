@@ -27,6 +27,7 @@ migration 0023_statement_coverage.up.sql sha256:b23f0cefea13ef00bdfd6057af36e113
 migration 0024_cost_resolutions.up.sql sha256:650fb1db36328c11d3171febc2f82f88e6bf4ff538612532653eb477bd69ae7a
 migration 0025_cost_refusals.up.sql sha256:49d6fba4a1ca3f5ed5a5f752d2483a74b8f334563e657a7cb4bdd9390a46ac5a
 migration 0026_provider_stop_holds_slot.up.sql sha256:1e938e7834d24d4335eae50bb09b04803023f1e259a64f05a281278880bab3de
+migration 0027_obligation_paid_once.up.sql sha256:1d15f1a9a7a3ad8742435606499c33d82313f3dd7cb0d3729a2eec21d6b6d36b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1816,6 +1817,7 @@ table billing.provider_intents
   index CREATE INDEX provider_intents_initial_membership_history_idx ON billing.provider_intents USING btree (merchant_id, (((payload -> 'terms'::text) ->> 'subscription_id'::text))) WHERE ((intent_type = 'initial_membership'::text) AND (status = 'succeeded'::text))
   index CREATE INDEX provider_intents_native_vault_delete_idx ON billing.provider_intents USING btree (merchant_id, psp_id, ((payload ->> 'rail_customer_ref'::text))) WHERE (intent_type = 'nmi_vault_delete'::text)
   index CREATE INDEX provider_intents_next_attempt_at_idx ON billing.provider_intents USING btree (next_attempt_at) WHERE (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text]))
+  index CREATE UNIQUE INDEX provider_intents_obligation_unreleased_key ON billing.provider_intents USING btree (merchant_id, subscription_id, ((payload ->> 'order_reference'::text))) WHERE ((intent_type = ANY (ARRAY['subscription_collection'::text, 'manual_rebill'::text])) AND (status <> ALL (ARRAY['failed_terminal'::text, 'superseded'::text, 'expired'::text])))
   index CREATE UNIQUE INDEX provider_intents_open_subscription_collection_key ON billing.provider_intents USING btree (merchant_id, subscription_id) WHERE ((intent_type = 'subscription_collection'::text) AND (status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text])))
   index CREATE INDEX provider_intents_origin_created_at_intent_type_idx ON billing.provider_intents USING btree (merchant_id, origin, created_at, intent_type)
   index CREATE UNIQUE INDEX provider_intents_pkey ON billing.provider_intents USING btree (merchant_id, id)
