@@ -21,11 +21,12 @@ import (
 // Registration, AuthKit's admin surface and browser OIDC are not mounted.
 var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
 
-// registrationRouteGroups is AuthKit's whole JSON API, mounted when people can
-// register (open or invite-only). Browser OIDC stays unmounted.
+// registrationRouteGroups is AuthKit's JSON API, mounted when people can
+// register (open or invite-only). Browser OIDC and delegated-token minting
+// (superseded by RFC 9068 access tokens) stay unmounted.
 var registrationRouteGroups = []iam.RouteGroup{
 	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount, iam.RouteAdmin,
-	iam.RoutePermissionGroups, iam.RouteDeviceKeys, iam.RouteDelegated,
+	iam.RoutePermissionGroups, iam.RouteDeviceKeys,
 }
 
 // MountedRouteGroups is the explicit list of AuthKit route groups this control
