@@ -21,34 +21,26 @@ const StripeDetachedParkReason = "stripe_payment_method_detached"
 
 // MirrorAttachedStripePaymentMethod fetches the instrument before mirroring it.
 // A stale attached event therefore cannot revive a method Stripe now reports as
-// detached.
+// detached. eventRef names the event that asked (see UpsertStripeCardForCustomer).
 func MirrorAttachedStripePaymentMethod(
 	ctx context.Context,
 	database *db.DB,
 	customers *RailCustomerService,
 	clock clockwork.Clock,
 	reader StripePaymentStateReader,
-	paymentMethodID string,
-) (*models.PaymentMethod, error) {
+	paymentMethodID, eventRef string,
+) (*models.PaymentMethod, bool, error) {
 	if reader == nil {
-		return nil, errors.New("stripe payment state reader is not configured")
+		return nil, false, errors.New("stripe payment state reader is not configured")
 	}
 	truth, err := reader.PaymentMethod(ctx, paymentMethodID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if truth == nil || strings.TrimSpace(truth.CustomerID) == "" || truth.Card == nil {
-		return nil, nil
+		return nil, false, nil
 	}
-	return UpsertStripeCardForCustomer(
-		ctx,
-		database,
-		customers,
-		clock,
-		truth.CustomerID,
-		truth.ID,
-		truth.Card,
-	)
+	return UpsertStripeCardForCustomer(ctx, database, customers, clock, truth.CustomerID, truth, eventRef)
 }
 
 // ConvergeStripeCustomerPaymentState applies Stripe's current subscription
@@ -92,15 +84,7 @@ func ConvergeStripeCustomerPaymentState(
 		}
 		var localMethodID *uuid.UUID
 		if method := remote.PaymentMethod; method != nil && method.Card != nil {
-			local, err := UpsertStripeCardForCustomer(
-				ctx,
-				database,
-				customers,
-				clock,
-				state.CustomerID,
-				method.ID,
-				method.Card,
-			)
+			local, _, err := UpsertStripeCardForCustomer(ctx, database, customers, clock, state.CustomerID, method, "")
 			if err != nil {
 				return err
 			}

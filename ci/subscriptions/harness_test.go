@@ -247,6 +247,8 @@ type world struct {
 	cfg    func(*config.Config)
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]openrails.PSPConfig)
+	// custodians are the merchant's declared card custodians.
+	custodians map[string]openrails.CustodianConfig
 	// selfService mounts the full customer self-service API (tier changes
 	// included) instead of billing management.
 	selfService bool
@@ -377,7 +379,7 @@ func (w *world) start() {
 	if w.mount != nil {
 		w.mount(&routes)
 	}
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps}
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps, Custodians: w.custodians}
 	deps := openrails.Deps{Postgres: pool, StripeTransport: stripe, NMITransport: nmi, Clock: w.clock}
 	if w.deps != nil {
 		w.deps(&deps)

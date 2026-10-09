@@ -15,10 +15,13 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -169,8 +172,10 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if !descriptor.SupportsChargeSavedMethod {
 			return fmt.Errorf("%w: rail %q does not support invoice collection", ErrCollectionPaymentMethodInvalid, method.Rail)
 		}
-		if rails.IsNMI(models.Rail(method.Rail)) && strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef)) == "" {
-			return fmt.Errorf("%w: approved unscheduled stored-credential agreement required for automatic collection", ErrCollectionPaymentMethodInvalid)
+		if err := requireCollectionAgreement(ctx, q, method); errors.Is(err, charge.ErrAgreementRequired) {
+			return fmt.Errorf("%w: automatic collection: %w", ErrCollectionPaymentMethodInvalid, err)
+		} else if err != nil {
+			return err
 		}
 		if err := s.ensureSettingsRowTx(ctx, q, tid.UUID(), payer.UUID(), currency, BillingModePrepaid, now); err != nil {
 			return fmt.Errorf("ensure money account settings: %w", err)
@@ -491,6 +496,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			return nil
 		}
 		method, err := s.collectionMethodFor(ctx, q, tid.UUID(), payer.UUID(), invoice, opts)
+		if errors.Is(err, charge.ErrAgreementRequired) && !opts.manual {
+			return stopCollectionForAgreement(ctx, s.db.NewWithPgxTx(tx), invoice, now)
+		}
 		if err != nil || method == nil {
 			return err
 		}
@@ -654,5 +662,53 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	if opts.initiator == charge.InitiatorCustomer && (!rails.IsNMI(models.Rail(method.Rail)) || (method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianHyperSwitch)) {
 		return nil, ErrCustomerPaymentUnsupported
 	}
+	if opts.initiator == charge.InitiatorMerchant {
+		if err := requireCollectionAgreement(ctx, q, method); err != nil {
+			if opts.manual && errors.Is(err, charge.ErrAgreementRequired) {
+				return nil, fmt.Errorf("%w: %w", ErrCollectionPaymentMethodInvalid, err)
+			}
+			return nil, err
+		}
+	}
 	return &method, nil
+}
+
+// requireCollectionAgreement refuses a merchant-initiated collection on a
+// card without its customer's agreement (#1166): an NMI card needs its
+// unscheduled agreement, and a card reissued under another brand needs a
+// customer-initiated charge to anchor one again.
+func requireCollectionAgreement(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod) error {
+	unscheduled := strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef))
+	if rails.IsNMI(models.Rail(method.Rail)) && unscheduled == "" {
+		return charge.ErrAgreementRequired
+	}
+	if unscheduled != "" || strings.TrimSpace(models.DerefStr(method.StoredCredentialRecurringRef)) != "" {
+		return nil
+	}
+	changed, err := q.PaymentMethodBrandChanged(ctx, gen.PaymentMethodBrandChangedParams{MerchantID: method.MerchantID, PaymentMethodID: method.ID})
+	if err != nil {
+		return fmt.Errorf("read card brand changes: %w", err)
+	}
+	if changed {
+		return charge.ErrAgreementRequired
+	}
+	return nil
+}
+
+// stopCollectionForAgreement stops collecting an invoice whose collection
+// card carries no agreement for a merchant-initiated charge, and asks the
+// customer to act. Designating a card resumes it.
+func stopCollectionForAgreement(ctx context.Context, d *db.DB, invoice *models.Invoice, now time.Time) error {
+	stopped, err := d.Gen(ctx).StopInvoiceCollection(ctx, gen.StopInvoiceCollectionParams{
+		MerchantID: invoice.MerchantID, CustomerID: invoice.CustomerID, InvoiceID: invoice.ID,
+		FailureCode: charge.AgreementRequiredCode, FailureMessage: charge.ErrAgreementRequired.Error(), Now: now,
+	})
+	if err != nil {
+		return fmt.Errorf("stop invoice collection: %w", err)
+	}
+	if stopped != 1 {
+		return errors.New("stop invoice collection: invoice changed under lock")
+	}
+	action := collection.Action{Decline: decline.Result{Action: decline.FixPaymentMethod}}
+	return queueInvoiceCollectionOutcome(ctx, d, invoice, action, charge.AgreementRequiredCode, now)
 }

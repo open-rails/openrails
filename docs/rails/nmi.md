@@ -151,9 +151,12 @@ Enable these event types (what the handler consumes):
   canceled
 - `acu.summary.automaticallyupdated` / `.closedaccount` / `.contactcustomer`
   (Automatic Card Updater). An updated card is re-read from the vault, and
-  memberships waiting on it retry at the next due pass. A closed account parks
-  the card. Both closed and contact-customer ask the member for a new card.
-  Each notice is recorded once in `payment_method_updates`.
+  memberships waiting on it retry at the next due pass. A card reissued under
+  another brand instead loses its stored-credential agreements: it is charged
+  off-session only after a customer-initiated charge anchors one again, and its
+  members are asked to act. A closed account parks the card. Both closed and
+  contact-customer ask the member for a new card. Each notice is recorded once
+  in `payment_method_updates`.
 
 Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a
@@ -251,6 +254,10 @@ doesn't surprise you:
 - **Every later charge names its first.** A merchant-initiated charge carries
   the agreement's initial NMI transaction id; a card with no recorded anchor is
   not charged off-session (an import raises `life.import.no_recurring_anchor`).
+  A renewal stops for the member and an invoice's collection stops with failure
+  code `stored_credential_required` until a customer-initiated charge anchors
+  one. Replacing a card keeps only the recurring agreement its verification
+  anchored.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference

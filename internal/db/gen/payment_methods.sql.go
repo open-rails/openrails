@@ -371,22 +371,29 @@ func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, ar
 const getPaymentMethodByCustodianRef = `-- name: GetPaymentMethodByCustodianRef :one
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
+  AND pm.customer_id = $2::uuid
   AND pm.custodian <> 'psp'
-  AND pm.custodian_id = $2::uuid
-  AND pm.rail_method_ref = $3::text
+  AND pm.custodian_id = $3::uuid
+  AND pm.rail_method_ref = $4::text
 ORDER BY pm.created_at, pm.id
 LIMIT 1
 `
 
 type GetPaymentMethodByCustodianRefParams struct {
 	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
 	CustodianID   uuid.UUID
 	RailMethodRef string
 }
 
-// A custodian-held card by its custodian token.
+// A customer's custodian-held card by its custodian token.
 func (q *Queries) GetPaymentMethodByCustodianRef(ctx context.Context, arg GetPaymentMethodByCustodianRefParams) (BillingPaymentMethod, error) {
-	row := q.db.QueryRow(ctx, getPaymentMethodByCustodianRef, arg.MerchantID, arg.CustodianID, arg.RailMethodRef)
+	row := q.db.QueryRow(ctx, getPaymentMethodByCustodianRef,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.CustodianID,
+		arg.RailMethodRef,
+	)
 	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
@@ -422,15 +429,17 @@ func (q *Queries) GetPaymentMethodByCustodianRef(ctx context.Context, arg GetPay
 const getPaymentMethodByFingerprint = `-- name: GetPaymentMethodByFingerprint :one
 SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1
-  AND pm.custodian = $2
-  AND pm.custodian_id = $3::uuid
-  AND pm.fingerprint = $4::text
+  AND pm.customer_id = $2::uuid
+  AND pm.custodian = $3
+  AND pm.custodian_id = $4::uuid
+  AND pm.fingerprint = $5::text
 ORDER BY pm.created_at
 LIMIT 1
 `
 
 type GetPaymentMethodByFingerprintParams struct {
 	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
 	Custodian   string
 	CustodianID uuid.UUID
 	Fingerprint string
@@ -438,10 +447,12 @@ type GetPaymentMethodByFingerprintParams struct {
 
 // #795: dedup lookup — an intent whose fingerprint matches a stored instrument
 // reuses that instrument instead of minting a duplicate. Scoped by the
-// custodian, which issues the fingerprint and holds the card.
+// custodian, which issues the fingerprint and holds the card, and by the
+// customer: one customer's charge never reuses another's card or agreement.
 func (q *Queries) GetPaymentMethodByFingerprint(ctx context.Context, arg GetPaymentMethodByFingerprintParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByFingerprint,
 		arg.MerchantID,
+		arg.CustomerID,
 		arg.Custodian,
 		arg.CustodianID,
 		arg.Fingerprint,
@@ -734,6 +745,51 @@ type GetPaymentMethodForShareParams struct {
 // commit and then sees it pinning the instrument.
 func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMethodForShareParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodForShare, arg.MerchantID, arg.ID)
+	var i BillingPaymentMethod
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.Rail,
+		&i.PspID,
+		&i.Custodian,
+		&i.CustodianID,
+		&i.RailCustomerRef,
+		&i.RailMethodRef,
+		&i.StoredCredentialRecurringRef,
+		&i.StoredCredentialUnscheduledRef,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.CardExpMonth,
+		&i.CardExpYear,
+		&i.Metadata,
+		&i.Fingerprint,
+		&i.NetworkTokenID,
+		&i.NetworkTokenStatus,
+		&i.NetworkTokenPar,
+		&i.ChargeVia,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPaymentMethodForUpdate = `-- name: GetPaymentMethodForUpdate :one
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+FOR UPDATE
+`
+
+type GetPaymentMethodForUpdateParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetPaymentMethodForUpdate(ctx context.Context, arg GetPaymentMethodForUpdateParams) (BillingPaymentMethod, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodForUpdate, arg.MerchantID, arg.ID)
 	var i BillingPaymentMethod
 	err := row.Scan(
 		&i.ID,
@@ -1495,6 +1551,28 @@ func (q *Queries) ParkStripePaymentMethodByRef(ctx context.Context, arg ParkStri
 	return result.RowsAffected(), nil
 }
 
+const paymentMethodBrandChanged = `-- name: PaymentMethodBrandChanged :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.payment_method_updates
+    WHERE merchant_id = $1::uuid AND payment_method_id = $2::uuid
+      AND kind = 'brand_changed'
+)
+`
+
+type PaymentMethodBrandChangedParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// #1166: whether an account updater ever reissued the card under another
+// brand.
+func (q *Queries) PaymentMethodBrandChanged(ctx context.Context, arg PaymentMethodBrandChangedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, paymentMethodBrandChanged, arg.MerchantID, arg.PaymentMethodID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const refreshCustodianCardMetadata = `-- name: RefreshCustodianCardMetadata :execrows
 UPDATE billing.payment_methods SET
     card_brand = COALESCE($1::text, card_brand),
@@ -1580,6 +1658,47 @@ func (q *Queries) RefreshPaymentMethodCard(ctx context.Context, arg RefreshPayme
 	return result.RowsAffected(), nil
 }
 
+const refreshStripePaymentMethodCard = `-- name: RefreshStripePaymentMethodCard :execrows
+UPDATE billing.payment_methods SET
+    card_brand = $1::text,
+    card_last4 = $2::text,
+    card_exp_month = $3::smallint,
+    card_exp_year = $4::smallint,
+    fingerprint = COALESCE(NULLIF($5::text, ''), fingerprint),
+    updated_at = $6::timestamptz
+WHERE merchant_id = $7::uuid AND id = $8::uuid AND rail = 'stripe'
+`
+
+type RefreshStripePaymentMethodCardParams struct {
+	CardBrand    *string
+	CardLast4    *string
+	CardExpMonth *int16
+	CardExpYear  *int16
+	Fingerprint  string
+	UpdatedAt    time.Time
+	MerchantID   uuid.UUID
+	ID           uuid.UUID
+}
+
+// Stripe's current card for a mirrored method: brand, last four, expiry and
+// fingerprint.
+func (q *Queries) RefreshStripePaymentMethodCard(ctx context.Context, arg RefreshStripePaymentMethodCardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, refreshStripePaymentMethodCard,
+		arg.CardBrand,
+		arg.CardLast4,
+		arg.CardExpMonth,
+		arg.CardExpYear,
+		arg.Fingerprint,
+		arg.UpdatedAt,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const replacePaymentMethodCard = `-- name: ReplacePaymentMethodCard :execrows
 UPDATE billing.payment_methods SET
     rail_method_ref = $1::text,
@@ -1589,6 +1708,7 @@ UPDATE billing.payment_methods SET
     card_exp_year = $5::smallint,
     metadata = $6,
     stored_credential_recurring_ref = NULLIF($7::text, ''),
+    stored_credential_unscheduled_ref = NULL,
     park_reason = NULL,
     parked_at = NULL,
     updated_at = $8::timestamptz
@@ -1612,7 +1732,9 @@ type ReplacePaymentMethodCardParams struct {
 }
 
 // An in-place card replacement moves the method onto the verified billing
-// entry: card metadata and its recurring agreement change together.
+// entry: card metadata and its recurring agreement change together. The
+// verification anchors only the recurring agreement, so the replaced card's
+// unscheduled agreement goes; the next customer-initiated charge anchors one.
 func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePaymentMethodCardParams) (int64, error) {
 	result, err := q.db.Exec(ctx, replacePaymentMethodCard,
 		arg.NewRailMethodRef,
@@ -1826,6 +1948,31 @@ func (q *Queries) UpdatePaymentMethod(ctx context.Context, arg UpdatePaymentMeth
 		arg.UpdatedAt,
 		arg.MerchantID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const voidStoredCredentialRefs = `-- name: VoidStoredCredentialRefs :execrows
+UPDATE billing.payment_methods SET
+    stored_credential_recurring_ref = NULL,
+    stored_credential_unscheduled_ref = NULL,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+`
+
+type VoidStoredCredentialRefsParams struct {
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #1166: a card reissued under another brand carries none of its customer's
+// agreements. No merchant-initiated charge until a customer-initiated one
+// anchors them again.
+func (q *Queries) VoidStoredCredentialRefs(ctx context.Context, arg VoidStoredCredentialRefsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, voidStoredCredentialRefs, arg.UpdatedAt, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

@@ -247,6 +247,7 @@ func stripeEventNeedsPaymentState(eventType string) bool {
 	case "charge.succeeded",
 		"payment_method.attached",
 		"payment_method.detached",
+		"payment_method.automatically_updated",
 		"customer.updated",
 		"customer.subscription.updated",
 		"customer.subscription.deleted":

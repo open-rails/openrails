@@ -309,6 +309,23 @@ WHERE merchant_id = $1
   AND status IN ('open', 'past_due')
   AND collection_intent_id = sqlc.arg(intent_id)::uuid;
 
+-- name: StopInvoiceCollection :execrows
+-- or#828 bucket 2 before any attempt (#1166): the collection card carries no
+-- customer agreement for a merchant-initiated charge, so charging stops until
+-- the customer acts, as a fix-your-card decline stops it.
+UPDATE billing.invoices
+SET collection_failure_count = collection_failure_count + 1,
+    collection_failed_at = COALESCE(collection_failed_at, sqlc.arg(now)::timestamptz),
+    next_collection_attempt_at = NULL,
+    last_collection_failure_code = sqlc.arg(failure_code)::text,
+    last_collection_failure_message = sqlc.arg(failure_message)::text,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = sqlc.arg(invoice_id)::uuid
+  AND status IN ('open', 'past_due')
+  AND collection_intent_id IS NULL;
+
 -- name: ResumeStoppedInvoiceCollection :execrows
 -- or#828 bucket-2 resume. A stopped invoice is one that failed at least once
 -- and has NO next attempt scheduled — charging halted because the instrument

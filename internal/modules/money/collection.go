@@ -104,6 +104,16 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
 		return nil, err
 	}
+	if req.Initiator == charge.InitiatorMerchant {
+		// The card lost its agreement after enqueue: nothing is sent, and the
+		// next attempt stops for the customer.
+		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), method); err != nil {
+			if errors.Is(err, charge.ErrAgreementRequired) {
+				return nil, fmt.Errorf("%w: %w", charge.ErrInstrumentChanged, err)
+			}
+			return nil, err
+		}
+	}
 
 	rail := normalizeRail(method.Rail)
 	if rail == "" {

@@ -3,6 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -151,6 +152,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		}
 		if method.CustomerID != sub.CustomerID || !method.ChargeableOn(sub.PspID) || method.Rail != sub.Rail {
 			return errors.New("rebill method is not owned by this customer and provider account")
+		}
+		if strings.TrimSpace(method.StoredCredentialRecurringRef) == "" {
+			return fmt.Errorf("rebill: %w", charge.ErrAgreementRequired)
 		}
 		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP) {
 			return ErrRebillUnsupported

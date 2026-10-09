@@ -352,13 +352,14 @@ func (r *PaymentMethodRepo) GetByRailMethodRefForPSP(ctx context.Context, rail s
 	return models.PaymentMethodFromGen(row)
 }
 
-// GetByCustodianRef finds a custodian-held card by its custodian token.
-func (r *PaymentMethodRepo) GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
+// GetByCustodianRef finds a customer's custodian-held card by its custodian
+// token.
+func (r *PaymentMethodRepo) GetByCustodianRef(ctx context.Context, custodianID, customerID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetPaymentMethodByCustodianRef(ctx, gen.GetPaymentMethodByCustodianRefParams{MerchantID: mid.UUID(), CustodianID: custodianID, RailMethodRef: methodRef})
+	row, err := r.db.Gen(ctx).GetPaymentMethodByCustodianRef(ctx, gen.GetPaymentMethodByCustodianRefParams{MerchantID: mid.UUID(), CustomerID: customerID, CustodianID: custodianID, RailMethodRef: methodRef})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPaymentMethodNotFound
 	}

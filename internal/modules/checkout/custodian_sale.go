@@ -88,7 +88,7 @@ type CheckoutCustodianSaleService struct {
 
 type custodianInstrumentStore interface {
 	Create(ctx context.Context, method *models.PaymentMethod) error
-	GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error)
+	GetByCustodianRef(ctx context.Context, custodianID, customerID uuid.UUID, methodRef string) (*models.PaymentMethod, error)
 }
 
 // custodialPSP is the resolved arrangement one custodian sale charges through:
@@ -375,7 +375,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Bil
 		}
 		return intents.Parked("bt token intent read failed before submission: " + err.Error())
 	}
-	priorRef, _ := h.priorAnchor(ctx, intent.MerchantID, tokenIntent.Fingerprint)
+	priorRef, _ := h.priorAnchor(ctx, intent.MerchantID, p.UserID, tokenIntent.Fingerprint)
 
 	citContext := charge.InitialOneTime()
 	if priorRef != "" {
@@ -495,14 +495,18 @@ func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.Bil
 	return intents.TerminalWithEvidence("NMI declined the custodian sale; nothing was charged", evidence), nil
 }
 
-// priorAnchor finds an existing instrument by the custodian's PAN fingerprint
-// and returns its unscheduled stored-credential anchor (+ the instrument row).
-func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.BillingPaymentMethod) {
-	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" {
+// priorAnchor finds the paying customer's instrument by the custodian's PAN
+// fingerprint and returns its unscheduled stored-credential anchor (+ the
+// instrument row). Another customer's card with the same number is never
+// found: a charge chains only to its own customer's agreement.
+func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, userID, fingerprint string) (string, *gen.BillingPaymentMethod) {
+	customerID, err := customerIDFromUser(userID)
+	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" || err != nil {
 		return "", nil
 	}
 	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{CustodianID: db.CustodianIDFromContext(ctx),
 		MerchantID:  merchantID,
+		CustomerID:  customerID,
 		Custodian:   nmiproxy.Custodian,
 		Fingerprint: fingerprint,
 	})
@@ -554,11 +558,19 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		return intents.Ambiguous("sale charged, but custodian client is unavailable: " + err.Error())
 	}
 
-	var token *basistheory.CardToken
+	// The customer's own card with this number keeps its instrument. Any other
+	// sale converts to a token of its own: a deduplicated token would be shared
+	// with another customer's instrument and agreements.
+	var held *gen.BillingPaymentMethod
 	if tokenIntent != nil {
+		if _, prior := h.priorAnchor(ctx, merchantID, p.UserID, tokenIntent.Fingerprint); prior != nil && prior.ParkReason == nil {
+			held = prior
+		}
+	}
+	var token *basistheory.CardToken
+	if tokenIntent != nil && held == nil {
 		token, err = bt.ConvertTokenIntent(ctx, p.TokenIntentID, basistheory.ConvertOpts{
 			IdempotencyKey: "btconv:" + orderID,
-			Deduplicate:    true,
 		})
 		if err != nil {
 			if basistheory.IsNotFound(err) {
@@ -578,17 +590,21 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 	}
 
 	var instrumentID *uuid.UUID
-	if token != nil {
+	if held != nil {
+		instrumentID = &held.ID
+	} else if token != nil {
 		id, ierr := h.ensureInstrument(ctx, merchantID, p, token)
 		if ierr != nil {
 			return intents.Ambiguous("sale charged, but instrument write failed: " + ierr.Error())
 		}
 		instrumentID = id
+	}
+	if instrumentID != nil {
 		// Anchor the unscheduled sequence write-once (identical to nmidirect).
 		if ref := strings.TrimSpace(res.CapturedRef); ref != "" && h.Sale.DB != nil {
 			if _, cerr := h.Sale.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
 				MerchantID: merchantID,
-				ID:         *id,
+				ID:         *instrumentID,
 				Agreement:  string(charge.AgreementUnscheduled),
 				Ref:        ref,
 			}); cerr != nil {
@@ -597,14 +613,16 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		}
 		// NT provisioning (B8): armed by config, idempotent per PAN, and never
 		// load-bearing — any failure warns and the instrument stays pan_proxy.
-		if cfg.Custody.NetworkTokens {
-			h.provisionNetworkToken(ctx, bt, merchantID, *id, token.ID, orderID)
+		if cfg.Custody.NetworkTokens && token != nil {
+			h.provisionNetworkToken(ctx, bt, merchantID, *instrumentID, token.ID, orderID)
 		}
 	}
 
 	metadata := map[string]any{"order_id": orderID, "bt_token_intent_id": p.TokenIntentID}
 	if token != nil {
 		metadata["bt_token_id"] = token.ID
+	} else if held != nil {
+		metadata["bt_token_id"] = models.DerefStr(held.RailMethodRef)
 	}
 	if p.E2ERunID != "" {
 		metadata["e2e_run_id"] = p.E2ERunID
@@ -645,13 +663,13 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 		return nil, errors.New("payment method service not wired")
 	}
 	custodian := db.CustodianIDFromContext(ctx)
-	if existing, err := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, token.ID); err == nil && existing != nil {
-		return &existing.ID, nil
-	} else if err != nil && !db.IsNotFound(err) && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-		return nil, err
-	}
 	customerID, err := customerIDFromUser(p.UserID)
 	if err != nil {
+		return nil, err
+	}
+	if existing, err := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, customerID, token.ID); err == nil && existing != nil {
+		return &existing.ID, nil
+	} else if err != nil && !db.IsNotFound(err) && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return nil, err
 	}
 	now := time.Now().UTC()
@@ -675,7 +693,7 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 	}
 	if err := h.Sale.PaymentMethodService.Create(ctx, method); err != nil {
 		// Concurrent write of the same token: reuse the surviving row.
-		if existing, gerr := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, token.ID); gerr == nil && existing != nil {
+		if existing, gerr := h.Sale.PaymentMethodService.GetByCustodianRef(ctx, custodian, customerID, token.ID); gerr == nil && existing != nil {
 			return &existing.ID, nil
 		}
 		return nil, err

@@ -23,9 +23,10 @@ var ErrStripeObjectNotFound = errors.New("stripe object not found")
 
 // StripePaymentMethodState is fetched Stripe truth for one stored card.
 type StripePaymentMethodState struct {
-	ID         string
-	CustomerID string
-	Card       *models.Card
+	ID          string
+	CustomerID  string
+	Card        *models.Card
+	Fingerprint string
 }
 
 // StripeSubscriptionPaymentState is the effective card selection for one
@@ -226,9 +227,10 @@ func parseStripePaymentMethodState(body []byte) (*StripePaymentMethodState, erro
 		return nil, errors.New("stripe payment method response missing id")
 	}
 	return &StripePaymentMethodState{
-		ID:         id,
-		CustomerID: stripeObjectID(paymentMethod.Customer),
-		Card:       NormalizeStripeCard(paymentMethod.Card),
+		ID:          id,
+		CustomerID:  stripeObjectID(paymentMethod.Customer),
+		Card:        NormalizeStripeCard(paymentMethod.Card),
+		Fingerprint: strings.TrimSpace(paymentMethod.Card.Fingerprint),
 	}, nil
 }
 

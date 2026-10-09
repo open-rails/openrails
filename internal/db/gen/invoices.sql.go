@@ -1802,6 +1802,48 @@ func (q *Queries) SettleStatementCoverage(ctx context.Context, arg SettleStateme
 	return result.RowsAffected(), nil
 }
 
+const stopInvoiceCollection = `-- name: StopInvoiceCollection :execrows
+UPDATE billing.invoices
+SET collection_failure_count = collection_failure_count + 1,
+    collection_failed_at = COALESCE(collection_failed_at, $3::timestamptz),
+    next_collection_attempt_at = NULL,
+    last_collection_failure_code = $4::text,
+    last_collection_failure_message = $5::text,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND id = $6::uuid
+  AND status IN ('open', 'past_due')
+  AND collection_intent_id IS NULL
+`
+
+type StopInvoiceCollectionParams struct {
+	MerchantID     uuid.UUID
+	CustomerID     uuid.UUID
+	Now            time.Time
+	FailureCode    string
+	FailureMessage string
+	InvoiceID      uuid.UUID
+}
+
+// or#828 bucket 2 before any attempt (#1166): the collection card carries no
+// customer agreement for a merchant-initiated charge, so charging stops until
+// the customer acts, as a fix-your-card decline stops it.
+func (q *Queries) StopInvoiceCollection(ctx context.Context, arg StopInvoiceCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, stopInvoiceCollection,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.FailureCode,
+		arg.FailureMessage,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const sumBilledInvoiceItemAmountInPeriod = `-- name: SumBilledInvoiceItemAmountInPeriod :one
 SELECT COALESCE(SUM(amount), 0)::bigint
 FROM billing.invoice_items

@@ -92,9 +92,10 @@ func (s *PaymentMethodService) ListByIDs(ctx context.Context, customerID uuid.UU
 	return s.repo.ListByIDs(ctx, customerID, ids)
 }
 
-// GetByCustodianRef finds a custodian-held card by its custodian token.
-func (s *PaymentMethodService) GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
-	return s.repo.GetByCustodianRef(ctx, custodianID, methodRef)
+// GetByCustodianRef finds a customer's custodian-held card by its custodian
+// token.
+func (s *PaymentMethodService) GetByCustodianRef(ctx context.Context, custodianID, customerID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
+	return s.repo.GetByCustodianRef(ctx, custodianID, customerID, methodRef)
 }
 
 // GetByRailMethodRef finds a payment method by its instrument-scope rail handle

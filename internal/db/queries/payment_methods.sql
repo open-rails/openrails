@@ -214,9 +214,11 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
 -- name: GetPaymentMethodByFingerprint :one
 -- #795: dedup lookup — an intent whose fingerprint matches a stored instrument
 -- reuses that instrument instead of minting a duplicate. Scoped by the
--- custodian, which issues the fingerprint and holds the card.
+-- custodian, which issues the fingerprint and holds the card, and by the
+-- customer: one customer's charge never reuses another's card or agreement.
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
+  AND pm.customer_id = sqlc.arg(customer_id)::uuid
   AND pm.custodian = sqlc.arg(custodian)
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.fingerprint = sqlc.arg(fingerprint)::text
@@ -319,7 +321,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: ReplacePaymentMethodCard :execrows
 -- An in-place card replacement moves the method onto the verified billing
--- entry: card metadata and its recurring agreement change together.
+-- entry: card metadata and its recurring agreement change together. The
+-- verification anchors only the recurring agreement, so the replaced card's
+-- unscheduled agreement goes; the next customer-initiated charge anchors one.
 UPDATE billing.payment_methods SET
     rail_method_ref = sqlc.arg(new_rail_method_ref)::text,
     card_brand = sqlc.narg(card_brand)::text,
@@ -328,6 +332,7 @@ UPDATE billing.payment_methods SET
     card_exp_year = sqlc.narg(card_exp_year)::smallint,
     metadata = sqlc.narg(metadata),
     stored_credential_recurring_ref = NULLIF(sqlc.arg(recurring_ref)::text, ''),
+    stored_credential_unscheduled_ref = NULL,
     park_reason = NULL,
     parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
@@ -354,6 +359,42 @@ UPDATE billing.payment_methods SET
     parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
+
+-- name: GetPaymentMethodForUpdate :one
+SELECT * FROM billing.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+FOR UPDATE;
+
+-- name: VoidStoredCredentialRefs :execrows
+-- #1166: a card reissued under another brand carries none of its customer's
+-- agreements. No merchant-initiated charge until a customer-initiated one
+-- anchors them again.
+UPDATE billing.payment_methods SET
+    stored_credential_recurring_ref = NULL,
+    stored_credential_unscheduled_ref = NULL,
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: RefreshStripePaymentMethodCard :execrows
+-- Stripe's current card for a mirrored method: brand, last four, expiry and
+-- fingerprint.
+UPDATE billing.payment_methods SET
+    card_brand = sqlc.narg(card_brand)::text,
+    card_last4 = sqlc.narg(card_last4)::text,
+    card_exp_month = sqlc.narg(card_exp_month)::smallint,
+    card_exp_year = sqlc.narg(card_exp_year)::smallint,
+    fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND rail = 'stripe';
+
+-- name: PaymentMethodBrandChanged :one
+-- #1166: whether an account updater ever reissued the card under another
+-- brand.
+SELECT EXISTS (
+    SELECT 1 FROM billing.payment_method_updates
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+      AND kind = 'brand_changed'
+);
 
 -- name: ParkPaymentMethod :execrows
 -- #1115: an account updater reported the card's account closed. The first
@@ -405,9 +446,10 @@ ORDER BY p.created_at, p.id
 LIMIT 2;
 
 -- name: GetPaymentMethodByCustodianRef :one
--- A custodian-held card by its custodian token.
+-- A customer's custodian-held card by its custodian token.
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.customer_id = sqlc.arg(customer_id)::uuid
   AND pm.custodian <> 'psp'
   AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.rail_method_ref = sqlc.arg(rail_method_ref)::text

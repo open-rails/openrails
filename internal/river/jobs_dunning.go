@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -369,6 +370,9 @@ func (w *DunningWorker) processSubscription(
 			// Only the member can fix this: wait for a new card on the
 			// dunning clock, under the merchant's dunning access policy.
 			reason, code := "payment_method_unusable", "payment_method_unusable"
+			if errors.Is(err, charge.ErrAgreementRequired) {
+				code = charge.AgreementRequiredCode
+			}
 			if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
 				return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
 			}
@@ -469,6 +473,14 @@ func (w *DunningWorker) processSubscription(
 	}
 	producer := intents.NewManualRebillHandler(w.DB, w.Config, w.NMIResolver, w.Clock)
 	intent, err := producer.EnqueueScheduled(ctx, sub.ID)
+	if errors.Is(err, charge.ErrAgreementRequired) {
+		// Only the member can fix this: wait for a card they agree to.
+		reason, code := "payment_method_unusable", charge.AgreementRequiredCode
+		if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: sub.Rail, SubscriptionID: &sub.ID, FailureReason: &reason, FailureCode: &code, Decline: decline.FixPaymentMethod}); err != nil {
+			return dunningOutcomeFailed, fmt.Errorf("await a payment method: %w", err)
+		}
+		return dunningOutcomeFailed, nil
+	}
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: subscription has no admissible recurring attempt")
 		return dunningOutcomeFailed, nil

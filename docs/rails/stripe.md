@@ -52,8 +52,8 @@ OpenRails registers the endpoint on Stripe **automatically** — at merchant boo
 and via an hourly reconcile job — subscribing exactly to the event types it handles
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 checkout-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
-`charge.refunded`, `refund.created/updated`, `payment_method.attached`, and dispute
-open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
+`charge.refunded`, `refund.created/updated`, `payment_method.attached` and
+`.automatically_updated`, and dispute open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
 
 Signing-secret handling depends on credential custody:
@@ -179,6 +179,16 @@ answers `next_action: {type: "redirect_to_url", url}`, and the buyer returns to
 the session's `success_url`. Completion arrives via `checkout.session.completed`
 (and the async-payment variants) on the webhook; the Stripe session carries the
 `checkout_attempt_id` metadata key.
+
+### Card updates
+
+`payment_method.automatically_updated` refreshes the same payment method from
+Stripe's current card: brand, last four, expiry and fingerprint. A same-brand
+reissue keeps billing, and memberships waiting on the card retry. A reissue
+under another brand needs the customer's consent again: OpenRails refuses to
+charge the card off-session (renewals it bills, invoice collection) with
+failure code `stored_credential_required`, and asks the members it pays for to
+act, until the customer saves the card again or pays a membership with it.
 
 ### Subscriptions Stripe bills
 

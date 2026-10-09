@@ -2,6 +2,7 @@ package charge
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
@@ -18,7 +19,7 @@ func ValidateEngineInstrument(rail string, instrument FrozenInstrument, binding 
 		return errors.New("engine collection requires an exact saved customer and method")
 	}
 	if renewal && strings.TrimSpace(instrument.StoredCredentialRecurringRef) == "" {
-		return errors.New("engine renewal requires a qualified recurring agreement")
+		return fmt.Errorf("engine renewal requires a recurring agreement: %w", ErrAgreementRequired)
 	}
 	switch instrument.Custodian {
 	case models.CustodianPSP:

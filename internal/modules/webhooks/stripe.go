@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -311,6 +312,7 @@ var HandledStripeEventTypes = []string{
 	"charge.succeeded",
 	"payment_method.attached",
 	"payment_method.detached",
+	"payment_method.automatically_updated",
 	"customer.updated",
 	"charge.refunded",
 	"charge.dispute.created",
@@ -352,6 +354,8 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handlePaymentMethodAttached(ctx, obj)
 	case "payment_method.detached":
 		return s.handlePaymentMethodDetached(ctx, obj, evt.Data.PreviousAttributes)
+	case "payment_method.automatically_updated":
+		return s.handlePaymentMethodAutomaticallyUpdated(ctx, evt.ID, obj)
 	case "customer.updated":
 		return s.handleCustomerUpdated(ctx, obj)
 	case "charge.refunded":
@@ -450,15 +454,77 @@ func (s *StripeWebhookService) handlePaymentMethodAttached(ctx context.Context, 
 	if err := json.Unmarshal(obj, &pm); err != nil {
 		return fmt.Errorf("parse payment_method: %w", err)
 	}
-	return s.withStripePaymentStateTx(ctx, pm.Customer, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
-		if _, err := payments.MirrorAttachedStripePaymentMethod(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, s.StripePaymentState, pm.ID); err != nil {
+	var notices []*models.NotificationQueue
+	err := s.withStripePaymentStateTx(ctx, pm.Customer, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
+		method, brandChanged, err := payments.MirrorAttachedStripePaymentMethod(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, s.StripePaymentState, pm.ID, "")
+		if err != nil {
 			return fmt.Errorf("mirror attached stripe payment method: %w", err)
+		}
+		notices = nil
+		if method != nil && brandChanged {
+			if notices, err = askForNewCard(ctx, s.SubscriptionLifecycleService, txdb, method.ID, s.now()); err != nil {
+				return err
+			}
 		}
 		if err := s.convergeStripeCustomerPaymentState(ctx, txdb, pm.Customer); err != nil {
 			return err
 		}
 		return MarkWebhookProcessedInTx(ctx, tx)
 	})
+	if err == nil && s.SubscriptionLifecycleService != nil {
+		s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
+	}
+	return err
+}
+
+// handlePaymentMethodAutomaticallyUpdated folds Stripe's card updater: the
+// same method takes the card Stripe now holds (brand, last four, expiry,
+// fingerprint), read from Stripe rather than the payload. A same-brand reissue
+// keeps billing and wakes members waiting on the card; a reissue under another
+// brand loses the method's stored-credential agreements, so OpenRails charges
+// it off-session only after a customer-initiated charge, and its members are
+// asked to act (#1166).
+func (s *StripeWebhookService) handlePaymentMethodAutomaticallyUpdated(ctx context.Context, eventID string, obj json.RawMessage) error {
+	var pm stripePaymentMethod
+	if err := json.Unmarshal(obj, &pm); err != nil {
+		return fmt.Errorf("parse payment_method: %w", err)
+	}
+	var notices []*models.NotificationQueue
+	err := s.withStripePaymentStateTx(ctx, pm.Customer, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
+		method, brandChanged, err := payments.MirrorAttachedStripePaymentMethod(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, s.StripePaymentState, pm.ID, eventID)
+		if err != nil {
+			return fmt.Errorf("mirror updated stripe payment method: %w", err)
+		}
+		notices = nil
+		if method != nil {
+			now := s.now()
+			if brandChanged {
+				if notices, err = askForNewCard(ctx, s.SubscriptionLifecycleService, txdb, method.ID, now); err != nil {
+					return err
+				}
+			} else {
+				mid, err := merchant.Require(ctx)
+				if err != nil {
+					return err
+				}
+				if err := paymentmethods.RecordCardUpdate(ctx, txdb.Gen(ctx), paymentmethods.CardUpdate{MerchantID: mid.UUID(), PaymentMethodID: method.ID, CustomerID: method.CustomerID,
+					PSPID: method.PspID, Source: paymentmethods.UpdateStripe, Kind: paymentmethods.CardUpdated, EventRef: eventID, OccurredAt: now}); err != nil {
+					return err
+				}
+				if err := subscriptions.WakeForReplacedMethod(ctx, txdb, mid.UUID(), method.ID, now); err != nil {
+					return err
+				}
+			}
+		}
+		if err := s.convergeStripeCustomerPaymentState(ctx, txdb, pm.Customer); err != nil {
+			return err
+		}
+		return MarkWebhookProcessedInTx(ctx, tx)
+	})
+	if err == nil && s.SubscriptionLifecycleService != nil {
+		s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
+	}
+	return err
 }
 
 func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, obj, previous json.RawMessage) error {
@@ -491,7 +557,7 @@ func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, 
 			// An old detach event cannot override current attached provider
 			// truth. Preserve the method and converge the provider's current
 			// defaults without creating a detached finding.
-			if _, err := payments.UpsertStripeCardForCustomer(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, truth.CustomerID, truth.ID, truth.Card); err != nil {
+			if _, _, err := payments.UpsertStripeCardForCustomer(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, truth.CustomerID, truth, ""); err != nil {
 				return err
 			}
 			if err := s.convergeStripeCustomerPaymentState(ctx, txdb, truth.CustomerID); err != nil {
