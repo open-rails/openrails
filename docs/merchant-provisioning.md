@@ -73,8 +73,8 @@ eligibility. Former-name modes are `finite`, `forever`, and `immediate`; omit
 `duration` for the latter two. Environment equivalents are
 `AUTH_NAMING_ENABLED`, `AUTH_NAMING_RENAME_INTERVAL`,
 `AUTH_NAMING_FORMER_NAMES_MODE`, and `AUTH_NAMING_FORMER_NAMES_DURATION`.
-Hosts running the control plane in process set
-`Config.ControlPlane.Auth.Naming` (`openrails.NamingConfig`).
+Hosts building on the server package set `server.Config.Auth`'s `Naming`
+(`server.NamingConfig`).
 
 Merchants rename themselves with `PUT /v1/merchant/name {"name": ...}`
 (`merchant:settings:update`), subject to the rename interval and, on hosted
@@ -85,27 +85,30 @@ each).
 
 ### Hosted creation recipe (registration is provisioning)
 
-A hosted product (openrails-saas shape) wires everything through
-`Config.ControlPlane.MerchantCreation`:
+A hosted product (openrails-saas shape) builds on the server package and wires
+everything through `server.Config.MerchantCreation`:
 
 ```go
-cfg.ControlPlane = &openrails.ControlPlaneConfig{
-    Auth:         openrails.AuthConfig{Issuer: "https://api.my-brand.example"},
+engine.SendGrid = &openrails.SendGridConfig{APIKey: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
+cfg := server.Config{
+    Engine:       engine,
+    Auth:         server.AuthConfig{Issuer: "https://api.my-brand.example"},
+    LocalSignIn:  true,
     Registration: iam.RegistrationModeOpen, // github.com/open-rails/authkit/iam
-    MerchantCreation: &openrails.MerchantCreationConfig{
+    MerchantCreation: &server.MerchantCreationConfig{
         ReservedSlugs: []string{"my-brand"}, // + billing.ReservedMerchantSlugs, always
         FreeAllowance: 2,                    // owned merchants before a card on file is required
     },
 }
-var client *openrails.Client
-cfg.SendGrid = &openrails.SendGridConfig{APIKey: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
-deps := openrails.Deps{
+var srv *server.Server
+deps := server.Deps{
+    Engine: openrails.Deps{Postgres: pool},
     // openrails-saas shape: the platform merchant's book holds the vault.
     HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
-        return client.SubjectHasVaultedPaymentMethod(ctx, platformMerchantID, subject)
+        return srv.SubjectHasVaultedPaymentMethod(ctx, platformMerchantID, subject)
     },
 }
-client, err := openrails.New(ctx, cfg, deps)
+srv, err := server.New(ctx, cfg, deps)
 ```
 
 With it set, signed-in users create merchants they own with
@@ -114,7 +117,7 @@ name already resolves to a merchant the caller owns (the idempotent repair).
 Refusals: 400 `invalid_name`, 409 `name_taken` / `name_reserved`, 403
 `email_unverified` / `creation_refused`, 402 `merchant_creation_payment_method_required`. Creation
 is capped at 12 per 24 hours per client IP and per user (429 with
-`Retry-After`). The same policy holds in-process `ProvisionMerchant` calls that
+`Retry-After`). The same policy holds the server's `ProvisionMerchant` calls that
 name an `OwnerUserID` (typed refusals `billing.ErrMerchantSlugReserved` /
 `billing.ErrMerchantCreationRefused`) and merchant renames. Ownerless
 `ProvisionMerchant` and Bootstrap are operator acts and stay ungated — that is
@@ -123,7 +126,7 @@ how a platform merchant claims a reserved name.
 `FreeAllowance` selects the standard hosted admission policy, composed from
 OpenRails' own state: verified email always; a free allowance of owned
 merchants; beyond it, a vaulted payment method on file (no charge,
-`Deps.HasVaultedPaymentMethod`) unlocks more. The predicate is repair-safe: a
+`server.Deps.HasVaultedPaymentMethod`) unlocks more. The predicate is repair-safe: a
 name that resolves to a merchant the caller already owns bypasses the allowance
 and vault checks because it creates nothing. Typed refusals:
 `billing.ErrMerchantCreationEmailUnverified`,
@@ -134,17 +137,17 @@ and vault checks because it creates nothing. Typed refusals:
 Core provides the mechanism; when to warn about and retire an unused merchant
 is the host's policy (openrails-saas owns its own, with its own notices).
 
-- `client.ListMerchantRetirementCandidates(ctx, req)` pages live,
+- `srv.ListMerchantRetirementCandidates(ctx, req)` pages live,
   group-bound merchants created before `req.CreatedBefore`, oldest first,
   excluding reserved slugs (`billing.ReservedMerchantSlugs` plus
-  `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
+  `server.MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
   with the merchant's own scoped queries.
-- `client.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
+- `srv.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
   row, refuses a missing/retired merchant, a different group UUID, a reserved
   slug or any activity, and otherwise commits the irreversible tombstone, which
   releases the name, before deleting exactly that AuthKit group. Refusals are
   returned in the result.
-- `client.CompletePendingMerchantRetirements(ctx, limit)` retries committed
+- `srv.CompletePendingMerchantRetirements(ctx, limit)` retries committed
   retirements whose group release failed, by UUID.
 
 Activity is any customer (and everything owned through customers), payment or
@@ -293,7 +296,7 @@ are never implicitly copied to a managed backend.
 A merchant is never hard-deleted through an API. The standalone operator
 soft-deletes one with `DELETE /v1/platform/merchants/{id}` and brings it back
 with `POST /v1/platform/merchants/{id}/restore`; a never-used merchant is retired
-with `Client.RetireUnusedMerchant` (above), which releases its name for good.
+with the server's `RetireUnusedMerchant` (above), which releases its name for good.
 
 Two things no deletion does, by construction:
 

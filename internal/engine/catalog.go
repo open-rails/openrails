@@ -31,10 +31,7 @@ func declaredCatalog(cfg config.Config) (*catalog.Application, error) {
 	if cfg.Catalog == nil {
 		return nil, nil
 	}
-	switch {
-	case cfg.ControlPlane != nil:
-		return nil, fmt.Errorf("openrails: Config.Catalog declares an embedded merchant's catalog; a control plane's merchants manage theirs through the API")
-	case strings.TrimSpace(cfg.Merchant.Slug) == "":
+	if strings.TrimSpace(cfg.Merchant.Slug) == "" {
 		return nil, fmt.Errorf("openrails: Config.Catalog declares Config.Merchant's catalog; set Config.Merchant")
 	}
 	if err := cfg.Catalog.Validate(); err != nil {

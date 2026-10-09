@@ -21,7 +21,7 @@ import (
 // step-up.
 func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, reserving())
+	cp := f.newServer(t, reserving())
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	owner := newAccount(t, cp)

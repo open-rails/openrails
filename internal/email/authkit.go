@@ -15,9 +15,9 @@ import (
 // OpenRails itself.
 const app = "OpenRails"
 
-// AuthKitSender hands AuthKit's messages to the deployment's one email sender,
-// rendered, with the message itself attached for a sender with its own
-// templates.
+// AuthKitSender hands the standalone server's AuthKit messages, rendered, to
+// the engine's email sender. A host with its own templates gives the server an
+// authkit.EmailSender instead.
 type AuthKitSender struct{ Sender config.EmailSender }
 
 // Send renders msg and delivers it from the deployment's own address.
@@ -26,8 +26,7 @@ func (a AuthKitSender) Send(ctx context.Context, msg iam.EmailMessage) error {
 	if err != nil {
 		return err
 	}
-	auth := msg
-	return a.Sender.Send(ctx, config.Email{To: msg.To, Subject: subject, Text: text, HTML: htmlOf(text), Auth: &auth})
+	return a.Sender.Send(ctx, config.Email{To: msg.To, Subject: subject, Text: text, HTML: htmlOf(text)})
 }
 
 // CheckHealth is the sender's.

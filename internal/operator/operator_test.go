@@ -6,103 +6,54 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
-	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/controlplane"
 )
 
-func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
+func TestOptionsPasswordlessPolicy(t *testing.T) {
 	outbox := new(authtest.Outbox)
 	emailSender, smsSender := outbox.Email(), outbox.SMS()
 	for name, tc := range map[string]struct {
-		opts    AttachOptions
+		opts    Options
 		wantErr bool
 	}{
-		"disabled":                        {AttachOptions{}, false},
-		"login with email":                {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, EmailSender: emailSender}, false},
-		"login with sms only":             {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, SMSSender: smsSender}, false},
-		"open auto-registration":          {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
-		"auto-registration without login": {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration closed":        {AttachOptions{LocalSignIn: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration invite-only":   {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"login without sender":            {AttachOptions{LocalSignIn: true, PasswordlessLogin: true}, true},
-		"open without sender":             {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeOpen}, true},
-		"invite-only with sender":         {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
-		"closed without sender":           {AttachOptions{LocalSignIn: true, Registration: iam.RegistrationModeClosed}, false},
-		"unknown mode":                    {AttachOptions{LocalSignIn: true, Registration: "sometimes"}, true},
-		"open without local sign-in":      {AttachOptions{Registration: iam.RegistrationModeOpen, EmailSender: emailSender}, true},
-		"passwordless without local":      {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender}, true},
+		"disabled":                        {Options{}, false},
+		"login with email":                {Options{LocalSignIn: true, PasswordlessLogin: true, EmailSender: emailSender}, false},
+		"login with sms only":             {Options{LocalSignIn: true, PasswordlessLogin: true, SMSSender: smsSender}, false},
+		"open auto-registration":          {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
+		"auto-registration without login": {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration closed":        {Options{LocalSignIn: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration invite-only":   {Options{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"login without sender":            {Options{LocalSignIn: true, PasswordlessLogin: true}, true},
+		"open without sender":             {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen}, true},
+		"invite-only with sender":         {Options{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
+		"closed without sender":           {Options{LocalSignIn: true, Registration: iam.RegistrationModeClosed}, false},
+		"unknown mode":                    {Options{LocalSignIn: true, Registration: "sometimes"}, true},
+		"open without local sign-in":      {Options{Registration: iam.RegistrationModeOpen, EmailSender: emailSender}, true},
+		"passwordless without local":      {Options{PasswordlessLogin: true, EmailSender: emailSender}, true},
 	} {
-		err := validateAttachOptions(tc.opts)
+		_, err := ControlPlaneOptions(tc.opts)
 		require.Equal(t, tc.wantErr, err != nil, "%s: %v", name, err)
 	}
 }
 
-// Attach refuses before building identity resources: nothing is left
-// half-attached when the graph cannot accept a control plane.
-func TestAttachRefusesBeforeBuildingResources(t *testing.T) {
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
-	require.ErrorContains(t, Attach(context.Background(), nil, cfg, nil, nil), "required")
-	require.ErrorContains(t, Attach(context.Background(), &app.App{}, nil, nil, nil), "required")
-	require.ErrorContains(t, Attach(context.Background(), &app.App{}, cfg, nil, nil), "runtime is required")
-	require.ErrorContains(t, AttachWithOptions(context.Background(), &app.App{Runtime: &app.Runtime{}}, cfg, nil, AttachOptions{LocalSignIn: true, PasswordlessLogin: true}), "sender")
-
-	late := &app.App{Runtime: &app.Runtime{RiverClient: &river.Client[pgx.Tx]{}}}
-	require.ErrorContains(t, Attach(context.Background(), late, cfg, nil, nil), "attach before River initialization")
-	require.Nil(t, late.ControlPlane)
-	require.Nil(t, Get(late))
-	require.Nil(t, Get(nil))
-}
-
-// Every operator verb is a wiring error without an attached control plane;
-// none falls back to an unscoped pool.
-func TestOperatorVerbsRequireControlPlane(t *testing.T) {
-	ctx, a, id := context.Background(), &app.App{Runtime: &app.Runtime{}}, billing.MerchantID(uuid.New())
-	calls := map[string]func() error{
-		"ProvisionMerchant": func() error {
-			_, err := ProvisionMerchant(ctx, a, billing.ProvisionMerchantParams{Slug: "shop"})
-			return err
-		},
-		"ProvisionMerchantForRestore": func() error {
-			_, err := ProvisionMerchantForRestore(ctx, a, ProvisionMerchantForRestoreRequest{MerchantID: id})
-			return err
-		},
-		"RunBootstrap":                       func() error { _, err := RunBootstrap(ctx, a, BootstrapOptions{}); return err },
-		"ListMerchantsForSubject":            func() error { _, err := ListMerchantsForSubject(ctx, a, "user"); return err },
-		"ListActiveMerchantIDs":              func() error { _, err := ListActiveMerchantIDs(ctx, a, billing.PageRequest{}); return err },
-		"SetMerchantAPIHost":                 func() error { return SetMerchantAPIHost(ctx, a, id, "api.shop.example") },
-		"FleetAnalytics":                     func() error { _, err := FleetAnalytics(ctx, a, billing.MerchantID{}, 30); return err },
-		"FleetTimeseries":                    func() error { _, err := FleetTimeseries(ctx, a, billing.MerchantID{}, 12); return err },
-		"CompletePendingMerchantRetirements": func() error { _, err := CompletePendingMerchantRetirements(ctx, a, 10); return err },
-		"StandaloneRoutes":                   func() error { _, err := StandaloneRoutes(a, config.Routes{}); return err },
-		"SubjectHasVaultedPaymentMethod": func() error {
-			_, err := SubjectHasVaultedPaymentMethod(ctx, a, id, "user")
-			return err
-		},
-	}
-	for name, call := range calls {
-		err := call()
-		require.Error(t, err, name)
-		require.Regexp(t, "control plane|Attach", err.Error(), name)
-	}
-
+// An unanswerable admission question refuses.
+func TestMerchantCreationAdmissionRefusesWithoutAnswers(t *testing.T) {
 	_, err := MerchantCreationAdmission(nil, MerchantCreationPolicy{FreeAllowance: 1})
 	require.Error(t, err)
+	none := func() *controlplane.ControlPlane { return nil }
 	for _, allowance := range []int{0, -1} {
-		_, err = MerchantCreationAdmission(a, MerchantCreationPolicy{FreeAllowance: allowance})
+		_, err = MerchantCreationAdmission(none, MerchantCreationPolicy{FreeAllowance: allowance})
 		require.ErrorContains(t, err, "FreeAllowance must be positive")
 	}
-	admit, err := MerchantCreationAdmission(a, MerchantCreationPolicy{FreeAllowance: 1,
+	admit, err := MerchantCreationAdmission(none, MerchantCreationPolicy{FreeAllowance: 1,
 		HasVaultedPaymentMethod: func(context.Context, string) (bool, error) { return true, nil }})
 	require.NoError(t, err)
-	require.ErrorContains(t, admit(ctx, "shop", "user"), "control plane unavailable", "an unanswerable admission question refuses")
+	require.ErrorContains(t, admit(context.Background(), "shop", "user"), "control plane unavailable")
 }
 
 // Fleet money travels as exact decimal strings (docs/money-wire.md); counts

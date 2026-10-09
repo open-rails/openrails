@@ -31,7 +31,7 @@ snapshot names, and fails when they are not.
 
 ## Go API
 
-Every exported identifier of `openrails`, `billing`, `catalog`,
+Every exported identifier of `openrails`, `billing`, `catalog`, `server`,
 `adapters/http`, `adapters/gin`, `adapters/fiber`, `openrailstest` and
 `web/admin`.
 `api/go.txt` holds one line per constant, variable, function, type, struct
@@ -47,8 +47,7 @@ are struct tags, so the list covers the YAML and JSON documents too.
   value of a typed enum; a new error sentinel in `billing`.
 - **Breaking:** removing or renaming a line of `api/go.txt`; changing a
   signature, a field's type or tag, or a constant's value; adding a method to
-  an interface a host implements (`EmailSender`, `SMSSender`,
-  `RequestAuthenticator`);
+  an interface a host implements (`EmailSender`, `Auth`);
   moving to a new major version of a module whose types the API exposes (pgx
   v5, go-redis v9, the Vault client).
 

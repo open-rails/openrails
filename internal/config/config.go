@@ -73,9 +73,6 @@ type Config struct {
 	// Checkout is the shared payment page several sites sell through; zero
 	// when each site renders its own checkout.
 	Checkout CheckoutConfig
-	// ControlPlane attaches the OpenRails-owned AuthKit control plane (the
-	// standalone server and hosted products); nil for hosts with their own auth.
-	ControlPlane *ControlPlaneConfig
 
 	// PublicBillingBaseURL is the external billing mount, excluding /v1. It is
 	// used only to build provider callbacks and customer billing links.

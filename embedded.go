@@ -212,7 +212,7 @@ type Route struct {
 // host's root router (adapters/http, adapters/gin and adapters/fiber mount
 // them): the API under selection.Prefix and the admin console at its own path.
 // It fails when the engine lacks what a selected group needs, before anything
-// mounts. With Config.ControlPlane it is the standalone surface, at the root.
+// mounts. A standalone server's engine refuses: mount server.Routes.
 func (c *Client) Routes(selection Routes) ([]Route, error) {
 	e, err := c.embedded()
 	if err != nil {

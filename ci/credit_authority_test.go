@@ -19,7 +19,7 @@ import (
 // balance and opens no credit line.
 func TestSecuritySupportCannotMintCredit(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, reserving())
+	cp := f.newServer(t, reserving())
 	ctx := t.Context()
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

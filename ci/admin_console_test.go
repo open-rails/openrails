@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
+	"github.com/open-rails/openrails/server"
 )
 
 // consoleBuild stands in for web/admin's build (not built for go test): the
@@ -56,6 +57,16 @@ func requireConsoleAt(t *testing.T, handler http.Handler, mount, marker string) 
 	require.Contains(t, w.Header().Get("Cache-Control"), "immutable")
 }
 
+// standaloneConsole serves c from a standalone build on a server whose issuer
+// is issuer.
+func standaloneConsole(issuer string, c *openrails.AdminConsole) func(*server.Config, *server.Deps) {
+	return func(cfg *server.Config, deps *server.Deps) {
+		cfg.Auth.Issuer = issuer
+		cfg.AdminConsole = c
+		deps.Engine.ConsoleAssets = consoleBuild("standalone")
+	}
+}
+
 // The console's bootstrap document names the path AuthKit's JSON API is
 // served at: /auth/v1 beneath an origin issuer, else the issuer's path plus
 // /v1, the version AuthKit appends.
@@ -65,12 +76,8 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 		"http://127.0.0.1":             "/auth/v1",
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",
 	} {
-		cfg := f.config()
-		cfg.ControlPlane = controlPlane(t, issuer)
-		cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})
-		require.NoError(t, err, issuer)
-		t.Cleanup(func() { _ = cp.Close(context.Background()) })
-		handler, err := standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{}})
+		srv := f.newServer(t, standaloneConsole(issuer, &openrails.AdminConsole{}))
+		handler, err := standaloneHandler(srv)
 		require.NoError(t, err)
 		requireConsoleAt(t, handler, "/admin", "standalone")
 
@@ -86,50 +93,37 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 	}
 }
 
-func controlPlane(t *testing.T, issuer string) *openrails.ControlPlaneConfig {
-	return &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
-		Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true,
-		AllowMemory: true, AllowMissingSenders: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
-	}}
-}
-
-// admin_console.path moves the standalone console (#1127): the binary's
-// handler and a library mount both serve it there and nothing at /admin, and
-// a path over OpenRails' own routes refuses to build the surface. Without a
-// console selected no console route exists.
+// admin_console.path moves the standalone console (#1127): the server's
+// handler and its routes on a host router both serve it there and nothing at
+// /admin, and a path over OpenRails' own routes refuses to build the server.
+// Without a console selected no console route exists.
 func TestStandaloneAdminConsolePath(t *testing.T) {
 	f := newFixture(t)
-	cfg := f.config()
-	cfg.ControlPlane = controlPlane(t, "http://127.0.0.1")
-	cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})
+	moved := f.newServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Path: "/billing/admin"}))
+	handler, err := standaloneHandler(moved)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = cp.Close(context.Background()) })
-
-	moved := openrails.Routes{AdminConsole: &openrails.AdminConsole{Path: "/billing/admin"}}
-	handler, err := standaloneHandler(cp, moved)
+	routes, err := moved.Routes()
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, cp, moved))
+	for _, r := range routes {
+		mux.Handle(r.Method+" "+r.Path, r.Handler)
+	}
 	for _, h := range []http.Handler{handler, mux} {
 		requireConsoleAt(t, h, "/billing/admin", "standalone")
 		require.Equal(t, http.StatusNotFound, get(h, "/admin/").Code)
 	}
-	off, err := standaloneHandler(cp)
+	off, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", nil)))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
 
 	// A hosted product's console extensions read their data from config.json.
-	hosted := openrails.Routes{AdminConsole: &openrails.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}
-	hostedMux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(hostedMux, cp, hosted))
-	require.Contains(t, get(hostedMux, "/admin/config.json").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
-	_, err = cp.Routes(openrails.Routes{AdminConsole: &openrails.AdminConsole{Extensions: map[string]any{"Hosted": true}}})
+	hosted, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}})))
+	require.NoError(t, err)
+	require.Contains(t, get(hosted, "/admin/config.json").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
+	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Extensions: map[string]any{"Hosted": true}}))
 	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
 
-	overlapping := openrails.Routes{AdminConsole: &openrails.AdminConsole{Path: "/v1"}}
-	_, err = standaloneHandler(cp, overlapping)
-	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
-	_, err = cp.Routes(overlapping)
+	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Path: "/v1"}))
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
 }
 

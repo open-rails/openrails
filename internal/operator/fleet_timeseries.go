@@ -2,10 +2,9 @@ package operator
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 )
 
 // FleetTimeseries returns the weekly fleet trend series
@@ -14,13 +13,8 @@ import (
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every series (a hosted platform passes its
 // own platform merchant); zero excludes nothing. weeks outside 4..52 is
-// refused. Calling without an attached control plane is a wiring error
-// (call Attach/AttachWithOptions first).
-func FleetTimeseries(ctx context.Context, a *app.App, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
-	cp := Get(a)
-	if cp == nil {
-		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")
-	}
+// refused.
+func FleetTimeseries(ctx context.Context, cp *controlplane.ControlPlane, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
 	series, err := cp.FleetTimeseries(ctx, exclude, weeks)
 	if err != nil {
 		return nil, err

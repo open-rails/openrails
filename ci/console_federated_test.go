@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/server"
 )
 
 // A self-hosted OpenRails without local sign-in: its console is the trusted
@@ -50,19 +51,22 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	}
 
 	shop := uniqueName("console-idp")
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
-		cfg.ControlPlane.LocalSignIn = false
-		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
-			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []openrails.TrustedIssuerConfig{{
-				Name: "Example ID", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
-			}},
+	federated := func(issuer *server.ConsoleIssuer) func(*server.Config, *server.Deps) {
+		return func(cfg *server.Config, deps *server.Deps) {
+			cfg.LocalSignIn = false
+			cfg.ResourceServer = &server.ResourceServerConfig{
+				Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
+				TrustedIssuers: []server.TrustedIssuerConfig{{
+					Name: "Example ID", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
+				}},
+			}
+			cfg.AdminConsole, cfg.ConsoleIssuer = &openrails.AdminConsole{}, issuer
+			deps.Engine.ConsoleAssets = consoleBuild("federated")
 		}
-		deps.ConsoleAssets = consoleBuild("federated")
-	})
+	}
+	cp := f.newServer(t, federated(&server.ConsoleIssuer{URL: as.URL, ClientID: console}))
 	provision(t, cp, shop)
-	sel := openrails.Routes{AdminConsole: &openrails.AdminConsole{Issuer: &openrails.ConsoleIssuer{URL: as.URL, ClientID: console}}}
-	handler, err := standaloneHandler(cp, sel)
+	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
 	var boot struct {
@@ -110,8 +114,8 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Empty(t, merchantList(t, w), "the console shows the empty state")
 
-	_, err = standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{}})
+	_, err = f.buildServer(t, federated(nil))
 	require.ErrorContains(t, err, "no sign-in method")
-	_, err = standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{Issuer: &openrails.ConsoleIssuer{URL: "https://elsewhere.e2e.test", ClientID: console}}})
+	_, err = f.buildServer(t, federated(&server.ConsoleIssuer{URL: "https://elsewhere.e2e.test", ClientID: console}))
 	require.ErrorContains(t, err, "not one of resource_server.trusted_issuers")
 }

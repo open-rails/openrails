@@ -59,12 +59,12 @@ connections `SET ROLE` to it.
 
 `New` creates or upgrades OpenRails' tables in `cfg.Database.Schema`, River's
 in `cfg.Database.RiverSchema` (`billing_river` for the default schema),
-whichever fleet `Start` will run there, and this month's partitions. AuthKit,
-the control plane's or the host's own, migrates itself in `authkit.New`.
-Replicas booting together take turns on an advisory lock, and a migration that
-fails fails `New`, so new pods crash-loop while the old ones keep serving. An
-older build boots against a schema a newer one already migrated: migrations it
-does not know are left as they are.
+whichever fleet `Start` will run there, and this month's partitions. A host's
+own AuthKit migrates itself in `authkit.New`. Replicas booting together take
+turns on an advisory lock, and a migration that fails fails `New`, so new pods
+crash-loop while the old ones keep serving. An older build boots against a
+schema a newer one already migrated: migrations it does not know are left as
+they are.
 
 Billing, AuthKit, application tables and River may share `public` or another
 namespace. OpenRails archives contain only billing-owned tables and never include
@@ -92,8 +92,7 @@ explicit:
 | `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
-| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`), for billing and control-plane mail alike. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
+| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`). Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
 
 | Deps field | Meaning |
 |---|---|
@@ -101,8 +100,7 @@ explicit:
 | `Redis` | Optional shared rate limits, FX rates and abuse statistics. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
-| `Email` | Your own sender for all of OpenRails' rendered email, billing and control plane; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
-| `SMS`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
+| `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
@@ -454,31 +452,14 @@ The default does not restrict an engine, and the per-operation option does not
 mutate it. An engine with a declared merchant refuses a different one. Both
 selectors require the same operation permission; neither acts as authorization.
 
-### 8. The control plane (hosted products)
+### 8. Hosted products
 
-A hosted product runs OpenRails' own AuthKit control plane instead of bringing
-its own auth: `Config.ControlPlane` (issuer and keys in `Auth`, `Registration`,
-`MerchantCreation`). `Registration` is AuthKit's self-registration mode
-(`iam.RegistrationModeOpen`, `iam.RegistrationModeInviteOnly` or
-`iam.RegistrationModeClosed`); empty is closed. Open and invite-only mount
-AuthKit's self-service API and need an email or SMS sender. Its AuthKit mail
-goes through the deployment's one email sender (`Config.SendGrid` or
-`Deps.Email`), rendered; text goes through `Deps.SMS` (AuthKit's
-`adapters/twilio` provides one). `Routes` is then the standalone surface
-(billing and AuthKit), mounted at the router's root with no `Prefix`; `Routes`
-may add `CatalogEdits`, `AdminConsole` and delegated `CustomerProfiles`. Its
-workers join the same River client through `Start`.
-
-The operations a hosted product runs as the operator are Client methods of the
-in-process engine only (a remote Client refuses them): `ProvisionMerchant`,
-`SetMerchantAPIHost`, `ListMerchantsForSubject`, `ListActiveMerchantIDs`,
-`ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
-`EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
-`ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
-`CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod`,
-`AuthenticateUser`, and `AuthKit()` for the control plane's AuthKit client.
-`MerchantCreation.FreeAllowance` gates merchant creation beyond the allowance on
-`Deps.HasVaultedPaymentMethod`.
+The library serves the merchants its host declares, behind the host's own auth.
+A product that serves many merchants with OpenRails' own accounts (merchant
+sign-up, teams, merchant API keys, trusted issuers, fleet analytics) builds on
+`github.com/open-rails/openrails/server` instead, which composes this engine
+with its own AuthKit like any host does; see
+[standalone-integration.md](standalone-integration.md#building-on-the-server-package).
 
 ### 9. Acting on delinquency
 
@@ -533,11 +514,9 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 [self-hosting-mode1.md](self-hosting-mode1.md).
 
 
-Merchant team and API-key routes are mounted only when their control-plane
-managers are attached. A plain embedded billing runtime has no placeholder
-management routes; the host continues to own its identity/team UI. Standalone
-and SaaS deployments with a control plane retain the same permission-gated
-management endpoints.
+Merchant team and API-key routes belong to the standalone server's control
+plane. An embedded engine mounts no placeholder management routes; the host
+owns its identity and team UI.
 
 ### Merchant checkout authority
 

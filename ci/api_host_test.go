@@ -15,8 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/server"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -107,10 +107,10 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	dns := newTXTServer(t)
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
-		cfg.PublicBillingBaseURL = "https://" + shared
-		cfg.DashboardBaseURL = "https://" + console
-		deps.DNSResolver = dns.resolver()
+	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.Engine.PublicBillingBaseURL = "https://" + shared
+		cfg.Engine.DashboardBaseURL = "https://" + console
+		deps.Engine.DNSResolver = dns.resolver()
 	})
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

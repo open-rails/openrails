@@ -13,8 +13,7 @@ import (
 // Migrate creates or upgrades through pool what New does first: OpenRails'
 // tables in Config.Database.Schema, this month's partitions and River's tables
 // in Config.Database.RiverSchema. It is for operator tooling and fixtures that
-// prepare a schema without running the engine. The control plane's AuthKit
-// migrates itself when New builds it.
+// prepare a schema without running the engine.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 	if pool == nil {
 		return fmt.Errorf("openrails: Migrate requires a Postgres pool")

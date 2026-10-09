@@ -1,5 +1,9 @@
 package config
 
+// The standalone server's configuration (package server), defined here so
+// the internal packages it composes share it. The embedded engine reads none
+// of it.
+
 import (
 	"fmt"
 	"strings"
@@ -8,48 +12,8 @@ import (
 	"github.com/open-rails/authkit/iam"
 )
 
-// ControlPlaneConfig attaches the OpenRails-owned AuthKit control plane: user
-// accounts, merchant permission groups, API keys and the standalone HTTP
-// surface. The standalone server and hosted products set it; hosts with their
-// own authentication leave it nil and supply Deps.Authenticate instead.
-type ControlPlaneConfig struct {
-	// Auth is the control plane's identity configuration (issuer, keys, naming).
-	Auth AuthConfig
-	// Registration is AuthKit's native self-registration mode: open,
-	// invite_only or closed. Empty is closed, so a self-hosted deployment
-	// registers nobody; a hosted product opens it. Open and invite-only also
-	// mount AuthKit's self-service API and need an email or SMS sender.
-	Registration iam.RegistrationMode
-	// PasswordlessLogin exposes contact-based passwordless sign-in;
-	// PasswordlessAutoRegistration also creates a no-password user for a
-	// verified unknown contact (requires open registration and a sender).
-	PasswordlessLogin            bool
-	PasswordlessAutoRegistration bool
-	// LocalSignIn serves sign-in to the control plane's own accounts
-	// (password, passwordless, registration). Off, the default, mounts none
-	// of AuthKit's sign-in surface: people arrive with a trusted issuer's
-	// access tokens. Hosted products and self-hosters without an identity
-	// provider turn it on.
-	LocalSignIn bool
-	// FrontendBaseURL is where emailed links point. Empty uses the issuer,
-	// which for a hosted product serves no pages.
-	FrontendBaseURL string
-	// TrustedProxies and CloudflareProxies override Config's for AuthKit's
-	// client-IP resolver; only CloudflareProxies may assert CF-Connecting-IP.
-	TrustedProxies    []string
-	CloudflareProxies []string
-	// AuthRateLimits overlays AuthKit's default rate-limit buckets by name.
-	AuthRateLimits map[string]AuthRateLimit
-	// MerchantCreation declares the policy for merchant names users claim.
-	// Nil for operator-provisioned deployments.
-	MerchantCreation *MerchantCreationConfig
-	// ResourceServer accepts RFC 9068 access tokens (at+jwt) that trusted
-	// issuers mint for this deployment, so a host's users reach the merchant
-	// API without OpenRails holding their accounts. Nil accepts none.
-	ResourceServer *ResourceServerConfig
-}
-
-// ResourceServerConfig makes the control plane an OAuth 2.0 resource server.
+// ResourceServerConfig makes the standalone server an OAuth 2.0 resource
+// server.
 type ResourceServerConfig struct {
 	// Identifier is this deployment's resource identifier (RFC 8707): an
 	// accepted token's aud must name it.
@@ -158,7 +122,7 @@ type AuthRateLimit struct {
 
 // MerchantCreationConfig is the hosted policy for user-claimed merchant names.
 // Reserved names, the pattern and the admission gate apply to
-// Client.ProvisionMerchant with an owner and to renames.
+// Server.ProvisionMerchant with an owner and to renames.
 type MerchantCreationConfig struct {
 	// ReservedSlugs are reserved in addition to billing.ReservedMerchantSlugs.
 	ReservedSlugs []string
@@ -168,7 +132,7 @@ type MerchantCreationConfig struct {
 	// SlugPattern further restricts claimed names (an unanchored regexp).
 	SlugPattern string
 	// FreeAllowance is how many merchants a user may own before creating
-	// another requires a vaulted payment method (Deps.HasVaultedPaymentMethod).
+	// another requires a vaulted payment method (server.Deps.HasVaultedPaymentMethod).
 	// Zero admits every creation that passes the name policy.
 	FreeAllowance int
 }
@@ -195,7 +159,7 @@ type AuthConfig struct {
 	RequestOrigin string
 
 	// DirectPeerIP declares that clients connect directly. Behind a reverse
-	// proxy, set Config.TrustedProxies instead.
+	// proxy, set the engine's TrustedProxies instead.
 	DirectPeerIP bool
 
 	// Naming is the site naming policy for merchant names and usernames.

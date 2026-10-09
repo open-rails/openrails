@@ -253,7 +253,6 @@ func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
 	sent := mail.all()[0]
 	require.Equal(t, alertTo, sent.To)
 	require.Equal(t, from, sent.From.Address)
-	require.Nil(t, sent.Auth, "billing mail carries no AuthKit message")
 	require.NotEmpty(t, sent.Subject)
 	require.NotEmpty(t, sent.Text)
 }

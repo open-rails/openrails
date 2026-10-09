@@ -19,7 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/vaultfake"
+	"github.com/open-rails/openrails/server"
 )
 
 // The standalone server boots from its merchant manifest without waiting on
@@ -42,19 +44,17 @@ merchants:
         signer: { mode: vault_transit, key: `+transitKey+` }
 `), 0o600))
 
-	boot := func() (*openrails.Client, error) {
-		cfg := f.config()
-		cfg.ProviderWriteMode = openrails.ProviderWritesFull
-		cfg.Vault = &openrails.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token}
-		cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
-		cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
-			Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
-		}}
-		rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		graph := engine.Graph(rt)
-		return rt, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, nil, "")
+	boot := func() (*server.Server, error) {
+		srv := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+			cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
+			cfg.Engine.Vault = &openrails.VaultConfig{Enabled: true, Address: fake.URL(), Token: fake.Token}
+			cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
+			cfg.Auth = server.AuthConfig{
+				Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
+			}
+		})
+		graph, cp := operator.Of(srv)
+		return srv, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, cp, manifest, nil, "")
 	}
 	activeFor := func(account string) int {
 		var n int
@@ -78,8 +78,9 @@ merchants:
 	fake.SetUp(true)
 	fake.Rotate(transitKey)
 	rotated := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()
-	rt, err := boot()
+	srv, err := boot()
 	require.NoError(t, err)
+	rt := srv.Client()
 	graph := engine.Graph(rt)
 	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), slug)
 	require.NoError(t, err)

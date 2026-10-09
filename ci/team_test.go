@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/server"
 )
 
 // SEC: adding a teammate by email never grants a merchant role to an account
@@ -35,19 +36,15 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			ctx := t.Context()
 			slug := "team-" + uuid.NewString()[:8]
-			cfg := f.config()
-			cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Registration: mode, Auth: openrails.AuthConfig{
-				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
-			}}
-			deps := openrails.Deps{Postgres: f.pool}
 			mail := &outbox{}
-			if registers {
-				deps.Email = mail
-			}
-			cp, err := openrails.New(ctx, cfg, deps)
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = cp.Close(context.Background()) })
-			require.NoError(t, engine.Graph(cp).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
+			cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+				cfg.Registration = mode
+				cfg.Auth.Issuer = "http://127.0.0.1/" + slug
+				if registers {
+					deps.Engine.Email = mail
+				}
+			})
+			require.NoError(t, engine.Graph(cp.Client()).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 			core := cp.AuthKit()
 			account := func(verified bool) iam.User {
 				id := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
@@ -63,8 +60,8 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			require.NoError(t, err)
 			handler, err := standaloneHandler(cp)
 			require.NoError(t, err)
-			server := httptest.NewServer(handler)
-			t.Cleanup(server.Close)
+			ts := httptest.NewServer(handler)
+			t.Cleanup(ts.Close)
 			// Inviting needs a recent sign-in, which a minted token is not.
 			token := authtest.SignIn(t, core, authtest.User{User: owner, Email: email, Password: authtest.Password}).AccessToken
 
@@ -75,7 +72,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 					require.NoError(t, err)
 					data = bytes.NewReader(raw)
 				}
-				req, err := http.NewRequestWithContext(ctx, method, server.URL+"/v1/merchant/team"+path, data)
+				req, err := http.NewRequestWithContext(ctx, method, ts.URL+"/v1/merchant/team"+path, data)
 				require.NoError(t, err)
 				req.Header.Set("Authorization", "Bearer "+token)
 				req.Header.Set("OpenRails-Merchant", slug)
@@ -128,12 +125,11 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")
 
 			if registers {
-				// The control plane's mail reaches the deployment's one sender,
-				// rendered, from the deployment's own address.
+				// The control plane's mail reaches the engine's sender, rendered,
+				// from the deployment's own address.
 				require.NoError(t, core.ResetAccountMFA(ctx, verified.ID))
 				notice := mail.to(*verified.Email)
 				require.NotNil(t, notice, "the notice was sent")
-				require.Equal(t, iam.MessageMFAReset, notice.Auth.Kind)
 				require.Empty(t, notice.From)
 				require.Contains(t, notice.Subject, "Two-step verification")
 			}

@@ -50,8 +50,7 @@ type trustedIssuer struct {
 }
 
 // WithResourceServer accepts the access tokens cfg's trusted issuers mint
-// for this deployment. The standalone binary and hosted products set it
-// through Config.ControlPlane.ResourceServer.
+// for this deployment (server.Config.ResourceServer).
 func WithResourceServer(cfg config.ResourceServerConfig) Option {
 	return func(o *options) { o.resourceServer = &cfg }
 }

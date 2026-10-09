@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -21,18 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hostconfig"
-	"github.com/open-rails/openrails/internal/operator"
 )
-
-// standaloneAuth is the control plane's identity configuration, nil for
-// database-only commands.
-func standaloneAuth(ctx context.Context) *config.AuthConfig {
-	cfg, _ := ctx.Value(config.ConfigContextKey).(*config.Config)
-	if cfg == nil || cfg.ControlPlane == nil {
-		return nil
-	}
-	return &cfg.ControlPlane.Auth
-}
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -77,10 +66,6 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			// The standalone server always runs the control plane (#469).
-			if cfg.Auth != nil {
-				cfg.Config.ControlPlane = &config.ControlPlaneConfig{Auth: *cfg.Auth, ResourceServer: cfg.ResourceServer, LocalSignIn: cfg.LocalSignIn}
-			}
 			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
 			return nil
 		},
@@ -163,137 +148,57 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read no-workers flag: %w", err)
 	}
-	startWorkers := !noWorkers
+	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
+	if err != nil {
+		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
+	}
 	log.Info(buildinfo.Get().String())
 	config.LogStartupStatus(cfg)
 
 	// xs-007 row 40: the boot waits for the database for as long as it takes
 	// — a failover, a slow start — and only an operator's stop signal ends the
 	// wait. While waiting the process is not listening, which is exactly what
-	// "not ready" means to whoever is probing it; the 60 s budget this
-	// replaced turned a two-minute failover into a crash loop.
-	bootCtx, stopBoot := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopBoot()
-
-	// The standalone binary builds its engine like any host, with the
-	// OpenRails-owned control plane (mandatory here, #469) and OpenRails-managed
-	// River (#895). The admin console is web/admin's build, when present.
-	client, err := openrails.New(bootCtx, *cfg, openrails.Deps{})
+	// "not ready" means to whoever is probing it.
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
 	if err != nil {
-		if bootCtx.Err() != nil {
+		if ctx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
 			return nil
 		}
-		return fmt.Errorf("bootstrap application: %w", err)
+		return err
 	}
-	stopBoot()
-	cleanupOnError := true
-	defer func() {
-		if cleanupOnError {
-			if err := client.Close(context.Background()); err != nil {
-				log.WithError(err).Error("Application cleanup failed")
-			}
-		}
-	}()
-	graph := engine.Graph(client)
+	closeOnError := func(err error) error {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return errors.Join(err, srv.Close(closeCtx))
+	}
 
 	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
 	// mounted, apply control-plane authority on first run only. Catalog
 	// reconciliation stays an explicit CLI/init-job operation.
-	if err := applyStartupBootstrap(context.Background(), cfg, graph); err != nil {
-		cleanupOnError = true
-		return fmt.Errorf("startup bootstrap: %w", err)
+	if err := applyStartupBootstrap(ctx, cp); err != nil {
+		return closeOnError(fmt.Errorf("startup bootstrap: %w", err))
 	}
-
 	// Reload snapshot credentials and seed absent merchant metadata. Existing
 	// metadata is preserved unless an explicit application changes it. The
 	// conventional file is optional; an explicit manifest path must exist.
-	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
-	if err != nil {
-		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
-	}
 	listener := hostconfig.FromContext(cmd.Context())
-	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), graph.Config, graph, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
-		cleanupOnError = true
-		return err
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
+		return closeOnError(err)
 	}
-	// Bind request-side producers before HTTP can accept work, including when
-	// --no-workers delegates execution to a separate process. This starts no workers.
-	if err := graph.Runtime.InitRiver(cmd.Context()); err != nil {
-		return fmt.Errorf("bind standalone job producers: %w", err)
+	// Issue #222: there is no separate private/service listener. Server-to-
+	// server callers authenticate with OpenRails-issued merchant API keys on
+	// the same surface. HTTP never serves webhook and async billing APIs when
+	// the workers cannot start.
+	if noWorkers {
+		err = srv.Serve(ctx)
+	} else {
+		err = srv.Run(ctx)
 	}
-
-	cleanupOnError = false
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Public API server (user/admin JWT auth). The full standalone surface is
-	// the framework-neutral net/http stack (#670) — the same stack embedded
-	// hosts mount.
-	publicServer, err := operator.StandaloneServer(graph, listener.Routes())
 	if err != nil {
-		return fmt.Errorf("build billing http handler: %w", err)
-	}
-	publicHandler := publicServer.Handler()
-	// xs-007 row 37: no request-wide WriteTimeout. It was set before the
-	// handler knew its work, and at 30 s it sat below a route's own 50 s
-	// budget: a payment-method replacement committed at the provider and the
-	// client got EOF. A route that has a budget declares it
-	// (httprequest.Request.Budget) and owns its deadline; every provider and
-	// database call underneath carries its own I/O bound. What stays is what
-	// observes the PEER, not the work: ReadHeaderTimeout and ReadTimeout bound
-	// a client that opened a connection and is not sending its request
-	// (slowloris — bytes not arriving is the observation), IdleTimeout bounds
-	// a keep-alive connection between requests.
-	publicSrv := &http.Server{
-		Handler:           publicHandler,
-		Addr:              fmt.Sprintf("%s:%d", listener.Host, listener.Port),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		MaxHeaderBytes:    1 << 20,
-	}
-
-	// Issue #222: there is no separate private/service listener. Server-to-server
-	// callers authenticate with OpenRails-issued merchant API keys against the SAME
-	// public API surface (publicSrv); embedded hosts use the in-process facade.
-
-	// Start public server in a goroutine
-	go func() {
-		log.Infof("Starting public billing server on %s", publicSrv.Addr)
-		if err := publicSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.WithError(err).Fatal("Failed to start public server")
-		}
-	}()
-
-	// HTTP must not serve webhook and async billing APIs when the workers
-	// cannot start.
-	var workerErr error
-	if startWorkers {
-		log.Info("Starting billing background workers")
-		if workerErr = client.Start(cmd.Context()); workerErr != nil {
-			log.WithError(workerErr).Error("Background workers failed to start; shutting down server...")
-		}
-	}
-	if workerErr == nil {
-		<-sigChan
-		log.Info("Shutdown signal received, shutting down server...")
-	}
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := publicSrv.Shutdown(shutdownCtx); err != nil {
-		log.WithError(err).Error("Public server forced to shutdown")
-	}
-
-	if err := client.Close(shutdownCtx); err != nil {
-		log.WithError(err).Error("Application shutdown encountered issues")
-	}
-
-	if workerErr != nil {
-		return workerErr
+		return err
 	}
 	log.Info("Billing service shutdown complete")
 	return nil
@@ -302,51 +207,44 @@ func runServer(cmd *cobra.Command, args []string) error {
 func runWorker(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	config.LogStartupStatus(cfg)
-
-	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
-	bootCtx, stopBoot := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
-	defer stopBoot()
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	// The same engine as run-server, without a listener: the control plane
-	// contributes its AuthKit jobs to the fleet.
-	client, err := openrails.New(bootCtx, *cfg, openrails.Deps{})
+	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	// The same server as run-server, without a listener: AuthKit's jobs run
+	// in the same fleet.
+	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
 	if err != nil {
-		if bootCtx.Err() != nil {
+		if ctx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
 			return nil
 		}
-		return fmt.Errorf("bootstrap application: %w", err)
+		return err
 	}
-	stopBoot()
 	defer func() {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer shutdownCancel()
-		if err := client.Close(shutdownCtx); err != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Close(closeCtx); err != nil {
 			log.WithError(err).Error("Application shutdown encountered issues")
 		}
 	}()
-	graph := engine.Graph(client)
-	if err := serverboot.ReconcileBootMerchantManifest(cmd.Context(), graph.Config, graph, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(cmd.Context()).MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
 		return err
 	}
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	// Background workers only (no HTTP server); fail fast if River cannot start.
-	if err := client.Start(cmd.Context()); err != nil {
+	if err := srv.Start(ctx); err != nil {
 		return err
 	}
-	<-sigChan
+	<-ctx.Done()
 	log.Info("Shutdown signal received, stopping workers...")
-	log.Info("Billing service workers shutdown complete")
 	return nil
 }
 
-// applyStandaloneMigrations does what New does first: billing and River.
-// AuthKit migrates itself when the control plane is built.
+// applyStandaloneMigrations does what server.New does first: billing and
+// River. AuthKit migrates itself when the server builds it.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 	if err != nil {

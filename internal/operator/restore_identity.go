@@ -9,7 +9,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -29,13 +28,9 @@ type ProvisionMerchantForRestoreRequest struct {
 // destination merchant group whose live owner is req.OwnerUserID, claiming
 // req.Slug. It creates no groups, roles, credentials or host routes. The
 // importer separately requires an empty billing book.
-func ProvisionMerchantForRestore(ctx context.Context, a *app.App, req ProvisionMerchantForRestoreRequest) (*billing.ProvisionMerchantResult, error) {
+func ProvisionMerchantForRestore(ctx context.Context, cp *controlplane.ControlPlane, req ProvisionMerchantForRestoreRequest) (*billing.ProvisionMerchantResult, error) {
 	if req.MerchantID.IsZero() {
 		return nil, fmt.Errorf("control plane restore provision: merchant_id is required")
-	}
-	cp := Get(a)
-	if cp == nil || cp.Core() == nil {
-		return nil, fmt.Errorf("control plane restore provision: no control plane attached (call Attach first)")
 	}
 	groupID, owner := strings.TrimSpace(req.ExistingGroupID), strings.TrimSpace(req.OwnerUserID)
 	if groupID == "" || owner == "" {

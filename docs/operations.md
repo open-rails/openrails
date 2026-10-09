@@ -1168,7 +1168,7 @@ engine-wide policy**, not a per-merchant setting.
 
 - **Configuring a merchant's host**: the owner claims and proves one
   (`PUT /v1/merchant/api-host`, then `POST /v1/merchant/api-host/verify`), or
-  the operator binds it with `Client.SetMerchantAPIHost`. It is
+  the operator binds it with the server's `SetMerchantAPIHost`. It is
   `billing.merchants.api_host` (globally unique among live merchants),
   resolved LIVE on the next
   request; no boot-time host map, so a merchant configured on one node

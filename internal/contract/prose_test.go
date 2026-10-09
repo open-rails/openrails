@@ -31,7 +31,7 @@ var foreignPaths = []string{
 var (
 	proseHost   = regexp.MustCompile(`https?://[^/\s]+`)
 	prosePath   = regexp.MustCompile("(?:\\b(GET|POST|PUT|PATCH|DELETE) `?|(?:^|[^\\w/.:-]))(?:/billing)?(/v1/[A-Za-z0-9_{}/:.*<>-]*)")
-	proseGo     = regexp.MustCompile(`\b(openrails|billing|catalog)\.([A-Z]\w*)(?:\.([A-Z]\w*))?`)
+	proseGo     = regexp.MustCompile(`\b(openrails|billing|catalog|server)\.([A-Z]\w*)(?:\.([A-Z]\w*))?`)
 	proseMethod = regexp.MustCompile(`\b[cC]lient\.([A-Z]\w*)`)
 	// A bare Go name in a code span that reads as a Client operation.
 	proseVerb  = regexp.MustCompile("`((?:Get|List|Create|Update|Delete|Set|Ensure|Apply|Archive|Cancel|Resume|Refund|Record|Capture|Release|Extend|Admit|Open|Preview|Refresh|Resolve|Revoke|Confirm|Check|Has|Import|Export|Provision|Rename|Declare|Retry|Mark|Void|Ask|Query|Generate|Verify|Acknowledge|Report|Change|Retire|Complete)[A-Z]\\w*)(?:\\([^`]*\\))?`")

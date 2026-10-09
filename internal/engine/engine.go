@@ -1,6 +1,6 @@
 // Package engine is the in-process OpenRails engine behind openrails.New. It
 // builds the application graph from Config and Deps and owns its lifecycle,
-// HTTP routes, River composition and the opt-in control plane.
+// HTTP routes and River composition.
 //
 // River is required (#895): renewals, credit expiry, invoices, webhook
 // reconciliation and provider intents all run as River jobs. With River
@@ -132,11 +132,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if e.merchant.Slug != "" {
 		if m, err := rt.Merchants.GetBySlug(ctx, e.merchant.Slug); err == nil {
 			declared = append(declared, m.ID)
-		}
-	}
-	if cfg.ControlPlane != nil {
-		if err := attachControlPlane(ctx, application, *cfg.ControlPlane, deps); err != nil {
-			return fail(err)
 		}
 	}
 	if _, err := rt.GetBillingPeriodicJobs(ctx); err != nil {

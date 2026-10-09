@@ -43,11 +43,10 @@ An identity has three parts:
 Provider writes record all three: the subject, the invoker and the
 credential (`kind:id`).
 
-The standalone control plane is mandatory and uses closed registration. Its
-own sign-in (password, passwordless, registration) is opt-in
-(`ControlPlaneConfig.LocalSignIn`, standalone `local_sign_in`); without it
-people sign in at a trusted issuer.
-OpenRails-SaaS explicitly enables hosted registration when attaching it. A
+The standalone server (package `server`) runs its own AuthKit with closed
+registration. Its own sign-in (password, passwordless, registration) is opt-in
+(`server.Config.LocalSignIn`, `local_sign_in`); without it people sign in at a
+trusted issuer. OpenRails-SaaS opens hosted registration. A
 merchant signing application maps to exactly one merchant permission group;
 its token cannot select another merchant by adding a claim or changing a URL.
 Identity/contact attributes do not confer authorization.

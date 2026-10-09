@@ -24,7 +24,7 @@ import (
 )
 
 // Every refusal precedes AuthKit's construction, so none needs a database.
-func TestNewRefusesIncompleteConfiguration(t *testing.T) {
+func TestAuthKitRefusesIncompleteConfiguration(t *testing.T) {
 	pool, err := pgxpool.New(t.Context(), "postgres://127.0.0.1:1/unreachable")
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
@@ -45,9 +45,11 @@ func TestNewRefusesIncompleteConfiguration(t *testing.T) {
 		"rate limits need Redis":         {&config.Config{}, &config.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
 		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &config.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
 	} {
-		_, err := New(context.Background(), tc.cfg, tc.auth, tc.pool, tc.opts...)
+		_, _, err := AuthKit(tc.cfg, tc.auth, tc.pool, tc.opts...)
 		require.ErrorContains(t, err, want)
 	}
+	_, err = New(nil, &config.Config{}, &config.AuthConfig{Issuer: issuer}, pool)
+	require.ErrorContains(t, err, "AuthKit client is required")
 }
 
 // Standalone is private by construction: registration is closed unless the

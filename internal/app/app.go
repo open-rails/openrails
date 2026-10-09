@@ -23,30 +23,13 @@ type App struct {
 	Runtime     *Runtime
 	RedisClient *redis.Client
 
-	// ControlPlane is an optional host-owned lifecycle resource. Concrete
-	// identity capabilities are supplied by standalone composition; the billing
-	// runtime only owns its cleanup.
-	ControlPlane interface{ Close() }
 	// ConsoleAssets is the admin console SPA (#754, web/admin), served by the
 	// standalone surface when admin_console is enabled.
 	ConsoleAssets fs.FS
-
-	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
-	// created only when the control plane is attached and no pool was injected. It
-	// is attached together with ControlPlane via SetControlPlane and closed here.
-	controlPlanePool *pgxpool.Pool
-}
-
-// SetControlPlane registers host identity cleanup and its optional owned pool.
-// Borrowed pools remain owned by the host.
-func (a *App) SetControlPlane(cp interface{ Close() }, ownedPool *pgxpool.Pool) {
-	if a == nil {
-		return
-	}
-	a.ControlPlane = cp
-	if ownedPool != nil {
-		a.controlPlanePool = ownedPool
-	}
+	// Standalone marks the engine of a standalone server (package server),
+	// which owns merchant identity and the HTTP surface: the embedded mount
+	// and RegisterMerchantForRestore refuse.
+	Standalone bool
 }
 
 // BootstrapOptions controls optional overrides for embedded use. Embedded
@@ -178,10 +161,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		RedisClient: runtime.RedisClient,
 	}
 
-	// The OpenRails-owned AuthKit control plane (#224) is no longer built here
-	// (#284): the core stays AuthKit-free. The standalone/opt-in path builds it and
-	// attaches via SetControlPlane (see internal/operator.AttachWithOptions).
-
 	return app, nil
 }
 
@@ -191,19 +170,10 @@ func (a *App) Close(ctx context.Context) error {
 		return nil
 	}
 	var errs []error
-	// Shared workers must stop before their optional components release pools.
 	if a.Runtime != nil {
 		if err := a.Runtime.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
-	}
-	if a.ControlPlane != nil {
-		a.ControlPlane.Close()
-	}
-	a.ControlPlane = nil
-	if a.controlPlanePool != nil {
-		a.controlPlanePool.Close()
-		a.controlPlanePool = nil
 	}
 	if len(errs) == 0 {
 		return nil

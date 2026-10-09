@@ -142,7 +142,6 @@ func TestAuthKitMessagesRender(t *testing.T) {
 		require.Empty(t, m.From, "the deployment's own address")
 		require.NotEmpty(t, m.Subject)
 		require.NotEmpty(t, m.Text)
-		require.NotNil(t, m.Auth)
 	}
 	require.Contains(t, rec.got[0].Text, "123456")
 	require.Contains(t, rec.got[1].Text, "654321")

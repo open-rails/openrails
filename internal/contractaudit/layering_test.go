@@ -18,7 +18,7 @@ import (
 // The public interface is these packages (#1121): the Client, its nouns, the
 // catalog model, the router adapters and the hosts' Auth conformance kit.
 // Everything else is internal/ or main.
-var publicPackages = []string{".", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "web/admin"}
+var publicPackages = []string{".", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "server", "web/admin"}
 
 func TestPublicPackages(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,23 +14,22 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/operator"
 )
 
 // Routes materializes the HTTP surface sel selects for the host's root
 // router, and fails before anything mounts when a selected group lacks the
-// Auth it needs: nothing is ever mounted open. Without a control plane that
-// is sel's groups under sel.Prefix (and the admin console at its own path);
-// with one it is the standalone surface at the root, gated by the control
-// plane's own Auth, to which sel adds only CatalogEdits, AdminConsole,
-// CustomerProfiles with their own Auth and merchant, and CookieOrigin. Every
-// mount of the merchant API in one process must agree on CatalogEdits.
+// Auth it needs: nothing is ever mounted open. It is sel's groups under
+// sel.Prefix, and the admin console at its own path. Every mount of the
+// merchant API in one process must agree on CatalogEdits. A standalone
+// server's engine refuses: its surface is the server's.
 func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return nil, fmt.Errorf("openrails: client is closed")
+	}
+	if e.App.Standalone {
+		return nil, fmt.Errorf("openrails: this engine is a standalone server's; mount server.Routes")
 	}
 	sel.CustomerProfiles = append([]config.CustomerRoutes(nil), sel.CustomerProfiles...)
 	// Mounting one selection again reuses its handlers, so in-memory rate
@@ -78,29 +76,6 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 		if err := config.ValidateMountPath("Routes.Prefix", sel.Prefix); err != nil {
 			return nil, fmt.Errorf("openrails: %w", err)
 		}
-	}
-	if operator.Get(a) != nil {
-		if sel.Prefix != "" || sel.Storefront || sel.Merchant || sel.Customers != config.CustomersNone || !httproutes.IsNilAuth(sel.Auth) {
-			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes is the standalone surface at the root, gated by the control plane; set only CatalogEdits, AdminConsole, CustomerProfiles (each with its own Auth and Merchant) and CookieOrigin")
-		}
-		profiles := embedhttp.CustomerProfiles(sel)
-		extra, err := embedhttp.BuildCustomerRoutes(a, profiles)
-		if err != nil {
-			return nil, err
-		}
-		// The server resolved selectors on its own routes.
-		router.ResolveMerchantSelectors(extra, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
-			return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-		}, embedhttp.CustomerPrefixes("", profiles)...)
-		table, err := operator.StandaloneRoutes(a, sel)
-		if err != nil {
-			return nil, err
-		}
-		table.Entries = append(table.Entries, extra.Entries...)
-		if err := embedhttp.ValidateRouteTable(table); err != nil {
-			return nil, err
-		}
-		return routebundle.FromTable(table), nil
 	}
 	table, err := embedhttp.ConfiguredRoutes(a, sel)
 	if err != nil {
@@ -163,17 +138,9 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		return nil, fmt.Errorf("openrails: Routes.AdminConsole needs a console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
 	cfg := a.Config
-	var rs *config.ResourceServerConfig
-	if cfg.ControlPlane != nil {
-		rs = cfg.ControlPlane.ResourceServer
-	}
-	issuer, err := adminconsole.ConsoleIssuer(sel.AdminConsole, rs)
-	if err != nil {
-		return nil, fmt.Errorf("openrails: Routes.AdminConsole: %w", err)
-	}
 	authBase := sel.AdminConsole.AuthBaseURL
-	if authBase == "" && issuer == nil {
-		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.Issuer or AdminConsole.AuthBaseURL")
+	if authBase == "" {
+		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.AuthBaseURL")
 	}
 	handler, err := adminconsole.Handler(path, adminconsole.Config{
 		AuthBaseURL:            authBase,
@@ -183,7 +150,6 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
 		Extensions:             sel.AdminConsole.Extensions,
-		Issuer:                 issuer,
 	}, a.ConsoleAssets)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)

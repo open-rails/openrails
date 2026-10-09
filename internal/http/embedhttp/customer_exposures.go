@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
@@ -50,8 +51,10 @@ func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string 
 }
 
 // BuildCustomerRoutes mounts each customer profile, gated by its Auth at its
-// merchant (or at the merchant each verdict names, when it has none).
-func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes) (*router.Table, error) {
+// merchant (or at the merchant each verdict names, when it has none). host
+// resolves a merchant's API host (#734): the standalone server's; nil
+// embedded.
+func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host merchant.HostResolver) (*router.Table, error) {
 	if err := validateCustomerRoutes(exposures, a.Runtime); err != nil {
 		return nil, err
 	}
@@ -63,7 +66,6 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes) (*router
 	if err != nil {
 		return nil, err
 	}
-	host := FromApp(a).HostResolve
 	for _, e := range exposures {
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"

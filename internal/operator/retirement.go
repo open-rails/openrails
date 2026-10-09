@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -20,8 +19,8 @@ import (
 // ListMerchantRetirementCandidates pages live, group-bound merchants created
 // before req.CreatedBefore, excluding the deployment's reserved slugs, each with
 // its current activity fact.
-func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error) {
-	cp, dir, err := retirementDirectory(a)
+func ListMerchantRetirementCandidates(ctx context.Context, cp *controlplane.ControlPlane, req billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error) {
+	cp, dir, err := retirementDirectory(cp)
 	if err != nil {
 		return billing.MerchantRetirementCandidatePage{}, err
 	}
@@ -31,8 +30,8 @@ func ListMerchantRetirementCandidates(ctx context.Context, a *app.App, req billi
 // RetireUnusedMerchant retires a live, unreserved merchant with no activity that
 // is still bound to groupID, then deletes exactly that AuthKit group with its
 // slug released. Refusals are reported in the result, not as errors.
-func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID billing.MerchantID, groupID string) (billing.MerchantRetirement, error) {
-	cp, dir, err := retirementDirectory(a)
+func RetireUnusedMerchant(ctx context.Context, cp *controlplane.ControlPlane, merchantID billing.MerchantID, groupID string) (billing.MerchantRetirement, error) {
+	cp, dir, err := retirementDirectory(cp)
 	if err != nil {
 		return billing.MerchantRetirement{}, err
 	}
@@ -41,19 +40,15 @@ func RetireUnusedMerchant(ctx context.Context, a *app.App, merchantID billing.Me
 
 // CompletePendingMerchantRetirements finishes up to limit committed retirements
 // whose group release is pending, by captured group UUID.
-func CompletePendingMerchantRetirements(ctx context.Context, a *app.App, limit int) (int, error) {
-	cp, dir, err := retirementDirectory(a)
+func CompletePendingMerchantRetirements(ctx context.Context, cp *controlplane.ControlPlane, limit int) (int, error) {
+	cp, dir, err := retirementDirectory(cp)
 	if err != nil {
 		return 0, err
 	}
 	return dir.CompletePendingGroupReleases(ctx, limit, groupReleaser(cp))
 }
 
-func retirementDirectory(a *app.App) (*controlplane.ControlPlane, *merchants.Service, error) {
-	cp := Get(a)
-	if cp == nil || cp.Core() == nil {
-		return nil, nil, errors.New("merchant retirement: no control plane attached (call Attach first)")
-	}
+func retirementDirectory(cp *controlplane.ControlPlane) (*controlplane.ControlPlane, *merchants.Service, error) {
 	dir, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {
 		return nil, nil, err

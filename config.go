@@ -30,38 +30,12 @@ type (
 	Routes = config.Routes
 	// AdminConsole is Routes.AdminConsole: the merchant admin console.
 	AdminConsole = config.AdminConsole
-	// ConsoleIssuer is AdminConsole.Issuer: the trusted issuer staff sign in at.
-	ConsoleIssuer = config.ConsoleIssuer
 	// CustomerRoutes is one further customer surface of
 	// Routes.CustomerProfiles.
 	CustomerRoutes = config.CustomerRoutes
 	// CustomerHTTPScope is Routes.Customers and CustomerRoutes.Scope: which
 	// customer routes a surface mounts.
 	CustomerHTTPScope = config.CustomerHTTPScope
-	// ControlPlaneConfig is Config.ControlPlane: the OpenRails-owned AuthKit
-	// control plane.
-	ControlPlaneConfig = config.ControlPlaneConfig
-	// AuthConfig is ControlPlaneConfig.Auth: issuer, signing keys and naming.
-	AuthConfig = config.AuthConfig
-	// AuthRateLimit is one AuthKit rate-limit bucket of
-	// ControlPlaneConfig.AuthRateLimits.
-	AuthRateLimit = config.AuthRateLimit
-	// MerchantCreationConfig is ControlPlaneConfig.MerchantCreation: the
-	// policy for merchant names users claim.
-	MerchantCreationConfig = config.MerchantCreationConfig
-	// ResourceServerConfig is ControlPlaneConfig.ResourceServer: the
-	// authorization servers whose access tokens the merchant API accepts.
-	ResourceServerConfig = config.ResourceServerConfig
-	// TrustedIssuerConfig is one of ResourceServerConfig.TrustedIssuers.
-	TrustedIssuerConfig = config.TrustedIssuerConfig
-	// NamingConfig is AuthConfig.Naming: the rename policy for merchant names
-	// and usernames.
-	NamingConfig = config.NamingConfig
-	// FormerNamesConfig is NamingConfig.FormerNames: how long a former name
-	// keeps forwarding.
-	FormerNamesConfig = config.FormerNamesConfig
-	// FormerNamesMode is FormerNamesConfig.Mode.
-	FormerNamesMode = config.FormerNamesMode
 
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
@@ -110,16 +84,12 @@ type (
 	// deployment.
 	HyperSwitchConfig = config.HyperSwitchConfig
 
-	// EmailSender is Deps.Email: it delivers OpenRails' rendered email,
-	// billing and control plane alike.
+	// EmailSender is Deps.Email: it delivers OpenRails' rendered email.
 	EmailSender = config.EmailSender
 	// Email is one message an EmailSender delivers.
 	Email = config.Email
 	// EmailAddress is a mailbox and its display name.
 	EmailAddress = config.EmailAddress
-	// SMSSender is Deps.SMS: it delivers the control plane's AuthKit
-	// text messages.
-	SMSSender = config.SMSSender
 
 	// Auth is Routes.Auth: helpers/auth's Auth, the host's auth as net/http
 	// middleware (Required, RequirePermission, Sensitive and Identity), which
@@ -160,13 +130,6 @@ const (
 	SecretBackendVault = config.SecretBackendVault
 	// SecretBackendDB stores credentials encrypted in the database.
 	SecretBackendDB = config.SecretBackendDB
-
-	// FormerNamesFinite forwards a former name for FormerNamesConfig.Duration.
-	FormerNamesFinite = config.FormerNamesFinite
-	// FormerNamesForever forwards a former name indefinitely.
-	FormerNamesForever = config.FormerNamesForever
-	// FormerNamesImmediate releases a former name at once.
-	FormerNamesImmediate = config.FormerNamesImmediate
 
 	// CustomersNone mounts no customer routes.
 	CustomersNone = config.CustomersNone

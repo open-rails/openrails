@@ -1,9 +1,10 @@
 # Hosted customer audiences
 
 Configure the engine once, then mount the routes an `openrails.Routes` selects
-with a framework adapter. With `Config.ControlPlane`, `Client.Routes` is the standalone surface:
-identity, merchant, platform, customer, callback and enabled console
-registrations. Process health endpoints remain host-owned. Provider callbacks
+with a framework adapter. A standalone server's `Routes` is the standalone
+surface: identity, merchant, platform, customer, callback and enabled console
+registrations, plus the customer profiles it is given. Process health
+endpoints remain host-owned. Provider callbacks
 are addressed by account (`/v1/webhooks/{rail}/{account_id}`) in every posture.
 
 A host can additionally expose a customer audience with its own `Auth`, set on

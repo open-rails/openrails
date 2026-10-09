@@ -33,11 +33,16 @@ type Dependencies struct {
 	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
 	// wraps it as the best-effort global middleware (#282/#670).
 	Authenticator billingauth.Authenticator
-	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224).
-	// REQUIRED (#469): the standalone surface always runs with a control
-	// plane — there is no verifier-only mode. The server selectively mounts the
-	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
+	// ControlPlane is the standalone server's control plane over its own
+	// AuthKit. Required: the server selectively mounts the intentional AuthKit
+	// route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
+	// Issuer is the control plane's issuer: its users' and API keys'.
+	Issuer string
+	// ResourceServer is the trusted issuers the merchant API accepts, and
+	// ConsoleIssuer the one of them the admin console signs staff in at.
+	ResourceServer *config.ResourceServerConfig
+	ConsoleIssuer  *config.ConsoleIssuer
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
 	// The console mounts only when this is present AND admin_console.enabled;
@@ -58,6 +63,10 @@ type Server struct {
 	// there is no gin auth provider any more; every surface uses this directly).
 	authenticator billingauth.Authenticator
 	controlPlane  *controlplane.ControlPlane
+	issuer        string
+	// resourceServer and consoleIssuer are Dependencies'.
+	resourceServer *config.ResourceServerConfig
+	consoleIssuer  *config.ConsoleIssuer
 	// customerResolver replaces the control plane's openrails:self token
 	// verification (tests).
 	customerResolver httproutes.ResourceCustomerResolver
@@ -167,19 +176,9 @@ func (s *Server) handleBrowser(mux router.Registrar, pattern string, h http.Hand
 	s.browserTierRoutes.Add(pattern)
 }
 
-func New(deps Dependencies) (*Server, error) { return newServer(deps, false) }
-
-// ConfiguredRoutes reuses the already initialized runtime and control plane.
-// Materializing HTTP must never open another secret backend or rearm services.
-func ConfiguredRoutes(deps Dependencies) (*router.Table, error) {
-	srv, err := newServer(deps, true)
-	if err != nil {
-		return nil, err
-	}
-	return srv.HTTPRoutes(), nil
-}
-
-func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
+// New assembles the standalone surface over the engine's initialized runtime
+// and the server's control plane.
+func New(deps Dependencies) (*Server, error) {
 	if deps.Config == nil {
 		return nil, fmt.Errorf("server config is required")
 	}
@@ -225,11 +224,8 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Authenticator == nil {
 		return nil, fmt.Errorf("authenticator is required")
 	}
-	// HARD CUT (#469): the standalone surface always runs with the AuthKit
-	// control plane; a missing control plane is a boot failure, not a degraded
-	// "verifier-only" server.
 	if deps.ControlPlane == nil {
-		return nil, fmt.Errorf("control plane is required (#469: standalone always runs the AuthKit control plane)")
+		return nil, fmt.Errorf("control plane is required")
 	}
 	if deps.ControlPlane.Pool() == nil {
 		return nil, fmt.Errorf("control plane pool is required")
@@ -241,6 +237,9 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		rdb:                deps.Redis,
 		authenticator:      deps.Authenticator,
 		controlPlane:       deps.ControlPlane,
+		issuer:             deps.Issuer,
+		resourceServer:     deps.ResourceServer,
+		consoleIssuer:      deps.ConsoleIssuer,
 		captchaStore:       deps.Runtime.CaptchaStore,
 		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis),
 		consoleAssets:      deps.ConsoleAssets,
@@ -259,19 +258,12 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	// merchant_config_source=manifest) serves read-only provider credentials from the
 	// manifest and operator webhook URLs from managed encrypted storage. Provider
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
-	if routesOnly {
-		if deps.Runtime.Merchants == nil {
-			return nil, fmt.Errorf("standalone routes require initialized runtime merchant services")
-		}
-		s.merchants = deps.Runtime.Merchants
-	} else {
-		if err := deps.Runtime.EnsureMerchantsService(context.Background()); err != nil {
-			return nil, err
-		}
-		// The Runtime owns credential construction and lifetime; HTTP assembly
-		// reuses its service instead of opening another store.
-		s.merchants = deps.Runtime.Merchants
+	// The Runtime owns credential construction and lifetime; HTTP assembly
+	// reuses its service instead of opening another store.
+	if err := deps.Runtime.EnsureMerchantsService(context.Background()); err != nil {
+		return nil, err
 	}
+	s.merchants = deps.Runtime.Merchants
 
 	// Single (standalone-friendly) HTTP surface on the framework-neutral
 	// net/http mux (#670): the same stack the embedded surface serves.
@@ -407,11 +399,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 // staffAuth is the standalone server's Auth for the merchant API: its API
 // keys, trusted issuers' access tokens and control-plane user sessions.
 func (s *Server) staffAuth() *httproutes.StandaloneAuth {
-	issuer := ""
-	if s.cfg != nil && s.cfg.ControlPlane != nil {
-		issuer = s.cfg.ControlPlane.Auth.Issuer
-	}
-	auth := &httproutes.StandaloneAuth{Issuer: issuer, Authenticator: s.authenticator}
+	auth := &httproutes.StandaloneAuth{Issuer: s.issuer, Authenticator: s.authenticator}
 	if s.controlPlane != nil {
 		auth.ResourceTokenResolver, auth.AdminPermissionChecker, auth.ServiceCredentialResolver = s.controlPlane, s.controlPlane, s.controlPlane
 	}
@@ -430,10 +418,9 @@ func (s *Server) customerAuth() httproutes.StandaloneCustomers {
 	return httproutes.StandaloneCustomers{Resolver: s.controlPlane}
 }
 
-// hostMerchantResolver is the standalone #734 Host->merchant resolver —
-// always the attached control plane in a server built via New() (#469: the
-// control plane is mandatory); nil-safe for hand-built *Server{} unit tests
-// that skip New(). Unrelated to CORS since #765 (CORS is a static per-route
+// hostMerchantResolver is the standalone #734 Host->merchant resolver: the
+// control plane's; nil-safe for hand-built *Server{} unit tests that skip
+// New(). Unrelated to CORS since #765 (CORS is a static per-route
 // policy, not sourced from Host/merchant resolution).
 func (s *Server) hostMerchantResolver(ctx context.Context, host string) (billing.MerchantID, error) {
 	if s == nil || s.controlPlane == nil {

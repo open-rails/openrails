@@ -9,15 +9,14 @@ retired inputs and refuse configuration loading.
 
 ## Authentication
 
-Embedded billing receives `openrails.Config` and the host's authentication hooks
-in `openrails.Deps`; it does not load AuthKit configuration. The standalone
-server's `config.yaml` composes billing settings with the control plane's `auth`
-settings (`openrails.AuthConfig`); its loader handles YAML, environment variables
-and mounted secret files. Remote consumers only construct a Client.
+Embedded billing receives `openrails.Config` and is given the host's `Auth`
+where its routes are mounted; it loads no AuthKit configuration. The standalone
+server's `config.yaml` composes billing settings with the server's own AuthKit
+settings (`auth`, `server.AuthConfig`); its loader handles YAML, environment
+variables and mounted secret files. Remote consumers only construct a Client.
 
 An embedded host supplying authentication does not need a standalone issuer or
-signing key. When constructing the OpenRails authentication control plane, supply
-`auth.issuer` explicitly. No billing URL is an issuer fallback. HTTPS is required.
+signing key. The standalone server needs `auth.issuer` explicitly. No billing URL is an issuer fallback. HTTPS is required.
 Declare `auth.direct_peer_ip` for direct connections or trusted proxy ranges for
 a reverse proxy; request headers never declare their own trusted origin.
 

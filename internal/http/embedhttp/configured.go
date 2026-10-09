@@ -78,7 +78,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	providers.Webhooks = true
 	capabilities := configuredCapabilities(a.Runtime, active, profiles, providers)
 	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, CatalogWrites: sel.CatalogEdits})
-	extra, err := BuildCustomerRoutes(a, profiles)
+	extra, err := BuildCustomerRoutes(a, profiles, nil)
 	if err != nil {
 		return nil, err
 	}

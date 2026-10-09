@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 )
 
 // ProvisionMerchant idempotently provisions a merchant at runtime through the
@@ -13,14 +13,9 @@ import (
 // new one claiming it, bound to a new merchant permission-group (persona
 // merchant, parent root, owner req.OwnerUserID). Safe to re-run.
 //
-// This is the engine mechanism behind a hosted wrapper's "registration is
-// provisioning" flow. Calling it without an attached control plane is a wiring
-// error (call Attach/AttachWithOptions first).
-func ProvisionMerchant(ctx context.Context, a *app.App, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
-	cp := Get(a)
-	if cp == nil || cp.Core() == nil {
-		return nil, fmt.Errorf("control plane provision: no control plane attached (call Attach first)")
-	}
+// This is the mechanism behind a hosted wrapper's "registration is
+// provisioning" flow.
+func ProvisionMerchant(ctx context.Context, cp *controlplane.ControlPlane, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return nil, fmt.Errorf("%w: %w", billing.ErrInvalidMerchantSlug, err)

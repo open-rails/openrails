@@ -331,8 +331,8 @@ sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 **Per-merchant API hosts.** A multi-merchant deployment can give each
 merchant a canonical hostname (the owner claims it with `PUT /v1/merchant/api-host`
 and proves control of the domain with a TXT record, then
-`POST /v1/merchant/api-host/verify`; operators bind directly with
-`Client.SetMerchantAPIHost`). It resolves live on the next request, no restart.
+`POST /v1/merchant/api-host/verify`; operators bind directly with the
+server's `SetMerchantAPIHost`). It resolves live on the next request, no restart.
 The public routes then resolve the merchant from the Host header, and every
 merchant-scoped route enforces Host-merchant == issuer-merchant: a token minted
 for merchant A is rejected on merchant B's host even though it verifies.
@@ -342,6 +342,63 @@ registration: browser-facing tiers (checkout, `/v1/me/*`)
 answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every
 other surface (merchant API, webhooks, admin) emits no CORS headers at all.
+
+### Building on the server package
+
+The `openrails` binary is a command line over
+`github.com/open-rails/openrails/server`. A product that serves many merchants
+with OpenRails' own accounts builds on the same package:
+
+```go
+srv, err := server.New(ctx, server.Config{
+    Engine:      openrails.Config{TestMode: openrails.Live, ProviderWriteMode: openrails.ProviderWritesFull},
+    Auth:        server.AuthConfig{Issuer: "https://billing.example.com", KeysPath: "/vault/auth"},
+    LocalSignIn: true,
+}, server.Deps{Engine: openrails.Deps{Postgres: pool, Redis: rdb}})
+if err != nil {
+    return err
+}
+return srv.Run(ctx) // serves Addr (default :3053) and runs the workers until ctx ends
+```
+
+`server.New` composes three parts as any host of the library does: the engine
+(`openrails.New`); the server's own AuthKit client, its tables created or
+upgraded and its routes mounted at the issuer's path; and the multi-merchant
+control plane (merchant provisioning and names, teams, merchant API keys,
+federated grants, trusted issuers, fleet analytics). The engine's routes are
+gated by the server's own `openrails.Auth`: it accepts merchant API keys, the
+server's sessions and trusted issuers' access tokens, and resolves the merchant
+each acts for.
+
+| `server.Config` | Meaning |
+|---|---|
+| `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
+| `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, development allowances. |
+| `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
+| `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
+| `MerchantCreation` | Lets signed-in users create merchants: reserved names, a pattern and a free allowance. |
+| `ResourceServer` | The trusted issuers whose access tokens the merchant API accepts (above). |
+| `CatalogEdits`, `AdminConsole`, `ConsoleIssuer` | The catalog-write routes and the admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
+| `Addr` | Where `Run` listens; default `:3053`. |
+
+`server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's
+senders (`SMS`; `AuthEmail` for your own templates, else AuthKit's mail is
+rendered and sent through the engine's sender) and `HasVaultedPaymentMethod`,
+which unlocks merchant creation beyond the free allowance.
+
+`Run` serves `Handler` and runs the workers; `Serve` serves without them. A
+product with its own router mounts `Routes` instead (the surface without
+health routes, plus customer surfaces with their own `Auth`) and composes
+`RiverJobs` into its River fleet before `Start(ctx,
+openrails.WithRiverClient(fleet))`. The operator's operations are methods of
+the server: `ProvisionMerchant`, `SetMerchantAPIHost`,
+`ListMerchantsForSubject`, `ListActiveMerchantIDs`, `ListUserMerchants`,
+`ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
+`EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
+`ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
+`CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` and
+`AuthenticateUser`. `AuthKit` is the server's AuthKit client and `Client` the
+engine.
 
 ### Upgrades and ops
 

@@ -11,15 +11,15 @@ import (
 	billing "github.com/open-rails/openrails/internal/config"
 )
 
-// Config is the standalone server's configuration: the engine's, the control
-// plane's identity and the listener.
+// Config is the standalone server's configuration (server.Config): the
+// engine's, the server's AuthKit and the listener.
 type Config struct {
 	*billing.Config
 	Auth *billing.AuthConfig
 	// ResourceServer accepts trusted issuers' access tokens on the merchant
 	// API (resource_server).
 	ResourceServer *billing.ResourceServerConfig
-	// LocalSignIn serves sign-in to the control plane's own accounts
+	// LocalSignIn serves sign-in to the server's own accounts
 	// (local_sign_in); off, people sign in at a trusted issuer.
 	LocalSignIn bool
 	// Host and Port are the HTTP listener (default 0.0.0.0:3053).
@@ -29,17 +29,13 @@ type Config struct {
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
 	MerchantManifestOverlays []string
-	// CatalogEdits mounts the merchant API's catalog-write routes
-	// (openrails.Routes.CatalogEdits).
+	// CatalogEdits mounts the merchant API's catalog-write routes.
 	CatalogEdits bool
-	// AdminConsole serves the merchant admin console
-	// (openrails.Routes.AdminConsole); nil, the default, serves none.
-	AdminConsole *billing.AdminConsole
-}
-
-// Routes is the surface the standalone server mounts.
-func (c *Config) Routes() billing.Routes {
-	return billing.Routes{CatalogEdits: c.CatalogEdits, AdminConsole: c.AdminConsole}
+	// AdminConsole serves the merchant admin console; nil, the default,
+	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
+	// at a trusted issuer.
+	AdminConsole  *billing.AdminConsole
+	ConsoleIssuer *billing.ConsoleIssuer
 }
 
 type contextKey struct{}
@@ -160,7 +156,14 @@ func (a *adminConsoleFile) mount() *billing.AdminConsole {
 	if a == nil || !a.Enabled {
 		return nil
 	}
-	return &billing.AdminConsole{Path: a.Path, Issuer: a.Issuer}
+	return &billing.AdminConsole{Path: a.Path}
+}
+
+func (a *adminConsoleFile) issuer() *billing.ConsoleIssuer {
+	if a == nil || !a.Enabled {
+		return nil
+	}
+	return a.Issuer
 }
 
 // config is the loaded file as the server's configuration.
@@ -209,6 +212,7 @@ func (f *fileConfig) config() (*Config, error) {
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		CatalogEdits:             f.CatalogEdits,
 		AdminConsole:             f.AdminConsole.mount(),
+		ConsoleIssuer:            f.AdminConsole.issuer(),
 	}, nil
 }
 

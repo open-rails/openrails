@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +13,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/server"
 )
 
 // Registration is AuthKit's mode, passed straight through: capabilities
@@ -37,19 +36,17 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			name = "default"
 		}
 		t.Run(name, func(t *testing.T) {
-			cfg := f.config()
-			cfg.ControlPlane = controlPlane(t, "http://127.0.0.1/reg-"+uuid.NewString()[:8])
-			cfg.ControlPlane.Registration = tc.mode
-			deps := openrails.Deps{Postgres: f.pool}
-			if tc.mode == iam.RegistrationModeOpen || tc.mode == iam.RegistrationModeInviteOnly {
-				deps.Email = &outbox{}
-			}
-			client, err := openrails.New(t.Context(), cfg, deps)
+			issuer := "http://127.0.0.1/reg-" + uuid.NewString()[:8]
+			srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+				cfg.Auth.Issuer = issuer
+				cfg.Registration = tc.mode
+				if tc.mode == iam.RegistrationModeOpen || tc.mode == iam.RegistrationModeInviteOnly {
+					deps.Engine.Email = &outbox{}
+				}
+			})
+			handler, err := standaloneHandler(srv)
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = client.Close(context.Background()) })
-			handler, err := standaloneHandler(client)
-			require.NoError(t, err)
-			base := strings.TrimSuffix(cfg.ControlPlane.Auth.Issuer, "/")
+			base := issuer
 			base = base[strings.Index(base, "/reg-"):] + "/v1"
 
 			w := get(handler, base+"/capabilities")
@@ -83,14 +80,11 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			iam.RegistrationModeOpen:       "requires an email or SMS sender",
 			iam.RegistrationModeInviteOnly: "requires an email or SMS sender",
 		} {
-			cfg := f.config()
-			cfg.ControlPlane = controlPlane(t, "http://127.0.0.1/reg-"+uuid.NewString()[:8])
-			cfg.ControlPlane.Auth.AllowMissingSenders = false
-			cfg.ControlPlane.Registration = mode
-			client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-			if err == nil {
-				_ = client.Close(context.Background())
-			}
+			_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
+				cfg.Auth.Issuer = "http://127.0.0.1/reg-" + uuid.NewString()[:8]
+				cfg.Auth.AllowMissingSenders = false
+				cfg.Registration = mode
+			})
 			require.ErrorContains(t, err, want, mode)
 		}
 	})

@@ -33,7 +33,8 @@ Before the code:
 | `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind` |
 | `openrails.PSPFromEnv` | Removed: build each PSP from your own configuration with the rail's typed struct (`openrails.NMIPSP`, `StripePSP`, `CCBillPSP`, `SolanaPSP`) and its `PSPConfig()`, or keep the merchant in a file read by `openrails.ReadMerchantFile` |
 | `MerchantDeclaration` with `Profile`, `Invoice`, `BillingPolicies`, `CheckoutRouting` and their `*Config` types | `MerchantDeclaration.Settings` is the `billing.MerchantSettings` document the configuration API reads and applies |
-| `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail; `Deps.SMSSender` | One sender for both: `Deps.Email` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused. Text messages: `Deps.SMS` |
+| `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail; `Deps.SMSSender` | One sender: `Deps.Email` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused. The standalone server's AuthKit mail goes through it rendered, or through `server.Deps.AuthEmail`; text through `server.Deps.SMS` |
+| `Config.ControlPlane` (`ControlPlaneConfig`, `AuthConfig`, `MerchantCreationConfig`, `ResourceServerConfig`, `NamingConfig`), `ErrNoControlPlane`, `Deps.SMS`, `Deps.HasVaultedPaymentMethod`, `AdminConsole.Issuer`, `Email.Auth`, and the control-plane `Client` methods (`ProvisionMerchant`, `AuthKit`, `FleetAnalytics`, …) | The `server` package: `server.New(ctx, server.Config{Engine: cfg, Auth: …}, server.Deps{Engine: deps})` builds the engine, its own AuthKit and the control plane; the methods are the `server.Server`'s; `server.Config.ConsoleIssuer` signs staff in to the console at a trusted issuer |
 | A hand-written `ALTER … OWNER` pass after migrating a shared schema | The role of the pool `New` runs with owns every object; for another owner, have that pool's connections `SET ROLE` to it |
 | `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
@@ -44,7 +45,7 @@ Before the code:
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
-| `AuthConfig.Naming merchant.NamingConfig` | `openrails.NamingConfig`, `openrails.FormerNamesConfig`, `openrails.FormerNamesMode` |
+| `AuthConfig.Naming merchant.NamingConfig` | `server.NamingConfig`, `server.FormerNamesConfig`, `server.FormerNamesMode` |
 | `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` returns an error for them; they belong to `openrails.NewRemote` |
 | `Close` on a client from `With` closed the engine | It returns an error; close the client `openrails.New` returned |
 | `openrails.WithCurrency`; `client.Balance` | Removed: every request names its currency |
@@ -239,7 +240,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename is `PUT /v1/merchant/name` and a user's merchants `GET /v1/merchants` |
 | `GetUnreadNotificationCount` returned `int64` | It returns `billing.UnreadCount` |
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical entries of `client.ListMerchantNotifications(` |
-| `ListActiveMerchantIDs(ctx, limit, offset)` | `client.ListActiveMerchantIDs(` takes a `billing.PageRequest` and returns a page |
+| `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
 | Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | `merchant:operations:read` gates the inbox, findings and worker health |
 | Permissions `merchant:catalog:read-own`, `merchant:catalog:update-own`; the control plane's `creator` role | Removed with creator-owned catalogs; a teammate or API key holds `viewer`, `support` or `owner` |

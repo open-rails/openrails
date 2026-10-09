@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/server"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,8 +18,8 @@ import (
 func TestMerchantCreationRoute(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
-		cfg.ControlPlane.MerchantCreation = &openrails.MerchantCreationConfig{ReservedSlugs: []string{reserved}, FreeAllowance: 1}
+	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.MerchantCreation = &server.MerchantCreationConfig{ReservedSlugs: []string{reserved}, FreeAllowance: 1}
 		deps.HasVaultedPaymentMethod = func(context.Context, string) (bool, error) { return false, nil }
 	})
 	handler, err := standaloneHandler(cp)

@@ -10,13 +10,13 @@ import (
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
-	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/config"
-	embcp "github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/controlplane"
 )
 
 type pushAuthBootstrapOptions struct {
@@ -122,18 +122,17 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 		return fmt.Errorf("config not loaded; push-auth-bootstrap requires --config")
 	}
 
-	application := &app.App{Config: cfg}
+	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	if err != nil {
+		return err
+	}
 	defer func() {
-		if closeErr := application.Close(context.Background()); closeErr != nil {
+		if closeErr := srv.Close(context.Background()); closeErr != nil {
 			log.WithError(closeErr).Error("push-auth-bootstrap cleanup failed")
 		}
 	}()
 
-	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
-		return fmt.Errorf("attach control plane: %w", err)
-	}
-
-	return applyAuthKitAuthorityManifest(ctx, application, manifest, out, iam.BootstrapOptions{
+	return applyAuthKitAuthorityManifest(ctx, cp, manifest, out, iam.BootstrapOptions{
 		DryRun:      opts.dryRun,
 		StartupOnly: opts.startupOnly,
 		Name:        opts.name,
@@ -163,18 +162,17 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return err
 	}
 
-	application := &app.App{Config: cfg}
+	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	if err != nil {
+		return err
+	}
 	defer func() {
-		if closeErr := application.Close(context.Background()); closeErr != nil {
+		if closeErr := srv.Close(context.Background()); closeErr != nil {
 			log.WithError(closeErr).Error("push-merchant-config cleanup failed")
 		}
 	}()
 
-	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
-		return fmt.Errorf("attach control plane: %w", err)
-	}
-
-	return applyPushMerchantConfigManifest(ctx, cfg, application, manifest, out, reconcileOpts)
+	return applyPushMerchantConfigManifest(ctx, cfg, cp, manifest, out, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {
@@ -205,17 +203,17 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		return fmt.Errorf("config not loaded; dump-merchant-config requires --config")
 	}
 
-	application := &app.App{Config: cfg}
+	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	if err != nil {
+		return err
+	}
 	defer func() {
-		if closeErr := application.Close(context.Background()); closeErr != nil {
+		if closeErr := srv.Close(context.Background()); closeErr != nil {
 			log.WithError(closeErr).Error("dump-merchant-config cleanup failed")
 		}
 	}()
-	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
-		return fmt.Errorf("attach control plane: %w", err)
-	}
 
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, embcp.Get(application), opts.slug, bootstrap.DumpMerchantConfigOptions{
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, cp, opts.slug, bootstrap.DumpMerchantConfigOptions{
 		IncludeSecrets: opts.includeSecrets,
 	})
 	if err != nil {
@@ -240,14 +238,10 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 // server start only. Catalog files are never reconciled from normal server
 // startup (explicit CLI/init-job); the MODE-1 merchant manifest converges
 // separately EVERY boot (#847, serverboot.ReconcileBootMerchantManifest).
-func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) error {
-	path := resolveBootstrapManifestPath(cfg)
+func applyStartupBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {
+	path := resolveBootstrapManifestPath()
 	if path == "" {
 		return nil
-	}
-	cp := embcp.Get(a)
-	if cp == nil {
-		return fmt.Errorf("startup bootstrap: control plane not attached (#469: it is mandatory in standalone mode)")
 	}
 
 	manifest, err := readBootstrapManifest(path)
@@ -255,12 +249,12 @@ func applyStartupBootstrap(ctx context.Context, cfg *config.Config, a *app.App) 
 		return err
 	}
 	log.WithField("file", path).Info("startup bootstrap: first run — applying AuthKit authority manifest")
-	return applyAuthKitAuthorityManifest(ctx, a, manifest, log.StandardLogger().Out, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
+	return applyAuthKitAuthorityManifest(ctx, cp, manifest, log.StandardLogger().Out, iam.BootstrapOptions{StartupOnly: true, Name: "openrails"})
 }
 
 // resolveBootstrapManifestPath returns the conventional bootstrap manifest
 // location when that file exists, else "".
-func resolveBootstrapManifestPath(_ *config.Config) string {
+func resolveBootstrapManifestPath() string {
 	if _, err := os.Stat(bootstrap.DefaultBootstrapManifestPath); err == nil {
 		return bootstrap.DefaultBootstrapManifestPath
 	}
@@ -286,11 +280,7 @@ func readBootstrapManifest(path string) (iam.BootstrapManifest, error) {
 // from a manifest, validated against the control plane's roles. It
 // intentionally does not touch OpenRails merchant config, secrets, catalog,
 // provider state, or remote rails.
-func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest iam.BootstrapManifest, out io.Writer, opts iam.BootstrapOptions) error {
-	cp := embcp.Get(a)
-	if cp == nil {
-		return fmt.Errorf("AuthKit authority bootstrap: control plane not attached")
-	}
+func applyAuthKitAuthorityManifest(ctx context.Context, cp *controlplane.ControlPlane, manifest iam.BootstrapManifest, out io.Writer, opts iam.BootstrapOptions) error {
 	if cp.Core() == nil {
 		return fmt.Errorf("AuthKit authority bootstrap: core service unavailable")
 	}
@@ -305,7 +295,7 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest iam
 // merchant config manifest: permission-group + optional host-app issuer-as-owner,
 // merchant row, provider secrets, and profile (#527). It intentionally does not
 // touch catalog/provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a *app.App, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}
@@ -314,10 +304,6 @@ func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, a 
 		return nil
 	}
 
-	cp := embcp.Get(a)
-	if cp == nil {
-		return fmt.Errorf("merchant config: control plane not attached")
-	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, reconcileOpts); err != nil {
 		return fmt.Errorf("merchant bootstrap: %w", err)
 	}

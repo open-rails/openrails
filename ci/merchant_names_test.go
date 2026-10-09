@@ -20,58 +20,60 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/server"
 )
 
-// attachControlPlane builds a client with the control plane, minting real
-// user tokens over the shared AuthKit schema. edit adjusts the configuration.
-func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, *openrails.Deps)) *openrails.Client {
+// newServer builds a standalone server over the fixture's database, minting
+// real user tokens over the shared AuthKit schema. edit adjusts the
+// configuration.
+func (f *fixture) newServer(t *testing.T, edit func(*server.Config, *server.Deps)) *server.Server {
 	t.Helper()
-	cfg := f.config()
-	cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
+	srv, err := f.buildServer(t, edit)
+	require.NoError(t, err)
+	return srv
+}
+
+// buildServer is newServer reporting New's error.
+func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.Deps)) (*server.Server, error) {
+	t.Helper()
+	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: server.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 	}}
-	deps := openrails.Deps{Postgres: f.pool}
+	deps := server.Deps{Engine: openrails.Deps{Postgres: f.pool}}
 	if edit != nil {
 		edit(&cfg, &deps)
 	}
-	client, err := openrails.New(t.Context(), cfg, deps)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	return client
+	srv, err := server.New(t.Context(), cfg, deps)
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { _ = srv.Close(context.Background()) })
+	return srv, nil
 }
 
 // operatorRename renames a merchant as the operator: no rename interval, no
 // reserved-name check.
-func operatorRename(ctx context.Context, cp *openrails.Client, id billing.MerchantID, name string) error {
-	_, err := operator.Get(engine.Graph(cp)).RenameMerchant(ctx, id, name, "", true)
+func operatorRename(ctx context.Context, srv *server.Server, id billing.MerchantID, name string) error {
+	_, cp := operator.Of(srv)
+	_, err := cp.RenameMerchant(ctx, id, name, "", true)
 	return err
 }
 
-// standaloneHandler is the standalone server's full HTTP surface, with job
-// producers bound as the standalone boot binds them; routes adds the admin
-// console or catalog edits.
-func standaloneHandler(client *openrails.Client, routes ...openrails.Routes) (http.Handler, error) {
-	graph := engine.Graph(client)
+// standaloneHandler is the server's whole HTTP surface, with job producers
+// bound as Run binds them.
+func standaloneHandler(srv *server.Server) (http.Handler, error) {
+	graph, _ := operator.Of(srv)
 	if err := graph.Runtime.InitRiver(context.Background()); err != nil {
 		return nil, err
 	}
-	var sel openrails.Routes
-	if len(routes) > 0 {
-		sel = routes[0]
-	}
-	server, err := operator.StandaloneServer(graph, sel)
-	if err != nil {
-		return nil, err
-	}
-	return server.Handler(), nil
+	return srv.Handler(), nil
 }
 
 // newUser creates an AuthKit user with an unverified email and returns its id
 // and a bearer access token.
-func newUser(t *testing.T, cp *openrails.Client) (string, string) {
+func newUser(t *testing.T, cp *server.Server) (string, string) {
 	t.Helper()
 	username := "u" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	u, err := cp.AuthKit().CreateUser(t.Context(), iam.NewUser{Email: username + "@e2e.test", Username: username})
@@ -83,14 +85,14 @@ func newUser(t *testing.T, cp *openrails.Client) (string, string) {
 
 // newOwner is a verified account signed in with its password: owner
 // operations need a recent sign-in, which a minted token is not.
-func newOwner(t *testing.T, cp *openrails.Client) (string, string) {
+func newOwner(t *testing.T, cp *server.Server) (string, string) {
 	t.Helper()
 	u := newAccount(t, cp)
 	return u.ID, authtest.SignIn(t, cp.AuthKit(), u).AccessToken
 }
 
 // verifyEmail marks the user's email proven, as the system.
-func verifyEmail(t *testing.T, cp *openrails.Client, userID string) {
+func verifyEmail(t *testing.T, cp *server.Server, userID string) {
 	t.Helper()
 	verified := true
 	_, err := cp.AuthKit().UpdateUser(t.Context(), iam.SystemIdentity(), userID, iam.UserUpdate{EmailVerified: &verified})
@@ -99,9 +101,9 @@ func verifyEmail(t *testing.T, cp *openrails.Client, userID string) {
 
 func uniqueName(prefix string) string { return prefix + "-" + uuid.NewString()[:8] }
 
-func reserving(names ...string) func(*openrails.Config, *openrails.Deps) {
-	return func(cfg *openrails.Config, _ *openrails.Deps) {
-		cfg.ControlPlane.MerchantCreation = &openrails.MerchantCreationConfig{ReservedSlugs: names}
+func reserving(names ...string) func(*server.Config, *server.Deps) {
+	return func(cfg *server.Config, _ *server.Deps) {
+		cfg.MerchantCreation = &server.MerchantCreationConfig{ReservedSlugs: names}
 	}
 }
 
@@ -128,7 +130,7 @@ func call(t *testing.T, handler http.Handler, token, method, path, selector stri
 func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, reserving(reserved))
+	cp := f.newServer(t, reserving(reserved))
 	ctx := t.Context()
 	owner, _ := newUser(t, cp)
 	other, _ := newUser(t, cp)
@@ -191,7 +193,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 func TestMerchantRenameRoute(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.attachControlPlane(t, reserving(reserved))
+	cp := f.newServer(t, reserving(reserved))
 	ctx := t.Context()
 	owner, token := newOwner(t, cp)
 	shop := uniqueName("shop")

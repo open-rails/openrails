@@ -30,11 +30,10 @@ import (
 	"github.com/open-rails/authkit/keys"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
-	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/server"
 )
 
 const resourceID = "https://openrails.e2e.test"
@@ -146,7 +145,7 @@ func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
-func provision(t *testing.T, cp *openrails.Client, slug string) {
+func provision(t *testing.T, cp *server.Server, slug string) {
 	owner := newAccount(t, cp)
 	_, err := cp.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
 	require.NoError(t, err)
@@ -163,11 +162,11 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	stranger := newIssuerKey(t, "https://stranger.e2e.test")
 	shop, rival := uniqueName("rs-shop"), uniqueName("rs-rival")
 	const adminOrigin = "https://admin.host.e2e.test"
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
-		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
+	cp := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+		cfg.ResourceServer = &server.ResourceServerConfig{
 			Identifier:   resourceID,
 			DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []openrails.TrustedIssuerConfig{
+			TrustedIssuers: []server.TrustedIssuerConfig{
 				{
 					Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop},
 					Permissions:    []string{billing.MerchantOperationsRead, billing.MerchantPSPsRead},
@@ -382,10 +381,10 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 	}
 
 	shop := uniqueName("rs-authkit")
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
-		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
+	cp := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+		cfg.ResourceServer = &server.ResourceServerConfig{
 			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []openrails.TrustedIssuerConfig{{
+			TrustedIssuers: []server.TrustedIssuerConfig{{
 				Name: "authkit", Issuer: as.URL, Keys: pinned, Merchants: []string{shop},
 				Permissions: []string{"merchant:*"}, AllowedOrigins: []string{adminOrigin},
 			}},
@@ -510,8 +509,8 @@ func dpopServe(t *testing.T, handler http.Handler, tokens authtest.OAuthTokens, 
 func TestResourceServerTrustsRegisteredIssuers(t *testing.T) {
 	f := newFixture(t)
 	app := newIssuerKey(t, "https://"+strings.ReplaceAll(f.schema, "_", "-")+".merchant.e2e.test")
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
-		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32)}
+	cp := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+		cfg.ResourceServer = &server.ResourceServerConfig{Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32)}
 	})
 	jwk := keys.PublicJWK(&app.key.PublicKey, app.kid, "")
 	shop := uniqueName("registered")
@@ -526,8 +525,8 @@ merchants:
         keys:
           - {kty: "%s", kid: "%s", n: "%s", e: "%s"}
 `, shop, app.iss, jwk.Kty, jwk.Kid, jwk.N, jwk.E)), 0o600))
-	graph := engine.Graph(cp)
-	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, nil, ""))
+	graph, plane := operator.Of(cp)
+	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, manifest, nil, ""))
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	const findings = "/v1/merchant/findings"
@@ -581,10 +580,10 @@ func TestResourceServerFederatedGrants(t *testing.T) {
 	host := newIssuerKey(t, "https://grants-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
 	other := newIssuerKey(t, "https://grants-other-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
 	shop, rival := uniqueName("fg-shop"), uniqueName("fg-rival")
-	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
-		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
+	cp := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
+		cfg.ResourceServer = &server.ResourceServerConfig{
 			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []openrails.TrustedIssuerConfig{
+			TrustedIssuers: []server.TrustedIssuerConfig{
 				{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{"merchant:*"}},
 				{Name: "other", Issuer: other.iss, Keys: other.pinned(t), Merchants: []string{rival}, Permissions: []string{"merchant:*"}},
 			},

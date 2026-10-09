@@ -44,11 +44,6 @@ func TestNewRefusesInvalidConfigBeforeOpeningResources(t *testing.T) {
 			c.Merchant.Slug = "m"
 			c.Catalog = &catalog.Application{}
 		}), config.Deps{}, "Config.Catalog: "},
-		"catalog with control plane": {with(sandbox, func(c *config.Config) {
-			c.ControlPlane = &config.ControlPlaneConfig{}
-			c.Merchant.Slug = "m"
-			c.Catalog = &catalog.Application{SchemaVersion: 1}
-		}), config.Deps{}, "control plane's merchants"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, err := New(context.Background(), tc.cfg, tc.deps)

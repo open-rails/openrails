@@ -9,7 +9,6 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/authkit/iam"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -32,14 +31,9 @@ type Deps struct {
 	// the binary was built with one.
 	ConsoleAssets fs.FS
 
-	// Email delivers OpenRails' email: billing receipts and alerts, and the
-	// control plane's AuthKit messages. Nil uses Config.SendGrid.
+	// Email delivers OpenRails' email: billing receipts and alerts. Nil uses
+	// Config.SendGrid.
 	Email EmailSender
-	// SMS delivers the control plane's AuthKit text messages.
-	SMS SMSSender
-	// HasVaultedPaymentMethod answers whether a user has a payment method on
-	// file, unlocking merchant creation beyond the free allowance.
-	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
 
 	// Test seams, refused with Config.TestMode live. StripeTransport and
 	// NMITransport replace the provider wires; DNSResolver answers api_host
@@ -65,19 +59,10 @@ type Email struct {
 	Subject string
 	Text    string
 	HTML    string
-	// Auth is the AuthKit message a control-plane email renders, for a sender
-	// with its own templates; nil for billing email.
-	Auth *iam.EmailMessage
 }
 
 // EmailAddress is a mailbox and its display name.
 type EmailAddress struct {
 	Name    string
 	Address string
-}
-
-// SMSSender delivers AuthKit text messages.
-type SMSSender interface {
-	Send(context.Context, iam.SMSMessage) error
-	CheckHealth(context.Context) error
 }

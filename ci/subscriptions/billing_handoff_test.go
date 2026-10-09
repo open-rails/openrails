@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/server"
 )
 
 // Exercise the operator's real CLI over separate databases, then resume through
@@ -222,37 +223,40 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	mid := source.client[embedded].MerchantID()
 	source.stop()
 	target := handoffTarget(t, source)
-	client, err := openrails.New(t.Context(), openrails.Config{
-		Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema},
-		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
-		DB: &openrails.DBConfig{URL: target.dsn},
-		ControlPlane: &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
+	srv, err := server.New(t.Context(), server.Config{
+		Engine: openrails.Config{
+			Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema},
+			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
+			DB: &openrails.DBConfig{URL: target.dsn},
+		},
+		LocalSignIn: true, Auth: server.AuthConfig{
 			Issuer: "http://127.0.0.1/" + target.schema, AllowMemory: true, AllowMissingSenders: true,
 			AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
-		}},
-	}, openrails.Deps{Postgres: target.pool})
+		},
+	}, server.Deps{Engine: openrails.Deps{Postgres: target.pool}})
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	auth := client.AuthKit()
+	t.Cleanup(func() { require.NoError(t, srv.Close(context.Background())) })
+	auth := srv.AuthKit()
+	_, cp := operator.Of(srv)
 	owner, outsider := authtest.NewUser(t, auth), authtest.NewUser(t, auth)
 	ownerSubject := iam.UserSubject(owner.ID)
 	group, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
 	require.NoError(t, err)
 	req := operator.ProvisionMerchantForRestoreRequest{MerchantID: mid, Slug: target.slug, ExistingGroupID: group.ID, OwnerUserID: outsider.ID}
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), engine.Graph(client), req)
+	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.ErrorIs(t, err, iam.ErrInsufficientAuthority)
 	req.OwnerUserID = owner.ID
-	prepared, err := operator.ProvisionMerchantForRestore(t.Context(), engine.Graph(client), req)
+	prepared, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.NoError(t, err)
 	require.Equal(t, mid, prepared.MerchantID)
 	require.Equal(t, group.ID, prepared.GroupID)
 	require.True(t, prepared.Created)
-	again, err := operator.ProvisionMerchantForRestore(t.Context(), engine.Graph(client), req)
+	again, err := operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.NoError(t, err)
 	require.False(t, again.Created)
 	otherGroup, err := auth.CreateGroup(t.Context(), iam.NewGroup{ID: uuid.NewString(), Persona: operator.MerchantType, Owner: &ownerSubject})
 	require.NoError(t, err)
 	req.ExistingGroupID = otherGroup.ID
-	_, err = operator.ProvisionMerchantForRestore(t.Context(), engine.Graph(client), req)
+	_, err = operator.ProvisionMerchantForRestore(t.Context(), cp, req)
 	require.ErrorIs(t, err, merchants.ErrMerchantRestoreConflict)
 }

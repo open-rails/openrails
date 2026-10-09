@@ -12,7 +12,7 @@ import (
 )
 
 // hostOnly are the engine settings a host builds in code; no file key sets them.
-var hostOnly = map[string]bool{"Merchant": true, "Catalog": true, "Checkout": true, "ControlPlane": true}
+var hostOnly = map[string]bool{"Merchant": true, "Catalog": true, "Checkout": true}
 
 // Every file key reaches the server's configuration, and every engine setting
 // is either a file key or deliberately host-only.
@@ -41,6 +41,7 @@ func TestFileReachesConfig(t *testing.T) {
 		}
 	}
 	f.AdminConsole.Enabled = true
+	f.AdminConsole.Issuer = &billing.ConsoleIssuer{}
 	cfg, err := f.config()
 	require.NoError(t, err)
 	for _, v := range []reflect.Value{reflect.ValueOf(cfg).Elem(), reflect.ValueOf(cfg.Config).Elem()} {

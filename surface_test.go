@@ -40,27 +40,10 @@ var hostingMethods = map[string]string{
 }
 
 // embeddedMethods are operations only an in-process engine offers. Each one
-// crosses merchants as the operator of a hosted product, or runs inside a
-// transaction of the host's, so no merchant route can carry it; the reason
-// names the host that calls it.
+// serves a hosted product or runs inside a transaction of the host's, so no
+// merchant route can carry it; the reason names the host that calls it. The
+// control plane's cross-merchant operations are package server's.
 var embeddedMethods = map[string]string{
-	"AuthKit":                            "the hosted product: its account routes use the control plane's AuthKit client",
-	"AuthenticateUser":                   "the hosted product: verifies a control-plane session on its own routes",
-	"HasRootPermission":                  "the hosted product: gates its operator routes on the root group",
-	"ResolveAuthorizedMerchant":          "the hosted product: resolves the merchant its own routes act on, with the caller's permission",
-	"ResolveMerchantForGroup":            "the hosted product: resolves a merchant from a group reference",
-	"ProvisionMerchant":                  "the hosted product: registration provisions a merchant for its owner",
-	"SetMerchantAPIHost":                 "the hosted product: binds a host of the deployment's own, which a merchant cannot claim",
-	"ListActiveMerchantIDs":              "the hosted product: its usage settlement walks the merchant directory",
-	"ListMerchantsForSubject":            "the hosted product: the merchants a portal user is a customer of",
-	"ListUserMerchants":                  "the hosted product: current staff and owner memberships for its verified live user request",
-	"EnsureCustomerPermissionGroup":      "the hosted product: the portal group of a customer organisation",
-	"SubjectHasVaultedPaymentMethod":     "the hosted product: Deps.HasVaultedPaymentMethod, for its merchant-creation policy",
-	"FleetAnalytics":                     "the hosted product: its operator analytics",
-	"FleetTimeseries":                    "the hosted product: its operator analytics",
-	"ListMerchantRetirementCandidates":   "the hosted product: its dormant-merchant policy",
-	"RetireUnusedMerchant":               "the hosted product: its dormant-merchant policy",
-	"CompletePendingMerchantRetirements": "the hosted product: its dormant-merchant policy",
 	"DeclarePSP":                         "the hosted product: a PSP identity without credentials, for imported billing facts",
 	"OpenOperationAuthorizationTx":       "host-four: OpenOperationAuthorization inside the host's transaction",
 	"GetOperationAuthorizationTx":        "host-four: GetOperationAuthorization inside the host's transaction",

@@ -21,13 +21,11 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 )
 
-// ControlPlane is OpenRails' in-process AuthKit control plane (issue #224):
-// the AuthKit Client that holds identities, merchant groups and credentials,
-// and the verifiers OpenRails' routes authenticate with.
-//
-// HARD CUT (#469): the control plane is mandatory in standalone mode — the
-// standalone binary always constructs it at boot and a construction failure is
-// fatal. Embedded hosts opt in with Config.ControlPlane.
+// ControlPlane is the standalone server's multi-merchant control plane over
+// its own AuthKit client, which holds identities, merchant groups and
+// credentials: merchant provisioning and names, teams, API keys, federated
+// grants, the OAuth resource server and fleet aggregates. Only package server
+// builds one; the embedded engine has none.
 type ControlPlane struct {
 	client *authkit.Client
 	// registration is AuthKit's native self-registration mode; closed unless
@@ -75,12 +73,11 @@ type options struct {
 	resourceServer               *config.ResourceServerConfig
 }
 
-// Option configures the control plane for embedding hosts.
+// Option configures the control plane.
 type Option func(*options)
 
 // WithRegistration sets AuthKit's native self-registration mode. Empty is
-// closed: standalone registers nobody; hosted products opt in through
-// Config.ControlPlane.Registration.
+// closed: a self-hosted server registers nobody; hosted products open it.
 func WithRegistration(mode iam.RegistrationMode) Option {
 	return func(o *options) { o.registration = mode }
 }
@@ -298,63 +295,23 @@ func authConfig(auth *config.AuthConfig, options options, naming config.NamingPo
 	}
 }
 
-// New builds the OpenRails-owned AuthKit control plane from config and a pgx
-// pool over the database holding AuthKit's schema (standalone: OpenRails' own
-// database). The caller owns the pool.
-//
-// The control plane is mandatory in standalone mode (#469): every input is
-// required and a failure here is a boot failure, never a silent downgrade.
-func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
-	if cfg == nil || auth == nil {
-		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
-	}
-	if err := config.ValidateAuthTransport(auth); err != nil {
-		return nil, err
-	}
-	if pool == nil {
-		return nil, errors.New("controlplane: pgx pool is required")
-	}
-	if strings.TrimSpace(auth.Issuer) == "" {
-		return nil, errors.New("controlplane: auth.issuer is required")
-	}
-	options := newOptions(opts)
-	if err := ValidateRegistrationMode(options.registration); err != nil {
-		return nil, err
-	}
-
-	var pattern *regexp.Regexp
-	if options.merchantCreation != nil {
-		if pat := strings.TrimSpace(options.merchantCreation.SlugPattern); pat != "" {
-			re, err := regexp.Compile("^(?:" + pat + ")$")
-			if err != nil {
-				return nil, fmt.Errorf("controlplane: merchant creation slug pattern: %w", err)
-			}
-			pattern = re
-		}
-	}
-	namingConfig := auth.Naming
-	if options.naming != nil {
-		namingConfig = *options.naming
-	}
-	naming, err := config.NormalizeNaming(namingConfig)
+// AuthKit is the control plane's AuthKit: the configuration and dependencies
+// a standalone server builds, migrates and serves its AuthKit client from,
+// over pool (OpenRails' own database, owned by the caller).
+func AuthKit(cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (authkit.Config, authkit.Deps, error) {
+	cp, options, err := prepare(cfg, auth, pool, opts)
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: naming policy: %w", err)
+		return authkit.Config{}, authkit.Deps{}, err
 	}
-
 	var keySource keys.Source
 	if auth.MintDisabled {
 		log.Info("controlplane: auth.mint_disabled=true; running VERIFY-ONLY by declared posture (token minting disabled)")
 	} else if keySource, err = inlineKeySource(auth); err != nil {
-		return nil, err
-	}
-	cp := &ControlPlane{
-		registration: registrationMode(options.registration), localSignIn: options.localSignIn, merchantCreation: options.merchantCreation,
-		merchantCreationPattern: pattern, naming: naming,
-		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
+		return authkit.Config{}, authkit.Deps{}, err
 	}
 	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {
-		return nil, err
+		return authkit.Config{}, authkit.Deps{}, err
 	}
 	httpCfg.Groups = cp.MountedRouteGroups()
 	httpCfg.APIPath = authAPIPath(auth.Issuer)
@@ -375,25 +332,74 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	case options.redis != nil:
 		deps.Redis = options.redis
 	case !auth.AllowMemory:
-		return nil, errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
+		return authkit.Config{}, authkit.Deps{}, errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
 	}
-	client, err := authkit.New(ctx, authConfig(auth, options, naming, &httpCfg, config.RiverSchemaName(cfg)), deps)
+	return authConfig(auth, options, cp.naming, &httpCfg, config.RiverSchemaName(cfg)), deps, nil
+}
+
+// New is the control plane over client, the AuthKit client built from AuthKit
+// with the same arguments. Closing it closes client.
+func New(client *authkit.Client, cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
+	if client == nil {
+		return nil, errors.New("controlplane: an AuthKit client is required")
+	}
+	cp, options, err := prepare(cfg, auth, pool, opts)
 	if err != nil {
-		return nil, fmt.Errorf("controlplane: build authkit (declare auth.mint_disabled=true if verify-only is intentional, #748): %w", err)
+		return nil, err
 	}
 	cp.client = client
 	cp.users = userauth.NewAuthenticator(client)
 	if options.resourceServer != nil {
 		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
-			_ = client.Close(context.WithoutCancel(ctx))
 			return nil, err
 		}
 	}
 	return cp, nil
 }
 
-// Close releases AuthKit's resources. The host pool supplied to New remains
-// owned by the caller.
+// prepare validates the control plane's declaration: every input is required
+// and a failure is a boot failure, never a silent downgrade (#469).
+func prepare(cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts []Option) (*ControlPlane, options, error) {
+	options := newOptions(opts)
+	if cfg == nil || auth == nil || strings.TrimSpace(auth.Issuer) == "" {
+		return nil, options, errors.New("controlplane: auth.issuer is required")
+	}
+	if err := config.ValidateAuthTransport(auth); err != nil {
+		return nil, options, err
+	}
+	if pool == nil {
+		return nil, options, errors.New("controlplane: pgx pool is required")
+	}
+	if err := ValidateRegistrationMode(options.registration); err != nil {
+		return nil, options, err
+	}
+	var pattern *regexp.Regexp
+	if options.merchantCreation != nil {
+		if pat := strings.TrimSpace(options.merchantCreation.SlugPattern); pat != "" {
+			re, err := regexp.Compile("^(?:" + pat + ")$")
+			if err != nil {
+				return nil, options, fmt.Errorf("controlplane: merchant creation slug pattern: %w", err)
+			}
+			pattern = re
+		}
+	}
+	namingConfig := auth.Naming
+	if options.naming != nil {
+		namingConfig = *options.naming
+	}
+	naming, err := config.NormalizeNaming(namingConfig)
+	if err != nil {
+		return nil, options, fmt.Errorf("controlplane: naming policy: %w", err)
+	}
+	return &ControlPlane{
+		registration: registrationMode(options.registration), localSignIn: options.localSignIn, merchantCreation: options.merchantCreation,
+		merchantCreationPattern: pattern, naming: naming,
+		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
+	}, options, nil
+}
+
+// Close closes the AuthKit client. The pool supplied to New remains owned by
+// the caller.
 func (c *ControlPlane) Close() {
 	if c != nil && c.client != nil {
 		_ = c.client.Close(context.Background())

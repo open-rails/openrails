@@ -55,11 +55,13 @@ state and the merchant switcher then offer "New merchant". Any link may open the
 console on a merchant with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`);
 the console selects it if the user belongs to it and drops the fragment.
 
-**Where staff sign in.** At a trusted issuer when `AdminConsole.Issuer`
-(standalone: `admin_console.issuer`) names one of the resource server's trusted
-issuers and the console's public client there; otherwise at AuthKit. A
-standalone console needs one of the two: without `local_sign_in` the control
-plane serves no sign-in, and a console with neither refuses to boot. Register
+**Where staff sign in.** Embedded, at the host's AuthKit
+(`AdminConsole.AuthBaseURL`). Standalone, at a trusted issuer when
+`server.Config.ConsoleIssuer` (`admin_console.issuer`) names one of the
+resource server's trusted issuers and the console's public client there;
+otherwise at the server's own AuthKit. A standalone console needs one of the
+two: without `local_sign_in` the server serves no sign-in, and a console with
+neither refuses to boot. Register
 the console at your issuer as a public client with the redirect URI
 `<console URL>/callback`, the authorization-code and refresh grants and
 OpenRails' resource identifier; its tokens' permissions (within the ceiling)

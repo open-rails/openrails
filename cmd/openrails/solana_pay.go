@@ -45,7 +45,7 @@ func newSolanaPayResolveCmd() *cobra.Command {
 }
 
 func runSolanaPayResolve(ctx context.Context, cfg *config.Config, merchantSlug, signature, resolution string) error {
-	client, graph, err := openEngine(ctx, cfg, openrails.Deps{}, false)
+	client, graph, err := openEngine(ctx, cfg, openrails.Deps{})
 	if err != nil {
 		return err
 	}

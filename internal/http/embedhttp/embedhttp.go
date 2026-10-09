@@ -10,7 +10,6 @@
 package embedhttp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -28,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -70,26 +68,6 @@ type Assembler struct {
 	// Auth is the mount's Routes.Auth: the merchant tier's staff gate, and
 	// who presents a checkout session.
 	Auth billingauth.Auth
-	// HostResolve is the #734 Host->merchant mechanism, derived from an
-	// attached control plane; nil without one.
-	HostResolve merchant.HostResolver
-}
-
-// hostMerchantResolver is the #734 neutral capability a *controlplane.ControlPlane
-// satisfies, asserted off App.ControlPlane so this package stays free of
-// AuthKit.
-type hostMerchantResolver interface {
-	ResolveMerchantByHost(ctx context.Context, host string) (billing.MerchantID, error)
-}
-
-// HostMerchantResolverFrom derives the #734 Host->merchant resolver from an
-// app's ControlPlane field. Nil when no control plane is attached.
-func HostMerchantResolverFrom(controlPlane any) merchant.HostResolver {
-	c, ok := controlPlane.(hostMerchantResolver)
-	if !ok || c == nil {
-		return nil
-	}
-	return c.ResolveMerchantByHost
 }
 
 // FromApp builds an Assembler from the application graph.
@@ -103,7 +81,6 @@ func FromApp(a *app.App) *Assembler {
 		CaptchaStore: a.Runtime.CaptchaStore,
 		RDB:          a.RedisClient,
 		AdminLimiter: middleware.NewAdminOperationLimiter(a.RedisClient),
-		HostResolve:  HostMerchantResolverFrom(a.ControlPlane),
 	}
 }
 
@@ -212,9 +189,6 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 			middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
-			// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
-			// nil), unrelated to CORS since #765.
-			middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
 			// OpenRails-native rate-limiting + captcha for embedded hosts.
 			limiter,
 		)

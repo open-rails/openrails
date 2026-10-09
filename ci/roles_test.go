@@ -11,7 +11,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
 )
 
@@ -20,7 +19,7 @@ import (
 // credential hands out only a role its grants cover.
 func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 	f := newFixture(t)
-	cp := operator.Get(engine.Graph(f.attachControlPlane(t, nil)))
+	_, cp := operator.Of(f.newServer(t, nil))
 	require.NotNil(t, cp)
 
 	held := func(role iam.Role) []string {

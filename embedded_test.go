@@ -37,11 +37,8 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 	_, err = c.Routes(Routes{Storefront: true})
 	require.ErrorIs(t, err, ErrRemoteClient)
 	require.Nil(t, c.Probes())
-	_, err = c.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: "x"})
-	require.ErrorIs(t, err, ErrRemoteClient)
 	_, err = c.DeclarePSP(t.Context(), billing.MerchantID(uuid.New()), billing.PSPDeclaration{})
 	require.ErrorIs(t, err, ErrRemoteClient)
-	require.Nil(t, c.AuthKit())
 	require.NoError(t, c.Close(t.Context()))
 }
 

@@ -15,12 +15,13 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/server"
 )
 
 // A staff member's permission checks act as their own sign-in: a session
@@ -30,7 +31,7 @@ import (
 // OpenRails' no-escalation check.
 func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, reserving())
+	cp := f.newServer(t, reserving())
 	ctx := t.Context()
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
@@ -78,7 +79,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 
 // newAccount creates an account with a verified email and a password, which
 // authtest.SignIn signs in. Names are unique: tests share AuthKit's schema.
-func newAccount(t *testing.T, cp *openrails.Client) authtest.User {
+func newAccount(t *testing.T, cp *server.Server) authtest.User {
 	t.Helper()
 	name := "a" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	email := name + "@e2e.test"
@@ -93,20 +94,21 @@ func newAccount(t *testing.T, cp *openrails.Client) authtest.User {
 // OpenRails' roles.
 func TestControlPlaneOperatorPaths(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, nil)
+	cp := f.newServer(t, nil)
 	ctx := t.Context()
-	require.NoError(t, engine.Graph(cp).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
+	require.NoError(t, engine.Graph(cp.Client()).Runtime.InitRiver(ctx), "bind job producers, as the standalone boot does")
 	admin := newAccount(t, cp)
 
 	slug := uniqueName("unbound")
 	var mid string
 	require.NoError(t, f.pool.QueryRow(ctx, "INSERT INTO "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" (slug, status) VALUES ($1, 'active') RETURNING id::text", slug).Scan(&mid))
-	res, err := operator.RunBootstrap(ctx, engine.Graph(cp), operator.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	_, plane := operator.Of(cp)
+	res, err := plane.Bootstrap(ctx, controlplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.True(t, res.MerchantGroupCreated)
 	require.Equal(t, mid, res.BootstrapMerchantGroupID, "the group is keyed by the merchant")
 	require.True(t, res.APIKeyMinted)
-	again, err := operator.RunBootstrap(ctx, engine.Graph(cp), operator.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
+	again, err := plane.Bootstrap(ctx, controlplane.BootstrapOptions{BootstrapMerchantSlug: slug, InitialAdminUserID: admin.ID, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.False(t, again.MerchantGroupCreated || again.APIKeyMinted, "a rerun changes nothing")
 	roles, err := cp.AuthKit().GroupRoles(ctx, iam.GroupByID(mid), []iam.Subject{iam.UserSubject(admin.ID)})

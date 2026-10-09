@@ -357,12 +357,12 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 					return err
 				}
 				defer database.Close()
-				client, graph, err := openEngine(ctx, cfg, openrails.Deps{Postgres: database.Pool()}, true)
+				srv, _, cp, err := openServer(ctx, openrails.Deps{Postgres: database.Pool()})
 				if err != nil {
 					return err
 				}
-				defer func() { _ = client.Close(context.WithoutCancel(ctx)) }()
-				if _, err := operator.ProvisionMerchantForRestore(ctx, graph, operator.ProvisionMerchantForRestoreRequest{
+				defer func() { _ = srv.Close(context.WithoutCancel(ctx)) }()
+				if _, err := operator.ProvisionMerchantForRestore(ctx, cp, operator.ProvisionMerchantForRestoreRequest{
 					MerchantID: mid, Slug: strings.TrimSpace(slug), ExistingGroupID: strings.TrimSpace(groupID), OwnerUserID: strings.TrimSpace(ownerID),
 				}); err != nil {
 					return err

@@ -66,19 +66,19 @@ type Issuer struct {
 
 // ConsoleIssuer resolves console's issuer against the resource server: nil
 // without one.
-func ConsoleIssuer(console *config.AdminConsole, rs *config.ResourceServerConfig) (*Issuer, error) {
-	if console == nil || console.Issuer == nil {
+func ConsoleIssuer(console *config.ConsoleIssuer, rs *config.ResourceServerConfig) (*Issuer, error) {
+	if console == nil {
 		return nil, nil
 	}
-	url, name, resource, err := config.ResolveConsoleIssuer(console.Issuer, rs)
+	url, name, resource, err := config.ResolveConsoleIssuer(console, rs)
 	if err != nil {
 		return nil, err
 	}
-	scope := strings.Join(strings.Fields(console.Issuer.Scope), " ")
+	scope := strings.Join(strings.Fields(console.Scope), " ")
 	if scope == "" {
 		scope = config.ConsoleScope
 	}
-	return &Issuer{URL: url, ClientID: strings.TrimSpace(console.Issuer.ClientID), Name: name, Resource: resource, Scope: scope}, nil
+	return &Issuer{URL: url, ClientID: strings.TrimSpace(console.ClientID), Name: name, Resource: resource, Scope: scope}, nil
 }
 
 // Present reports whether assets hold a servable console build: a non-nil

@@ -110,15 +110,15 @@ func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.
 	return svc.ApplyCatalog(catalogpolicy.OperatorContext(merchant.WithID(ctx, merchantID)), *params)
 }
 
-// RegisterMerchantForRestore registers a preserved merchant UUID for a host
-// without a control plane, then binds the engine to it. Call during startup,
+// RegisterMerchantForRestore registers a preserved merchant UUID for an
+// embedding host, then binds the engine to it. Call during startup,
 // before serving or starting workers. It registers no PSPs or credentials.
 func RegisterMerchantForRestore(ctx context.Context, a *app.App, id billing.MerchantID, slug string) (billing.MerchantID, error) {
 	if err := initialized(a); err != nil {
 		return billing.MerchantID{}, err
 	}
-	if a.ControlPlane != nil {
-		return billing.MerchantID{}, fmt.Errorf("openrails: an attached control plane restores through ProvisionMerchantForRestore with destination group authority")
+	if a.Standalone {
+		return billing.MerchantID{}, fmt.Errorf("openrails: a standalone server restores through ProvisionMerchantForRestore with destination group authority")
 	}
 	if bound := a.Runtime.ConfiguredMerchant(); !bound.IsZero() && bound != id {
 		return billing.MerchantID{}, merchants.ErrMerchantRestoreConflict

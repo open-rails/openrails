@@ -2,10 +2,9 @@ package operator
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 )
 
 // FleetAnalytics returns cross-merchant operator aggregates —
@@ -15,13 +14,8 @@ import (
 // gates it behind platform-superadmin authority and audits every request.
 // exclude removes one merchant from every aggregate (a hosted platform passes
 // its own platform merchant); zero excludes nothing. windowDays outside 1..365
-// is refused. Calling without an attached control plane is a wiring error
-// (call Attach/AttachWithOptions first).
-func FleetAnalytics(ctx context.Context, a *app.App, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
-	cp := Get(a)
-	if cp == nil {
-		return nil, fmt.Errorf("control plane: no control plane attached (call Attach first)")
-	}
+// is refused.
+func FleetAnalytics(ctx context.Context, cp *controlplane.ControlPlane, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
 	snapshot, err := cp.FleetAnalytics(ctx, exclude, windowDays)
 	if err != nil {
 		return nil, err

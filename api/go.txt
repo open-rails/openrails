@@ -7,9 +7,6 @@ pkg openrails, const CustomerBillingManagement config.CustomerHTTPScope = 3
 pkg openrails, const CustomerSelfService config.CustomerHTTPScope = 1
 pkg openrails, const CustomerSubscriptionManagement config.CustomerHTTPScope = 2
 pkg openrails, const CustomersNone config.CustomerHTTPScope = 0
-pkg openrails, const FormerNamesFinite config.FormerNamesMode = "finite"
-pkg openrails, const FormerNamesForever config.FormerNamesMode = "forever"
-pkg openrails, const FormerNamesImmediate config.FormerNamesMode = "immediate"
 pkg openrails, const Live config.CredentialPosture = "live"
 pkg openrails, const ProviderWritesFull untyped string = "full"
 pkg openrails, const ProviderWritesLimited untyped string = "limited"
@@ -45,8 +42,6 @@ pkg openrails, method (*Client) ArchivePSP(context.Context, billing.PSPID, billi
 pkg openrails, method (*Client) ArchiveProduct(context.Context, billing.ArchiveProductParams, ...RequestOption) (*billing.ProductArchive, error)
 pkg openrails, method (*Client) AskCatalog(context.Context, billing.AskCatalogParams, ...RequestOption) (*billing.CatalogAnswer, error)
 pkg openrails, method (*Client) AskMetrics(context.Context, billing.AskMetricsParams, ...RequestOption) (*billing.MetricsAnswer, error)
-pkg openrails, method (*Client) AuthKit() *authkit.Client
-pkg openrails, method (*Client) AuthenticateUser(*http.Request) (Identity, error)
 pkg openrails, method (*Client) CancelReprice(context.Context, billing.RepriceID, ...RequestOption) (*billing.Reprice, error)
 pkg openrails, method (*Client) CancelRepriceBatch(context.Context, billing.RepriceBatchID, ...RequestOption) (*billing.RepriceBatchCancel, error)
 pkg openrails, method (*Client) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
@@ -56,7 +51,6 @@ pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.Custo
 pkg openrails, method (*Client) CheckProductAccess(context.Context, billing.CustomerID, billing.CheckProductAccessParams, ...RequestOption) (map[string]bool, error)
 pkg openrails, method (*Client) CheckoutFrameAncestors() string
 pkg openrails, method (*Client) Close(context.Context) error
-pkg openrails, method (*Client) CompletePendingMerchantRetirements(context.Context, int) (int, error)
 pkg openrails, method (*Client) ConfirmCheckoutAttempt(context.Context, billing.CheckoutAttemptID, billing.ConfirmCheckoutAttemptParams, ...RequestOption) (*billing.CheckoutAttempt, error)
 pkg openrails, method (*Client) CreateAlertWebhook(context.Context, billing.CreateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) CreateCheckoutAttempt(context.Context, billing.CreateCheckoutAttemptParams, ...RequestOption) (*billing.CheckoutAttempt, error)
@@ -77,15 +71,12 @@ pkg openrails, method (*Client) DeletePaymentMethod(context.Context, billing.Cus
 pkg openrails, method (*Client) DeleteProductAccess(context.Context, billing.CustomerID, billing.ProductAccessID, ...RequestOption) error
 pkg openrails, method (*Client) DeleteRateOverride(context.Context, billing.CustomerID, string, ...RequestOption) error
 pkg openrails, method (*Client) DeleteSpendDelegation(context.Context, billing.CustomerID, billing.SpendDelegationScope, string, ...RequestOption) error
-pkg openrails, method (*Client) EnsureCustomerPermissionGroup(context.Context, string, string) (string, error)
 pkg openrails, method (*Client) EnsureCustomers(context.Context, []billing.EnsureCustomerParams, ...RequestOption) ([]billing.Customer, error)
 pkg openrails, method (*Client) EnsureProduct(context.Context, billing.CreateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmission(context.Context, string, billing.ExtendAdmissionParams, ...RequestOption) (*billing.Admission, error)
 pkg openrails, method (*Client) ExtendOperationAuthorization(context.Context, billing.ExtendOperationAuthorizationParams, ...RequestOption) (*billing.OperationAuthorizationExtension, error)
 pkg openrails, method (*Client) ExtendOperationAuthorizationTx(context.Context, pgx.Tx, billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error)
-pkg openrails, method (*Client) FleetAnalytics(context.Context, billing.MerchantID, int) (*billing.FleetSnapshot, error)
-pkg openrails, method (*Client) FleetTimeseries(context.Context, billing.MerchantID, int) (*billing.FleetSeries, error)
 pkg openrails, method (*Client) GenerateDashboardWidget(context.Context, billing.GenerateDashboardWidgetParams, ...RequestOption) (*billing.GeneratedWidget, error)
 pkg openrails, method (*Client) GetAPIHost(context.Context, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) GetAdmission(context.Context, string, ...RequestOption) (*billing.Admission, error)
@@ -127,10 +118,8 @@ pkg openrails, method (*Client) GetSubscription(context.Context, billing.Subscri
 pkg openrails, method (*Client) GetTrustLevel(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.TrustLevel, error)
 pkg openrails, method (*Client) GetUnreadNotificationCount(context.Context, ...RequestOption) (*billing.UnreadCount, error)
 pkg openrails, method (*Client) GetUsage(context.Context, billing.CustomerID, billing.GetUsageParams, ...RequestOption) (*billing.Usage, error)
-pkg openrails, method (*Client) HasRootPermission(context.Context, *http.Request, string) (bool, error)
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
-pkg openrails, method (*Client) ListActiveMerchantIDs(context.Context, billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
 pkg openrails, method (*Client) ListCatalogDrift(context.Context, billing.CatalogDriftListParams, ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CustomerID, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
@@ -145,8 +134,6 @@ pkg openrails, method (*Client) ListHostEvents(context.Context, billing.HostEven
 pkg openrails, method (*Client) ListInvoicePayments(context.Context, billing.InvoiceID, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.InvoicePayment], error)
 pkg openrails, method (*Client) ListInvoices(context.Context, billing.InvoiceListParams, ...RequestOption) (*billing.ListPage[billing.Invoice], error)
 pkg openrails, method (*Client) ListMerchantNotifications(context.Context, billing.MerchantNotificationListParams, ...RequestOption) (*billing.ListPage[billing.MerchantNotification], error)
-pkg openrails, method (*Client) ListMerchantRetirementCandidates(context.Context, billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)
-pkg openrails, method (*Client) ListMerchantsForSubject(context.Context, string) ([]billing.MerchantRef, error)
 pkg openrails, method (*Client) ListMeterRateOverrides(context.Context, string, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.RateOverride], error)
 pkg openrails, method (*Client) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
 pkg openrails, method (*Client) ListOffers(context.Context, billing.OfferListParams, ...RequestOption) (billing.OfferPages, error)
@@ -165,7 +152,6 @@ pkg openrails, method (*Client) ListRepriceBatches(context.Context, billing.Repr
 pkg openrails, method (*Client) ListReprices(context.Context, billing.RepriceListParams, ...RequestOption) (*billing.ListPage[billing.Reprice], error)
 pkg openrails, method (*Client) ListSpendDelegations(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
-pkg openrails, method (*Client) ListUserMerchants(context.Context, *http.Request) ([]billing.UserMerchant, error)
 pkg openrails, method (*Client) ListWorkerHealth(context.Context, ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error)
 pkg openrails, method (*Client) MarkInvoiceUncollectible(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) MarkNotificationsRead(context.Context, []billing.NotificationID, ...RequestOption) (map[billing.NotificationID]*billing.MerchantNotification, error)
@@ -177,7 +163,6 @@ pkg openrails, method (*Client) PreviewPlanMigration(context.Context, billing.Cr
 pkg openrails, method (*Client) PreviewRepriceBatch(context.Context, billing.PreviewRepriceBatchParams, ...RequestOption) (*billing.RepriceBatchPreview, error)
 pkg openrails, method (*Client) PreviewTierChange(context.Context, billing.SubscriptionID, billing.ChangeTierParams, ...RequestOption) (*billing.TierChangePreview, error)
 pkg openrails, method (*Client) Probes() []Probe
-pkg openrails, method (*Client) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
 pkg openrails, method (*Client) QueryMetrics(context.Context, billing.MetricsQuery, ...RequestOption) (*billing.MetricsResult, error)
 pkg openrails, method (*Client) Ready(context.Context) error
 pkg openrails, method (*Client) RecordProviderBillingObservation(context.Context, billing.RecordProviderBillingObservationParams, ...RequestOption) (*billing.ProviderBillingQualification, error)
@@ -191,11 +176,8 @@ pkg openrails, method (*Client) ReleaseOperationAuthorization(context.Context, b
 pkg openrails, method (*Client) ReleaseOperationAuthorizationTx(context.Context, pgx.Tx, billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error)
 pkg openrails, method (*Client) ReplaceEntitlements(context.Context, billing.ReplaceEntitlementsParams, ...RequestOption) (*billing.CatalogApplicationReceipt, error)
 pkg openrails, method (*Client) ReportWastedSpend(context.Context, billing.ReportWastedSpendParams, ...RequestOption) (*billing.WastedSpendReport, error)
-pkg openrails, method (*Client) ResolveAuthorizedMerchant(context.Context, *http.Request, string, string) (billing.MerchantID, string, error)
 pkg openrails, method (*Client) ResolveFinding(context.Context, billing.FindingID, billing.ResolveFindingParams, ...RequestOption) (*billing.FindingResolution, error)
-pkg openrails, method (*Client) ResolveMerchantForGroup(context.Context, string) (billing.MerchantID, string, error)
 pkg openrails, method (*Client) ResumeSubscription(context.Context, billing.SubscriptionID, ...RequestOption) (*billing.Subscription, error)
-pkg openrails, method (*Client) RetireUnusedMerchant(context.Context, billing.MerchantID, string) (billing.MerchantRetirement, error)
 pkg openrails, method (*Client) RetryInvoiceCollection(context.Context, billing.InvoiceID, billing.RetryInvoiceCollectionParams, ...RequestOption) (*billing.InvoiceCollection, error)
 pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.CustomerID, billing.CreditGrantID, billing.RevokeCreditGrantParams, ...RequestOption) (*billing.CreditGrant, error)
 pkg openrails, method (*Client) RiverJobs() river.Contribution
@@ -206,7 +188,6 @@ pkg openrails, method (*Client) SetCreditLimit(context.Context, billing.Customer
 pkg openrails, method (*Client) SetCustomerBillingPolicy(context.Context, billing.CustomerID, billing.SetCustomerBillingPolicyParams, ...RequestOption) (*billing.CustomerBillingPolicy, error)
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (*Client) SetInvoiceProfile(context.Context, billing.CustomerID, billing.SetInvoiceProfileParams, ...RequestOption) (*billing.InvoiceProfile, error)
-pkg openrails, method (*Client) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) SetMeterRateCard(context.Context, string, billing.SetMeterRateCardParams, ...RequestOption) (*billing.Meter, error)
 pkg openrails, method (*Client) SetRateOverride(context.Context, billing.CustomerID, string, billing.SetRateOverrideParams, ...RequestOption) (*billing.RateOverride, error)
@@ -215,7 +196,6 @@ pkg openrails, method (*Client) SetSpendDelegations(context.Context, billing.Cus
 pkg openrails, method (*Client) SetSubscriptionPaymentMethod(context.Context, billing.SubscriptionID, billing.SetSubscriptionPaymentMethodParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) SetTrustLevel(context.Context, billing.CustomerID, billing.SetTrustLevelParams, ...RequestOption) (*billing.TrustLevel, error)
 pkg openrails, method (*Client) Start(context.Context, ...StartOption) error
-pkg openrails, method (*Client) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
 pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
@@ -232,30 +212,8 @@ pkg openrails, type AdminConsole = config.AdminConsole
 pkg openrails, type AdminConsole struct
 pkg openrails, type AdminConsole struct, AuthBaseURL string
 pkg openrails, type AdminConsole struct, Extensions map[string]any
-pkg openrails, type AdminConsole struct, Issuer *config.ConsoleIssuer
 pkg openrails, type AdminConsole struct, Path string
 pkg openrails, type Auth = billingauth.Auth
-pkg openrails, type AuthConfig = config.AuthConfig
-pkg openrails, type AuthConfig struct
-pkg openrails, type AuthConfig struct, ActiveKeyID string
-pkg openrails, type AuthConfig struct, ActivePrivateKeyPEM string
-pkg openrails, type AuthConfig struct, AllowEphemeralSigningKey bool
-pkg openrails, type AuthConfig struct, AllowLoopbackHTTP bool
-pkg openrails, type AuthConfig struct, AllowMemory bool
-pkg openrails, type AuthConfig struct, AllowMissingSenders bool
-pkg openrails, type AuthConfig struct, AllowPrivateNetworkJWKS bool
-pkg openrails, type AuthConfig struct, DirectPeerIP bool
-pkg openrails, type AuthConfig struct, Issuer string
-pkg openrails, type AuthConfig struct, KeysPath string
-pkg openrails, type AuthConfig struct, MintDisabled bool
-pkg openrails, type AuthConfig struct, Naming config.NamingConfig
-pkg openrails, type AuthConfig struct, PublicKeysJSON string
-pkg openrails, type AuthConfig struct, RequestOrigin string
-pkg openrails, type AuthRateLimit = config.AuthRateLimit
-pkg openrails, type AuthRateLimit struct
-pkg openrails, type AuthRateLimit struct, Cooldown time.Duration
-pkg openrails, type AuthRateLimit struct, Limit int
-pkg openrails, type AuthRateLimit struct, Window time.Duration
 pkg openrails, type CCBillPSP struct
 pkg openrails, type CCBillPSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type CCBillPSP struct, Archived bool `psp:"archived"`
@@ -282,7 +240,6 @@ pkg openrails, type Config struct, Catalog *catalog.Application
 pkg openrails, type Config struct, CatalogReconciliationInterval string
 pkg openrails, type Config struct, Checkout config.CheckoutConfig
 pkg openrails, type Config struct, CloudflareProxies []string
-pkg openrails, type Config struct, ControlPlane *config.ControlPlaneConfig
 pkg openrails, type Config struct, CredentialReadOnly bool
 pkg openrails, type Config struct, CredentialSnapshotID string
 pkg openrails, type Config struct, DB *config.DBConfig
@@ -308,25 +265,6 @@ pkg openrails, type Config struct, TestMode config.CredentialPosture
 pkg openrails, type Config struct, TrustedProxies []string
 pkg openrails, type Config struct, Vault *config.VaultConfig
 pkg openrails, type Config struct, WebhookSecretOverlap string
-pkg openrails, type ConsoleIssuer = config.ConsoleIssuer
-pkg openrails, type ConsoleIssuer struct
-pkg openrails, type ConsoleIssuer struct, ClientID string
-pkg openrails, type ConsoleIssuer struct, Name string
-pkg openrails, type ConsoleIssuer struct, Scope string
-pkg openrails, type ConsoleIssuer struct, URL string
-pkg openrails, type ControlPlaneConfig = config.ControlPlaneConfig
-pkg openrails, type ControlPlaneConfig struct
-pkg openrails, type ControlPlaneConfig struct, Auth config.AuthConfig
-pkg openrails, type ControlPlaneConfig struct, AuthRateLimits map[string]config.AuthRateLimit
-pkg openrails, type ControlPlaneConfig struct, CloudflareProxies []string
-pkg openrails, type ControlPlaneConfig struct, FrontendBaseURL string
-pkg openrails, type ControlPlaneConfig struct, LocalSignIn bool
-pkg openrails, type ControlPlaneConfig struct, MerchantCreation *config.MerchantCreationConfig
-pkg openrails, type ControlPlaneConfig struct, PasswordlessAutoRegistration bool
-pkg openrails, type ControlPlaneConfig struct, PasswordlessLogin bool
-pkg openrails, type ControlPlaneConfig struct, Registration iam.RegistrationMode
-pkg openrails, type ControlPlaneConfig struct, ResourceServer *config.ResourceServerConfig
-pkg openrails, type ControlPlaneConfig struct, TrustedProxies []string
 pkg openrails, type Credential = billingauth.Credential
 pkg openrails, type CredentialKind = billingauth.CredentialKind
 pkg openrails, type CredentialPosture = config.CredentialPosture
@@ -369,16 +307,13 @@ pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, ConsoleAssets fs.FS
 pkg openrails, type Deps struct, DNSResolver *net.Resolver
 pkg openrails, type Deps struct, Email config.EmailSender
-pkg openrails, type Deps struct, HasVaultedPaymentMethod func(context.Context, string) (bool, error)
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, Redis *redis.Client
-pkg openrails, type Deps struct, SMS config.SMSSender
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
 pkg openrails, type Deps struct, Vault *api.Client
 pkg openrails, type Email = config.Email
 pkg openrails, type Email struct
-pkg openrails, type Email struct, Auth *iam.EmailMessage
 pkg openrails, type Email struct, From config.EmailAddress
 pkg openrails, type Email struct, HTML string
 pkg openrails, type Email struct, Subject string
@@ -395,12 +330,6 @@ pkg openrails, type EmailSender interface, Send(context.Context, config.Email) e
 pkg openrails, type EncryptionConfig = config.EncryptionConfig
 pkg openrails, type EncryptionConfig struct
 pkg openrails, type EncryptionConfig struct, MasterKey string
-pkg openrails, type FormerNamesConfig = config.FormerNamesConfig
-pkg openrails, type FormerNamesConfig struct
-pkg openrails, type FormerNamesConfig struct, Duration *time.Duration
-pkg openrails, type FormerNamesConfig struct, Mode config.FormerNamesMode
-pkg openrails, type FormerNamesMode = config.FormerNamesMode
-pkg openrails, type FormerNamesMode string
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string
@@ -425,12 +354,6 @@ pkg openrails, type LLMConfig struct, Provider string
 pkg openrails, type LoggerConfig = config.LoggerConfig
 pkg openrails, type LoggerConfig struct
 pkg openrails, type LoggerConfig struct, Level string
-pkg openrails, type MerchantCreationConfig = config.MerchantCreationConfig
-pkg openrails, type MerchantCreationConfig struct
-pkg openrails, type MerchantCreationConfig struct, FreeAllowance int
-pkg openrails, type MerchantCreationConfig struct, ReservedEscalationRole string
-pkg openrails, type MerchantCreationConfig struct, ReservedSlugs []string
-pkg openrails, type MerchantCreationConfig struct, SlugPattern string
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, APIHost string `yaml:"api_host,omitempty"`
@@ -451,11 +374,6 @@ pkg openrails, type NMIPSP struct, TokenizationURL string `psp:"settings.tokeniz
 pkg openrails, type NMIPSP struct, WebhookOverlapExpiresAt time.Time `psp:"settings.webhook_overlap_expires_at"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
 pkg openrails, type NMIPSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
-pkg openrails, type NamingConfig = config.NamingConfig
-pkg openrails, type NamingConfig struct
-pkg openrails, type NamingConfig struct, Enabled *bool
-pkg openrails, type NamingConfig struct, FormerNames config.FormerNamesConfig
-pkg openrails, type NamingConfig struct, RenameInterval *time.Duration
 pkg openrails, type PSPConfig = config.PSPConfig
 pkg openrails, type PSPConfig struct
 pkg openrails, type PSPConfig struct, AccountID string `yaml:"account_id,omitempty"`
@@ -489,11 +407,6 @@ pkg openrails, type RedisConfig struct, Addr string
 pkg openrails, type RedisConfig struct, DB int
 pkg openrails, type RedisConfig struct, Password string
 pkg openrails, type RequestOption func(*requestOptions)
-pkg openrails, type ResourceServerConfig = config.ResourceServerConfig
-pkg openrails, type ResourceServerConfig struct
-pkg openrails, type ResourceServerConfig struct, DPoPNonceKey string
-pkg openrails, type ResourceServerConfig struct, Identifier string
-pkg openrails, type ResourceServerConfig struct, TrustedIssuers []config.TrustedIssuerConfig
 pkg openrails, type Route struct
 pkg openrails, type Route struct, Handler http.Handler
 pkg openrails, type Route struct, Method string
@@ -509,10 +422,6 @@ pkg openrails, type Routes struct, Customers config.CustomerHTTPScope
 pkg openrails, type Routes struct, Merchant bool
 pkg openrails, type Routes struct, Prefix string
 pkg openrails, type Routes struct, Storefront bool
-pkg openrails, type SMSSender = config.SMSSender
-pkg openrails, type SMSSender interface
-pkg openrails, type SMSSender interface, CheckHealth(context.Context) error
-pkg openrails, type SMSSender interface, Send(context.Context, iam.SMSMessage) error
 pkg openrails, type SendGridConfig = config.SendGridConfig
 pkg openrails, type SendGridConfig struct
 pkg openrails, type SendGridConfig struct, APIKey string
@@ -539,16 +448,6 @@ pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.
 pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type SubjectKind = billingauth.SubjectKind
-pkg openrails, type TrustedIssuerConfig = config.TrustedIssuerConfig
-pkg openrails, type TrustedIssuerConfig struct
-pkg openrails, type TrustedIssuerConfig struct, AllowedOrigins []string
-pkg openrails, type TrustedIssuerConfig struct, GroupRoles map[string]string
-pkg openrails, type TrustedIssuerConfig struct, Issuer string
-pkg openrails, type TrustedIssuerConfig struct, JWKSURI string
-pkg openrails, type TrustedIssuerConfig struct, Keys []iam.RemoteApplicationKey
-pkg openrails, type TrustedIssuerConfig struct, Merchants []string
-pkg openrails, type TrustedIssuerConfig struct, Name string
-pkg openrails, type TrustedIssuerConfig struct, Permissions []string
 pkg openrails, type VaultConfig = config.VaultConfig
 pkg openrails, type VaultConfig struct
 pkg openrails, type VaultConfig struct, Address string
@@ -562,7 +461,6 @@ pkg openrails, type VaultConfig struct, ScopePrefix string
 pkg openrails, type VaultConfig struct, SecretID string
 pkg openrails, type VaultConfig struct, Token string
 pkg openrails, type VaultConfig struct, TransitMount string
-pkg openrails, var ErrNoControlPlane error
 pkg openrails, var ErrRemoteClient error
 pkg openrails, var ErrUnauthenticated error
 pkg openrails/adapters/fiber, const RouteNamePrefix untyped string = "openrails."
@@ -3376,4 +3274,115 @@ pkg openrails/openrailstest, type AuthCases struct, Permission string
 pkg openrails/openrailstest, type AuthCases struct, Refused map[string]func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Staff func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, StaleStaff func() *http.Request
+pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
+pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
+pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"
+pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)
+pkg openrails/server, method (*Server) AuthKit() *authkit.Client
+pkg openrails/server, method (*Server) AuthenticateUser(*http.Request) (openrails.Identity, error)
+pkg openrails/server, method (*Server) Client() *openrails.Client
+pkg openrails/server, method (*Server) Close(context.Context) error
+pkg openrails/server, method (*Server) CompletePendingMerchantRetirements(context.Context, int) (int, error)
+pkg openrails/server, method (*Server) EnsureCustomerPermissionGroup(context.Context, string, string) (string, error)
+pkg openrails/server, method (*Server) FleetAnalytics(context.Context, billing.MerchantID, int) (*billing.FleetSnapshot, error)
+pkg openrails/server, method (*Server) FleetTimeseries(context.Context, billing.MerchantID, int) (*billing.FleetSeries, error)
+pkg openrails/server, method (*Server) Handler() http.Handler
+pkg openrails/server, method (*Server) HasRootPermission(context.Context, *http.Request, string) (bool, error)
+pkg openrails/server, method (*Server) ListActiveMerchantIDs(context.Context, billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)
+pkg openrails/server, method (*Server) ListMerchantRetirementCandidates(context.Context, billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)
+pkg openrails/server, method (*Server) ListMerchantsForSubject(context.Context, string) ([]billing.MerchantRef, error)
+pkg openrails/server, method (*Server) ListUserMerchants(context.Context, *http.Request) ([]billing.UserMerchant, error)
+pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
+pkg openrails/server, method (*Server) ResolveAuthorizedMerchant(context.Context, *http.Request, string, string) (billing.MerchantID, string, error)
+pkg openrails/server, method (*Server) ResolveMerchantForGroup(context.Context, string) (billing.MerchantID, string, error)
+pkg openrails/server, method (*Server) RetireUnusedMerchant(context.Context, billing.MerchantID, string) (billing.MerchantRetirement, error)
+pkg openrails/server, method (*Server) RiverJobs() river.Contribution
+pkg openrails/server, method (*Server) Routes(...openrails.CustomerRoutes) ([]openrails.Route, error)
+pkg openrails/server, method (*Server) Run(context.Context) error
+pkg openrails/server, method (*Server) Serve(context.Context) error
+pkg openrails/server, method (*Server) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
+pkg openrails/server, method (*Server) Start(context.Context, ...openrails.StartOption) error
+pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
+pkg openrails/server, type AuthConfig = config.AuthConfig
+pkg openrails/server, type AuthConfig struct
+pkg openrails/server, type AuthConfig struct, ActiveKeyID string
+pkg openrails/server, type AuthConfig struct, ActivePrivateKeyPEM string
+pkg openrails/server, type AuthConfig struct, AllowEphemeralSigningKey bool
+pkg openrails/server, type AuthConfig struct, AllowLoopbackHTTP bool
+pkg openrails/server, type AuthConfig struct, AllowMemory bool
+pkg openrails/server, type AuthConfig struct, AllowMissingSenders bool
+pkg openrails/server, type AuthConfig struct, AllowPrivateNetworkJWKS bool
+pkg openrails/server, type AuthConfig struct, DirectPeerIP bool
+pkg openrails/server, type AuthConfig struct, Issuer string
+pkg openrails/server, type AuthConfig struct, KeysPath string
+pkg openrails/server, type AuthConfig struct, MintDisabled bool
+pkg openrails/server, type AuthConfig struct, Naming config.NamingConfig
+pkg openrails/server, type AuthConfig struct, PublicKeysJSON string
+pkg openrails/server, type AuthConfig struct, RequestOrigin string
+pkg openrails/server, type AuthRateLimit = config.AuthRateLimit
+pkg openrails/server, type AuthRateLimit struct
+pkg openrails/server, type AuthRateLimit struct, Cooldown time.Duration
+pkg openrails/server, type AuthRateLimit struct, Limit int
+pkg openrails/server, type AuthRateLimit struct, Window time.Duration
+pkg openrails/server, type Config struct
+pkg openrails/server, type Config struct, Addr string
+pkg openrails/server, type Config struct, AdminConsole *openrails.AdminConsole
+pkg openrails/server, type Config struct, Auth AuthConfig
+pkg openrails/server, type Config struct, AuthRateLimits map[string]AuthRateLimit
+pkg openrails/server, type Config struct, CatalogEdits bool
+pkg openrails/server, type Config struct, CloudflareProxies []string
+pkg openrails/server, type Config struct, ConsoleIssuer *ConsoleIssuer
+pkg openrails/server, type Config struct, Engine openrails.Config
+pkg openrails/server, type Config struct, FrontendBaseURL string
+pkg openrails/server, type Config struct, LocalSignIn bool
+pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig
+pkg openrails/server, type Config struct, PasswordlessAutoRegistration bool
+pkg openrails/server, type Config struct, PasswordlessLogin bool
+pkg openrails/server, type Config struct, Registration iam.RegistrationMode
+pkg openrails/server, type Config struct, ResourceServer *ResourceServerConfig
+pkg openrails/server, type Config struct, TrustedProxies []string
+pkg openrails/server, type ConsoleIssuer = config.ConsoleIssuer
+pkg openrails/server, type ConsoleIssuer struct
+pkg openrails/server, type ConsoleIssuer struct, ClientID string
+pkg openrails/server, type ConsoleIssuer struct, Name string
+pkg openrails/server, type ConsoleIssuer struct, Scope string
+pkg openrails/server, type ConsoleIssuer struct, URL string
+pkg openrails/server, type Deps struct
+pkg openrails/server, type Deps struct, AuthEmail authkit.EmailSender
+pkg openrails/server, type Deps struct, Engine openrails.Deps
+pkg openrails/server, type Deps struct, HasVaultedPaymentMethod func(context.Context, string) (bool, error)
+pkg openrails/server, type Deps struct, SMS authkit.SMSSender
+pkg openrails/server, type FormerNamesConfig = config.FormerNamesConfig
+pkg openrails/server, type FormerNamesConfig struct
+pkg openrails/server, type FormerNamesConfig struct, Duration *time.Duration
+pkg openrails/server, type FormerNamesConfig struct, Mode config.FormerNamesMode
+pkg openrails/server, type FormerNamesMode = config.FormerNamesMode
+pkg openrails/server, type FormerNamesMode string
+pkg openrails/server, type MerchantCreationConfig = config.MerchantCreationConfig
+pkg openrails/server, type MerchantCreationConfig struct
+pkg openrails/server, type MerchantCreationConfig struct, FreeAllowance int
+pkg openrails/server, type MerchantCreationConfig struct, ReservedEscalationRole string
+pkg openrails/server, type MerchantCreationConfig struct, ReservedSlugs []string
+pkg openrails/server, type MerchantCreationConfig struct, SlugPattern string
+pkg openrails/server, type NamingConfig = config.NamingConfig
+pkg openrails/server, type NamingConfig struct
+pkg openrails/server, type NamingConfig struct, Enabled *bool
+pkg openrails/server, type NamingConfig struct, FormerNames config.FormerNamesConfig
+pkg openrails/server, type NamingConfig struct, RenameInterval *time.Duration
+pkg openrails/server, type ResourceServerConfig = config.ResourceServerConfig
+pkg openrails/server, type ResourceServerConfig struct
+pkg openrails/server, type ResourceServerConfig struct, DPoPNonceKey string
+pkg openrails/server, type ResourceServerConfig struct, Identifier string
+pkg openrails/server, type ResourceServerConfig struct, TrustedIssuers []config.TrustedIssuerConfig
+pkg openrails/server, type Server struct
+pkg openrails/server, type TrustedIssuerConfig = config.TrustedIssuerConfig
+pkg openrails/server, type TrustedIssuerConfig struct
+pkg openrails/server, type TrustedIssuerConfig struct, AllowedOrigins []string
+pkg openrails/server, type TrustedIssuerConfig struct, GroupRoles map[string]string
+pkg openrails/server, type TrustedIssuerConfig struct, Issuer string
+pkg openrails/server, type TrustedIssuerConfig struct, JWKSURI string
+pkg openrails/server, type TrustedIssuerConfig struct, Keys []iam.RemoteApplicationKey
+pkg openrails/server, type TrustedIssuerConfig struct, Merchants []string
+pkg openrails/server, type TrustedIssuerConfig struct, Name string
+pkg openrails/server, type TrustedIssuerConfig struct, Permissions []string
 pkg openrails/web/admin, func FS() fs.FS

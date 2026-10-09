@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
+	"github.com/open-rails/openrails/server"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,10 +36,10 @@ func (p *refuseCheckoutProvider) RoundTrip(*http.Request) (*http.Response, error
 func TestCheckoutSessionResolvesStoredMerchant(t *testing.T) {
 	f := newFixture(t)
 	provider := &refuseCheckoutProvider{}
-	cp := f.attachControlPlane(t, func(_ *openrails.Config, deps *openrails.Deps) { deps.StripeTransport = provider })
+	cp := f.newServer(t, func(_ *server.Config, deps *server.Deps) { deps.Engine.StripeTransport = provider })
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	rt := engine.Graph(cp).Runtime
+	rt := engine.Graph(cp.Client()).Runtime
 	var mids []billing.MerchantID
 	var prices []billing.PriceID
 	var slugs []string
@@ -48,11 +49,11 @@ func TestCheckoutSessionResolvesStoredMerchant(t *testing.T) {
 		entry, err := cp.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: slug, DisplayName: name})
 		require.NoError(t, err)
 		mid := entry.MerchantID
-		product, err := cp.CreateProduct(t.Context(), billing.CreateProductParams{Key: "scope", DisplayName: name}, openrails.ForMerchantID(mid))
+		product, err := cp.Client().CreateProduct(t.Context(), billing.CreateProductParams{Key: "scope", DisplayName: name}, openrails.ForMerchantID(mid))
 		require.NoError(t, err)
-		price, err := cp.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "scope", Currency: "USD", UnitAmount: 123_000_000}, openrails.ForMerchantID(mid))
+		price, err := cp.Client().CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "scope", Currency: "USD", UnitAmount: 123_000_000}, openrails.ForMerchantID(mid))
 		require.NoError(t, err)
-		_, err = cp.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer}}, openrails.ForMerchantID(mid))
+		_, err = cp.Client().EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer}}, openrails.ForMerchantID(mid))
 		require.NoError(t, err)
 		slugs = append(slugs, slug)
 		mids = append(mids, mid)

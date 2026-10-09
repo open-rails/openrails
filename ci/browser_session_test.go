@@ -18,7 +18,7 @@ import (
 // rejecting body-token fallback and cross-origin cookie consumption.
 func TestControlPlaneBrowserSessionUsesRefreshCookie(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, nil)
+	cp := f.newServer(t, nil)
 	user := newAccount(t, cp)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

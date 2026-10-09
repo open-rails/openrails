@@ -169,7 +169,7 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		}
 		err := embedhttp.ValidateRoutes(config.Routes{CustomerProfiles: profiles}, profiles, graph.Runtime)
 		if err == nil {
-			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles)
+			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
 			require.NoError(t, buildErr)
 			if err = embedhttp.ValidateRouteTable(table); err == nil {
 				engine := gin.New()

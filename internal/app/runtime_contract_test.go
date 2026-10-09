@@ -125,18 +125,3 @@ func TestPythPriceProviderDevnetParity(t *testing.T) {
 		}
 	}
 }
-
-type closingControlPlane struct{ calls int }
-
-func (c *closingControlPlane) Close() { c.calls++ }
-
-func TestCloseReleasesControlPlaneOnce(t *testing.T) {
-	cp := &closingControlPlane{}
-	a := &App{}
-	a.SetControlPlane(cp, nil)
-	require.NoError(t, a.Close(context.Background()))
-	require.NoError(t, a.Close(context.Background()))
-	require.Equal(t, 1, cp.calls)
-	require.Nil(t, a.ControlPlane)
-	require.NoError(t, (*App)(nil).Close(context.Background()))
-}

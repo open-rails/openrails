@@ -43,11 +43,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
 		Extensions:             s.adminConsole.Extensions,
 	}
-	var rs *config.ResourceServerConfig
-	if s.cfg.ControlPlane != nil {
-		rs = s.cfg.ControlPlane.ResourceServer
-	}
-	issuer, err := adminconsole.ConsoleIssuer(s.adminConsole, rs)
+	issuer, err := adminconsole.ConsoleIssuer(s.consoleIssuer, s.resourceServer)
 	if err != nil {
 		return err
 	}

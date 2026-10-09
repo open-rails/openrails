@@ -55,17 +55,14 @@ type AdminConsole struct {
 	// Path is where the console is served: an absolute path without a
 	// trailing slash, outside Prefix's API. Empty is "/admin".
 	Path string
-	// AuthBaseURL is the AuthKit JSON API staff sign in through; required
-	// unless Config.ControlPlane serves one.
+	// AuthBaseURL is the AuthKit JSON API staff sign in through. Required
+	// when embedded; the standalone server defaults it to its own AuthKit.
 	AuthBaseURL string
 	// Extensions is the host's data for the console extensions it builds in
 	// (scripts/build-admin-console.sh --extensions), keyed by extension id and
 	// served verbatim in config.json. OpenRails never reads it; a plain
 	// console build leaves it empty.
 	Extensions map[string]any
-	// Issuer signs staff in at a trusted issuer instead of the control
-	// plane's own accounts. It needs Config.ControlPlane's ResourceServer.
-	Issuer *ConsoleIssuer
 }
 
 // ConsoleIssuer is the authorization server the console signs staff in at,

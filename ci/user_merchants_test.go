@@ -19,7 +19,7 @@ import (
 // a user holds a role in, by current name, with the user's role in each.
 func TestUserMerchantsListing(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, reserving())
+	cp := f.newServer(t, reserving())
 	ctx := t.Context()
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestUserMerchantsListing(t *testing.T) {
 // Client, without taking a caller-selected user ID or joining AuthKit groups.
 func TestHostUserMerchantListingUsesLiveSessionAndMembership(t *testing.T) {
 	f := newFixture(t)
-	cp := f.attachControlPlane(t, reserving())
+	cp := f.newServer(t, reserving())
 	ctx := t.Context()
 	member, token := newOwner(t, cp)
 	owner, _ := newOwner(t, cp)

@@ -18,7 +18,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -37,21 +37,21 @@ type MerchantCreationPolicy struct {
 }
 
 // MerchantCreationAdmission composes the or#914 hosted admission predicate for
-// MerchantCreationConfig.Admission. Late-bound: the control plane is resolved
-// per call (the predicate is constructed before Attach completes). Every
+// MerchantCreationConfig.Admission. Late-bound: controlPlane is called per
+// check (the predicate is built before the control plane). Every
 // unanswerable question refuses — admission is a judgment about identity and
 // money, never made on an unanswered question. A name the user already owns is
 // an idempotent repair, not a creation event, so it returns before allowance
 // and vault checks. The allowance counts live merchants the user owns.
-func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
-	if a == nil {
-		return nil, errors.New("merchant creation admission: app is required")
+func MerchantCreationAdmission(controlPlane func() *controlplane.ControlPlane, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
+	if controlPlane == nil {
+		return nil, errors.New("merchant creation admission: control plane is required")
 	}
 	if policy.FreeAllowance <= 0 {
 		return nil, fmt.Errorf("merchant creation admission: FreeAllowance must be positive, got %d", policy.FreeAllowance)
 	}
 	return func(ctx context.Context, instanceSlug, ownerUserID string) error {
-		cp := Get(a)
+		cp := controlPlane()
 		if cp == nil || cp.Core() == nil {
 			return errors.New("control plane unavailable")
 		}
@@ -105,11 +105,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 // un-parked vaulted payment method on file with vaultMerchant (for a hosted
 // product: its PLATFORM merchant — the book that treats hosted merchants'
 // owners as customers). Runs under MerchantTx for vaultMerchant.
-func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMerchant billing.MerchantID, subjectUserID string) (bool, error) {
-	cp := Get(a)
-	if cp == nil || cp.Pool() == nil {
-		return false, errors.New("control plane unavailable")
-	}
+func SubjectHasVaultedPaymentMethod(ctx context.Context, cp *controlplane.ControlPlane, vaultMerchant billing.MerchantID, subjectUserID string) (bool, error) {
 	subjectUserID = strings.TrimSpace(subjectUserID)
 	if vaultMerchant.IsZero() || subjectUserID == "" {
 		return false, errors.New("vault merchant and subject are required")

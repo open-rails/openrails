@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// Control-plane vocabulary: the operations an embedded engine with
-// Config.ControlPlane offers a hosted product (merchant provisioning, the
-// merchant directory, fleet aggregates and retirement).
+// Control-plane vocabulary: the operations the standalone server (package
+// server) offers a hosted product (merchant provisioning, the merchant
+// directory, fleet aggregates and retirement).
 
 // MerchantGroupPersona and CustomerGroupPersona are the AuthKit group personas
 // of merchant and customer permission groups. A customer's group ID is the

@@ -47,15 +47,15 @@ func newSolanaSignerApproveCmd() *cobra.Command {
 }
 
 func runSolanaSignerApprove(ctx context.Context, cfg *config.Config, merchantSlug, key, manifestPath string) error {
-	client, graph, err := openEngine(ctx, cfg, openrails.Deps{}, true)
+	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
 	if err != nil {
 		return err
 	}
-	defer func() { _ = client.Close(context.Background()) }()
+	defer func() { _ = srv.Close(context.Background()) }()
 	if err := graph.Runtime.MerchantSecretBackend.Await(ctx, merchantsecrets.AwaitTimeout); err != nil {
 		return err
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, manifestPath, hostconfig.FromContext(ctx).MerchantManifestOverlays, ""); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, hostconfig.FromContext(ctx).MerchantManifestOverlays, ""); err != nil {
 		return err
 	}
 	mid, err := resolveCLIMerchant(ctx, graph.Runtime.DB, merchantSlug)

@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -18,8 +17,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/server"
 )
 
 // The root owner always needs a second factor, so a control plane where none
@@ -29,19 +28,13 @@ import (
 // enrollments.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
-	attach := func(auth openrails.AuthConfig) (*openrails.Client, error) {
+	attach := func(auth server.AuthConfig) (*server.Server, error) {
 		t.Helper()
 		auth.Issuer = "http://127.0.0.1/" + f.schema
 		auth.AllowMemory, auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true, true
-		cfg := f.config()
-		cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: auth}
-		client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-		if err == nil {
-			t.Cleanup(func() { _ = client.Close(context.Background()) })
-		}
-		return client, err
+		return f.buildServer(t, func(cfg *server.Config, _ *server.Deps) { cfg.Auth = auth })
 	}
-	methods := func(cp *openrails.Client) []string {
+	methods := func(cp *server.Server) []string {
 		t.Helper()
 		handler, err := standaloneHandler(cp)
 		require.NoError(t, err)
