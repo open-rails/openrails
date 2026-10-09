@@ -109,11 +109,15 @@ func (s *CheckoutAttemptService) listCheckoutOptionsForPrice(ctx context.Context
 	return options, nil
 }
 
-// boundSettlementToken is the token a Solana price link fixes: the published
-// plan's mint for a subscription, or a declared token for a one-time sale.
+// boundSettlementToken is the token a Solana sale must settle in: a price
+// denominated in a token is paid in that token; otherwise its link fixes it,
+// the published plan's mint for a subscription or a declared token.
 func boundSettlementToken(price *models.Price, candidate RoutingCandidate) string {
 	if candidate.Rail != string(models.RailSolana) {
 		return ""
+	}
+	if units, ok := moneyutil.LookupCurrency(price.Currency); ok && units.Kind == "crypto" {
+		return units.Code
 	}
 	var link map[string]string
 	if candidate.PSPID != uuid.Nil {
