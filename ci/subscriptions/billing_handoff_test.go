@@ -68,16 +68,20 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				source.stop()
 
 				target := handoffTarget(t, source)
-				cli := func(w *world, args ...string) (string, error) {
+				operator := func(w *world, args ...string) (string, error) {
 					t.Helper()
-					configuration, err := json.Marshal(map[string]any{"schema": w.schema, "db": map[string]string{"url": w.dsn}})
+					configuration, err := json.Marshal(map[string]any{"database": map[string]string{"schema": w.schema}, "db": map[string]string{"url": w.dsn}})
 					require.NoError(t, err)
 					path := filepath.Join(t.TempDir(), "database.yaml")
 					require.NoError(t, os.WriteFile(path, configuration, 0o600))
-					cmd := exec.CommandContext(t.Context(), binary, append([]string{"--config", path, "billing"}, args...)...)
+					cmd := exec.CommandContext(t.Context(), binary, append([]string{"--config", path}, args...)...)
 					cmd.Env = append(os.Environ(), "DB_URL="+w.dsn, "DATABASE_SCHEMA="+w.schema)
 					out, err := cmd.CombinedOutput()
 					return string(out), err
+				}
+				cli := func(w *world, args ...string) (string, error) {
+					t.Helper()
+					return operator(w, append([]string{"billing"}, args...)...)
 				}
 				run := func(w *world, args ...string) string {
 					t.Helper()
@@ -118,6 +122,11 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				require.Equal(t, 1, member.providerAttempts(), "complete import and replay make no charge")
 				require.NoError(t, target.pool.QueryRow(t.Context(), target.q("SELECT count(*) FROM billing.merchants WHERE id=$1"), otherID.UUID()).Scan(&count))
 				require.Zero(t, count, "another source merchant was not imported")
+
+				// A restored merchant stays readonly until the operator arms its one
+				// live copy, the source being stopped for good.
+				out, err = operator(target, "--test-mode", "sandbox", "merchant", "arm", "--merchant", "id:"+mid.String(), "--by", "e2e handoff")
+				require.NoError(t, err, out)
 
 				// Re-enter provider credentials through the normal constructor only
 				// after restoration; preserved references resolve at the same gateway.

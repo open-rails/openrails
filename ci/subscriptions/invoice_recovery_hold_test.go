@@ -54,13 +54,16 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.Len(t, w.nmi.Attempts(), 1)
 
 	// The same established temporary code applies to merchant retry after a
-	// real decline. The original approved payment supplied the MIT agreement.
+	// real decline. Naming the card to collect USD invoices is the customer's
+	// agreement to a merchant-initiated charge; without it the retry is refused
+	// for good, hold or not.
 	second := observedInvoice(t, w, c, 50_000_000)
 	w.nmi.SetDecline(visa.Last4, "202")
 	declined := payNMIInvoice(t.Context(), w, c, second, method, "declined")
 	require.NoError(t, declined.err)
 	require.Equal(t, http.StatusPaymentRequired, declined.status, string(declined.body))
 	w.nmi.SetDecline(visa.Last4, "")
+	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": method, "currency": "USD"})
 	blockHistory()
 	w.advance(5 * 24 * time.Hour)
 	params := billing.RetryInvoiceCollectionParams{PaymentMethodID: pmid(method), IdempotencyKey: "merchant-recovery"}
@@ -69,10 +72,11 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.Len(t, w.nmi.Attempts(), 2, "held retry sends no additional sale")
 	w.nmi.ClearIntercepts()
 	w.refreshProviders()
-	paid, err := w.client[remote].RetryInvoiceCollection(t.Context(), second, params)
-	require.NoError(t, err)
-	require.Equal(t, billing.InvoicePaid, paid.Invoice.Status)
+	w.settleCollectionScans()
+	w.settle()
+	require.Equal(t, billing.InvoicePaid, w.invoice(second).Status, "once the hold lifts, collection under the card's mandate pays it")
 	require.Len(t, w.nmi.Attempts(), 3, "each invoice has one approved sale; the decline stays an attempt")
+	require.Equal(t, "merchant", w.nmi.LastSale().InitiatedBy)
 	require.Len(t, w.nmi.ledger(""), 2)
 }
 
