@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,7 +60,7 @@ func RefundChargeAfterCancel(ctx context.Context, d *db.DB, payment *models.Paym
 	}
 	evidence := map[string]any{
 		"payment_id": payment.ID.String(), "customer_id": payment.CustomerID.String(), "rail": string(payment.Rail),
-		"transaction_id": payment.TransactionID, "amount": payment.Amount, "currency": payment.Currency,
+		"transaction_id": payment.TransactionID, "amount": strconv.FormatInt(payment.Amount, 10), "currency": payment.Currency,
 	}
 	if payment.SubscriptionID != nil {
 		evidence["subscription_id"] = payment.SubscriptionID.String()
