@@ -523,8 +523,9 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, arg GetPaymentMethod
 
 const getPaymentMethodByPSPRailRefs = `-- name: GetPaymentMethodByPSPRailRefs :one
 SELECT id, customer_id FROM billing.payment_methods
-WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND rail = $3::text
-  AND rail_customer_ref = $4::text AND rail_method_ref = $5::text
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND custodian_id IS NULL AND rail = $3::text
+  AND (rail_customer_ref = NULLIF($4::text, '') OR (rail_customer_ref IS NULL AND $4::text = ''))
+  AND (rail_method_ref = NULLIF($5::text, '') OR (rail_method_ref IS NULL AND $5::text = ''))
 `
 
 type GetPaymentMethodByPSPRailRefsParams struct {
@@ -540,6 +541,7 @@ type GetPaymentMethodByPSPRailRefsRow struct {
 	CustomerID uuid.UUID
 }
 
+// GetPaymentMethodByPSPRefs on one rail.
 func (q *Queries) GetPaymentMethodByPSPRailRefs(ctx context.Context, arg GetPaymentMethodByPSPRailRefsParams) (GetPaymentMethodByPSPRailRefsRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByPSPRailRefs,
 		arg.MerchantID,
@@ -555,8 +557,9 @@ func (q *Queries) GetPaymentMethodByPSPRailRefs(ctx context.Context, arg GetPaym
 
 const getPaymentMethodByPSPRefs = `-- name: GetPaymentMethodByPSPRefs :one
 SELECT id, customer_id, rail FROM billing.payment_methods
-WHERE merchant_id = $1::uuid AND psp_id = $2::uuid
-  AND rail_customer_ref = $3::text AND rail_method_ref = $4::text
+WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND custodian_id IS NULL
+  AND (rail_customer_ref = NULLIF($3::text, '') OR (rail_customer_ref IS NULL AND $3::text = ''))
+  AND (rail_method_ref = NULLIF($4::text, '') OR (rail_method_ref IS NULL AND $4::text = ''))
 `
 
 type GetPaymentMethodByPSPRefsParams struct {
@@ -572,6 +575,9 @@ type GetPaymentMethodByPSPRefsRow struct {
 	Rail       string
 }
 
+// The payment_methods_psp_instrument_key identity: an empty ref is the stored
+// NULL, which the key treats as a value. OR, unlike IS NOT DISTINCT FROM,
+// keeps each ref an index condition.
 func (q *Queries) GetPaymentMethodByPSPRefs(ctx context.Context, arg GetPaymentMethodByPSPRefsParams) (GetPaymentMethodByPSPRefsRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByPSPRefs,
 		arg.MerchantID,

@@ -372,14 +372,20 @@ VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(payment_method_id)::uuid, sqlc.arg
 ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentMethodByPSPRefs :one
+-- The payment_methods_psp_instrument_key identity: an empty ref is the stored
+-- NULL, which the key treats as a value. OR, unlike IS NOT DISTINCT FROM,
+-- keeps each ref an index condition.
 SELECT id, customer_id, rail FROM billing.payment_methods
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND custodian_id IS NULL
+  AND (rail_customer_ref = NULLIF(sqlc.arg(rail_customer_ref)::text, '') OR (rail_customer_ref IS NULL AND sqlc.arg(rail_customer_ref)::text = ''))
+  AND (rail_method_ref = NULLIF(sqlc.arg(rail_method_ref)::text, '') OR (rail_method_ref IS NULL AND sqlc.arg(rail_method_ref)::text = ''));
 
 -- name: GetPaymentMethodByPSPRailRefs :one
+-- GetPaymentMethodByPSPRefs on one rail.
 SELECT id, customer_id FROM billing.payment_methods
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND rail = sqlc.arg(rail)::text
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text AND rail_method_ref = sqlc.arg(rail_method_ref)::text;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid AND custodian_id IS NULL AND rail = sqlc.arg(rail)::text
+  AND (rail_customer_ref = NULLIF(sqlc.arg(rail_customer_ref)::text, '') OR (rail_customer_ref IS NULL AND sqlc.arg(rail_customer_ref)::text = ''))
+  AND (rail_method_ref = NULLIF(sqlc.arg(rail_method_ref)::text, '') OR (rail_method_ref IS NULL AND sqlc.arg(rail_method_ref)::text = ''));
 
 -- name: CustomerHasVaultedPaymentMethod :one
 SELECT EXISTS (
