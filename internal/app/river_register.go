@@ -82,6 +82,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Clock:         clock,
 		Merchants:     r.Merchants, // #699/#788: per-merchant store-armed pulls
 		DeferDelete:   r.DeferredDeletes,
+		Contacts:      r.Contacts,
 		Alerts:        r.AlertService, // #787: requires_review findings -> operator notifications
 		NMIClients:    r.NMIClients,
 		PullEndpoints: reconcile.ProviderEndpoints{CCBillDataLinkBaseURL: config.SandboxCCBillDataLinkURL(r.Config)},

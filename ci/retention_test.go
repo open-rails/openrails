@@ -130,8 +130,6 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 
 	// One admitted request and one usage event land in this month's partitions.
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
 	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	request, deadline := "job-"+uuid.NewString(), now.Add(time.Hour)
@@ -261,9 +259,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	ctx := t.Context()
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 	for _, c := range []billing.CustomerID{customer, other} {
-		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: c}})
-		require.NoError(t, err)
-		_, err = createCreditGrant(ctx, client, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+		_, err := createCreditGrant(ctx, client, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 		require.NoError(t, err)
 	}
 
@@ -332,8 +328,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
+	w.exec(`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, w.merchant, customer.UUID())
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "plan-" + uuid.NewString()[:8], DisplayName: "Plan"})
 	require.NoError(t, err)
 	var productID, psp, subscription uuid.UUID
@@ -502,9 +497,7 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
-	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	var psp, account uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))

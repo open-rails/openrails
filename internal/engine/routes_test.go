@@ -163,10 +163,10 @@ func TestCapabilitiesReportTheMount(t *testing.T) {
 		require.NotEmpty(t, doc.Currencies)
 		return doc.Capabilities.RouteGroups
 	}
-	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": false}, read(config.Routes{Auth: fake}))
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
-	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true}, read(config.Routes{Auth: fake, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true}, read(config.Routes{Auth: fake, Permissions: authtest.Permissions()}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": false, "provisioning": false}, read(config.Routes{Auth: fake}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false, "provisioning": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true, "provisioning": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true, "provisioning": true}, read(config.Routes{Auth: fake, Permissions: authtest.Permissions(), Provisioning: true}))
 }
 
 func TestCatalogEditsFollowTheCatalogWriteMount(t *testing.T) {

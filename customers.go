@@ -11,8 +11,8 @@ import (
 // ListCustomers lists the merchant's customers, newest first.
 func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error) {
 	q := url.Values{}
-	if params.Query != "" {
-		q.Set("q", params.Query)
+	if params.Search != "" {
+		q.Set("search", params.Search)
 	}
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
@@ -22,26 +22,6 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 		return nil, err
 	}
 	return &out, nil
-}
-
-// EnsureCustomers creates 1 to billing.MaxBatchItems distinct customers under
-// the bound merchant, or replaces their declared fields, all or none; the
-// answer is in request order. Commerce writes create customers on demand;
-// call this to declare them first, or to set their billing emails.
-func (c *Client) EnsureCustomers(ctx context.Context, items []billing.EnsureCustomerParams, requestOptions ...RequestOption) ([]billing.Customer, error) {
-	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item.ID.IsZero() {
-			return nil, invalidErr("customer id is required")
-		}
-	}
-	var out billing.EnsureCustomerBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/customers/ensure", billing.EnsureCustomerBatchParams{Items: items}, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
 }
 
 // ListCustomerSettings lists customers' settings, newest customer first.
@@ -61,8 +41,8 @@ func (c *Client) ListCustomerSettings(ctx context.Context, params billing.Custom
 
 // UpdateCustomerSettings changes 1 to billing.MaxBatchItems distinct
 // customers' settings, all or none; the answer is in request order. Each
-// item changes only the fields it names. A person needs a recent sign-in
-// for it.
+// item changes only the fields it names; a customer not billed yet is
+// created. A person needs a recent sign-in for it.
 func (c *Client) UpdateCustomerSettings(ctx context.Context, items []billing.UpdateCustomerSettingsParams, requestOptions ...RequestOption) ([]billing.CustomerSettings, error) {
 	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err

@@ -38,6 +38,18 @@ type MerchantDeclaration struct {
 	// configuration API reads and applies, validated the same way. Omitted
 	// fields keep their stored values; a declared list replaces the stored one.
 	Settings billing.MerchantSettings `yaml:"settings,omitempty"`
+	// Secrets are the merchant's own credentials.
+	Secrets MerchantSecrets `yaml:"secrets,omitempty"`
+}
+
+// MerchantSecrets are a merchant's own credentials, kept out of version
+// control like a PSP's.
+type MerchantSecrets struct {
+	// SCIMToken is a provisioning token (at least 32 characters) the
+	// merchant's directory presents at /scim/v2. OpenRails keeps its hash as
+	// the merchant's declared token, replaced when this changes and removed
+	// when it is removed.
+	SCIMToken string `yaml:"scim_token,omitempty"`
 }
 
 // PSPConfig is one declared PSP: the merchant's account on a rail.

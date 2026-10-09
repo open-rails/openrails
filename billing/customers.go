@@ -6,47 +6,38 @@ import (
 
 // Customer is one merchant-scoped billing record. Its ID is the host's stable
 // subject UUID; the same UUID under another merchant is a different customer.
-// Email is the billing contact the merchant declared, null when none.
+// Contact is who the customer is, from the merchant's directory; null when the
+// directory holds no contact for it.
 type Customer struct {
-	ID       CustomerID `json:"id"`
-	Email    *string    `json:"email"`
-	Username *string    `json:"username"`
-	// Blocked customers may not buy: checkout sessions refuse them.
-	Blocked    bool      `json:"blocked"`
-	CreatedAt  time.Time `json:"created_at"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ID         CustomerID       `json:"id"`
+	Contact    *CustomerContact `json:"contact"`
+	CreatedAt  time.Time        `json:"created_at"`
+	LastSeenAt time.Time        `json:"last_seen_at"`
 }
 
-// EnsureCustomerParams declares one customer: the facts OpenRails keeps about
-// it instead of asking the host's auth. EnsureCustomers creates the customer
-// or replaces these fields; a nil Email or Username clears it. Receipts and
-// notices go to Email, the CCBill username bridge matches Username, and
-// checkout sessions refuse a Blocked customer (one banned or deleted at the
-// host). Call it whenever they change.
-type EnsureCustomerParams struct {
-	ID       CustomerID `json:"id"`
-	Email    *string    `json:"email"`
-	Username *string    `json:"username"`
-	Blocked  bool       `json:"blocked"`
+// CustomerContact is how to reach a customer, as the merchant's directory
+// holds it: read live from the host's directory when OpenRails is embedded
+// beside it (Deps.Contacts), else the copy its SCIM provisioning and verified
+// access tokens keep. Active and SyncedAt describe that copy and are null for
+// a live read.
+type CustomerContact struct {
+	Email    *string `json:"email"`
+	Name     *string `json:"name"`
+	Username *string `json:"username"`
+	// Active is the directory's SCIM active flag, shown and never enforced:
+	// the host's auth decides who signs in.
+	Active *bool `json:"active"`
+	// SyncedAt is when the copy last changed.
+	SyncedAt *time.Time `json:"synced_at"`
 }
 
-// EnsureCustomerBatchParams declares 1 to MaxBatchItems distinct customers in
-// one transaction.
-type EnsureCustomerBatchParams struct {
-	Items []EnsureCustomerParams `json:"items"`
-}
-
-// EnsureCustomerBatchResult is every declared customer, in request order.
-type EnsureCustomerBatchResult struct {
-	Items []Customer `json:"items"`
-}
-
-// CustomerListParams lists customers, newest first. Query matches an id
-// prefix or an email substring. IDs instead reads 1 to MaxBatchItems named
-// customers in one page; unknown ones are absent.
+// CustomerListParams lists customers, newest first. Search instead lists the
+// customers whose email, username or name contains it, or whose id it is: at
+// most limit, newest first, in one page. IDs instead reads 1 to
+// MaxBatchItems named customers in one page; unknown ones are absent.
 type CustomerListParams struct {
-	Query string       `form:"q"`
-	IDs   []CustomerID `form:"-"`
+	Search string       `form:"search"`
+	IDs    []CustomerID `form:"-"`
 	PageRequest
 }
 

@@ -108,6 +108,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		DNSResolver:     deps.DNSResolver,
 		Clock:           deps.Clock,
 		EmailSender:     deps.Email,
+		Contacts:        deps.Contacts,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
 	if err != nil {

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { AdminSubscription } from "@/lib/api/types"
-import { formatDate, shortId } from "@/lib/format"
+import { customerName, formatDate, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toast } from "sonner"
 
@@ -142,7 +142,7 @@ export function SubscriptionsPage() {
       }
       const p = new URLSearchParams(params)
       p.set("customer_id", c.id)
-      p.set("customer", c.email || shortId(c.id, 13))
+      p.set("customer", customerName(c))
       setParams(p)
       setInput("")
     } catch (err) {

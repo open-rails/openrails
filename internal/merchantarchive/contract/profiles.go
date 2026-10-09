@@ -19,7 +19,7 @@ type Profile struct {
 var LegacyProducts = Profile{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"revision", "bigint"}, {"id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"entitlements", "jsonb"}, {"tier_group", "text"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"credit_grant", "jsonb"}}}
 
 var Profiles = []Profile{
-	{Name: "customers", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"issuer", "text"}, {"email", "text"}, {"created_at", "timestamp with time zone"}, {"last_seen_at", "timestamp with time zone"}, {"username", "text"}, {"blocked", "boolean"}}},
+	{Name: "customers", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"issuer", "text"}, {"created_at", "timestamp with time zone"}, {"last_seen_at", "timestamp with time zone"}}},
 	{Name: "custodians", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"kind", "text"}, {"environment", "text"}, {"account_id", "text"}, {"settings", "jsonb"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "merchant_configuration_applications", Columns: []Column{{"merchant_id", "uuid"}, {"application_id", "text"}, {"request_sha256", "bytea"}, {"result", "jsonb"}, {"applied_at", "timestamp with time zone"}}},
 	{Name: "catalog_applications", Columns: []Column{{"merchant_id", "uuid"}, {"application_id", "text"}, {"schema_version", "bigint"}, {"request_sha256", "bytea"}, {"base_revision", "bigint"}, {"applied_revision", "bigint"}, {"result", "jsonb"}, {"applied_at", "timestamp with time zone"}}},

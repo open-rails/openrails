@@ -123,8 +123,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 	// An invoice for usage on credit, paid from the next funding: invoice
 	// payments, credit grants and their ledger.
 	d := w.newCustomer()
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: d.cid()}})
-	require.NoError(t, err)
 	_, err = w.client[remote].UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: d.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}}})
 	require.NoError(t, err)
 	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: d.cid(), Invoker: d.id, Currency: "USD", EventType: "ids", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
@@ -153,6 +151,10 @@ func TestListsReadNamedRecords(t *testing.T) {
 			_, err = w.pool.Exec(ctx, w.q(stmt), w.slug)
 			require.NoError(t, err)
 		}
+	}
+	for range 2 {
+		_, err = client.CreateProvisioningToken(ctx, billing.CreateProvisioningTokenParams{Name: "directory"})
+		require.NoError(t, err)
 	}
 	for range 2 {
 		w.seedFinding(duplicateCharge, "provider_charge:"+c.id+":"+uuid.NewString()+":"+w.clock.Now().Format("2006-01"))
@@ -187,8 +189,10 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},
 		"GET /v1/admin/rebill-cycles":                                {"/v1/admin/rebill-cycles", "", "rebill_cycles", "", ""},
 		"GET /v1/admin/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
+		"GET /v1/admin/customers/{customer_id}/mandates":             {customer + "/mandates", "", "mandates", "", ""},
 		"GET /v1/admin/psps":                                         {"/v1/admin/psps", "", "psps", ", account_id = 'elsewhere'", ""},
 		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "merchant_webhooks", "", ""},
+		"GET /v1/admin/provisioning-tokens":                          {"/v1/admin/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/admin/host-events":                                  {"/v1/admin/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/admin/notifications":                                {"/v1/admin/notifications", "", "notifications", "", ""},
 		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
@@ -251,17 +255,23 @@ func TestListsReadNamedRecords(t *testing.T) {
 	before := idsOf(t, page)
 	tx, err := w.pool.Begin(ctx)
 	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, "SET LOCAL session_replication_role = replica")
 	require.NoError(t, err)
 	elsewhere := uuid.New()
-	_, err = tx.Exec(ctx, w.q(`INSERT INTO billing.customers (merchant_id, id, email) VALUES ($1, $2, 'elsewhere@example.test')`), elsewhere, c.cid().UUID())
-	require.NoError(t, err)
+	for _, stmt := range []string{
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customer_contacts (merchant_id, customer_id, email, directory_updated_at) VALUES ($1, $2, 'elsewhere@example.test', now())`,
+	} {
+		_, err = tx.Exec(ctx, w.q(stmt), elsewhere, c.cid().UUID())
+		require.NoError(t, err)
+	}
 	require.NoError(t, tx.Commit(ctx))
-	t.Cleanup(func() { w.dropElsewhere("customers", elsewhere) })
+	t.Cleanup(func() { w.dropElsewhere("customer_contacts", elsewhere); w.dropElsewhere("customers", elsewhere) })
 	status, page = w.staffJSON(http.MethodGet, "/v1/admin/customers?ids="+c.id, nil)
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, before, idsOf(t, page))
-	require.NotEqual(t, "elsewhere@example.test", page["data"].([]any)[0].(map[string]any)["email"])
+	require.Nil(t, page["data"].([]any)[0].(map[string]any)["contact"], "another merchant's contact is not this customer's")
 }
 
 // Effective tiers are looked up for many customers at once: every requested

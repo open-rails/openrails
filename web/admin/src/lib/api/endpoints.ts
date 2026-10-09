@@ -66,13 +66,13 @@ import type {
 // --- Customers ---
 
 export const listCustomers = (
-  q: string,
+  search: string,
   limit: number,
   cursor: string,
   signal?: AbortSignal
 ) =>
   api<ListPage<Customer>>("/admin/customers", {
-    query: { q, limit, cursor },
+    query: { search, limit, cursor },
     signal,
   })
 
@@ -102,10 +102,10 @@ export const listCustomerUsageRateOverrides = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RateOverride>>(
-    `/admin/customers/${customerId}/rate-overrides`,
-    { query: { limit: PAGE_MAX, cursor }, signal }
-  )
+  api<ListPage<RateOverride>>(`/admin/customers/${customerId}/rate-overrides`, {
+    query: { limit: PAGE_MAX, cursor },
+    signal,
+  })
 
 export const putCustomerUsageRateOverride = (
   customerId: string,
@@ -535,7 +535,11 @@ export const createRepriceBatch = (
 ) =>
   api<RepriceBatchResult>("/admin/reprice-batches", {
     method: "POST",
-    body: { product_key: productKey, price_key: priceKey, effective_at: effectiveAt },
+    body: {
+      product_key: productKey,
+      price_key: priceKey,
+      effective_at: effectiveAt,
+    },
   })
 
 // listRepriceBatches lists a price key's batches, newest first.
@@ -580,9 +584,7 @@ export const cancelReprice = (id: string) =>
 export type { CatalogApplicationReceipt } from "./generated/wire"
 
 export const getCatalogRevision = () =>
-  api<{ revision: number; writes_allowed: boolean }>(
-    "/admin/catalog/revision"
-  )
+  api<{ revision: number; writes_allowed: boolean }>("/admin/catalog/revision")
 
 // JSON is valid YAML too. Keep the reviewed document byte-for-byte unchanged
 // instead of parsing/re-encoding money in the browser. The server deduplicates
@@ -622,8 +624,7 @@ export const listFindings = (
 export const getFindingSummary = (signal?: AbortSignal) =>
   api<FindingsGauges>("/admin/findings/summary", { signal })
 
-export const getFinding = (id: string) =>
-  api<Finding>(`/admin/findings/${id}`)
+export const getFinding = (id: string) => api<Finding>(`/admin/findings/${id}`)
 
 export const resolveFinding = (
   id: string,
@@ -644,12 +645,19 @@ export const getMerchantConfiguration = (signal?: AbortSignal) =>
   api<MerchantConfiguration>("/admin/configuration", { signal })
 
 // Changes only the settings it names, against the revision the form read.
-export const applyMerchantSettings = (revision: string, settings: MerchantSettings) =>
+export const applyMerchantSettings = (
+  revision: string,
+  settings: MerchantSettings
+) =>
   api<{ application_id: string; revision: string; replayed: boolean }>(
     "/admin/configuration/applications",
     {
       method: "POST",
-      body: { application_id: crypto.randomUUID(), expected_revision: revision, settings },
+      body: {
+        application_id: crypto.randomUUID(),
+        expected_revision: revision,
+        settings,
+      },
     }
   )
 

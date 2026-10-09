@@ -39,6 +39,9 @@ type (
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
 	MerchantDeclaration = config.MerchantDeclaration
+	// MerchantSecrets is MerchantDeclaration.Secrets: the merchant's own
+	// credentials (secrets.scim_token).
+	MerchantSecrets = config.MerchantSecrets
 	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
 	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
@@ -89,6 +92,13 @@ type (
 	Email = config.Email
 	// EmailAddress is a mailbox and its display name.
 	EmailAddress = config.EmailAddress
+
+	// Contacts is Deps.Contacts: helpers/contacts' Source, the host's
+	// directory read in process, which *authkit.Client implements. Email
+	// notices, the admin customer read, lists and search ask it.
+	Contacts = config.Contacts
+	// Contact is how to reach a person, as Contacts answers it.
+	Contact = config.Contact
 
 	// Auth is Routes.Auth: helpers/auth's Auth, the host's auth as net/http
 	// middleware (Required, RequirePermission, Sensitive and Identity), which

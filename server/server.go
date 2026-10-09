@@ -173,6 +173,9 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if cfg.Engine.Catalog != nil {
 		return nil, errors.New("server: Engine.Catalog declares one embedded merchant's catalog; a standalone server's merchants manage theirs through the API")
 	}
+	if deps.Engine.Contacts != nil {
+		return nil, errors.New("server: Engine.Contacts reads one embedded host's directory; a standalone server's merchants provision their users over SCIM")
+	}
 	client, err := openrails.New(ctx, cfg.Engine, deps.Engine)
 	if err != nil {
 		return nil, err

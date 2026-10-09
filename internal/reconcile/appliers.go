@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -231,9 +230,6 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		return MaterializeResult{}, nil // already materialized (or price vanished): no-op
 	}
 	res := MaterializeResult{SubscriptionID: rows[0].ID, Created: true}
-	if err := subscriptions.FillCustomerEmail(ctx, w.DB.Gen(ctx), a.CustomerID, a.CustomerEmail); err != nil {
-		return res, fmt.Errorf("record customer email: %w", err)
-	}
 
 	// The accepted access window is independent of the provider's billing date.
 	now := w.now()

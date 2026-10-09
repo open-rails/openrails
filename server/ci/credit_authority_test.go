@@ -59,9 +59,9 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 	for name, c := range callers {
 		writer := name != "viewer API key"
 		customer := uuid.NewString()
-		w := call(t, handler, ownerSession, http.MethodPost, "/v1/admin/customers/ensure", shop, map[string]any{"items": []any{map[string]any{"id": customer}}})
+		w := call(t, handler, ownerSession, http.MethodPatch, "/v1/admin/customers/settings", shop, map[string]any{"items": []any{map[string]any{"customer_id": customer}}})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		w = call(t, handler, c.token, http.MethodPost, "/v1/admin/customers/ensure", c.selector, map[string]any{"items": []any{map[string]any{"id": customer}}})
+		w = call(t, handler, c.token, http.MethodPatch, "/v1/admin/customers/settings", c.selector, map[string]any{"items": []any{map[string]any{"customer_id": customer}}})
 		require.Equal(t, writer, w.Code == http.StatusOK, "%s edits customers: %s", name, w.Body.String())
 
 		w = call(t, handler, c.token, http.MethodPost, "/v1/admin/credit-grants", c.selector, map[string]any{"items": []any{map[string]any{

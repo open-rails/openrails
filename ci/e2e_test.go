@@ -147,11 +147,6 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	require.Equal(t, productA.ID, page.Items[0].ID)
 
 	customerA := uuid.NewString()
-	customerB := uuid.NewString()
-	_, err = alice.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(customerA))}})
-	require.NoError(t, err)
-	_, err = bob.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(customerB))}})
-	require.NoError(t, err)
 	_, err = alice.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(customerA)), ProductID: productA.ID}}})
 	require.NoError(t, err)
 

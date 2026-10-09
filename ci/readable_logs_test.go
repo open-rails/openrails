@@ -28,8 +28,6 @@ func TestCreditExpiryLogsReadableAmounts(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
 	expires := time.Now().UTC().Add(time.Hour)
 	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{
 		Currency: "USD", Amount: 2_500_000, Source: "support", SourceID: uuid.NewString(), ExpiresAt: &expires,

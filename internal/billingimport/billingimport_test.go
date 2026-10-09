@@ -19,7 +19,7 @@ func declaredBook() DeclaredBilling {
 	return DeclaredBilling{
 		AsOf:       time.Now().UTC(),
 		DefaultPSP: PSPRef{Key: "nmi-main"},
-		Customers:  []DeclaredCustomer{{Customer: customer, Email: "payer@example.test"}},
+		Customers:  []DeclaredCustomer{{Customer: customer}},
 		PaymentMethods: []DeclaredPaymentMethod{{
 			Customer: customer, Rail: "nmi", RailCustomerRef: uuid.NewString(), RailMethodRef: uuid.NewString(),
 			Card: &billing.CardDetails{Brand: ptr("visa"), Last4: ptr("1111"), ExpMonth: ptr(12), ExpYear: ptr(2029)},
@@ -69,7 +69,6 @@ func TestDeclaredBookPANFirewall(t *testing.T) {
 		},
 		"txn.transaction_id": func(b *DeclaredBilling) { b.Transactions[0].TransactionID = "3782 822463 10005" },
 		"grant.source_id":    func(b *DeclaredBilling) { b.AdminGrants[0].SourceID = "5555-5555-5555-4444" },
-		"customer.email":     func(b *DeclaredBilling) { b.Customers[0].Email = visa + "@example.test" },
 		"default_psp.key":    func(b *DeclaredBilling) { b.DefaultPSP.Key = visa },
 	} {
 		book := declaredBook()

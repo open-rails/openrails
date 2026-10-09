@@ -433,48 +433,6 @@ func TestHostedCheckoutEmbedOrigins(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 }
 
-// Read and pay check the customer's standing, as the host last pushed it, on
-// every action: a blocked customer neither reads, pays (a new card or a
-// saved one) nor mints.
-func TestHostedCheckoutAccountState(t *testing.T) {
-	t.Parallel()
-	app, pay := hostedHosts(t, nil)
-	buyer := app.newCustomer()
-	method := buyer.saveCard("nmi", visa)
-	price := app.membership("content:members", 9_990_000)
-	session := hostedSession{w: pay, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
-	minted := app.handOver(buyer, price.ID)
-	option, mintedOption := session.option("nmi"), minted.option("nmi")
-	block := func(blocked bool) {
-		_, err := app.client[remote].EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid(), Blocked: blocked}})
-		require.NoError(t, err)
-	}
-
-	block(true)
-	status, out := pay.guest(http.MethodGet, "/v1/checkout-sessions/"+session.id, nil)
-	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	require.Equal(t, "customer_blocked", hostedErrorCode(out))
-	status, out = session.pay(map[string]any{"option_id": option, "payment_token": pay.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
-	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	require.Equal(t, "customer_blocked", hostedErrorCode(out))
-	status, out = minted.payAs(buyer, map[string]any{"option_id": mintedOption, "payment_method_id": method})
-	require.Equal(t, http.StatusForbidden, status, "a session minted before the block: %v", out)
-	require.Equal(t, "customer_blocked", hostedErrorCode(out))
-	status, out = buyer.call(http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": price.ID})
-	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	require.Equal(t, "customer_blocked", hostedErrorCode(out))
-	_, err := app.client[remote].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: buyer.identity(), PriceID: price.ID})
-	require.Error(t, err, "the host cannot mint for a blocked customer either")
-	pay.settle()
-	require.Empty(t, pay.nmi.ledger(""))
-	require.False(t, buyer.entitled("content:members"))
-
-	block(false)
-	status, out = session.payCard(visa)
-	require.Equal(t, http.StatusOK, status, "%v", out)
-	require.Equal(t, "succeeded", out["status"])
-}
-
 // A host that starts checkout server-side mints through the Client; the buyer
 // pays with a card they already saved.
 func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {

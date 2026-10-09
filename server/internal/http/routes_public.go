@@ -14,6 +14,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/scim"
 )
 
 // registerUserRoutesAt mounts the buyer-facing checkout/catalog surface —
@@ -41,6 +42,17 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
+// registerProvisioningRoutes mounts SCIM 2.0 at /scim/v2: a merchant's
+// provisioning token, or a client-credentials access token with scope scim
+// from its trusted issuer, names the merchant.
+func (s *Server) registerProvisioningRoutes(mux router.Registrar) {
+	auth := scim.Authenticator{Tokens: scim.Tokens{DB: s.runtime.DB}}
+	if s.controlPlane != nil {
+		auth.Resource = s.controlPlane.ResolveProvisioningToken
+	}
+	httproutes.RegisterProvisioningRoutes(router.NewMuxRecorded(mux, "/scim/v2", s.runtime, s.recordRoute), s.runtime, httproutes.Options{Provisioning: auth.Authenticate})
+}
+
 // registerStandaloneMetaRoutes registers health and metrics, the standalone
 // server's process surface, and the public configuration, which is browser
 // tier.
@@ -61,6 +73,7 @@ func (s *Server) capabilities() *billing.Capabilities {
 		// Team invitations mint register-and-join links when the control
 		// plane's posture allows them.
 		map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()})
+	caps.RouteGroups[string(httproutes.Provisioning)] = true
 	return &caps
 }
 

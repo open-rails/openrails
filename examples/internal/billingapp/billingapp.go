@@ -55,11 +55,8 @@ type Report struct {
 // Run executes the workflow with the given client.
 func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error) {
 	var r Report
-	customers, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.New())}})
-	if err != nil {
-		return r, fmt.Errorf("ensure customer: %w", err)
-	}
-	payer := customers[0].ID
+	// The customer is the host's user id; OpenRails creates it on first use.
+	payer := billing.CustomerID(uuid.New())
 	invoker := "app:" + in.Run
 
 	current, err := client.GetMerchantConfiguration(ctx)

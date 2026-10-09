@@ -8,10 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
+	directory "github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -21,68 +23,42 @@ import (
 // ErrCustomerNotFound is a customer the merchant never declared or billed.
 var ErrCustomerNotFound = apperr.New(http.StatusNotFound, "customer_not_found", "customer not found")
 
-func customerFromRow(row gen.BillingCustomer) billing.Customer {
-	return billing.Customer{ID: billing.CustomerID(row.ID), Email: row.Email, Username: row.Username, Blocked: row.Blocked, CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}
-}
+// errDirectoryUnavailable is a read the merchant's directory could not answer.
+var errDirectoryUnavailable = apperr.New(http.StatusServiceUnavailable, "service_unavailable", "The customer directory is unavailable.")
 
-// EnsureCustomers creates the merchant's customers or replaces their
-// declared fields, in one statement: every item or none. Items name distinct
-// customers.
-func (s *Service) EnsureCustomers(ctx context.Context, items []billing.EnsureCustomerParams) ([]billing.Customer, error) {
-	if len(items) == 0 || len(items) > billing.MaxBatchItems {
-		return nil, apperr.Invalidf("items must hold 1 to %d customers", billing.MaxBatchItems).WithParam("items")
+// customers builds the customer objects of rows, in order, their contacts
+// read in one lookup.
+func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []gen.BillingCustomer) ([]billing.Customer, error) {
+	ids := make([]uuid.UUID, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
 	}
-	ids := make([]uuid.UUID, len(items))
-	emails := make([]string, len(items))
-	usernames := make([]string, len(items))
-	blocked := make([]bool, len(items))
-	seen := make(map[billing.CustomerID]bool, len(items))
-	for i, item := range items {
-		if item.ID.IsZero() {
-			return nil, apperr.Invalidf("customer id is required").WithParam(apperr.ItemParam(i, "id"))
+	var found map[uuid.UUID]directory.Contact
+	if s.rt.Contacts != nil && len(ids) > 0 {
+		var err error
+		if found, err = s.rt.Contacts.Contacts(ctx, mid, ids); err != nil {
+			log.WithContext(ctx).WithError(err).Warn("customer contacts unavailable")
+			return nil, errDirectoryUnavailable
 		}
-		if seen[item.ID] {
-			return nil, apperr.Invalidf("customer %s is declared twice", item.ID).WithParam(apperr.ItemParam(i, "id"))
+	}
+	out := make([]billing.Customer, len(rows))
+	for i, row := range rows {
+		out[i] = billing.Customer{ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC()}
+		if contact, ok := found[row.ID]; ok {
+			out[i].Contact = customerContact(contact)
 		}
-		seen[item.ID] = true
-		if item.Email != nil {
-			email := strings.TrimSpace(*item.Email)
-			if email == "" || len(email) > 320 || !strings.Contains(email, "@") {
-				return nil, apperr.Invalidf("email must be an address of at most 320 bytes").WithParam(apperr.ItemParam(i, "email"))
-			}
-			emails[i] = email
-		}
-		if item.Username != nil {
-			username := strings.TrimSpace(*item.Username)
-			if username == "" || len(username) > 256 {
-				return nil, apperr.Invalidf("username must be at most 256 bytes and not blank").WithParam(apperr.ItemParam(i, "username"))
-			}
-			usernames[i] = username
-		}
-		ids[i], blocked[i] = item.ID.UUID(), item.Blocked
-	}
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.rt.DB.Gen(ctx).PutCustomers(ctx, gen.PutCustomersParams{MerchantID: mid.UUID(), Ids: ids, Emails: emails, Usernames: usernames, Blocked: blocked})
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[uuid.UUID]billing.Customer, len(rows))
-	for _, row := range rows {
-		byID[row.ID] = customerFromRow(row)
-	}
-	out := make([]billing.Customer, len(ids))
-	for i, id := range ids {
-		out[i] = byID[id]
 	}
 	return out, nil
+}
+
+func customerContact(c directory.Contact) *billing.CustomerContact {
+	text := func(v string) *string {
+		if v == "" {
+			return nil
+		}
+		return &v
+	}
+	return &billing.CustomerContact{Email: text(c.Email), Name: text(c.Name), Username: text(c.Username), Active: c.Active, SyncedAt: c.SyncedAt}
 }
 
 // GetCustomer reads one customer.
@@ -103,11 +79,15 @@ func (s *Service) GetCustomer(ctx context.Context, id identity.CustomerID) (*bil
 	if err != nil {
 		return nil, err
 	}
-	out := customerFromRow(row)
-	return &out, nil
+	out, err := s.customers(ctx, mid, []gen.BillingCustomer{row})
+	if err != nil {
+		return nil, err
+	}
+	return &out[0], nil
 }
 
-// ListCustomers lists the merchant's customers, newest first.
+// ListCustomers lists the merchant's customers, newest first, or those its
+// directory finds for a search.
 func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerListParams) (billing.ListPage[billing.Customer], error) {
 	var page billing.ListPage[billing.Customer]
 	ctx, release, err := s.pin(ctx)
@@ -119,35 +99,64 @@ func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerList
 	if err != nil {
 		return page, err
 	}
+	q := s.rt.DB.Gen(ctx)
 	if params.IDs != nil {
-		rows, err := s.rt.DB.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
+		rows, err := q.ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
 		if err != nil {
 			return page, err
 		}
-		for _, row := range rows {
-			page.Items = append(page.Items, customerFromRow(row))
-		}
-		return page, nil
+		page.Items, err = s.customers(ctx, mid, rows)
+		return page, err
 	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
+		return page, err
+	}
+	if search := strings.TrimSpace(params.Search); search != "" {
+		ids, err := s.searchCustomers(ctx, mid, search, limit)
+		if err != nil {
+			return page, err
+		}
+		rows, err := q.ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+		if err != nil {
+			return page, err
+		}
+		page.Items, err = s.customers(ctx, mid, rows[:min(len(rows), limit)])
 		return page, err
 	}
 	afterAt, afterID, err := pagination.After(params.Cursor)
 	if err != nil {
 		return page, err
 	}
-	rows, err := s.rt.DB.Gen(ctx).ListCustomers(ctx, gen.ListCustomersParams{
-		MerchantID: mid.UUID(), Q: strings.TrimSpace(params.Query), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
-	})
+	rows, err := q.ListCustomers(ctx, gen.ListCustomersParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return page, err
 	}
-	customers := make([]billing.Customer, 0, len(rows))
-	for _, row := range rows {
-		customers = append(customers, customerFromRow(row))
+	cut := pagination.Cut(rows, limit, func(c gen.BillingCustomer) any {
+		return pagination.TimeID{At: c.CreatedAt, ID: c.ID}
+	})
+	page.Next = cut.Next
+	page.Items, err = s.customers(ctx, mid, cut.Items)
+	return page, err
+}
+
+// searchCustomers is the ids a search names: the customer whose id it is,
+// and those whose contact the directory finds.
+func (s *Service) searchCustomers(ctx context.Context, mid billing.MerchantID, search string, limit int) ([]uuid.UUID, error) {
+	var ids []uuid.UUID
+	if id, err := uuid.Parse(search); err == nil {
+		ids = append(ids, id)
 	}
-	return pagination.Cut(customers, limit, func(c billing.Customer) any {
-		return pagination.TimeID{At: c.CreatedAt, ID: c.ID.UUID()}
-	}), nil
+	if s.rt.Contacts == nil {
+		return ids, nil
+	}
+	found, err := s.rt.Contacts.Search(ctx, mid, search, limit)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("customer search unavailable")
+		return nil, errDirectoryUnavailable
+	}
+	for _, c := range found {
+		ids = append(ids, c.CustomerID)
+	}
+	return ids, nil
 }

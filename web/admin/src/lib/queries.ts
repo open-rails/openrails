@@ -56,10 +56,16 @@ import {
 // Complete collections are explicit: selectors need every eligible record,
 // while catalog screens fetch only their visible page.
 export async function collectPages<T>(
-  loadPage: (cursor: string | undefined, signal?: AbortSignal) => Promise<ListPage<T>>,
+  loadPage: (
+    cursor: string | undefined,
+    signal?: AbortSignal
+  ) => Promise<ListPage<T>>,
   signal?: AbortSignal
 ): Promise<ListPage<T>> {
-  const data = await collectCursorPages((cursor) => loadPage(cursor, signal), signal)
+  const data = await collectCursorPages(
+    (cursor) => loadPage(cursor, signal),
+    signal
+  )
   return { data, next_cursor: null }
 }
 
@@ -112,10 +118,10 @@ export const merchantQueryKeys = (): MerchantQueryKeys => {
 }
 
 export const adminQueries = {
-  customers: (q: string, limit: number, cursor: string) =>
+  customers: (search: string, limit: number, cursor: string) =>
     queryOptions({
-      queryKey: [...queryKeys.customers(), { q, limit, cursor }],
-      queryFn: ({ signal }) => listCustomers(q, limit, cursor, signal),
+      queryKey: [...queryKeys.customers(), { search, limit, cursor }],
+      queryFn: ({ signal }) => listCustomers(search, limit, cursor, signal),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load customers" },
     }),
@@ -131,7 +137,8 @@ export const adminQueries = {
       queryKey: queryKeys.customerUsageRates(id),
       queryFn: ({ signal }) =>
         collectPages(
-          (cursor, signal) => listCustomerUsageRateOverrides(id, cursor, signal),
+          (cursor, signal) =>
+            listCustomerUsageRateOverrides(id, cursor, signal),
           signal
         ),
       enabled: Boolean(id),
@@ -315,7 +322,8 @@ export const adminQueries = {
         "history",
         { productKey, priceKey },
       ],
-      queryFn: ({ signal }) => getPriceKeyHistory(productKey!, priceKey!, signal),
+      queryFn: ({ signal }) =>
+        getPriceKeyHistory(productKey!, priceKey!, signal),
       enabled: Boolean(productKey && priceKey),
     }),
   repriceBatches: (productKey?: string, priceKey?: string, limit = 5) =>
@@ -325,7 +333,8 @@ export const adminQueries = {
         "reprice-batches",
         { productKey, priceKey, limit },
       ],
-      queryFn: ({ signal }) => listRepriceBatches(productKey!, priceKey!, limit, signal),
+      queryFn: ({ signal }) =>
+        listRepriceBatches(productKey!, priceKey!, limit, signal),
       enabled: Boolean(productKey && priceKey),
     }),
   catalogRevision: () =>

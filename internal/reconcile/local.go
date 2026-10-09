@@ -11,9 +11,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -147,9 +149,36 @@ type LocalStateLoader interface {
 // merchant-pinned connection.
 type PGLocalStateLoader struct {
 	DB *db.DB
+	// Contacts supplies each subscription's customer email for identity
+	// matching; nil matches without it.
+	Contacts identity.Directory
 }
 
 var _ LocalStateLoader = (*PGLocalStateLoader)(nil)
+
+// fillCustomerEmails reads the subscriptions' customers' emails in one
+// directory lookup.
+func (l *PGLocalStateLoader) fillCustomerEmails(ctx context.Context, merchantID billing.MerchantID, subs []LocalSubscription) error {
+	if l.Contacts == nil || len(subs) == 0 {
+		return nil
+	}
+	seen := map[uuid.UUID]bool{}
+	var ids []uuid.UUID
+	for _, s := range subs {
+		if s.CustomerID != uuid.Nil && !seen[s.CustomerID] {
+			seen[s.CustomerID] = true
+			ids = append(ids, s.CustomerID)
+		}
+	}
+	found, err := l.Contacts.Contacts(ctx, merchantID, ids)
+	if err != nil {
+		return fmt.Errorf("reconcile: customer contacts: %w", err)
+	}
+	for i := range subs {
+		subs[i].CustomerEmail = found[subs[i].CustomerID].Email
+	}
+	return nil
+}
 
 func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error) {
 	names := localRailNames(provider)
@@ -193,9 +222,6 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			ScheduledPriceID:            row.ScheduledPriceID,
 			TierChangePending:           row.TierChangePending,
 		}
-		if row.CustomerEmail != nil {
-			s.CustomerEmail = *row.CustomerEmail
-		}
 		if row.CancelType != nil {
 			s.CancelType = *row.CancelType
 		}
@@ -207,6 +233,10 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		}
 
 		state.Subscriptions = append(state.Subscriptions, s)
+	}
+
+	if err := l.fillCustomerEmails(ctx, scopeMerchantID, state.Subscriptions); err != nil {
+		return nil, err
 	}
 
 	prices, err := q.ReconcileListPricesWithPSPLinks(ctx, gen.ReconcileListPricesWithPSPLinksParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID})

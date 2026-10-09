@@ -572,9 +572,6 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	subscription.Price = price
-	if err := FillCustomerEmail(ctx, dbb.Gen(ctx), subscription.CustomerID, params.CustomerEmail); err != nil {
-		return nil, nil, fmt.Errorf("record customer email: %w", err)
-	}
 
 	if params.Prepared != nil && params.Prepared.Pending {
 		return subscription, nil, nil

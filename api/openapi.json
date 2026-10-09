@@ -249,7 +249,6 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
-          "customer_blocked",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -327,7 +326,6 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
-          "customer_blocked",
           "customer_proof_required",
           "idempotency_key_reused",
           "insufficient_funds",
@@ -484,7 +482,6 @@
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
           "customer_action_required",
-          "customer_blocked",
           "invalid_param",
           "resource_conflict",
           "resource_not_found",
@@ -540,7 +537,6 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
-          "customer_blocked",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -618,7 +614,6 @@
           "checkout_session_unavailable",
           "credential_custody_transition_required",
           "customer_action_required",
-          "customer_blocked",
           "customer_proof_required",
           "idempotency_key_reused",
           "insufficient_funds",
@@ -680,7 +675,6 @@
           "authentication_required",
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
-          "customer_blocked",
           "invalid_param",
           "resource_access_denied",
           "resource_conflict",
@@ -5283,7 +5277,7 @@
             }
           },
           {
-            "name": "q",
+            "name": "search",
             "in": "query",
             "schema": {
               "type": "string"
@@ -5331,54 +5325,8 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/ensure": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnsureCustomerBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnsureCustomerBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_cursor",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5509,7 +5457,6 @@
         "x-openrails-errors": [
           "billing_policy_not_found",
           "currency_unsupported",
-          "customer_not_found",
           "invalid_param",
           "service_credential_customer_scope_denied"
         ],
@@ -13451,6 +13398,158 @@
           "tier:operator"
         ]
       }
+    },
+    "/v1/admin/provisioning-tokens": {
+      "get": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProvisioningToken"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-errors": null,
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      },
+      "post": {
+        "tags": [
+          "merchant_config"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProvisioningTokenParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedProvisioningToken"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-sensitive": true,
+        "x-openrails-errors": [
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/provisioning-tokens/{id}": {
+      "delete": {
+        "tags": [
+          "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-sensitive": true,
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant"
+        ]
+      }
     }
   },
   "components": {
@@ -16456,6 +16555,14 @@
           }
         }
       },
+      "CreateProvisioningTokenParams": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "CreateRepriceBatchParams": {
         "type": "object",
         "properties": {
@@ -16546,6 +16653,46 @@
           "expires_at",
           "revoked_at",
           "secret"
+        ]
+      },
+      "CreatedProvisioningToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "declared": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "declared",
+          "created_at",
+          "last_used_at",
+          "token"
         ]
       },
       "CreditGrant": {
@@ -16741,28 +16888,15 @@
           "id": {
             "type": "string"
           },
-          "email": {
+          "contact": {
             "oneOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/CustomerContact"
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "username": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blocked": {
-            "type": "boolean"
           },
           "created_at": {
             "type": "string",
@@ -16775,9 +16909,7 @@
         },
         "required": [
           "id",
-          "email",
-          "username",
-          "blocked",
+          "contact",
           "created_at",
           "last_seen_at"
         ]
@@ -16903,6 +17035,69 @@
             "type": "string"
           }
         }
+      },
+      "CustomerContact": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "username": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "synced_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "name",
+          "username",
+          "active",
+          "synced_at"
+        ]
       },
       "CustomerEntitlement": {
         "type": "object",
@@ -17169,9 +17364,6 @@
         "type": "object",
         "properties": {
           "customer": {
-            "type": "string"
-          },
-          "email": {
             "type": "string"
           }
         }
@@ -17480,62 +17672,6 @@
         "required": [
           "tiers"
         ]
-      },
-      "EnsureCustomerBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EnsureCustomerParams"
-            }
-          }
-        }
-      },
-      "EnsureCustomerBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Customer"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "EnsureCustomerParams": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "email": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "username": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "blocked": {
-            "type": "boolean"
-          }
-        }
       },
       "EntitlementChange": {
         "type": "object",
@@ -22723,6 +22859,42 @@
           "resolved_at"
         ]
       },
+      "ProvisioningToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "declared": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "declared",
+          "created_at",
+          "last_used_at"
+        ]
+      },
       "PublicConfig": {
         "type": "object",
         "properties": {
@@ -25925,11 +26097,6 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "Only the customer may take this action, through their own step."
-    },
-    "customer_blocked": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The merchant declared this customer blocked: it may not buy."
     },
     "customer_email_required": {
       "status": 400,

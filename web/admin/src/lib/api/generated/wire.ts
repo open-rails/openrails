@@ -677,6 +677,10 @@ export type CreateProductParams = {
   archived?: boolean
 }
 
+export type CreateProvisioningTokenParams = {
+  name?: string
+}
+
 export type CreateRepriceBatchParams = {
   product_key: string
   price_key: string
@@ -694,6 +698,15 @@ export type CreatedAPIKey = {
   expires_at: string | null
   revoked_at: string | null
   secret: string
+}
+
+export type CreatedProvisioningToken = {
+  id: string
+  name: string
+  declared: boolean
+  created_at: string
+  last_used_at: string | null
+  token: string
 }
 
 export type CreditGrant = {
@@ -737,9 +750,7 @@ export type CurrencyUnits = {
 
 export type Customer = {
   id: string
-  email: string | null
-  username: string | null
-  blocked: boolean
+  contact: CustomerContact | null
   created_at: string
   last_seen_at: string
 }
@@ -767,6 +778,14 @@ export type CustomerCancelSubscriptionParams = {
 export type CustomerChangeTierParams = {
   price_id?: string
   signature?: string
+}
+
+export type CustomerContact = {
+  email: string | null
+  name: string | null
+  username: string | null
+  active: boolean | null
+  synced_at: string | null
 }
 
 export type CustomerEntitlement = {
@@ -833,7 +852,6 @@ export type DeclaredBilling = {
 
 export type DeclaredCustomer = {
   customer?: string
-  email?: string
 }
 
 export type DeclaredPaymentMethod = {
@@ -922,21 +940,6 @@ export type DunningTier = {
 
 export type EffectiveTierLookup = {
   tiers: Record<string, Tier | null> | null
-}
-
-export type EnsureCustomerBatchParams = {
-  items?: EnsureCustomerParams[]
-}
-
-export type EnsureCustomerBatchResult = {
-  items: Customer[]
-}
-
-export type EnsureCustomerParams = {
-  id?: string
-  email?: string | null
-  username?: string | null
-  blocked?: boolean
 }
 
 export type EntitlementChange = {
@@ -2022,6 +2025,14 @@ export type ProviderBillingResolution = {
   reference: string
   note: string
   resolved_at: string
+}
+
+export type ProvisioningToken = {
+  id: string
+  name: string
+  declared: boolean
+  created_at: string
+  last_used_at: string | null
 }
 
 export type PublicConfig = {

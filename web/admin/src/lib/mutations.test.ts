@@ -225,9 +225,9 @@ it("walks every export page, stops on an empty one, and looks one customer up", 
   expect(await exec(queryClient, M.exportSubscriptions(), { status: "past_due" })).toEqual([{ id: "sub_1" }])
   expect(await exec(queryClient, M.findCustomer(), "a@example.test")).toEqual({ id: "cus_9" })
   expect(requests.map((request) => request.query)).toEqual([
-    "q=alice&limit=200", "q=alice&limit=200&cursor=c1",
+    "search=alice&limit=200", "search=alice&limit=200&cursor=c1",
     "status=past_due&limit=200", "status=past_due&limit=200&cursor=c2",
-    "q=a%40example.test&limit=1",
+    "search=a%40example.test&limit=1",
   ])
 })
 

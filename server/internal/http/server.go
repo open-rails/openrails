@@ -297,6 +297,8 @@ func New(deps Dependencies) (*Server, error) {
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
 	s.registerWebhookRoutes(mux)
+	// SCIM 2.0: each merchant's directory pushes its users.
+	s.registerProvisioningRoutes(mux)
 	// or#893: the merchant-scoped alias (/v1/merchants/:merchant/webhooks/...,
 	// #529) is NOT mounted here. It was a transition alias beside the canonical
 	// surface above; standalone resolves the merchant from PSP

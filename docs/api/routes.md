@@ -2,9 +2,9 @@
 
 # Routes
 
-Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (233), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
 **Permission** is, for an admin or merchant-config route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.
 
@@ -129,7 +129,6 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/product-access` | merchant | `AdminWrite` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
 | DELETE | `/v1/admin/customers/{customer_id}/product-access/{id}` | merchant | `AdminWrite` | — | 204 — | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers` | merchant | `AdminRead` | — | 200 `ListPage<Customer>` |  |
-| POST | `/v1/admin/customers/ensure` | merchant | `AdminWrite` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` | sensitive |
 | GET | `/v1/admin/customers/settings` | merchant | `AdminRead` | — | 200 `ListPage<CustomerSettings>` |  |
 | PATCH | `/v1/admin/customers/settings` | merchant | `AdminWrite` | `UpdateCustomerSettingsBatchParams` | 200 `CustomerSettingsBatch` | sensitive; limit `grant` |
 | GET | `/v1/admin/customers/{customer_id}/billing-profile` | merchant | `AdminRead` | — | 200 `CustomerBillingProfile` |  |
@@ -246,6 +245,9 @@ The merchant's own configuration, every route behind the host's `Permissions.Mer
 | POST | `/v1/admin/billing-import` | merchant | `MerchantConfig` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
 | PUT | `/v1/admin/dashboard` | merchant | `MerchantConfig` | `SetDashboardParams` | 200 `Dashboard` |  |
 | POST | `/v1/admin/dashboard/widgets/generate` | merchant | `MerchantConfig` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
+| GET | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | — | 200 `ListPage<ProvisioningToken>` |  |
+| POST | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
+| DELETE | `/v1/admin/provisioning-tokens/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
 
 ## Control plane (standalone)
 
@@ -291,3 +293,22 @@ Inbound provider callbacks.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | `application/json` | 200 `WebhookReceipt` |  |
+
+## Provisioning (SCIM 2.0)
+
+A merchant's directory (AuthKit, Okta, Entra ID) pushing its users, which become its customers' contacts (RFC 7643, RFC 7644). Each request carries the merchant's provisioning token, or a client-credentials access token with scope `scim` from its trusted issuer. Bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves these routes out. The standalone server serves them; an embedded host with `Routes.Provisioning`.
+
+| Method | Path | Tier | Permission | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| GET | `/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/scim/v2/Schemas` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/scim/v2/Schemas/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| POST | `/scim/v2/Users` | provisioning | — | `application/scim+json` | 201 `application/scim+json` |  |
+| GET | `/scim/v2/Users` | provisioning | — | — | 200 `application/scim+json` |  |
+| GET | `/scim/v2/Users/{id}` | provisioning | — | — | 200 `application/scim+json` |  |
+| PUT | `/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| PATCH | `/scim/v2/Users/{id}` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |
+| DELETE | `/scim/v2/Users/{id}` | provisioning | — | — | 204 — |  |
+| POST | `/scim/v2/Bulk` | provisioning | — | `application/scim+json` | 200 `application/scim+json` |  |

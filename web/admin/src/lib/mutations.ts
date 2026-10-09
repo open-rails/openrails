@@ -242,9 +242,9 @@ export const adminMutations = {
     const customersKey = keys.customers()
     return mutationOptions({
       mutationKey: [...customersKey, "export"],
-      mutationFn: (q: string) =>
+      mutationFn: (search: string) =>
         collectAllCursorPages<Customer>((limit, cursor) =>
-          listCustomers(q, limit, cursor ?? "")
+          listCustomers(search, limit, cursor ?? "")
         ),
     })
   },
@@ -455,7 +455,8 @@ export const adminMutations = {
     const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "product-access", "grant"],
-      mutationFn: (grant: ProductGrant) => grantProductAccess(customerId, grant),
+      mutationFn: (grant: ProductGrant) =>
+        grantProductAccess(customerId, grant),
       onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
     })
   },
@@ -509,7 +510,11 @@ export const adminMutations = {
       }) => {
         const price = await getPriceByKey(productKey, priceKey)
         const product = await getProduct(price.product_id)
-        return { price, productName: product.display_name, productKey: product.key }
+        return {
+          price,
+          productName: product.display_name,
+          productKey: product.key,
+        }
       },
     })
   },
@@ -748,8 +753,13 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.settings(), "update"],
-      mutationFn: ({ revision, settings }: { revision: string; settings: MerchantSettings }) =>
-        applyMerchantSettings(revision, settings),
+      mutationFn: ({
+        revision,
+        settings,
+      }: {
+        revision: string
+        settings: MerchantSettings
+      }) => applyMerchantSettings(revision, settings),
       // A refused revision means the form is stale: reload either way.
       onSettled: invalidateExactOnSuccess(queryClient, keys.settings()),
     })
@@ -762,10 +772,14 @@ export const adminMutations = {
       retry: false,
       gcTime: 0,
       mutationFn: (psp: CreatePSPRequest) => {
-        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this form before saving")
+        if (selectedMerchant() !== merchant)
+          throw new Error("Merchant changed; reopen this form before saving")
         return createPSP(psp)
       },
-      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...keys.settings(),
+        "psps",
+      ]),
     })
   },
   updatePSP: (queryClient: QueryClient) => {
@@ -776,10 +790,14 @@ export const adminMutations = {
       retry: false,
       gcTime: 0,
       mutationFn: ({ id, psp }: { id: string; psp: UpdatePSPRequest }) => {
-        if (selectedMerchant() !== merchant) throw new Error("Merchant changed; reopen this form before saving")
+        if (selectedMerchant() !== merchant)
+          throw new Error("Merchant changed; reopen this form before saving")
         return updatePSP(id, psp)
       },
-      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...keys.settings(),
+        "psps",
+      ]),
     })
   },
   archivePSP: (queryClient: QueryClient) => {
@@ -788,7 +806,10 @@ export const adminMutations = {
       mutationKey: [...keys.settings(), "psps", "archive"],
       mutationFn: ({ id, allowLast }: { id: string; allowLast?: boolean }) =>
         archivePSP(id, allowLast),
-      onSuccess: invalidateExactOnSuccess(queryClient, [...keys.settings(), "psps"]),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...keys.settings(),
+        "psps",
+      ]),
     })
   },
   createApiKey: (queryClient: QueryClient) => {

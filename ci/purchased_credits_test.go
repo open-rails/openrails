@@ -85,8 +85,6 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 1_000_000})
 	require.NoError(t, err)
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
 	buy := func() {
 		t.Helper()
 		session, err := sell(t, client, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/success"})

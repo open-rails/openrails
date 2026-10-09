@@ -47,7 +47,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authk
 	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
 }
 
-func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error) {
+func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
@@ -71,7 +71,10 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
-	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
+	return openrails.New(ctx, cfg, openrails.Deps{
+		Postgres: db, // the same pool your app uses
+		Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+	})
 }
 
 func main() {
@@ -99,7 +102,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	bill, err := newBilling(ctx, db)
+	bill, err := newBilling(ctx, db, ak)
 	if err != nil {
 		return err
 	}

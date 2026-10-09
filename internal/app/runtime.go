@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/captcha"
+	"github.com/open-rails/openrails/internal/identity"
 
 	vaultapi "github.com/hashicorp/vault/api"
 
@@ -123,6 +124,11 @@ type Runtime struct {
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock clockwork.Clock
+	// Contacts is who customers are: the host's directory when HostContacts
+	// is set (embedded Deps.Contacts), else the kept copy SCIM and verified
+	// token claims fill.
+	Contacts     identity.Directory
+	HostContacts bool
 	// RiverProducer inserts jobs: the bound fleet, OpenRails' own or the
 	// host's, else the insert-only client New binds in the same schema.
 	RiverProducer  *river.Client[pgx.Tx]

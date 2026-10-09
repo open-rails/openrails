@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -940,7 +941,7 @@ func prunePlanApplied(logs []pullProviderPruneLog) bool {
 func newPullEngine(rt *pullProviderRuntime, fetchers map[reconcile.Provider]reconcile.RailFetcher) *reconcile.Engine {
 	cancels := intents.NewProviderCancelScheduler(rt.DB, intents.NewRateCeiling(rt.DB), intents.OriginSystem,
 		"terminal lifecycle outcome; the provider schedule must stop billing")
-	return reconcile.NewEngine(rt.DB, rt.Config, fetchers, cancels)
+	return reconcile.NewEngine(rt.DB, rt.Config, identity.Kept{DB: rt.DB}, fetchers, cancels)
 }
 
 func nmiClients(transport http.RoundTripper) *railresolve.NMIFactory {

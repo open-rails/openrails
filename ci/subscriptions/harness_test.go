@@ -749,9 +749,11 @@ type customer struct {
 	token string
 }
 
+// newCustomer is a user of the host, already a customer: settings create
+// one OpenRails has not seen.
 func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
-	_, err := w.client[embedded].EnsureCustomers(w.t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(id))}})
+	_, err := w.client[embedded].UpdateCustomerSettings(w.t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: billing.CustomerID(uuid.MustParse(id))}})
 	require.NoError(w.t, err)
 	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
 }

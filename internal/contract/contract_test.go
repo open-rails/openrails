@@ -34,6 +34,10 @@ func TestOpenAPICoversTheCatalog(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(files[OpenAPIFile], &doc))
 	for _, r := range routes.Catalog() {
+		if r.Group == routes.Provisioning {
+			require.NotContains(t, doc.Paths, r.Path, "SCIM's messages are the standard's")
+			continue
+		}
 		require.Contains(t, doc.Paths[r.Path], strings.ToLower(r.Method), r.Key())
 		for _, set := range r.ErrorSets() {
 			require.Contains(t, doc.Sets, set, r.Key())

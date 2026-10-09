@@ -60,7 +60,6 @@ type EnrollInput struct {
 	// CheckoutAttemptID is the checkout the first payment settles.
 	CheckoutAttemptID uuid.UUID
 	UserID            string
-	CustomerEmail     string
 	PriceID           uuid.UUID
 	// SubscriberWallet is the wallet the checkout expects to sign; it becomes
 	// the subscriber only once the landed payment proves it signed.
@@ -169,7 +168,6 @@ func (s *EnrollService) ConfirmEnrollment(ctx context.Context, in EnrollInput) (
 		PriceID:               in.PriceID,
 		Rail:                  models.RailSolana,
 		RailSubscriptionID:    &subPDAStr,
-		CustomerEmail:         in.CustomerEmail,
 		TransactionID:         sig,
 		Amount:                in.FiatAmount,
 		AmountProvided:        true,

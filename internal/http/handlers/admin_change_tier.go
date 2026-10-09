@@ -8,7 +8,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -100,19 +99,22 @@ func adminTierChangeRequest(
 		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
 		return nil, nil, nil, false
 	}
-	customer, err := r.State.DB.Gen(r.Request.Context()).GetCustomer(r.Request.Context(), gen.GetCustomerParams{MerchantID: subscription.MerchantID, ID: subscription.CustomerID})
-	if err != nil {
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load customer")
-		r.ErrorCode(billing.CodeInternalError, "subscription customer unavailable")
-		return nil, nil, nil, false
+	user := &checkout.UserIdentity{ID: subscription.CustomerID.String()}
+	if r.State.Contacts != nil {
+		found, err := r.State.Contacts.Contacts(r.Request.Context(), billing.MerchantID(subscription.MerchantID), []uuid.UUID{subscription.CustomerID})
+		if err != nil {
+			log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: customer contact")
+			r.ErrorCode(billing.CodeServiceUnavailable, "the customer directory is unavailable")
+			return nil, nil, nil, false
+		}
+		if email := found[subscription.CustomerID].Email; email != "" {
+			user.Email = &email
+		}
 	}
 	return &checkout.TierChangeRequest{
-			PriceID:        body.PriceID.String(),
-			SubscriptionID: subscriptionID,
-		}, &checkout.UserIdentity{
-			ID:    subscription.CustomerID.String(),
-			Email: customer.Email,
-		}, subscription, true
+		PriceID:        body.PriceID.String(),
+		SubscriptionID: subscriptionID,
+	}, user, subscription, true
 }
 
 // adminTierChangeAdmissible applies the operator-route guards to a new tier

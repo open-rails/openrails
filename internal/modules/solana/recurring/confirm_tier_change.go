@@ -60,9 +60,8 @@ type ConfirmTierChangeInput struct {
 	OldSubscriptionID uuid.UUID
 
 	// Acting user + new-plan identity (for the new membership).
-	UserID        string
-	CustomerEmail string
-	NewPriceID    uuid.UUID
+	UserID     string
+	NewPriceID uuid.UUID
 
 	// New on-chain subscription account the atomic tx created (from the prepare
 	// step's result). This is the rail_subscription_id of the new membership +
@@ -249,7 +248,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		PriceID:               in.NewPriceID,
 		Rail:                  models.RailSolana,
 		RailSubscriptionID:    &newPDA,
-		CustomerEmail:         in.CustomerEmail,
 		TransactionID:         in.Signature,
 		Amount:                in.NewFiatAmount,
 		AmountProvided:        true,

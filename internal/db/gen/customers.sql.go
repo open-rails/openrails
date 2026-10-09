@@ -12,41 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const customerIDsByUsername = `-- name: CustomerIDsByUsername :many
-SELECT c.id FROM billing.customers c
-WHERE c.merchant_id = $1
-  AND lower(c.username) = lower($2::text)
-ORDER BY c.id
-LIMIT 2
-`
-
-type CustomerIDsByUsernameParams struct {
-	MerchantID uuid.UUID
-	Username   string
-}
-
-// The CCBill username bridge: the merchant's customers that declared the
-// username. Two answers are ambiguous and resolve nothing.
-func (q *Queries) CustomerIDsByUsername(ctx context.Context, arg CustomerIDsByUsernameParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, customerIDsByUsername, arg.MerchantID, arg.Username)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const ensureCustomer = `-- name: EnsureCustomer :one
 
 INSERT INTO billing.customers (id, merchant_id, issuer)
@@ -54,7 +19,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version
+RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version
 `
 
 type EnsureCustomerParams struct {
@@ -74,11 +39,8 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.ID,
 		&i.MerchantID,
 		&i.Issuer,
-		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
-		&i.Username,
-		&i.Blocked,
 		&i.AccessVersion,
 	)
 	return i, err
@@ -102,26 +64,8 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return err
 }
 
-const fillCustomerEmail = `-- name: FillCustomerEmail :exec
-UPDATE billing.customers SET email = $1::text
-WHERE merchant_id = $2 AND id = $3 AND email IS NULL
-`
-
-type FillCustomerEmailParams struct {
-	Email      string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// An email seen at signup or at the provider fills an unset one; a declared
-// email stands.
-func (q *Queries) FillCustomerEmail(ctx context.Context, arg FillCustomerEmailParams) error {
-	_, err := q.db.Exec(ctx, fillCustomerEmail, arg.Email, arg.MerchantID, arg.ID)
-	return err
-}
-
 const getCustomer = `-- name: GetCustomer :one
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -137,41 +81,33 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.ID,
 		&i.MerchantID,
 		&i.Issuer,
-		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
-		&i.Username,
-		&i.Blocked,
 		&i.AccessVersion,
 	)
 	return i, err
 }
 
 const listCustomers = `-- name: ListCustomers :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers c
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers c
 WHERE c.merchant_id = $1
-  AND ($2::text = ''
-   OR c.id::text ILIKE $2 || '%'
-   OR c.email ILIKE '%' || $2 || '%')
-  AND ($3::timestamptz IS NULL
-   OR (c.created_at, c.id) < ($3::timestamptz, $4::uuid))
+  AND ($2::timestamptz IS NULL
+   OR (c.created_at, c.id) < ($2::timestamptz, $3::uuid))
 ORDER BY c.created_at DESC, c.id DESC
-LIMIT $5::int
+LIMIT $4::int
 `
 
 type ListCustomersParams struct {
 	MerchantID uuid.UUID
-	Q          string
 	AfterAt    *time.Time
 	AfterID    *uuid.UUID
 	RowLimit   int32
 }
 
-// Newest first. q matches an id prefix or an email substring.
+// Newest first.
 func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([]BillingCustomer, error) {
 	rows, err := q.db.Query(ctx, listCustomers,
 		arg.MerchantID,
-		arg.Q,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,
@@ -187,11 +123,8 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 			&i.ID,
 			&i.MerchantID,
 			&i.Issuer,
-			&i.Email,
 			&i.CreatedAt,
 			&i.LastSeenAt,
-			&i.Username,
-			&i.Blocked,
 			&i.AccessVersion,
 		); err != nil {
 			return nil, err
@@ -205,7 +138,7 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 }
 
 const listCustomersByIDs = `-- name: ListCustomersByIDs :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -228,11 +161,8 @@ func (q *Queries) ListCustomersByIDs(ctx context.Context, arg ListCustomersByIDs
 			&i.ID,
 			&i.MerchantID,
 			&i.Issuer,
-			&i.Email,
 			&i.CreatedAt,
 			&i.LastSeenAt,
-			&i.Username,
-			&i.Blocked,
 			&i.AccessVersion,
 		); err != nil {
 			return nil, err
@@ -280,79 +210,4 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 		return nil, err
 	}
 	return items, nil
-}
-
-const putCustomers = `-- name: PutCustomers :many
-INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
-SELECT item.id, $1::uuid, NULLIF(item.email, ''), NULLIF(item.username, ''), item.blocked
-FROM unnest($2::uuid[], $3::text[], $4::text[], $5::boolean[])
-  AS item(id, email, username, blocked)
-ON CONFLICT (merchant_id, id) DO UPDATE SET
-  email = EXCLUDED.email,
-  username = EXCLUDED.username,
-  blocked = EXCLUDED.blocked,
-  last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version
-`
-
-type PutCustomersParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
-	Emails     []string
-	Usernames  []string
-	Blocked    []bool
-}
-
-// The merchant's declaration of distinct customers in one statement; an empty
-// email or username is absent.
-func (q *Queries) PutCustomers(ctx context.Context, arg PutCustomersParams) ([]BillingCustomer, error) {
-	rows, err := q.db.Query(ctx, putCustomers,
-		arg.MerchantID,
-		arg.Ids,
-		arg.Emails,
-		arg.Usernames,
-		arg.Blocked,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingCustomer
-	for rows.Next() {
-		var i BillingCustomer
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Issuer,
-			&i.Email,
-			&i.CreatedAt,
-			&i.LastSeenAt,
-			&i.Username,
-			&i.Blocked,
-			&i.AccessVersion,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const setCustomerEmail = `-- name: SetCustomerEmail :exec
-UPDATE billing.customers SET email = $1
-WHERE merchant_id = $2 AND id = $3
-`
-
-type SetCustomerEmailParams struct {
-	Email      *string
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) SetCustomerEmail(ctx context.Context, arg SetCustomerEmailParams) error {
-	_, err := q.db.Exec(ctx, setCustomerEmail, arg.Email, arg.MerchantID, arg.ID)
-	return err
 }

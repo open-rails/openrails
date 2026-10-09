@@ -12,14 +12,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -481,27 +480,23 @@ func (s *Service) hostedRuntime() (*app.Runtime, error) {
 	return rt, nil
 }
 
-// hostedBuyer is the buyer's identity, read again on every action: a
-// customer the merchant declared blocked (EnsureCustomer) may not buy, even
-// on a session minted before the block.
+// hostedBuyer is the buyer's identity: what the session's minter verified,
+// and, when it knew no username, the one the merchant's contacts hold.
 func hostedBuyer(ctx context.Context, rt *app.Runtime, customerID billing.CustomerID, minted checkoutsession.Buyer) (billing.CheckoutCustomerIdentity, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.CheckoutCustomerIdentity{}, err
 	}
 	out := billing.CheckoutCustomerIdentity{ID: customerID, VerifiedEmail: minted.VerifiedEmail, Username: minted.Username}
-	row, err := rt.DB.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: customerID.UUID()})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	if out.Username != "" || rt.Contacts == nil {
 		return out, nil
-	case err != nil:
-		return billing.CheckoutCustomerIdentity{}, apperr.New(http.StatusServiceUnavailable, "service_unavailable", "Checkout is temporarily unavailable.")
-	case row.Blocked:
-		return billing.CheckoutCustomerIdentity{}, checkoutsession.ErrBlocked
 	}
-	if out.Username == "" && row.Username != nil {
-		out.Username = *row.Username
+	found, err := rt.Contacts.Contacts(ctx, mid, []uuid.UUID{customerID.UUID()})
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("checkout: customer contact unavailable")
+		return out, nil
 	}
+	out.Username = found[customerID.UUID()].Username
 	return out, nil
 }
 

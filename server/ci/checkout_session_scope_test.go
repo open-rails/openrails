@@ -53,8 +53,6 @@ func TestCheckoutSessionResolvesStoredMerchant(t *testing.T) {
 		require.NoError(t, err)
 		price, err := cp.Client().CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "scope", Currency: "USD", UnitAmount: 123_000_000}, openrails.ForMerchantID(mid))
 		require.NoError(t, err)
-		_, err = cp.Client().EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer}}, openrails.ForMerchantID(mid))
-		require.NoError(t, err)
 		slugs = append(slugs, slug)
 		mids = append(mids, mid)
 		prices = append(prices, price.ID)

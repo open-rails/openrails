@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/open-rails/helpers/contacts"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -47,6 +49,8 @@ type BootstrapOptions struct {
 	Clock       clockwork.Clock
 	// EmailSender replaces the sender Config.SendGrid selects.
 	EmailSender config.EmailSender
+	// Contacts is the host's directory (Deps.Contacts); nil keeps a copy.
+	Contacts contacts.Source
 	// Migrations replaces this build's migration files (test seam: an older
 	// build's chain).
 	Migrations fs.FS
@@ -136,6 +140,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		EmailSender: func() config.EmailSender {
 			if opts != nil {
 				return opts.EmailSender
+			}
+			return nil
+		}(),
+		Contacts: func() contacts.Source {
+			if opts != nil {
+				return opts.Contacts
 			}
 			return nil
 		}(),

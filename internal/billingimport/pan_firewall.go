@@ -47,11 +47,6 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 	if err := scan("default_psp.key", book.DefaultPSP.Key); err != nil {
 		return err
 	}
-	for i, customer := range book.Customers {
-		if err := scan(fmt.Sprintf("customers[%d]", i), customer.Email); err != nil {
-			return err
-		}
-	}
 	for i, method := range book.PaymentMethods {
 		var brand, last4 string
 		if method.Card != nil && method.Card.Brand != nil {

@@ -354,17 +354,29 @@ type BillingCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
-	Issuer *string
-	// The customer's billing contact email, as the merchant last declared it. NULL when none was declared.
-	Email      *string
+	Issuer     *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
-	// The customer's username, as the merchant last declared it: billing email and the CCBill username bridge read it. NULL when none was declared.
-	Username *string
-	// The merchant declared the customer may not buy (banned or deleted at the host): checkout session actions refuse it. Declared with EnsureCustomer.
-	Blocked bool
 	// Steps with every statement that changes the customer's product access: a cached key set from an older version is stale.
 	AccessVersion int64
+}
+
+// A customer's contact as the merchant's directory last reported it, when OpenRails is not embedded beside that directory: pushed over SCIM, or recorded from a verified access token's claims. Newest wins by directory_updated_at. Erasure keeps the row without its values, so an older report cannot restore them.
+type BillingCustomerContact struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Email       *string
+	DisplayName *string
+	UserName    *string
+	// SCIM active, shown and never enforced: the host's auth decides who signs in. NULL when no SCIM client reported it.
+	Active *bool
+	// When a SCIM client created this User (its meta.created); NULL when no SCIM client holds it: claims alone recorded it, or it was deleted.
+	ProvisionedAt *time.Time
+	// When the directory last changed these values, as it reported (a SCIM resource's meta.lastModified, a token's updated_at claim), else when OpenRails received a SCIM write. NULL when claims without updated_at recorded it: any dated report replaces it. An older report is ignored.
+	DirectoryUpdatedAt *time.Time
+	CreatedAt          time.Time
+	// When OpenRails last wrote the contact: its SCIM meta.lastModified, the customer read's synced_at.
+	UpdatedAt time.Time
 }
 
 // Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
@@ -1329,6 +1341,18 @@ type BillingProviderMutationLog struct {
 	CreatedAt time.Time
 	// The custodian the logged mutation was addressed to, for custodian-addressed intents. NULL for the ordinary PSP-addressed mutation.
 	CustodianID *uuid.UUID
+}
+
+// Bearer tokens a merchant's directory presents at /scim/v2, stored as their SHA-256. Revoking deletes the row.
+type BillingProvisioningToken struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	Name       string
+	// The merchant declaration's secrets.scim_token: at most one per merchant, replaced when the declaration changes it.
+	Declared    bool
+	TokenSha256 []byte
+	LastUsedAt  *time.Time
+	CreatedAt   time.Time
 }
 
 // Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail. The rail vocabulary lives here only; every table that stores rail beside psp_id references (merchant_id, id, rail).

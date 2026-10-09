@@ -24,9 +24,7 @@ func TestProviderBillingResponseTooLargeHasNoBody(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
-	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: uuid.NewString()})
+	_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	body := []byte(`{"rental":"too-large"}`)
 	_, err = client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{

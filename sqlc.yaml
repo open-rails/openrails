@@ -29,6 +29,7 @@ sql:
       - "internal/migrate/postgres/0029_subscription_quantity.up.sql"
       - "internal/migrate/postgres/0031_write_posture.up.sql"
       - "internal/migrate/postgres/0032_mandates.up.sql"
+      - "internal/migrate/postgres/0033_customer_contacts.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

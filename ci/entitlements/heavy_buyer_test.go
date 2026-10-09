@@ -25,7 +25,7 @@ import (
 func (f *fixture) seed(customer billing.CustomerID, prefix string, n, keys int, from time.Time) {
 	f.t.Helper()
 	ctx := f.t.Context()
-	_, err := f.client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
+	_, err := f.client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer}})
 	require.NoError(f.t, err)
 	s := pgx.Identifier{f.schema}.Sanitize()
 	tx, err := f.pool.Begin(ctx)

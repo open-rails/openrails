@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -18,6 +19,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/scim"
 )
 
 // Options is what an assembly supplies to mount catalog routes.
@@ -52,6 +54,10 @@ type Options struct {
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
+
+	// Provisioning authenticates the SCIM routes: the merchant a request
+	// acts for. Without it they are not mounted.
+	Provisioning func(*http.Request) (billing.MerchantID, error)
 
 	// External are the handlers the assembly owns.
 	External External
@@ -98,6 +104,25 @@ type Env struct {
 	Unlocker AdminRateLimitUnlocker
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
+	// scim is the SCIM server Provisioning authenticates, built once.
+	scim *scim.Server
+}
+
+// scimServer is the SCIM server the assembly's Provisioning authenticates.
+func (e *Env) scimServer() *scim.Server {
+	if e.Provisioning == nil || e.Runtime == nil {
+		return nil
+	}
+	if e.scim == nil {
+		rt := e.Runtime
+		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.Provisioning, Now: func() time.Time {
+			if rt.Clock != nil {
+				return rt.Clock.Now()
+			}
+			return time.Now()
+		}}
+	}
+	return e.scim
 }
 
 func newEnv(rt *app.Runtime, opts Options) *Env {
@@ -190,6 +215,8 @@ func (e *Env) gates(route Route) []router.Middleware {
 	switch route.Auth {
 	case AuthPublic, AuthSessionID, AuthProvider:
 		mw = conn
+	case AuthProvisioning:
+		// The SCIM server authenticates its merchant and answers SCIM errors.
 	case AuthCheckoutSession:
 		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
 	case AuthUser:
@@ -393,6 +420,12 @@ func RegisterControlPlaneRoutes(rr router.Router, rt *app.Runtime, opts Options)
 // environment; runtime bindings and signatures remain mandatory.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
+}
+
+// RegisterProvisioningRoutes mounts the SCIM 2.0 service provider on a
+// router rooted at /scim/v2, authenticated by opts.Provisioning.
+func RegisterProvisioningRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	newEnv(rt, opts).mount(rr, "/scim/v2", in(Provisioning))
 }
 
 // SelfRoutePrefix is the customer surface's path: one stable /me, whatever

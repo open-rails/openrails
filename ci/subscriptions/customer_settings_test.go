@@ -98,7 +98,6 @@ func TestCustomerSettingsBatchIsAllOrNone(t *testing.T) {
 		{map[string]any{"customer_id": b.id, "invoice_profile": map[string]any{"net_terms_days": 30, "collection_method": "wire"}}, http.StatusBadRequest, "invalid_param", "items[1].invoice_profile.collection_method"},
 		{map[string]any{"customer_id": a.id}, http.StatusBadRequest, "invalid_param", "items[1].customer_id"},
 		{map[string]any{"customer_id": b.id, "billing_policy": "undeclared"}, http.StatusNotFound, "billing_policy_not_found", "items[1].billing_policy"},
-		{map[string]any{"customer_id": uuid.NewString()}, http.StatusNotFound, "customer_not_found", "items[1].customer_id"},
 	} {
 		// The host's key: a person's writes are limited per item.
 		status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{valid, refused.item}})

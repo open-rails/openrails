@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A customer's prepaid money end to end through the admin API: declare
+// A customer's prepaid money end to end through the admin API: create
 // the customer, grant credit, admit and capture metered work, read the
 // ledger, usage and profile, then revoke what remains.
 func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
@@ -21,23 +21,19 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	client := f.runtime(t, "credits-"+uuid.NewString()[:8])
 	ctx := t.Context()
 
-	customer := billing.CustomerID(uuid.New())
-	email := "buyer@example.test"
-	declared, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer, Email: &email}})
-	require.NoError(t, err)
-	require.Equal(t, &email, declared[0].Email)
-	other := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: other}})
+	// Customer settings create a customer OpenRails has not seen.
+	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
+	_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer}, {CustomerID: other}})
 	require.NoError(t, err)
 	missing := billing.CustomerID(uuid.New())
 	read, err := client.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{customer, missing, customer}})
 	require.NoError(t, err)
-	require.Len(t, read.Items, 1, "a named customer is answered once; an undeclared one is absent")
-	require.Equal(t, &email, read.Items[0].Email)
+	require.Len(t, read.Items, 1, "a named customer is answered once; an unseen one is absent")
+	require.Nil(t, read.Items[0].Contact, "no directory holds a contact for it")
 
-	found, err := client.ListCustomers(ctx, billing.CustomerListParams{Query: "buyer@"})
+	found, err := client.ListCustomers(ctx, billing.CustomerListParams{Search: customer.String()})
 	require.NoError(t, err)
-	require.Len(t, found.Items, 1)
+	require.Len(t, found.Items, 1, "a search finds the customer whose id it is")
 	require.Equal(t, customer, found.Items[0].ID)
 	first, err := client.ListCustomers(ctx, billing.CustomerListParams{PageRequest: billing.PageRequest{Limit: 1}})
 	require.NoError(t, err)
@@ -148,7 +144,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	profile, err := client.GetCustomerBillingProfile(ctx, customer)
 	require.NoError(t, err)
 	require.Equal(t, customer, profile.Customer.ID)
-	require.Equal(t, &email, profile.Customer.Email)
+	require.Nil(t, profile.Customer.Contact)
 	require.Len(t, profile.Balances, 1)
 	require.EqualValues(t, 0, profile.Balances[0].BalanceAmount)
 

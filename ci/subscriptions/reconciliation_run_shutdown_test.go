@@ -61,7 +61,7 @@ func TestCanceledReconciliationRunDoesNotStrandArchive(t *testing.T) {
 	database, err := db.NewWithPGXPool(w.pool, w.schema)
 	require.NoError(t, err)
 	query := "SELECT pg_sleep(30) /* maintenance_finish_" + uuid.NewString() + " */"
-	reader := reconcile.NewEngine(database, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: canceledRunFetcher{database: database, query: query}}, nil)
+	reader := reconcile.NewEngine(database, nil, nil, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: canceledRunFetcher{database: database, query: query}}, nil)
 	ctx, cancel := context.WithCancel(merchant.WithID(t.Context(), mid))
 	defer cancel()
 	done := make(chan error, 1)

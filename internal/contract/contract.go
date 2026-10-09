@@ -33,15 +33,24 @@ var browserGroups = map[routes.Group]bool{routes.Checkout: true, routes.Customer
 // error-code registry, by repository path. fsys is the repository: enum
 // values are read from the source that declares them.
 func Files(fsys fs.FS) (map[string][]byte, error) {
-	all, err := newModel(fsys, routes.Catalog())
+	listed, err := newModel(fsys, routes.Catalog())
 	if err != nil {
 		return nil, err
 	}
-	var browser []routes.Route
+	// SCIM's messages are the standard's, described by its own discovery
+	// routes: the route table lists them, the wire contract does not.
+	var api, browser []routes.Route
 	for _, r := range routes.Catalog() {
+		if r.Group != routes.Provisioning {
+			api = append(api, r)
+		}
 		if browserGroups[r.Group] {
 			browser = append(browser, r)
 		}
+	}
+	all, err := newModel(fsys, api)
+	if err != nil {
+		return nil, err
 	}
 	sdk, err := newModel(fsys, browser)
 	if err != nil {
@@ -53,7 +62,7 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 	}
 	return map[string][]byte{
 		OpenAPIFile:                     openapi,
-		RoutesDoc:                       all.routesMD(),
+		RoutesDoc:                       listed.routesMD(),
 		CodesDoc:                        errorCodesMD(),
 		billingUIDir + "wire.ts":        sdk.wireTS(),
 		billingUIDir + "routes.ts":      sdk.routesTS(),

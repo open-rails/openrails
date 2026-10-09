@@ -32,11 +32,10 @@ type DeclaredBilling struct {
 	AdminGrants []DeclaredAdminGrant `json:"admin_grants,omitempty"`
 }
 
-// DeclaredCustomer ensures a customer row for a host subject; a nonempty
-// Email becomes its billing email.
+// DeclaredCustomer ensures a customer row for a host subject. Who the
+// customer is comes from the host's directory, never the import.
 type DeclaredCustomer struct {
 	Customer CustomerID `json:"customer"`
-	Email    string     `json:"email,omitempty"`
 }
 
 // PSPRef names the PSP a declared row belongs to: the psps row id, or the

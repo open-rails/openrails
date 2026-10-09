@@ -129,11 +129,6 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), c.Customer.UUID()); err != nil {
 				return fmt.Errorf("ensure customer %s: %w", c.Customer, err)
 			}
-			if email := strings.TrimSpace(c.Email); email != "" {
-				if err := q.SetCustomerEmail(ctx, gen.SetCustomerEmailParams{MerchantID: merchantID.UUID(), ID: c.Customer.UUID(), Email: &email}); err != nil {
-					return fmt.Errorf("customer %s email: %w", c.Customer, err)
-				}
-			}
 			seen[c.Customer.UUID()] = struct{}{}
 		}
 		for _, s := range opts.Book.Subscriptions {

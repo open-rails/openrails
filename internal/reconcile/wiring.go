@@ -4,6 +4,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -15,13 +16,13 @@ import (
 // queues the provider cancel of a terminal decision; every pull (worker or
 // CLI) supplies the system-origin scheduler. The caller supplies a
 // merchant-scoped context at Run time.
-func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher, cancels subscriptions.ProviderCancelScheduler) *Engine {
+func NewEngine(d *db.DB, cfg *config.Config, contacts identity.Directory, fetchers map[Provider]RailFetcher, cancels subscriptions.ProviderCancelScheduler) *Engine {
 	decisions := NewDecisionApplier(d, cancels)
 	decisions.LC.SetConfig(cfg)
 	e := &Engine{
 		Fetchers: fetchers,
 		Store:    &PGStore{DB: d},
-		Local:    &PGLocalStateLoader{DB: d},
+		Local:    &PGLocalStateLoader{DB: d, Contacts: contacts},
 		Writer:   &PGLocalWriter{DB: d},
 		// #665: subscription transitions route through the decider.
 		Decisions: decisions,

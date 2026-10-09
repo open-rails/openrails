@@ -309,6 +309,12 @@ resource_server:
 - Browsers on `allowed_origins` may call the admin API across origins.
   Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
   headers, never cookies.
+- A customer token's verified contact claims (`email` with `email_verified:
+  true`, `name`, `preferred_username`, `updated_at`) become the customer's
+  contact, newest first against SCIM pushes, so a user who registers and buys at
+  once gets the receipt ([customer contacts](customer-contacts.md)).
+- A client-credentials token with scope `scim` provisions the merchant's users
+  at `/scim/v2`, as a provisioning token does.
 - Refusals: `access_token_issuer_unknown` (untrusted `iss`),
   `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
   `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,

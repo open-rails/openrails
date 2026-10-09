@@ -19,14 +19,11 @@ type CreateMembershipParams struct {
 	// PaymentCustodian is the frozen credential custody of the accepted payment.
 	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.
-	Prepared           *InitialMembershipTerms
-	UserID             string
-	PriceID            uuid.UUID
-	Rail               models.Rail
-	RailSubscriptionID *string
-	// CustomerEmail is the email seen at signup; it fills the customer's
-	// email when none is declared.
-	CustomerEmail         string
+	Prepared              *InitialMembershipTerms
+	UserID                string
+	PriceID               uuid.UUID
+	Rail                  models.Rail
+	RailSubscriptionID    *string
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time
 	TransactionID         string

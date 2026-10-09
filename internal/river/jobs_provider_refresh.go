@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -282,6 +283,8 @@ type ProviderRefreshWorker struct {
 	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
 	Merchants   *merchants.Service
 	DeferDelete subscriptions.ProviderCancelScheduler
+	// Contacts supplies customer emails for identity matching.
+	Contacts identity.Directory
 	// Alerts bridges requires_review findings into the #736 operator
 	// notification store (#787). nil = no-op (no alerting service wired).
 	Alerts *alerting.Service
@@ -610,7 +613,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		return out
 	}
 
-	engine := reconcile.NewEngine(w.DB, w.Config, fetchers, w.DeferDelete)
+	engine := reconcile.NewEngine(w.DB, w.Config, w.Contacts, fetchers, w.DeferDelete)
 	engine.RecoverInvoicePayment = w.RecoverInvoicePayment
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {

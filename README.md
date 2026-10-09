@@ -138,7 +138,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error) {
+func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
@@ -162,7 +162,10 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
-	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
+	return openrails.New(ctx, cfg, openrails.Deps{
+		Postgres: db, // the same pool your app uses
+		Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+	})
 }
 ```
 
@@ -222,6 +225,32 @@ when you give its permission:
 
 `AdminWrite` and `CatalogWrite` need `AdminRead`; catalog reads are admin
 reads. Writes that move money or remove access also ask for a recent sign-in.
+
+#### Customer contact info
+
+OpenRails stores no copy of your users' emails or names. Your AuthKit is the
+source of truth, and OpenRails asks it whenever it sends a receipt or a
+failed-payment notice, or shows a customer in the admin routes or console. Pass
+it to `New`:
+
+```go
+bill, err := openrails.New(ctx, cfg, openrails.Deps{
+	Postgres: db,
+	Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+})
+```
+
+Without AuthKit, implement `openrails.Contacts` (`Contacts` by ids and
+`SearchContacts` by text) over your own user table. Leave it out and OpenRails
+sends your customers no email; in-app notices and host events still arrive.
+
+A standalone or hosted OpenRails cannot reach into your process, so your
+directory pushes users to it instead, over SCIM 2.0: point AuthKit's
+`Provisioning` (or Okta, or Entra ID) at `/billing/scim/v2` with the merchant's
+provisioning token. OpenRails keeps what was pushed and when, and AuthKit
+retries and reconciles so the copy stays current. Each customer request also
+brings the user's current email and name in its access token, so someone who
+signs up and buys at once is known before the next push.
 
 #### Using your own auth
 
@@ -353,7 +382,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	bill, err := newBilling(ctx, db)
+	bill, err := newBilling(ctx, db, ak)
 	if err != nil {
 		return err
 	}
@@ -671,11 +700,19 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/notifications/unread-count` | how many are unread |
 | `POST /billing/v1/me/notifications/read` | mark up to 100 read |
 
-**Payment processors** (always mounted)
+**Webhooks and provisioning** (other systems pushing to OpenRails; no user signs in)
 
-| Route | What it does |
-|---|---|
-| `POST /billing/v1/webhooks/{rail}/{account_id}` | processor notifications (Stripe, NMI, CCBill), verified per account |
+| Route | Mounted | What it does |
+|---|---|---|
+| `POST /billing/v1/webhooks/{rail}/{account_id}` | always | processor notifications (Stripe, NMI, CCBill), verified per account |
+| `POST /billing/scim/v2/Bulk` | standalone and hosted; embedded with `Routes.Provisioning: true` | your directory's batch of user changes, with the merchant's provisioning token |
+| `POST`, `GET`, `PUT`, `PATCH`, `DELETE /billing/scim/v2/Users`, `/billing/scim/v2/Users/{id}` | same | one user at a time, for directories that don't batch (Okta, Entra ID) |
+| `GET /billing/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | same | what OpenRails accepts, including the batch limits |
+
+Provisioning routes live under `{Prefix}/scim/v2`. Embedded, they are off by
+default because `Deps.Contacts` asks your AuthKit directly; turn them on only to
+keep a pushed copy instead (one or the other: `Mount` refuses both). See
+[customer contacts](docs/customer-contacts.md).
 
 `Permissions.AdminRead` and `AdminWrite` publish the admin API (`/billing/v1/admin/*`) for your staff and machines rather than your users: customers, payments and refunds, subscriptions, invoices, credits. `Permissions.CatalogWrite` adds catalog edits, and `Permissions.MerchantConfig` the merchant's own configuration: PSPs, settings, alerts. Each route is behind your permission for its bundle, and each has one method on the Go `Client`. Every route and its permission are in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
 
@@ -683,9 +720,8 @@ What you will set next:
 
 | To | Set |
 |---|---|
-| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.Email`; without one OpenRails sends no email |
+| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
 | Publish the admin routes | `Routes.Permissions`: your permissions for admin reads, admin writes, catalog edits and merchant config |
-| Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomers` whenever it changes |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
@@ -1464,6 +1500,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout sessions, payment methods, tokens, and error handling.
 - [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
+- [Customer contacts](docs/customer-contacts.md) — where customers' emails and names come from: your AuthKit in process, or your directory's SCIM 2.0 pushes.
 - [Products and prices through the Client](docs/catalog-client.md) and [choosing the merchant a call acts on](docs/client-merchant-selection.md).
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 

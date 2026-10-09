@@ -56,6 +56,8 @@ const (
 	Platform Group = "platform"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
+	// Provisioning is SCIM 2.0: the merchant's directory pushing its users.
+	Provisioning Group = "provisioning"
 )
 
 // Tier is what a route checks before its handler runs.
@@ -81,6 +83,9 @@ const (
 	AuthOperator Tier = "operator"
 	// AuthProvider: the payment provider's own signature on the payload.
 	AuthProvider Tier = "provider_signature"
+	// AuthProvisioning: the merchant's provisioning token, or a
+	// client-credentials access token with scope scim from its trusted issuer.
+	AuthProvisioning Tier = "provisioning"
 )
 
 // Feature is the configuration a route needs to be mounted.
@@ -305,7 +310,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, checkoutRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, platformRoutes,
+		merchantRoutes, opsRoutes, platformRoutes, provisioningRoutes,
 	} {
 		all = append(all, resource...)
 	}

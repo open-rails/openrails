@@ -178,6 +178,14 @@ export function shortId(id: string, n = 8): string {
   return id.length > n ? `${id.slice(0, n)}…` : id
 }
 
+// customerName names a customer by its directory contact, else its id.
+export function customerName(c: {
+  id: string
+  contact: { email: string | null; name: string | null } | null
+}): string {
+  return c.contact?.name || c.contact?.email || shortId(c.id, 13)
+}
+
 // timeAgo renders a compact relative time ("3m", "2h", "5d") for feeds like the
 // notification bell; falls back to a short date past a week.
 export function timeAgo(iso?: string | null): string {

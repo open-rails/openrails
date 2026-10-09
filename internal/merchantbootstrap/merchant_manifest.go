@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/scim"
 	"github.com/open-rails/openrails/internal/service"
 )
 
@@ -119,7 +120,7 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 	return ParseMerchantConfigManifest(merged)
 }
 
-// ValidateMerchantSecretOverlay limits operator-mounted overlays to processor
+// ValidateMerchantSecretOverlay limits operator-mounted overlays to secret
 // secret values. The checked-in manifest remains the authority for merchant
 // identity, account IDs, settings, custodians, and billing policy. Without
 // this shape check, koanf's deep merge would let a bad Vault document silently
@@ -134,7 +135,7 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 	}
 	for key := range root {
 		if key != "merchants" {
-			return fmt.Errorf("merchant secret overlay only accepts the merchants.<slug>.psps.<psp>.secrets shape (found %q)", key)
+			return fmt.Errorf("merchant secret overlay only accepts merchants.<slug>.psps.<psp>.secrets and merchants.<slug>.secrets.scim_token (found %q)", key)
 		}
 	}
 	merchants, ok := root["merchants"].(map[string]any)
@@ -147,9 +148,23 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 			return fmt.Errorf("merchant secret overlay merchants.%s must be a mapping", slug)
 		}
 		for key := range merchant {
-			if key != "psps" {
+			if key != "psps" && key != "secrets" {
 				return fmt.Errorf("merchant secret overlay cannot set merchants.%s.%s; structural manifest fields stay in the base manifest", slug, key)
 			}
+		}
+		if raw, ok := merchant["secrets"]; ok {
+			secrets, ok := raw.(map[string]any)
+			if !ok {
+				return fmt.Errorf("merchant secret overlay merchants.%s.secrets must be a mapping", slug)
+			}
+			for key := range secrets {
+				if key != "scim_token" {
+					return fmt.Errorf("merchant secret overlay cannot set merchants.%s.secrets.%s", slug, key)
+				}
+			}
+		}
+		if _, ok := merchant["psps"]; !ok {
+			continue
 		}
 		psps, ok := merchant["psps"].(map[string]any)
 		if !ok {
@@ -251,6 +266,9 @@ func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDec
 	}
 	if strings.TrimSpace(src.APIHost) != "" {
 		dst.APIHost = src.APIHost
+	}
+	if strings.TrimSpace(src.Secrets.SCIMToken) != "" {
+		dst.Secrets.SCIMToken = src.Secrets.SCIMToken
 	}
 	if len(src.Custodians) > 0 {
 		if dst.Custodians == nil {
@@ -779,6 +797,9 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	}
 	if err := service.ApplyDeclaredMerchantSettings(mctx, database, settings); err != nil {
 		return fmt.Errorf("merchant settings: %w", err)
+	}
+	if err := scim.Declare(mctx, database.Gen(mctx), merchantID, mt.Secrets.SCIMToken); err != nil {
+		return fmt.Errorf("merchant secrets: %w", err)
 	}
 
 	// or#880: custodians land FIRST — psps.custodian_id is a foreign key, and

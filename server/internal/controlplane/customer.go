@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/identity"
 )
 
 // ErrCustomerInvalid indicates a delegated request cannot identify an OpenRails
@@ -19,8 +21,10 @@ var ErrCustomerInvalid = errors.New("controlplane: customer merchant and UUID su
 // TouchCustomer resolves or creates the payable OpenRails customer for a
 // delegated request and refreshes last_seen_at. Customer identity is the
 // merchant plus the host/AuthKit stable UUID subject; issuer is audit metadata
-// only and never participates in the natural key.
-func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID billing.MerchantID, issuer, subject string) (uuid.UUID, error) {
+// only and never participates in the natural key. The token's contact claims
+// are recorded in the merchant's contacts, newest first; a failure to record
+// them is logged and never refuses the request.
+func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID billing.MerchantID, issuer, subject string, claims identity.Claims) (uuid.UUID, error) {
 	issuer = strings.TrimSpace(issuer)
 	subject = strings.TrimSpace(subject)
 	if merchantID.IsZero() || subject == "" {
@@ -58,6 +62,9 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID billing.Mer
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return uuid.Nil, err
+	}
+	if err := identity.RecordClaims(ctx, gen.New(c.pool), merchantID, row.ID, claims); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("customer_id", row.ID).Warn("controlplane: contact claims not recorded")
 	}
 	return row.ID, nil
 }

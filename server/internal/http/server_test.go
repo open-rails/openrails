@@ -115,7 +115,7 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, doc.Code)
 	var served billing.PublicConfig
 	require.NoError(t, json.Unmarshal(doc.Body.Bytes(), &served), doc.Body.String())
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true}, served.Capabilities.RouteGroups)
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true, "provisioning": true}, served.Capabilities.RouteGroups)
 	require.Nil(t, served.Payment)
 	require.Contains(t, doc.Body.String(), `"payment":null`)
 	require.Equal(t, "public, max-age=300", doc.Header().Get("Cache-Control"))

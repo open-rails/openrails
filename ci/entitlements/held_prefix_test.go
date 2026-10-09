@@ -112,8 +112,6 @@ func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	customer := billing.CustomerID(uuid.New())
-	_, err := f.client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
 	products := 0
 	grant := func(key string, ends *time.Time) billing.ProductAccessID {
 		t.Helper()

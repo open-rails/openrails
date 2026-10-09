@@ -94,9 +94,6 @@ database share it, so one of them can serve the payment page for all.
   member) answers `status: "blocked"`.
 - `success_url` must be on one of the minting app's `ReturnOrigins`. The
   payment host accepts its `EmbedOrigins` as return origins too.
-- The buyer is checked on every read and pay: a customer the merchant declared
-  blocked (`client.EnsureCustomers` with `Blocked`) is refused with
-  `403 customer_blocked`, even on a session minted before the block.
 - The session records the minting app's origin from that app's configuration
   (the `success_url` origin, else `ReturnOrigins[0]`, else the origin of
   `PublicBillingBaseURL`) and the document carries it as `embed_origin` only

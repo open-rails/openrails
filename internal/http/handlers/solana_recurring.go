@@ -287,10 +287,6 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		return
 	}
 
-	var email string
-	if user := r.GetUser(); user != nil && user.Email != nil {
-		email = *user.Email
-	}
 	// The network and token set come from the merchant's armed Solana PSP.
 	network := ""
 	var tokens map[string]config.TokenConfig
@@ -312,7 +308,6 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		Signature:          signature,
 		OldSubscriptionID:  subscriptionID,
 		UserID:             resolved.oldSub.CustomerID.String(),
-		CustomerEmail:      email,
 		NewPriceID:         resolved.newPrice.ID,
 		NewSubscriptionPDA: prep.NewSubscriptionPDA,
 		NewPlanID:          resolved.newTerms.planID,

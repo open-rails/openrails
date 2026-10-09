@@ -33,8 +33,6 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	database, err := db.NewWithPGXPool(f.pool, f.schema)
 	require.NoError(t, err)
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
-	require.NoError(t, err)
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "credit-accounting", DisplayName: "API credit"})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 80_000_000})

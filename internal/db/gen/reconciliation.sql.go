@@ -2689,8 +2689,6 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
        subscriptions.retry_attempts, subscriptions.next_retry_at,
        subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
-       (SELECT c.email FROM billing.customers c
-        WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
        price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
@@ -2732,7 +2730,6 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	NextRetryAt                 *time.Time
 	AccessDurationHoursSnapshot *int32
 	ScheduledPriceID            *uuid.UUID
-	CustomerEmail               *string
 	PriceCurrency               *string
 	TierChangePending           bool
 }
@@ -2772,7 +2769,6 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 			&i.NextRetryAt,
 			&i.AccessDurationHoursSnapshot,
 			&i.ScheduledPriceID,
-			&i.CustomerEmail,
 			&i.PriceCurrency,
 			&i.TierChangePending,
 		); err != nil {

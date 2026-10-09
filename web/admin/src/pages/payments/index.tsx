@@ -30,6 +30,7 @@ import {
   currencyScale,
   formatNativeAmount,
   formatDate,
+  customerName,
   shortId,
   unitsToDecimal,
 } from "@/lib/format"
@@ -156,7 +157,7 @@ export function PaymentsPage() {
       }
       const p = new URLSearchParams(params)
       p.set("customer_id", c.id)
-      p.set("customer", c.email || shortId(c.id, 13))
+      p.set("customer", customerName(c))
       p.delete("cursor")
       setParams(p)
       setInput("")

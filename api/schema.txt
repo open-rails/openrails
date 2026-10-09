@@ -33,6 +33,7 @@ migration 0029_subscription_quantity.up.sql sha256:9750b50c9056f763fd9cb3f20c60e
 migration 0030_card_brand_changes.up.sql sha256:f5d63b5b32aabcbdd80d7dc757f2280f5ac82a45163fcbca69b5a1d677fe5a2f
 migration 0031_write_posture.up.sql sha256:37d271c1cae114b18051d36cd73e3355cbd3791b64574179be0e99e087799948
 migration 0032_mandates.up.sql sha256:944db393b19078e1d44d1c0c7816189152d23c04ee4c2571b64472bbbe972ad9
+migration 0033_customer_contacts.up.sql sha256:a55bddd0d2832d76f7758c8127452b7dd48f783ec1e06b9b3ce6da7a110b2cec
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -517,6 +518,27 @@ table billing.custody_migrations
   index CREATE UNIQUE INDEX custody_migrations_payment_method_id_to_rail_method_ref_key ON billing.custody_migrations USING btree (merchant_id, payment_method_id, to_rail_method_ref)
   index CREATE UNIQUE INDEX custody_migrations_pkey ON billing.custody_migrations USING btree (merchant_id, id)
 
+table billing.customer_contacts
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column email text
+  column display_name text
+  column user_name text
+  column active boolean
+  column provisioned_at timestamp with time zone
+  column directory_updated_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint customer_contacts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint customer_contacts_display_name_check CHECK (((display_name IS NULL) OR ((display_name = btrim(display_name)) AND (display_name <> ''::text) AND (octet_length(display_name) <= 256))))
+  constraint customer_contacts_email_check CHECK (((email IS NULL) OR ((email = btrim(email)) AND (email <> ''::text) AND (octet_length(email) <= 320))))
+  constraint customer_contacts_pkey PRIMARY KEY (merchant_id, customer_id)
+  constraint customer_contacts_user_name_check CHECK (((user_name IS NULL) OR ((user_name = btrim(user_name)) AND (user_name <> ''::text) AND (octet_length(user_name) <= 256))))
+  index CREATE INDEX customer_contacts_email_idx ON billing.customer_contacts USING btree (merchant_id, lower(email)) WHERE (email IS NOT NULL)
+  index CREATE UNIQUE INDEX customer_contacts_pkey ON billing.customer_contacts USING btree (merchant_id, customer_id)
+  index CREATE INDEX customer_contacts_provisioned_idx ON billing.customer_contacts USING btree (merchant_id, provisioned_at, customer_id) WHERE (provisioned_at IS NOT NULL)
+  index CREATE UNIQUE INDEX customer_contacts_user_name_key ON billing.customer_contacts USING btree (merchant_id, lower(user_name)) WHERE (provisioned_at IS NOT NULL)
+
 table billing.customer_delinquency
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
@@ -591,19 +613,13 @@ table billing.customers
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
   column issuer text
-  column email text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column last_seen_at timestamp with time zone NOT NULL DEFAULT now()
-  column username text
-  column blocked boolean NOT NULL DEFAULT false
   column access_version bigint NOT NULL DEFAULT 0
-  constraint customers_email_check CHECK (((email IS NULL) OR ((email = btrim(email)) AND (email <> ''::text) AND (octet_length(email) <= 320))))
   constraint customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint customers_pkey PRIMARY KEY (merchant_id, id)
-  constraint customers_username_check CHECK (((username IS NULL) OR ((username = btrim(username)) AND (username <> ''::text) AND (octet_length(username) <= 256))))
   index CREATE INDEX customers_id_idx ON billing.customers USING btree (id, merchant_id)
   index CREATE UNIQUE INDEX customers_pkey ON billing.customers USING btree (merchant_id, id)
-  index CREATE INDEX customers_username_idx ON billing.customers USING btree (merchant_id, lower(username)) WHERE (username IS NOT NULL)
 
 table billing.dashboard_configs
   column merchant_id uuid NOT NULL
@@ -1933,6 +1949,22 @@ table billing.provider_mutation_logs
   index CREATE INDEX provider_mutation_logs_psp_id_idx ON billing.provider_mutation_logs USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
   index CREATE INDEX provider_mutation_logs_rail_phase_created_at_idx ON billing.provider_mutation_logs USING btree (rail, phase, created_at DESC)
   trigger CREATE TRIGGER immutable_provider_mutation_log_content BEFORE UPDATE ON billing.provider_mutation_logs FOR EACH ROW WHEN ((NOT ((new.provider_intent_id IS NULL) AND ((to_jsonb(new.*) - 'provider_intent_id'::text) = (to_jsonb(old.*) - 'provider_intent_id'::text))))) EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
+table billing.provisioning_tokens
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column name text NOT NULL
+  column declared boolean NOT NULL
+  column token_sha256 bytea NOT NULL
+  column last_used_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint provisioning_tokens_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint provisioning_tokens_name_check CHECK (((name = btrim(name)) AND (name <> ''::text) AND (octet_length(name) <= 128)))
+  constraint provisioning_tokens_pkey PRIMARY KEY (merchant_id, id)
+  constraint provisioning_tokens_token_sha256_check CHECK ((octet_length(token_sha256) = 32))
+  index CREATE UNIQUE INDEX provisioning_tokens_declared_key ON billing.provisioning_tokens USING btree (merchant_id) WHERE declared
+  index CREATE UNIQUE INDEX provisioning_tokens_pkey ON billing.provisioning_tokens USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX provisioning_tokens_token_sha256_key ON billing.provisioning_tokens USING btree (token_sha256)
 
 table billing.psp_customers
   column id uuid NOT NULL DEFAULT uuidv7()

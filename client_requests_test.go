@@ -449,10 +449,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{CustomerIDs: []billing.CustomerID{customerID}})
 			return err
 		},
-		"ensure customers empty": func() error {
-			_, err := c.EnsureCustomers(ctx, nil)
-			return err
-		},
 		"notifications empty": func() error {
 			_, err := c.MarkNotificationsRead(ctx, nil)
 			return err
@@ -526,12 +522,9 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{zero}})
 			return err
 		},
-		"ensure customer": func() error {
-			_, err := c.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: zero}})
-			return err
-		},
-		"billing profile": func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
-		"delinquency":     func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
+		"provisioning token": func() error { return c.DeleteProvisioningToken(ctx, billing.ProvisioningTokenID{}) },
+		"billing profile":    func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
+		"delinquency":        func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
 		"credit grant": func() error {
 			_, err := c.GetCreditGrant(ctx, billing.CustomerID(uuid.New()), billing.CreditGrantID{})
 			return err

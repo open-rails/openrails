@@ -35,7 +35,7 @@ import (
 
 // openTiers are the tiers no Auth runs on: their credential is the request
 // itself (a capability id or a provider signature) or there is none.
-var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession}
+var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession, AuthProvisioning}
 
 // openRoutes is every route no Auth gates. A route that joins it is a
 // reviewed change.
@@ -46,6 +46,10 @@ var openRoutes = []string{
 	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
 	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
+	// SCIM: the provisioning token or client-credentials token is the credential.
+	"GET /scim/v2/ServiceProviderConfig", "GET /scim/v2/ResourceTypes", "GET /scim/v2/ResourceTypes/{id}",
+	"GET /scim/v2/Schemas", "GET /scim/v2/Schemas/{id}", "POST /scim/v2/Bulk",
+	"POST /scim/v2/Users", "GET /scim/v2/Users", "GET /scim/v2/Users/{id}", "PUT /scim/v2/Users/{id}", "PATCH /scim/v2/Users/{id}", "DELETE /scim/v2/Users/{id}",
 }
 
 // sensitiveRoutes are the routes that also ask Auth.Sensitive of a user in
@@ -57,6 +61,7 @@ var sensitiveRoutes = []string{
 	"DELETE /v1/admin/customers/{customer_id}/product-access/{id}",
 	"DELETE /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
 	"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
+	"DELETE /v1/admin/provisioning-tokens/{id}",
 	"DELETE /v1/merchant/api-keys/{id}",
 	"DELETE /v1/merchant/federated-grants/{id}",
 	"DELETE /v1/merchant/team/invites/{id}",
@@ -85,7 +90,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/checkout-sessions",
 	"POST /v1/admin/configuration/applications",
 	"POST /v1/admin/credit-grants",
-	"POST /v1/admin/customers/ensure",
 	"POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke",
 	"POST /v1/admin/customers/{customer_id}/payments/off-channel",
 	"POST /v1/admin/findings/{id}/resolve",
@@ -103,6 +107,7 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/provider-operations/{operation_id}/refusal",
 	"POST /v1/admin/provider-operations/{operation_id}/release",
 	"POST /v1/admin/provider-operations/{operation_id}/resolution",
+	"POST /v1/admin/provisioning-tokens",
 	"POST /v1/admin/psps",
 	"POST /v1/admin/psps/refresh",
 	"POST /v1/admin/psps/{id}/archive",
@@ -133,7 +138,7 @@ var sensitiveRoutes = []string{
 // exact permission, a customer route none, and no customer path names a
 // customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
-	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthUser, AuthCustomer, AuthMerchant, AuthOperator, AuthProvider}
+	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthUser, AuthCustomer, AuthMerchant, AuthOperator, AuthProvider, AuthProvisioning}
 	var open, sensitive []string
 	names := map[string]string{}
 	for _, r := range Catalog() {

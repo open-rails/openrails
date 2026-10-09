@@ -81,6 +81,9 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	if err := ValidateRoutes(sel); err != nil {
 		return nil, err
 	}
+	if sel.Provisioning && a.Runtime.HostContacts {
+		return nil, fmt.Errorf("openrails: Routes.Provisioning keeps a pushed copy of your users, and Deps.Contacts reads your directory instead; choose one")
+	}
 	perms, _ := RoutePermissions(sel)
 	profiles := CustomerProfiles(sel)
 	asm := FromApp(a)
@@ -92,7 +95,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	table := asm.NewRoutes(Options{Permissions: perms, ProviderRoutes: &providers})
+	table := asm.NewRoutes(Options{Permissions: perms, ProviderRoutes: &providers, Provisioning: sel.Provisioning})
 	extra, err := BuildCustomerRoutes(a, profiles, nil)
 	if err != nil {
 		return nil, err

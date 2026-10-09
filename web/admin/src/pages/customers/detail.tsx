@@ -51,6 +51,7 @@ import {
   nativeAmountFromInput,
   shortId,
 } from "@/lib/format"
+import type { CustomerContact } from "@/lib/api/generated/wire"
 import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { parseHours } from "@/lib/duration"
@@ -88,7 +89,9 @@ export function CustomerDetailPage() {
         </Button>
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">
-            {profile.customer.email ?? "Customer"}
+            {profile.customer.contact?.name ||
+              profile.customer.contact?.email ||
+              "Customer"}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
             {profile.customer.id}
@@ -99,6 +102,8 @@ export function CustomerDetailPage() {
           <OffChannelPaymentDialog customerId={customerId} />
         </div>
       </div>
+
+      <CustomerContactCard contact={profile.customer.contact} />
 
       {profile.balances.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -476,8 +481,8 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
         <DialogHeader>
           <DialogTitle>Grant product access</DialogTitle>
           <DialogDescription>
-            Give this customer one of your products without a payment. They
-            hold its keys while the grant lasts, including keys you add to the
+            Give this customer one of your products without a payment. They hold
+            its keys while the grant lasts, including keys you add to the
             product later.
           </DialogDescription>
         </DialogHeader>
@@ -726,7 +731,8 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                       {(prices?.data ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
                           {priceAmountLabel(p)}
-                          {p.billing_interval_hours ? " · recurring" : ""} ({shortId(p.id)})
+                          {p.billing_interval_hours ? " · recurring" : ""} (
+                          {shortId(p.id)})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -839,5 +845,47 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// CustomerContactCard is who the customer is, from the merchant's directory:
+// read live, or the copy its SCIM provisioning keeps.
+function CustomerContactCard({ contact }: { contact: CustomerContact | null }) {
+  return (
+    <Card>
+      <CardHeader className="pb-1">
+        <CardTitle className="text-sm">Contact</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm">
+        {!contact ? (
+          <p className="text-muted-foreground">
+            Your directory holds no contact for this customer.
+          </p>
+        ) : (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+            <dt className="text-muted-foreground">Email</dt>
+            <dd className="truncate">{contact.email ?? "—"}</dd>
+            <dt className="text-muted-foreground">Name</dt>
+            <dd className="truncate">{contact.name ?? "—"}</dd>
+            <dt className="text-muted-foreground">Username</dt>
+            <dd className="truncate">{contact.username ?? "—"}</dd>
+            {contact.active !== null && (
+              <>
+                <dt className="text-muted-foreground">Directory</dt>
+                <dd>
+                  <Badge variant={contact.active ? "secondary" : "outline"}>
+                    {contact.active ? "Active" : "Deactivated"}
+                  </Badge>
+                </dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">Synced</dt>
+            <dd className="tabular-nums">
+              {contact.synced_at ? formatDate(contact.synced_at) : "Live"}
+            </dd>
+          </dl>
+        )}
+      </CardContent>
+    </Card>
   )
 }

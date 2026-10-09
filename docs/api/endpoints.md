@@ -224,9 +224,10 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 
 ## Customers, credit and usage
 
-- A **customer** is created by its first use or declared, up to 100 at a time,
-  with `POST /v1/admin/customers/ensure`; `GET /v1/admin/customers?ids=`
-  reads up to 100. Its balance, credit limit, trust level, spend delegations,
+- A **customer** is the host's user id, created by its first use (a purchase,
+  a credit grant, a settings change). `GET /v1/admin/customers?ids=` reads up
+  to 100, and `?search=` finds them by email, username or name. Its `contact`
+  comes from the merchant's directory ([customer contacts](../customer-contacts.md)). Its balance, credit limit, trust level, spend delegations,
   credit grants and ledger all live beneath `/v1/admin/customers/{customer_id}`.
 - **Credit grants** (`POST /v1/admin/credit-grants`, up to 100 across
   customers, all or none) are idempotent on each customer's `source_id`: an

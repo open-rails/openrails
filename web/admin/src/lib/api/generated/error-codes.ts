@@ -60,7 +60,6 @@ export type OpenRailsErrorCode =
   | "currency_unsupported"
   | "custodian_capture_unavailable"
   | "customer_action_required"
-  | "customer_blocked"
   | "customer_email_required"
   | "customer_not_found"
   | "customer_payment_unsupported"
@@ -303,7 +302,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   currency_unsupported: { status: 400, type: "invalid_request_error", meaning: "The currency is not in OpenRails' registry." },
   custodian_capture_unavailable: { status: 503, type: "api_error", meaning: "The card custodian cannot capture cards right now." },
   customer_action_required: { status: 403, type: "authorization_error", meaning: "Only the customer may take this action, through their own step." },
-  customer_blocked: { status: 403, type: "authorization_error", meaning: "The merchant declared this customer blocked: it may not buy." },
   customer_email_required: { status: 400, type: "invalid_request_error", meaning: "The rail needs the customer's verified email and username." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },

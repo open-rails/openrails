@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -84,8 +85,8 @@ func (s *Service) ListCustomerSettings(ctx context.Context, params billing.Custo
 
 // UpdateCustomerSettings changes 1 to billing.MaxBatchItems distinct
 // customers' settings, all or none, and answers their settings in request
-// order. The whole batch is validated before anything is written; settings
-// never create a customer.
+// order. The whole batch is validated before anything is written; a customer
+// OpenRails has not seen is created.
 func (s *Service) UpdateCustomerSettings(ctx context.Context, items []billing.UpdateCustomerSettingsParams) ([]billing.CustomerSettings, error) {
 	changes, err := validateCustomerSettings(items)
 	if err != nil {
@@ -117,10 +118,13 @@ func (s *Service) UpdateCustomerSettings(ctx context.Context, items []billing.Up
 		slices.SortFunc(order, func(a, b customerSettingsChange) int {
 			return strings.Compare(a.customer.String(), b.customer.String())
 		})
+		// A customer is the host's subject: one OpenRails has not billed yet
+		// is created, as every commerce write does.
 		for _, c := range order {
-			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: c.customer, MerchantID: mid.UUID()}); errors.Is(err, pgx.ErrNoRows) {
-				return ErrCustomerNotFound.WithParam(apperr.ItemParam(c.item, "customer_id"))
-			} else if err != nil {
+			if err := db.EnsureCustomerRowQ(ctx, q, mid.UUID(), c.customer); err != nil {
+				return err
+			}
+			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: c.customer, MerchantID: mid.UUID()}); err != nil {
 				return err
 			}
 		}

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
@@ -191,6 +192,24 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 	}, nil
 }
 
+// ResolveProvisioningToken verifies r's client-credentials access token with
+// scope scim and resolves the merchant whose users it provisions: the one the
+// request names, or the issuer's only one.
+func (c *ControlPlane) ResolveProvisioningToken(r *http.Request) (billing.MerchantID, error) {
+	if c == nil || c.resource == nil {
+		return billing.MerchantID{}, credential.ErrResourceServerNotConfigured
+	}
+	cl, is, err := c.verifyResourceToken(r, billing.ScopeSCIM)
+	if err != nil {
+		return billing.MerchantID{}, err
+	}
+	if cl.Kind != verify.TokenOAuthClient {
+		return billing.MerchantID{}, credential.ErrResourceTokenInvalid
+	}
+	mid, _, err := c.resourceMerchant(r.Context(), r, is)
+	return mid, err
+}
+
 // federatedSignInWindow is how recent a trusted issuer's sign-in must be for
 // an operation that moves money or grants access: AuthKit's own window.
 const federatedSignInWindow = 15 * time.Minute
@@ -295,7 +314,7 @@ func (c *ControlPlane) ResolveResourceCustomer(r *http.Request) (*credential.Res
 		return nil, err
 	}
 	subject := strings.TrimSpace(cl.Subject)
-	customerID, err := c.TouchCustomer(ctx, mid, cl.Issuer, subject)
+	customerID, err := c.TouchCustomer(ctx, mid, cl.Issuer, subject, contactClaims(r, cl))
 	if errors.Is(err, ErrCustomerInvalid) {
 		return nil, credential.ErrResourceTokenInvalid
 	}
@@ -314,6 +333,46 @@ func (c *ControlPlane) ResolveResourceCustomer(r *http.Request) (*credential.Res
 		EmailVerified:    cl.EmailVerified,
 		Username:         cl.Username,
 	}, nil
+}
+
+// contactClaims are the OIDC contact claims of r's access token, which
+// verification checked whole: email only when verified, name,
+// preferred_username (AuthKit's username otherwise) and updated_at.
+func contactClaims(r *http.Request, cl verify.Claims) identity.Claims {
+	out := identity.Claims{Username: cl.Username}
+	if cl.EmailVerified {
+		out.Email = cl.Email
+	}
+	fields := strings.Fields(r.Header.Get("Authorization"))
+	if len(fields) != 2 {
+		return out
+	}
+	parts := strings.Split(fields[1], ".")
+	if len(parts) != 3 {
+		return out
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return out
+	}
+	var claims struct {
+		Name              string          `json:"name"`
+		PreferredUsername string          `json:"preferred_username"`
+		UpdatedAt         json.RawMessage `json:"updated_at"`
+	}
+	if json.Unmarshal(raw, &claims) != nil {
+		return out
+	}
+	out.Name = claims.Name
+	if claims.PreferredUsername != "" {
+		out.Username = claims.PreferredUsername
+	}
+	var seconds float64
+	if json.Unmarshal(claims.UpdatedAt, &seconds) == nil && seconds > 0 {
+		at := time.Unix(int64(seconds), 0).UTC()
+		out.UpdatedAt = &at
+	}
+	return out
 }
 
 // permissions is what the issuer lets cl do: its permissions, mapped roles

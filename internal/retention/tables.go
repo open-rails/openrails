@@ -95,6 +95,8 @@ var Tables = map[string]Table{
 	"merchant_webhooks":                 {Class: State},
 	"dashboard_configs":                 {Class: State},
 	"federated_grants":                  {Class: State},
+	"customer_contacts":                 {Class: State},
+	"provisioning_tokens":               {Class: State},
 	"customers":                         {Class: State},
 	"customer_invoice_profiles":         {Class: State},
 	"customer_delinquency":              {Class: State},

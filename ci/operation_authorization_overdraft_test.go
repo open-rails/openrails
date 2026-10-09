@@ -29,8 +29,6 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 
 	customer := func() billing.CustomerID {
 		c := billing.CustomerID(uuid.New())
-		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: c}})
-		require.NoError(t, err)
 		return c
 	}
 	fund := func(c billing.CustomerID, amount int64) {

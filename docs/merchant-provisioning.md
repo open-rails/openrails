@@ -188,6 +188,8 @@ merchants:
         secrets:
           security_key: replace-with-nmi-security-key
           webhook_signing_secret: replace-with-nmi-webhook-secret
+    secrets:                       # the merchant's own credentials
+      scim_token: replace-with-a-long-random-token
 ```
 
 Per merchant:
@@ -221,6 +223,11 @@ Per merchant:
   so a deployment is all-test or all-live.
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
   `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
+- `secrets.scim_token` — a provisioning token (at least 32 characters) the
+  merchant's directory presents at `/scim/v2`
+  ([customer contacts](customer-contacts.md)). OpenRails keeps its SHA-256 as
+  the merchant's declared token, replaced when this changes and removed when it
+  is removed; tokens minted over the API stand beside it.
 
 `account_id` is operator-declared, per rail (never derived from credentials at
 runtime — details in `docs/rails/*.md`):
@@ -243,7 +250,8 @@ may reference the same custodian. See
 ### Secret overlays
 
 Secret values do not belong in the committed YAML. Overlays are YAML documents
-in the manifest's own shape (`merchants.<slug>.psps.<key>.secrets.*`),
+in the manifest's own shape (`merchants.<slug>.psps.<key>.secrets.*`,
+`merchants.<slug>.secrets.scim_token`),
 merged over the manifest in order (later wins) and strict-parsed with it:
 an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.

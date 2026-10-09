@@ -1687,11 +1687,7 @@ func (s *CheckoutAttemptService) confirmSolanaSubscriptionSession(ctx context.Co
 	if wallet == "" || sig == "" {
 		return nil, fmt.Errorf("%w: the signed first payment is required", ErrCheckoutAttemptValidation)
 	}
-	var email string
-	if user != nil && user.Email != nil {
-		email = *user.Email
-	}
-	sub, err := s.enrollSolanaSubscription(ctx, session, sig, email)
+	sub, err := s.enrollSolanaSubscription(ctx, session, sig)
 	switch {
 	case errors.Is(err, recurring.ErrPaymentNotLanded):
 		// Confirmation lag: the wallet just sent it. Retryable; the poller also
@@ -1721,7 +1717,7 @@ func (s *CheckoutAttemptService) confirmSolanaSubscriptionSession(ctx context.Co
 
 // enrollSolanaSubscription activates a subscribe checkout from its landed first
 // payment, with the terms, wallet, reference and validity the checkout stored.
-func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, session *models.CheckoutAttempt, signature, email string) (*models.Subscription, error) {
+func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, session *models.CheckoutAttempt, signature string) (*models.Subscription, error) {
 	tenantID, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -1739,7 +1735,6 @@ func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, s
 		MerchantID:        tenantID,
 		CheckoutAttemptID: session.ID,
 		UserID:            session.CustomerID.String(),
-		CustomerEmail:     email,
 		PriceID:           *session.PriceID,
 		SubscriberWallet:  strings.TrimSpace(getStringField(session.RailState, "subscriber_wallet")),
 		PlanID:            terms.planID,
@@ -2913,7 +2908,7 @@ func (s *CheckoutAttemptService) ConfirmSolanaSubscribeSession(ctx context.Conte
 		// No wallet has POSTed yet — there is nothing to confirm.
 		return solanamodule.ErrSolanaSubscribePending
 	}
-	sub, err := s.enrollSolanaSubscription(ctx, session, signature, "")
+	sub, err := s.enrollSolanaSubscription(ctx, session, signature)
 	if errors.Is(err, recurring.ErrPaymentNotLanded) {
 		return solanamodule.ErrSolanaSubscribePending
 	}

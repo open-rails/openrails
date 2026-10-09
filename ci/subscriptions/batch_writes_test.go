@@ -13,30 +13,22 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Customers are declared in batches, all or none, and read by the list's ids
-// filter, unknown ones absent.
+// A settings batch creates the customers OpenRails has not seen, all or
+// none; the list's ids filter reads them, unknown ones absent.
 func TestCustomerBatches(t *testing.T) {
 	w := newWorld(t)
 	a, b, missing := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
-	email := "a@example.test"
 	for _, tp := range []topology{embedded, remote} {
 		client := w.client[tp]
-		declared, err := client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: a, Email: &email}, {ID: b}})
+		settings, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: a}, {CustomerID: b}})
 		require.NoError(t, err)
-		require.Equal(t, []billing.CustomerID{a, b}, []billing.CustomerID{declared[0].ID, declared[1].ID}, "request order")
-		require.Equal(t, &email, declared[0].Email)
-		require.Nil(t, declared[1].Email)
+		require.Equal(t, []billing.CustomerID{a, b}, []billing.CustomerID{settings[0].CustomerID, settings[1].CustomerID}, "request order")
 
 		read, err := client.ListCustomers(t.Context(), billing.CustomerListParams{IDs: []billing.CustomerID{b, missing, a, b}})
 		require.NoError(t, err)
 		require.Len(t, read.Items, 2)
 		require.Empty(t, read.Next)
-		byID := map[billing.CustomerID]billing.Customer{}
-		for _, c := range read.Items {
-			byID[c.ID] = c
-		}
-		require.Equal(t, &email, byID[a].Email)
-		require.Contains(t, byID, b)
+		require.ElementsMatch(t, []billing.CustomerID{a, b}, []billing.CustomerID{read.Items[0].ID, read.Items[1].ID})
 	}
 
 	late := billing.CustomerID(uuid.New())
@@ -44,17 +36,16 @@ func TestCustomerBatches(t *testing.T) {
 		items any
 		param string
 	}{
-		{[]any{map[string]any{"id": late}, map[string]any{"id": a}, map[string]any{"id": late}}, "items[2].id"},
-		{[]any{map[string]any{"id": late}, map[string]any{"id": a, "email": "not-an-address"}}, "items[1].email"},
+		{[]any{map[string]any{"customer_id": late}, map[string]any{"customer_id": a}, map[string]any{"customer_id": late}}, "items[2].customer_id"},
 		{[]any{}, "items"},
 	} {
-		status, refused := w.staffJSON(http.MethodPost, "/v1/admin/customers/ensure", map[string]any{"items": body.items})
+		status, refused := w.staffJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": body.items})
 		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
 		require.Equal(t, body.param, refused["error"].(map[string]any)["param"])
 	}
 	read, err := w.client[remote].ListCustomers(t.Context(), billing.CustomerListParams{IDs: []billing.CustomerID{late}})
 	require.NoError(t, err)
-	require.Empty(t, read.Items, "a refused declaration declares nothing")
+	require.Empty(t, read.Items, "a refused batch creates nothing")
 }
 
 // Product access is granted in batches across customers; a retry under the

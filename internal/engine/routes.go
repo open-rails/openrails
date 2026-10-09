@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	log "github.com/sirupsen/logrus"
 
@@ -166,4 +167,23 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		{Method: http.MethodGet, Path: path, Handler: handler},
 		{Method: http.MethodGet, Path: path + "/{asset...}", Handler: handler},
 	}, nil
+}
+
+// SCIMHandler is the SCIM service provider for mid, rooted at the SCIM root
+// (/Users, /Bulk): a directory in the same process pushes to it, and holding
+// the engine is the authority. An engine reading Deps.Contacts keeps no copy
+// and refuses.
+func (e *Engine) SCIMHandler(mid billing.MerchantID) (http.Handler, error) {
+	rt := e.App.Runtime
+	if rt.HostContacts {
+		return nil, fmt.Errorf("openrails: Deps.Contacts is the contacts source; there is no copy to provision")
+	}
+	if mid.IsZero() {
+		return nil, fmt.Errorf("openrails: SCIMHandler needs the Client's merchant")
+	}
+	table := &router.Table{}
+	httproutes.RegisterProvisioningRoutes(router.NewMux(table, "", rt), rt, httproutes.Options{
+		Provisioning: func(*http.Request) (billing.MerchantID, error) { return mid, nil },
+	})
+	return table.Handler(), nil
 }

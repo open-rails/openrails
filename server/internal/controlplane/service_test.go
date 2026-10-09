@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
@@ -213,7 +214,7 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		mid     billing.MerchantID
 		subject string
 	}{{billing.MerchantID{}, "11111111-1111-4111-8111-111111111111"}, {mid, ""}, {mid, "not-a-uuid"}} {
-		_, err := (&ControlPlane{}).TouchCustomer(ctx, bad.mid, "iss", bad.subject)
+		_, err := (&ControlPlane{}).TouchCustomer(ctx, bad.mid, "iss", bad.subject, identity.Claims{})
 		require.ErrorIs(t, err, ErrCustomerInvalid)
 	}
 }

@@ -20,10 +20,29 @@ const PAGE = 50
 
 const columns: ColumnDef<Customer, unknown>[] = [
   {
-    header: "Email",
+    header: "Contact",
+    cell: ({ row }) => {
+      const contact = row.original.contact
+      if (!contact) return <span className="text-muted-foreground">—</span>
+      return (
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate font-medium">
+            {contact.name || contact.email || contact.username}
+          </span>
+          {contact.name && contact.email && (
+            <span className="truncate text-xs text-muted-foreground">
+              {contact.email}
+            </span>
+          )}
+        </div>
+      )
+    },
+  },
+  {
+    header: "Username",
     cell: ({ row }) =>
-      row.original.email ? (
-        <span className="font-medium">{row.original.email}</span>
+      row.original.contact?.username ? (
+        <span>{row.original.contact.username}</span>
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
@@ -61,9 +80,9 @@ function csvEscape(v: unknown): string {
 
 export function CustomersPage() {
   const [params, setParams] = useSearchParams()
-  const q = params.get("q") ?? ""
-  const pages = useCursorPages(q)
-  const [input, setInput] = React.useState(q)
+  const search = params.get("search") ?? ""
+  const pages = useCursorPages(search)
+  const [input, setInput] = React.useState(search)
   const navigate = useNavigate()
   const exportCustomers = useMutation(adminMutations.exportCustomers())
 
@@ -71,16 +90,27 @@ export function CustomersPage() {
     data,
     isPending: loading,
     isFetching,
-  } = useQuery(adminQueries.customers(q, PAGE, pages.cursor))
+  } = useQuery(adminQueries.customers(search, PAGE, pages.cursor))
 
   // Export walks every page of the current filter, not just the visible one.
   const exportCsv = async () => {
     try {
-      const rows = await exportCustomers.mutateAsync(q)
+      const rows = await exportCustomers.mutateAsync(search)
       const csv = [
-        ["id", "email", "created_at", "last_seen_at"].join(","),
+        ["id", "email", "name", "username", "created_at", "last_seen_at"].join(
+          ","
+        ),
         ...rows.map((r) =>
-          [r.id, r.email, r.created_at, r.last_seen_at].map(csvEscape).join(",")
+          [
+            r.id,
+            r.contact?.email,
+            r.contact?.name,
+            r.contact?.username,
+            r.created_at,
+            r.last_seen_at,
+          ]
+            .map(csvEscape)
+            .join(",")
         ),
       ].join("\n")
       const url = URL.createObjectURL(
@@ -105,7 +135,7 @@ export function CustomersPage() {
             className="relative"
             onSubmit={(e) => {
               e.preventDefault()
-              setParams(input ? { q: input } : {})
+              setParams(input ? { search: input } : {})
             }}
           >
             <HugeiconsIcon
@@ -114,7 +144,7 @@ export function CustomersPage() {
             />
             <Input
               className="w-64 pl-8"
-              placeholder="Search email or id…"
+              placeholder="Search email, username, name or id…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
@@ -136,7 +166,7 @@ export function CustomersPage() {
         data={data?.data ?? []}
         loading={loading}
         onRowClick={(row) => navigate(`/customers/${row.id}`)}
-        emptyMessage={q ? "No customers match." : "No customers yet."}
+        emptyMessage={search ? "No customers match." : "No customers yet."}
       />
       <CursorPager
         pages={pages}

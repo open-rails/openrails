@@ -24,6 +24,9 @@ import (
 
 var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$`)
 
+// scimPathShape is SCIM's: RFC 7644 names its endpoints in CamelCase.
+var scimPathShape = regexp.MustCompile(`^/scim/v2(/([A-Z][A-Za-z]*|\{[a-z_]+\}))+$`)
+
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
 	Admin:          {"/v1/admin/"},
@@ -32,6 +35,7 @@ var groupPaths = map[Group][]string{
 	Customer:       {"/v1/me/"},
 	ControlPlane:   {"/v1/merchant/", "/v1/merchants"},
 	Platform:       {"/v1/platform/"},
+	Provisioning:   {"/scim/v2/"},
 	Webhooks:       {"/v1/webhooks/"},
 }
 
@@ -49,11 +53,15 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 219)
+	require.Len(t, Catalog(), 233)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
-		require.Regexp(t, pathShape, r.Path, key)
+		if r.Group == Provisioning {
+			require.Regexp(t, scimPathShape, r.Path, key)
+		} else {
+			require.Regexp(t, pathShape, r.Path, key)
+		}
 		require.NotEmpty(t, r.Group, key)
 		require.NotEmpty(t, r.Auth, key)
 		if prefixes, ok := groupPaths[r.Group]; ok {
@@ -131,7 +139,7 @@ func TestMerchantListsTakeIDs(t *testing.T) {
 		lists++
 		require.Contains(t, r.Query, idsParam, "%s lists records with ids: declare idsParam", r.Key())
 	}
-	require.Equal(t, 22, lists)
+	require.Equal(t, 23, lists)
 }
 
 type recorder struct {
@@ -172,6 +180,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterStaffRoutes(at("/v1"), rt, opts)
 	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
+	RegisterProvisioningRoutes(at("/scim/v2"), rt, Options{Provisioning: func(*http.Request) (billing.MerchantID, error) { return billing.MerchantID{}, nil }})
 	RegisterCustomerRoutes(at("/v1/me"), rt, customers)
 	RegisterPlatformRoutes(at("/v1/platform"), rt, PlatformOptions{})
 

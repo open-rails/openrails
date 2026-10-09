@@ -190,6 +190,14 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	mount, _, _ = strings.Cut(mount, "\n\t})\n")
 	require.Contains(t, program, mount, "the README's mount")
 	require.NotContains(t, readme+program, "billingAuth", "AuthKit is the Auth; no adapter")
+
+	// The README's contacts are AuthKit, as the program's are.
+	_, contacts, ok := strings.Cut(readme, "#### Customer contact info")
+	require.True(t, ok)
+	_, contacts, ok = strings.Cut(contacts, "\tContacts: ")
+	require.True(t, ok)
+	contacts, _, _ = strings.Cut(contacts, "\n")
+	require.Contains(t, program, "\t\tContacts: "+contacts+"\n", "the README's Deps.Contacts")
 }
 
 // proseDocs lists the documents, relative to the repository root.

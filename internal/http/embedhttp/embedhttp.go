@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/scim"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -46,6 +47,8 @@ type Options struct {
 	ProviderRoutes *routesurface.ProviderRoutes
 	// Capabilities is what GET /v1/config reports; nil derives it.
 	Capabilities *Capabilities
+	// Provisioning mounts SCIM under /scim/v2 for the configured merchant.
+	Provisioning bool
 }
 
 // Assembler builds the embedded billing surface from the application graph.
@@ -107,6 +110,8 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
+	provisioning := opts.Provisioning && s.Runtime != nil && !s.Runtime.HostContacts
+	capabilities.RouteGroups[string(httproutes.Provisioning)] = provisioning
 	// browserTier tracks the configuration and checkout patterns mounted
 	// below (#765): the ONLY routes on this combined handler that belong to
 	// the permissive-CORS browser tier.
@@ -132,6 +137,11 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	}
 	if providerRoutes.Webhooks {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
+	}
+	if provisioning {
+		// The configured merchant's own directory pushes its users.
+		auth := scim.Authenticator{Tokens: scim.Tokens{DB: s.Runtime.DB}, Bound: s.Runtime.ConfiguredMerchant}
+		httproutes.RegisterProvisioningRoutes(router.NewMux(mux, embeddedMount+"/scim/v2", s.Runtime), s.Runtime, httproutes.Options{Provisioning: auth.Authenticate})
 	}
 
 	// Resolve the configured merchant on each request before merchant-owned

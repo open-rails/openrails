@@ -221,11 +221,11 @@ products:
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid()}})
-	require.NoError(t, err)
 	var provisionedPSP uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))
 	require.Equal(t, w.psp["nmi"].UUID(), provisionedPSP)
+	_, err = client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: buyer.cid()}})
+	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 	_, err = merchantarchive.RestoreCatalog(t.Context(), provisioned, mid, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err, "publicly provisioned prerequisites must satisfy restore")
