@@ -32,7 +32,7 @@ func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 			f := newFleet(t, 2, 0, tc.skew)
 			c := f.any().newCustomer()
 			client := f.any().client[remote]
-			_, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: nmiInvoiceAmount}}}})
+			_, err := client.UpdateCustomer(t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: nmiInvoiceAmount}}})
 			require.NoError(t, err)
 			_, err = recordUsage(t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "concurrent-finalize", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
 			require.NoError(t, err)

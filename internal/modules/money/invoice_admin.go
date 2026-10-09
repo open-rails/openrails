@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/billing"
 
@@ -62,6 +63,10 @@ func (s *MoneyService) ListInvoices(ctx context.Context, p billing.InvoiceListPa
 		status := string(p.Status)
 		params.Status = &status
 	}
+	if p.Overdue {
+		now := s.now()
+		params.OverdueAt = &now
+	}
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, err := s.db.Gen(ctx).ListInvoicesPage(ctx, params)
 		if err != nil {
@@ -107,7 +112,7 @@ var (
 
 // InvoiceAdminActions describes support operations without granting permission.
 // Unknown/in-flight collections require reconciliation before any support mutation.
-func InvoiceActions(invoice *models.Invoice) []billing.InvoiceAction {
+func InvoiceActions(invoice *models.Invoice, now time.Time) []billing.InvoiceAction {
 	actions := make([]billing.InvoiceAction, 0, 4)
 	if invoice == nil {
 		return actions
@@ -115,13 +120,13 @@ func InvoiceActions(invoice *models.Invoice) []billing.InvoiceAction {
 	if invoice.CollectionIntentID != nil {
 		return actions
 	}
-	if invoiceCollectionRetryable(invoice) {
+	if invoiceCollectionRetryable(invoice, now) {
 		actions = append(actions, billing.InvoiceActionRetryCollection)
 	}
 	switch invoice.Status {
 	case "draft":
 		actions = append(actions, billing.InvoiceActionVoid)
-	case "open", "past_due":
+	case "open":
 		actions = append(actions, billing.InvoiceActionVoid)
 		// A statement waiting only on other invoices has nothing due to pay
 		// or write off.
@@ -171,7 +176,7 @@ func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer iden
 			out = current
 			return nil
 		}
-		if !slices.Contains(InvoiceActions(current), in.Action) || in.Action == billing.InvoiceActionRetryCollection {
+		if !slices.Contains(InvoiceActions(current, s.now()), in.Action) || in.Action == billing.InvoiceActionRetryCollection {
 			return ErrInvoiceActionNotAllowed
 		}
 		local := NewMoneyService(s.db.NewWithPgxTx(tx), s.Clock())

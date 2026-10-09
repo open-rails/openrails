@@ -34,7 +34,13 @@ const columns: ColumnDef<Invoice, unknown>[] = [
   },
   {
     header: "Status",
-    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+    cell: ({ row }) => (
+      <span className="flex gap-1">
+        <StatusBadge status={row.original.status} />
+        {/* Past grace: the customer's new usage in this currency is refused. */}
+        {row.original.delinquent && <StatusBadge status="delinquent" />}
+      </span>
+    ),
   },
   {
     header: "Period",
@@ -60,7 +66,7 @@ const columns: ColumnDef<Invoice, unknown>[] = [
 export function InvoicesPage() {
   const [params, setParams] = useSearchParams()
   const filters: InvoiceFilters = Object.fromEntries(
-    ["customer_id", "currency", "status", "period_starts_after", "period_starts_before"].flatMap(
+    ["customer_id", "currency", "status", "overdue", "period_starts_after", "period_starts_before"].flatMap(
       (key) => (params.get(key) ? [[key, params.get(key)!]] : [])
     )
   )
@@ -156,7 +162,7 @@ function InvoiceFiltersForm({
           onChange={(e) => setFilter("status", e.target.value)}
         >
           <option value="">All statuses</option>
-          {["draft", "open", "past_due", "paid", "voided", "uncollectible"].map(
+          {["draft", "open", "paid", "voided", "uncollectible"].map(
             (status) => (
               <option key={status} value={status}>
                 {status.replaceAll("_", " ")}
@@ -183,6 +189,14 @@ function InvoiceFiltersForm({
           onChange={(e) => setFilter("period_starts_before", e.target.value)}
         />
       </div>
+      <label className="flex items-center gap-2 text-sm md:col-span-5">
+        <input
+          type="checkbox"
+          checked={draft.overdue === "true"}
+          onChange={(e) => setFilter("overdue", e.target.checked ? "true" : "")}
+        />
+        Overdue only: still owed past the due date
+      </label>
       <div className="flex gap-2 md:col-span-5">
         <Button type="submit">Apply filters</Button>
         <Button

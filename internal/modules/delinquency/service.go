@@ -54,18 +54,6 @@ func eventTypeFor(s State) string {
 // urgent payers evaluated, and the rest on the next 15-minute pass.
 const PassBatch = 5000
 
-// Snapshot is one payer's delinquency state in one currency.
-type Snapshot struct {
-	CustomerID       uuid.UUID  `json:"customer_id"`
-	Currency         string     `json:"currency"`
-	State            State      `json:"state"`
-	OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
-	OverdueAmount    int64      `json:"overdue_amount"`
-	OverdueInvoices  int        `json:"overdue_invoices"`
-	EnteredAt        time.Time  `json:"entered_at"`
-	EvaluatedAt      time.Time  `json:"evaluated_at"`
-}
-
 // Transition is one observed state change, already recorded and signalled.
 type Transition struct {
 	CustomerID uuid.UUID
@@ -435,84 +423,4 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 		return nil
 	})
 	return delinquent, err
-}
-
-// ListForCustomer returns one payer's delinquency state in every currency.
-func (s *Service) ListForCustomer(ctx context.Context, payer identity.CustomerID) ([]Snapshot, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("delinquency service not initialized")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var rows []gen.BillingCustomerDelinquency
-	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var qErr error
-		rows, qErr = s.db.Gen(ctx).ListCustomerDelinquency(ctx, gen.ListCustomerDelinquencyParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(),
-		})
-		return qErr
-	}); err != nil {
-		return nil, err
-	}
-	return snapshots(rows), nil
-}
-
-// RosterPosition is a roster page's keyset position.
-type RosterPosition struct {
-	Since    time.Time `json:"s"`
-	Customer uuid.UUID `json:"c"`
-	Currency string    `json:"u"`
-}
-
-// List returns one page of the merchant's overdue roster (grace + delinquent,
-// oldest debt first), optionally filtered to one state, after the given
-// position. Payers in good standing are never returned.
-func (s *Service) List(ctx context.Context, state State, after *RosterPosition, limit int) ([]Snapshot, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("delinquency service not initialized")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var filter *string
-	if state != "" {
-		if !state.Valid() || state == StateCurrent {
-			return nil, fmt.Errorf("delinquency: state filter must be grace or delinquent, got %q", state)
-		}
-		v := string(state)
-		filter = &v
-	}
-	params := gen.ListDelinquentCustomersParams{MerchantID: tid.UUID(), State: filter, RowLimit: int64(limit)}
-	if after != nil {
-		params.AfterOverdueStartedAt, params.AfterCustomer, params.AfterCurrency = &after.Since, &after.Customer, &after.Currency
-	}
-	var rows []gen.BillingCustomerDelinquency
-	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var qErr error
-		rows, qErr = s.db.Gen(ctx).ListDelinquentCustomers(ctx, params)
-		return qErr
-	}); err != nil {
-		return nil, err
-	}
-	return snapshots(rows), nil
-}
-
-func snapshots(rows []gen.BillingCustomerDelinquency) []Snapshot {
-	out := make([]Snapshot, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, Snapshot{
-			CustomerID:       r.CustomerID,
-			Currency:         r.Currency,
-			State:            ParseState(r.State),
-			OverdueStartedAt: r.OverdueStartedAt,
-			OverdueAmount:    r.OverdueAmount,
-			OverdueInvoices:  int(r.OverdueInvoices),
-			EnteredAt:        r.EnteredAt,
-			EvaluatedAt:      r.EvaluatedAt,
-		})
-	}
-	return out
 }

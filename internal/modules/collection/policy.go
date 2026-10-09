@@ -129,6 +129,27 @@ func (p Policy) NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (
 	return lastAttempt.Add(gap), true, nil
 }
 
+// Outlook is what remains of a case with failures counted declines whose
+// next attempt runs at next: the attempts still to come if each declines, and
+// when the last of them runs. Each later attempt chains on the one before, as
+// NextAttemptAt schedules it.
+func (p Policy) Outlook(cycleHours, failures int, next time.Time) (left int, final time.Time, err error) {
+	most, err := p.MaxFailures(cycleHours)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	left = max(most-max(failures, 0), 0)
+	final = next
+	for f := max(failures, 0) + 1; f < most; f++ {
+		at, ok, err := p.NextAttemptAt(cycleHours, f, final)
+		if err != nil || !ok {
+			return left, final, err
+		}
+		final = at
+	}
+	return left, final, nil
+}
+
 // Window is how long past the missed charge collection may still attempt it.
 func (p Policy) Window(cycleHours int) (time.Duration, error) {
 	offsets, err := p.RetryOffsets(cycleHours)

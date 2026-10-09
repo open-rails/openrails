@@ -129,7 +129,7 @@ func TestDurationOrderCanDisableRenewalAtCreation(t *testing.T) {
 		sub := w.subscription(tp, e.sub)
 		require.Equal(t, billing.SubscriptionCanceled, sub.Status, "one command records the paid order without a later renewal")
 		require.NotNil(t, sub.CanceledAt)
-		require.Nil(t, sub.NextRetryAt)
+		require.Nil(t, nextRetry(sub))
 		replayed, err := session.buy(e.c, order{rail: rail, method: e.method})
 		require.NoError(t, err)
 		require.Equal(t, e.sub, *replayed.SubscriptionID)

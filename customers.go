@@ -24,76 +24,30 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 	return &out, nil
 }
 
-// ListCustomerSettings lists customers' settings, newest customer first.
-// IDs instead reads 1 to billing.MaxBatchItems named customers in one page;
-// one the merchant never declared or billed is absent.
-func (c *Client) ListCustomerSettings(ctx context.Context, params billing.CustomerSettingsListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerSettings], error) {
-	q := url.Values{}
-	if err := setIDs(q, params.IDs); err != nil {
-		return nil, err
-	}
-	var out billing.ListPage[billing.CustomerSettings]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/customers/settings", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// UpdateCustomerSettings changes 1 to billing.MaxBatchItems distinct
-// customers' settings, all or none; the answer is in request order. Each
-// item changes only the fields it names; a customer not billed yet is
-// created. A person needs a recent sign-in for it.
-func (c *Client) UpdateCustomerSettings(ctx context.Context, items []billing.UpdateCustomerSettingsParams, requestOptions ...RequestOption) ([]billing.CustomerSettings, error) {
-	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
-		return nil, err
-	}
-	for _, item := range items {
-		if item.CustomerID.IsZero() {
-			return nil, invalidErr("customer_id is required")
-		}
-	}
-	var out billing.CustomerSettingsBatch
-	if err := c.do(ctx, http.MethodPatch, "/v1/admin/customers/settings", billing.UpdateCustomerSettingsBatchParams{Items: items}, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
-// GetCustomerBillingProfile reads one customer's billing at a glance.
-func (c *Client) GetCustomerBillingProfile(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.CustomerBillingProfile, error) {
+// GetCustomer reads one customer: its contact, its settings, and per currency
+// its balance and the card that pays its invoices.
+func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.Customer, error) {
 	path, err := customerIDPath(id)
 	if err != nil {
 		return nil, err
 	}
-	var out billing.CustomerBillingProfile
-	if err := c.do(ctx, http.MethodGet, path+"/billing-profile", nil, &out, requestOptions...); err != nil {
+	var out billing.Customer
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// ListCustomerDelinquency lists a customer's delinquency in every currency it
-// has owed in; an empty page means it was never overdue.
-func (c *Client) ListCustomerDelinquency(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.ListPage[billing.Delinquency], error) {
+// UpdateCustomer changes one customer's settings, only the fields params
+// names, and answers the customer; a customer not billed yet is created. A
+// person needs a recent sign-in for it.
+func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error) {
 	path, err := customerIDPath(id)
 	if err != nil {
 		return nil, err
 	}
-	var out billing.ListPage[billing.Delinquency]
-	if err := c.do(ctx, http.MethodGet, path+"/delinquency", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListDelinquency lists the merchant's overdue customers, oldest debt first.
-func (c *Client) ListDelinquency(ctx context.Context, params billing.DelinquencyListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Delinquency], error) {
-	q := url.Values{}
-	if params.State != "" {
-		q.Set("state", string(params.State))
-	}
-	var out billing.ListPage[billing.Delinquency]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/delinquency", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	var out billing.Customer
+	if err := c.do(ctx, http.MethodPatch, path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

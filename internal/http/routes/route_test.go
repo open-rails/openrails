@@ -53,7 +53,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 228)
+	require.Len(t, Catalog(), 224)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -65,7 +65,7 @@ func TestCatalogDeclarations(t *testing.T) {
 		require.NotEmpty(t, r.Group, key)
 		require.NotEmpty(t, r.Auth, key)
 		if prefixes, ok := groupPaths[r.Group]; ok {
-			require.True(t, slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(r.Path, prefix) }), "%s: a %s route is under %v", key, r.Group, prefixes)
+			require.True(t, slices.ContainsFunc(prefixes, func(prefix string) bool { return strings.HasPrefix(r.Path+"/", prefix) }), "%s: a %s route is under %v", key, r.Group, prefixes)
 		}
 		for _, param := range pathParam.FindAllStringSubmatch(r.Path, -1) {
 			require.Contains(t, pathParams, param[1], "%s: name the path parameter {id}, or add what it is to pathParams", key)

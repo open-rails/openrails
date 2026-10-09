@@ -76,9 +76,9 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 
 	// The directory changes; the next read is current.
 	directory.Put(openrails.Contact{ID: c.id, Email: "renamed@host.test", Name: "Member One", Username: "member_one"})
-	profile, err := w.client[remote].GetCustomerBillingProfile(ctx, c.cid())
+	profile, err := w.client[remote].GetCustomer(ctx, c.cid())
 	require.NoError(t, err)
-	require.Equal(t, "renamed@host.test", *profile.Customer.Contact.Email)
+	require.Equal(t, "renamed@host.test", *profile.Contact.Email)
 
 	_, err = w.rt.Routes(openrails.Routes{Auth: w.auth, Prefix: "/other", Provisioning: true})
 	require.ErrorContains(t, err, "Deps.Contacts", "one source of truth")
@@ -128,9 +128,9 @@ func TestReceiptsGoToThePushedEmail(t *testing.T) {
 	c.subscribe(embedded, "stripe", price.ID.String(), "content:members", c.saveCard("stripe", visa))
 	w.mailTo(mail, "pushed@directory.test")
 
-	profile, err := w.client[remote].GetCustomerBillingProfile(ctx, c.cid())
+	profile, err := w.client[remote].GetCustomer(ctx, c.cid())
 	require.NoError(t, err)
-	contact := profile.Customer.Contact
+	contact := profile.Contact
 	require.NotNil(t, contact)
 	require.Equal(t, "pushed@directory.test", *contact.Email)
 	require.Equal(t, "pushed", *contact.Username)

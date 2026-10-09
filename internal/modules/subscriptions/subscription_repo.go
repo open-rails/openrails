@@ -27,6 +27,8 @@ type SubscriptionFilters struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	// Dunning keeps the subscriptions past_due or awaiting_method.
+	Dunning bool
 }
 
 type SubscriptionRepo struct {
@@ -659,7 +661,7 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	rows, err := r.db.Gen(ctx).ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
 		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
+		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 		AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
 	if err != nil {
@@ -694,7 +696,7 @@ func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (in
 	return r.db.Gen(ctx).CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
 		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
+		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
 	})
 }
 

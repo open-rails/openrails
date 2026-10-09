@@ -753,7 +753,7 @@ type customer struct {
 // one OpenRails has not seen.
 func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
-	_, err := w.client[embedded].UpdateCustomerSettings(w.t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: billing.CustomerID(uuid.MustParse(id))}})
+	_, err := w.client[embedded].UpdateCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.UpdateCustomerParams{})
 	require.NoError(w.t, err)
 	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
 }
@@ -933,6 +933,23 @@ func (w *world) subscription(tp topology, id billing.SubscriptionID) *billing.Su
 	sub, err := w.client[tp].GetSubscription(w.t.Context(), id)
 	require.NoError(w.t, err)
 	return sub
+}
+
+// nextRetry is the dunning's next retry, nil out of dunning.
+func nextRetry(sub *billing.Subscription) *time.Time {
+	if sub.Dunning == nil {
+		return nil
+	}
+	return sub.Dunning.NextRetryAt
+}
+
+// graceEnds is the subscription's stored dunning grace: internal state the
+// wire no longer carries.
+func (w *world) graceEnds(id billing.SubscriptionID) *time.Time {
+	w.t.Helper()
+	var at *time.Time
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT grace_ends_at FROM billing.subscriptions WHERE id = $1`), id.UUID()).Scan(&at))
+	return at
 }
 
 func (w *world) payments(tp topology, customerID string) []billing.Payment {

@@ -331,12 +331,12 @@ func TestEngineDeclinePolicy(t *testing.T) {
 					sub := w.subscription(e.tp, e.sub)
 					require.True(t, sub.CurrentPeriodEndsAt.Equal(end), "a decline never extends the period")
 					require.Equal(t, sub.Status != "canceled", e.c.entitled(e.ent), "members keep access through dunning; only a confirmed outcome ends it (%s)", sub.Status)
-					if sub.NextRetryAt == nil {
+					if nextRetry(sub) == nil {
 						break
 					}
 					require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-					offsets = append(offsets, sub.NextRetryAt.Sub(first).Round(time.Hour))
-					w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+					offsets = append(offsets, nextRetry(sub).Sub(first).Round(time.Hour))
+					w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 					w.runRenewals()
 				}
 				require.Equal(t, tc.retries, offsets, "retry schedule")
@@ -353,8 +353,9 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				require.Len(t, completed(w.payments(e.tp, e.c.id)), 1)
 				if tc.final == "awaiting_method" {
 					// The wait for a card ends with the dunning window; recover inside it.
-					require.NotNil(t, sub.GraceEndsAt)
-					w.advance(sub.GraceEndsAt.Sub(w.clock.Now()) - time.Hour)
+					require.True(t, sub.Dunning.WaitingForNewCard)
+					require.NotNil(t, sub.Dunning.FinalRetryAt)
+					w.advance(sub.Dunning.FinalRetryAt.Sub(w.clock.Now()) - time.Hour)
 				} else {
 					w.advance(40 * day)
 				}

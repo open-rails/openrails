@@ -26,8 +26,8 @@ var ErrCustomerNotFound = apperr.New(http.StatusNotFound, "customer_not_found", 
 // errDirectoryUnavailable is a read the merchant's directory could not answer.
 var errDirectoryUnavailable = apperr.New(http.StatusServiceUnavailable, "service_unavailable", "The customer directory is unavailable.")
 
-// customers builds the customer objects of rows, in order, their contacts
-// read in one lookup.
+// customers builds the customer objects of rows, in order: their contacts in
+// one directory lookup, and each billing section in one read for every row.
 func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []gen.BillingCustomer) ([]billing.Customer, error) {
 	ids := make([]uuid.UUID, len(rows))
 	for i, row := range rows {
@@ -41,9 +41,21 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 			return nil, errDirectoryUnavailable
 		}
 	}
+	settings, err := customerSettings(ctx, s.rt.DB.Gen(ctx), mid.UUID(), ids)
+	if err != nil {
+		return nil, err
+	}
+	money, err := s.moneyService().CustomersMoney(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]billing.Customer, len(rows))
 	for i, row := range rows {
-		out[i] = billing.Customer{ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC()}
+		m := money[row.ID]
+		out[i] = billing.Customer{
+			ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC(),
+			Settings: settings[row.ID], Balances: m.Balances, CollectionPaymentMethods: m.Collection,
+		}
 		if contact, ok := found[row.ID]; ok {
 			out[i].Contact = customerContact(contact)
 		}
@@ -61,7 +73,8 @@ func customerContact(c directory.Contact) *billing.CustomerContact {
 	return &billing.CustomerContact{Email: text(c.Email), Name: text(c.Name), Username: text(c.Username), Active: c.Active, SyncedAt: c.SyncedAt}
 }
 
-// GetCustomer reads one customer.
+// GetCustomer reads one customer: its contact, its settings, and per currency
+// its balance and collection card.
 func (s *Service) GetCustomer(ctx context.Context, id identity.CustomerID) (*billing.Customer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -159,4 +172,28 @@ func (s *Service) searchCustomers(ctx context.Context, mid billing.MerchantID, s
 		ids = append(ids, c.CustomerID)
 	}
 	return ids, nil
+}
+
+// GetCustomerAccount is the customer's own summary. A customer never billed
+// has no money yet: empty lists, not a refusal.
+func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.CustomerID) (*billing.CustomerAccount, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	money, err := s.moneyService().CustomersMoney(ctx, []uuid.UUID{customer.UUID()})
+	if err != nil {
+		return nil, err
+	}
+	unread, err := s.rt.DB.Gen(ctx).CountUnreadCustomerNotifications(ctx, gen.CountUnreadCustomerNotificationsParams{MerchantID: mid.UUID(), CustomerID: customer.UUID()})
+	if err != nil {
+		return nil, err
+	}
+	m := money[customer.UUID()]
+	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, CollectionPaymentMethods: m.Collection, UnreadNotifications: unread}, nil
 }

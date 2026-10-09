@@ -3,8 +3,7 @@
 A customer is your user's id (the subject UUID your auth reports). Who it is —
 email, username, display name — belongs to your directory. OpenRails reads it
 for receipts and payment notices, the admin customer read
-(`GET /v1/admin/customers/{customer_id}/billing-profile`, its customer's
-`contact`) and search (`GET /v1/admin/customers?search=`), from one of two
+(`GET /v1/admin/customers/{customer_id}`, its `contact`) and search (`GET /v1/admin/customers?search=`), from one of two
 sources:
 
 | Deployment | Source | Copy |

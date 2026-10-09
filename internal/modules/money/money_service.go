@@ -809,12 +809,7 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	}
 	var held int64
 	if found {
-		now := s.now()
-		held, err = q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
-			MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
-			HeldSince: now.Add(-retention.AdmissionMaxHold),
-		})
-		if err != nil {
+		if held, err = s.heldAmount(ctx, q, tenantID, payerID, cur); err != nil {
 			return nil, err
 		}
 	}
@@ -827,6 +822,16 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 		Balance:     bal,
 		HeldBalance: held,
 	}, nil
+}
+
+// heldAmount is the one held total against a customer's balance in a
+// currency: live request reservations and provider authorizations.
+func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (int64, error) {
+	now := s.now()
+	return q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
+		HeldSince: now.Add(-retention.AdmissionMaxHold),
+	})
 }
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {

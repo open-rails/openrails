@@ -79,6 +79,7 @@ type AdminSubscriptionResponse struct {
 	//Product  *models.Product   `json:"product,omitempty"`
 	Price    *models.Price     `json:"price,omitempty"`
 	Payments []*models.Payment `json:"payments,omitempty"`
+	Dunning  *billing.SubscriptionDunning
 }
 
 // ListSubscriptions is one page of the merchant's subscriptions matching f,
@@ -99,8 +100,12 @@ func (s *AdminSubscriptionService) ListSubscriptions(ctx context.Context, f GetS
 	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subs.Items); err != nil {
 		return billing.ListPage[*AdminSubscriptionResponse]{}, err
 	}
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), subs.Items, prices)
+	if err != nil {
+		return billing.ListPage[*AdminSubscriptionResponse]{}, fmt.Errorf("failed to load subscription dunning: %w", err)
+	}
 	return pagination.Map(subs, func(sub *models.Subscription) *AdminSubscriptionResponse {
-		out := &AdminSubscriptionResponse{Subscription: sub}
+		out := &AdminSubscriptionResponse{Subscription: sub, Dunning: dunning[sub.ID]}
 		if price := prices[sub.PriceID]; price != nil {
 			out.Price, out.Product = price, price.Product
 		}
@@ -144,6 +149,12 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 			response.Product = product
 		}
 	}
+
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), []*models.Subscription{subscription}, map[uuid.UUID]*models.Price{subscription.PriceID: response.Price})
+	if err != nil {
+		return nil, fmt.Errorf("load subscription dunning: %w", err)
+	}
+	response.Dunning = dunning[subscription.ID]
 
 	// Include payment history for this subscription
 	if s.PaymentService != nil {

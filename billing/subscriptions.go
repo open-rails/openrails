@@ -25,8 +25,11 @@ type SubscriptionListParams struct {
 	IDs        []SubscriptionID
 	CustomerID CustomerID
 	Status     SubscriptionStatus
-	Rail       string
-	PriceID    PriceID
+	// Dunning keeps the subscriptions in dunning: past_due or
+	// awaiting_method, each with its Dunning.
+	Dunning bool
+	Rail    string
+	PriceID PriceID
 }
 
 // Subscription exposes lifecycle and recovery state without making provider
@@ -37,13 +40,12 @@ type SubscriptionListParams struct {
 // and Product, CancelPortalURL and Access.
 type Subscription struct {
 	// CollectionPolicy is read-only scheduling/recovery ownership.
-	CollectionPolicy    string           `json:"collection_policy"`
-	Recovery            *PaymentRecovery `json:"recovery,omitempty"`
-	LastRetryAt         *time.Time       `json:"last_retry_at"`
-	RetryAttempts       *int             `json:"retry_attempts"`
-	NextRetryAt         *time.Time       `json:"next_retry_at"`
-	GraceEndsAt         *time.Time       `json:"grace_ends_at"`
-	DeletionScheduledAt *time.Time       `json:"deletion_scheduled_at,omitempty"`
+	CollectionPolicy string           `json:"collection_policy"`
+	Recovery         *PaymentRecovery `json:"recovery,omitempty"`
+	// Dunning is the declined renewal being collected; null unless the
+	// subscription is past_due or awaiting_method.
+	Dunning             *SubscriptionDunning `json:"dunning"`
+	DeletionScheduledAt *time.Time           `json:"deletion_scheduled_at,omitempty"`
 	// Payments is the subscription's recovery history: the same Payment shape
 	// GET /v1/admin/payments serves.
 	Payments   []Payment      `json:"payments,omitempty"`
@@ -89,6 +91,24 @@ type Subscription struct {
 	NextAction *NextAction `json:"next_action"`
 	CreatedAt  time.Time   `json:"created_at"`
 	UpdatedAt  time.Time   `json:"updated_at"`
+}
+
+// SubscriptionDunning is a declined renewal's collection. Attempts counts
+// the renewal's declined charges so far. RetriesLeft and FinalRetryAt follow the
+// dunning policy the case opened under: the charges still to come if each
+// declines, and when the last one runs; both are null when the provider runs
+// the retries, and NextRetryAt is then the provider's next attempt when
+// OpenRails knows it. NextRetryAt is null while nothing is scheduled. A subscription
+// WaitingForNewCard is charged again only once the customer replaces the
+// card, and is canceled at FinalRetryAt if none arrives. LastFailureReason is
+// the latest decline's reason, null when none was recorded.
+type SubscriptionDunning struct {
+	Attempts          int            `json:"attempts"`
+	RetriesLeft       *int           `json:"retries_left"`
+	NextRetryAt       *time.Time     `json:"next_retry_at"`
+	FinalRetryAt      *time.Time     `json:"final_retry_at"`
+	WaitingForNewCard bool           `json:"waiting_for_new_card"`
+	LastFailureReason *DeclineReason `json:"last_failure_reason"`
 }
 
 // SubscriptionAccess is how a customer currently holds premium access: Kind

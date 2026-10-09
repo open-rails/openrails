@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,14 @@ func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 				}
 				*target = &parsed
 			}
+		}
+		if raw := strings.TrimSpace(r.Query("overdue")); raw != "" {
+			overdue, err := strconv.ParseBool(raw)
+			if err != nil {
+				r.APIError(api.Coded(billing.CodeInvalidQuery, "overdue must be true or false").WithParam("overdue"))
+				return
+			}
+			params.Overdue = overdue
 		}
 		svc, ok := newAdminBillingService(r)
 		if !ok {

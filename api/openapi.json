@@ -2887,6 +2887,13 @@
             }
           },
           {
+            "name": "dunning",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "expires_before",
             "in": "query",
             "schema": {
@@ -5032,38 +5039,18 @@
         ]
       }
     },
-    "/v1/admin/customers/settings": {
+    "/v1/admin/customers/{customer_id}": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
           {
-            "name": "cursor",
-            "in": "query",
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
             }
           }
         ],
@@ -5073,25 +5060,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/CustomerSettings"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
+                  "$ref": "#/components/schemas/Customer"
                 }
               }
             }
@@ -5108,22 +5077,34 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
-          "invalid_cursor"
+          "customer_not_found",
+          "invalid_customer_id",
+          "service_credential_customer_scope_denied",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:merchant"
         ]
       },
       "patch": {
         "tags": [
           "admin"
         ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateCustomerSettingsBatchParams"
+                "$ref": "#/components/schemas/UpdateCustomerParams"
               }
             }
           }
@@ -5134,7 +5115,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerSettingsBatch"
+                  "$ref": "#/components/schemas/Customer"
                 }
               }
             }
@@ -5155,197 +5136,10 @@
         "x-openrails-errors": [
           "billing_policy_not_found",
           "currency_unsupported",
+          "invalid_customer_id",
           "invalid_param",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/billing-profile": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomerBillingProfile"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "customer_not_found",
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/delinquency": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Delinquency"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/delinquency": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Delinquency"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_param"
+          "service_credential_customer_scope_denied",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6042,19 +5836,10 @@
         ]
       }
     },
-    "/v1/me/balance": {
+    "/v1/me": {
       "get": {
         "tags": [
           "customer"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
         ],
         "responses": {
           "200": {
@@ -6062,7 +5847,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Balance"
+                  "$ref": "#/components/schemas/CustomerAccount"
                 }
               }
             }
@@ -6077,12 +5862,9 @@
           }
         ],
         "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "currency_unsupported"
-        ],
+        "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
+          "tier:customer"
         ]
       }
     },
@@ -7357,6 +7139,13 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -12608,38 +12397,6 @@
         ]
       }
     },
-    "/v1/me/notifications/unread-count": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnreadCount"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
     "/v1/me/notifications/read": {
       "post": {
         "tags": [
@@ -16577,13 +16334,60 @@
           "last_seen_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/CustomerSettings"
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          },
+          "collection_payment_methods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectionPaymentMethod"
+            }
           }
         },
         "required": [
           "id",
           "contact",
           "created_at",
-          "last_seen_at"
+          "last_seen_at",
+          "settings",
+          "balances",
+          "collection_payment_methods"
+        ]
+      },
+      "CustomerAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "balances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Balance"
+            }
+          },
+          "collection_payment_methods": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollectionPaymentMethod"
+            }
+          },
+          "unread_notifications": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "balances",
+          "collection_payment_methods",
+          "unread_notifications"
         ]
       },
       "CustomerAmount": {
@@ -16601,89 +16405,6 @@
         "required": [
           "min_amount",
           "max_amount"
-        ]
-      },
-      "CustomerBillingProfile": {
-        "type": "object",
-        "properties": {
-          "customer": {
-            "$ref": "#/components/schemas/Customer"
-          },
-          "balances": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Balance"
-            }
-          },
-          "subscriptions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Subscription"
-            }
-          },
-          "entitlements": {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CustomerEntitlement"
-                }
-              },
-              "next_cursor": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "next_cursor"
-            ]
-          },
-          "payments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Payment"
-            }
-          },
-          "payment_methods": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PaymentMethod"
-            }
-          },
-          "product_access": {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ProductAccessGrant"
-                }
-              },
-              "next_cursor": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "next_cursor"
-            ]
-          }
-        },
-        "required": [
-          "customer",
-          "balances",
-          "subscriptions",
-          "entitlements",
-          "payments",
-          "payment_methods",
-          "product_access"
         ]
       },
       "CustomerCancelSubscriptionParams": {
@@ -16813,9 +16534,6 @@
       "CustomerSettings": {
         "type": "object",
         "properties": {
-          "customer_id": {
-            "type": "string"
-          },
           "credit_limits": {
             "type": "array",
             "items": {
@@ -16850,25 +16568,10 @@
           }
         },
         "required": [
-          "customer_id",
           "credit_limits",
           "trust_levels",
           "billing_policy",
           "invoice_profile"
-        ]
-      },
-      "CustomerSettingsBatch": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CustomerSettings"
-            }
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "Dashboard": {
@@ -17138,61 +16841,6 @@
             "format": "date-time"
           }
         }
-      },
-      "Delinquency": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "current",
-              "delinquent",
-              "grace"
-            ]
-          },
-          "overdue_started_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "overdue_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "overdue_invoices": {
-            "type": "integer"
-          },
-          "entered_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "evaluated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "customer_id",
-          "currency",
-          "state",
-          "overdue_started_at",
-          "overdue_amount",
-          "overdue_invoices",
-          "entered_at",
-          "evaluated_at"
-        ]
       },
       "DelinquencyHostEvent": {
         "type": "object",
@@ -18196,7 +17844,6 @@
               "draft",
               "open",
               "paid",
-              "past_due",
               "uncollectible",
               "voided"
             ]
@@ -18229,6 +17876,9 @@
                 "type": "null"
               }
             ]
+          },
+          "delinquent": {
+            "type": "boolean"
           },
           "paid_at": {
             "oneOf": [
@@ -18372,6 +18022,7 @@
           "collection_method",
           "issued_at",
           "due_at",
+          "delinquent",
           "paid_at",
           "voided_at",
           "uncollectible_at",
@@ -23716,43 +23367,10 @@
           "recovery": {
             "$ref": "#/components/schemas/PaymentRecovery"
           },
-          "last_retry_at": {
+          "dunning": {
             "oneOf": [
               {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "retry_attempts": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "next_retry_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "grace_ends_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
+                "$ref": "#/components/schemas/SubscriptionDunning"
               },
               {
                 "type": "null"
@@ -23944,10 +23562,7 @@
         },
         "required": [
           "collection_policy",
-          "last_retry_at",
-          "retry_attempts",
-          "next_retry_at",
-          "grace_ends_at",
+          "dunning",
           "id",
           "customer_id",
           "product_id",
@@ -24008,6 +23623,106 @@
           "kind",
           "product_id",
           "starts_at"
+        ]
+      },
+      "SubscriptionDunning": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "retries_left": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_retry_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "final_retry_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting_for_new_card": {
+            "type": "boolean"
+          },
+          "last_failure_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "authentication_required",
+                  "blocked_by_psp",
+                  "call_issuer",
+                  "card_not_supported",
+                  "communication_error",
+                  "currency_not_supported",
+                  "do_not_honor",
+                  "duplicate_transaction",
+                  "expired_card",
+                  "fraudulent",
+                  "gateway_rejected",
+                  "generic_decline",
+                  "incorrect_address",
+                  "incorrect_cvc",
+                  "incorrect_number",
+                  "incorrect_zip",
+                  "insufficient_funds",
+                  "invalid_account",
+                  "invalid_expiry",
+                  "invalid_pin",
+                  "invalid_request",
+                  "issuer_unavailable",
+                  "lost_card",
+                  "merchant_config",
+                  "no_such_issuer",
+                  "over_limit",
+                  "pickup_card",
+                  "processing_error",
+                  "restricted_card",
+                  "retry_later",
+                  "security_violation",
+                  "stolen_card",
+                  "stop_recurring",
+                  "transaction_not_allowed",
+                  "try_again_later",
+                  "unknown",
+                  "update_cardholder_data"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "attempts",
+          "retries_left",
+          "next_retry_at",
+          "final_retry_at",
+          "waiting_for_new_card",
+          "last_failure_reason"
         ]
       },
       "SubscriptionRetryNowResult": {
@@ -24462,23 +24177,9 @@
           "unread_count"
         ]
       },
-      "UpdateCustomerSettingsBatchParams": {
+      "UpdateCustomerParams": {
         "type": "object",
         "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateCustomerSettingsParams"
-            }
-          }
-        }
-      },
-      "UpdateCustomerSettingsParams": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
           "credit_limits": {
             "type": "array",
             "items": {

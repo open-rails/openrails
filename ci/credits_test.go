@@ -23,8 +23,10 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 
 	// Customer settings create a customer OpenRails has not seen.
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
-	_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer}, {CustomerID: other}})
-	require.NoError(t, err)
+	for _, id := range []billing.CustomerID{customer, other} {
+		_, err := client.UpdateCustomer(ctx, id, billing.UpdateCustomerParams{})
+		require.NoError(t, err)
+	}
 	missing := billing.CustomerID(uuid.New())
 	read, err := client.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{customer, missing, customer}})
 	require.NoError(t, err)
@@ -127,11 +129,11 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.EqualValues(t, 2, usage.Rows[0].EventCount)
 	require.EqualValues(t, 300_000, usage.Rows[0].Amount)
 
-	_, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer, TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}}})
+	_, err = client.UpdateCustomer(ctx, customer, billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}})
 	require.NoError(t, err)
-	settings, err := client.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{customer}})
+	settings, err := client.GetCustomer(ctx, customer)
 	require.NoError(t, err)
-	require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}, settings.Items[0].TrustLevels)
+	require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}, settings.Settings.TrustLevels)
 
 	revoked, err := client.RevokeCreditGrant(ctx, customer, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
 	require.NoError(t, err)
@@ -141,10 +143,10 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, revokedAgain.Replayed)
 
-	profile, err := client.GetCustomerBillingProfile(ctx, customer)
+	profile, err := client.GetCustomer(ctx, customer)
 	require.NoError(t, err)
-	require.Equal(t, customer, profile.Customer.ID)
-	require.Nil(t, profile.Customer.Contact)
+	require.Equal(t, customer, profile.ID)
+	require.Nil(t, profile.Contact)
 	require.Len(t, profile.Balances, 1)
 	require.EqualValues(t, 0, profile.Balances[0].BalanceAmount)
 

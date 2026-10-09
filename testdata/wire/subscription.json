@@ -1,9 +1,13 @@
 {
-  "collection_policy": "provider",
-  "last_retry_at": null,
-  "retry_attempts": null,
-  "next_retry_at": null,
-  "grace_ends_at": null,
+  "collection_policy": "nmi_schedule",
+  "dunning": {
+    "attempts": 2,
+    "retries_left": 3,
+    "next_retry_at": "2026-09-16T00:00:00.123456789Z",
+    "final_retry_at": "2026-09-16T00:00:00.123456789Z",
+    "waiting_for_new_card": false,
+    "last_failure_reason": "insufficient_funds"
+  },
   "payments": [
     {
       "id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
@@ -75,7 +79,7 @@
   "psp_id": "psp_55555555-5555-5555-5555-555555555555",
   "rail": "nmi",
   "rail_subscription_id": "rail-sub-1",
-  "status": "active",
+  "status": "past_due",
   "scheduled_change": {
     "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
     "quantity": null,

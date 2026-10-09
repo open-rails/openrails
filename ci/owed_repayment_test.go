@@ -160,7 +160,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 
 	t.Run("arrears capacity is unchanged", func(t *testing.T) {
 		customer := newCustomer()
-		_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer, CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 1_000_000}}}})
+		_, err := client.UpdateCustomer(ctx, customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 1_000_000}}})
 		require.NoError(t, err)
 		grant(customer, 500_000, "seed")
 		require.NoError(t, open(customer, "ar-a", 500_000))

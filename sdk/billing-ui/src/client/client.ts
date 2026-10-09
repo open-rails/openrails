@@ -16,6 +16,7 @@ import {
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
 import {
+  accountSchema,
   cardSetupSchema,
   checkoutSessionLinkSchema,
   publicConfigSchema,
@@ -30,6 +31,7 @@ import {
   subscriptionSchema,
   tierChangePreviewSchema,
   tierChangeSchema,
+  type Account,
   type CardSetup,
   type CheckoutSessionLink,
   type PublicConfig,
@@ -526,6 +528,14 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         query: cursorQuery(opts, 20),
         signal: opts.signal,
       })
+    },
+
+    /**
+     * The customer's summary: balance and amount owed per currency, the card
+     * that pays each currency, and unread notices.
+     */
+    getAccount(signal?: AbortSignal): Promise<Account> {
+      return json(accountSchema, "/me", { signal })
     },
 
     getInvoice(invoiceId: string, signal?: AbortSignal): Promise<Invoice> {

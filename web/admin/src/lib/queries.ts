@@ -4,7 +4,7 @@ import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
 import type { ListPage } from "@/lib/api/generated/wire"
 import {
   getCatalogRevision,
-  getCustomerProfile,
+  getCustomer,
   getMerchantConfiguration,
   getPayment,
   getPaymentAttempt,
@@ -17,7 +17,9 @@ import {
   getUnreadCount,
   listApiKeys,
   listCatalogDrift,
+  listCustomerEntitlements,
   listCustomerPaymentMethods,
+  listCustomerProductAccess,
   listCustomers,
   listCustomerUsageRateOverrides,
   getFindingSummary,
@@ -127,9 +129,55 @@ export const adminQueries = {
   customer: (id: string) =>
     queryOptions({
       queryKey: queryKeys.customer(id),
-      queryFn: ({ signal }) => getCustomerProfile(id, signal),
+      queryFn: ({ signal }) => getCustomer(id, signal),
       enabled: Boolean(id),
       meta: { errorAction: "Load customer" },
+    }),
+  // One page of each of a customer's lists, for the customer page.
+  customerSubscriptions: (id: string, limit: number, cursor: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.customer(id), "subscriptions", { limit, cursor }],
+      queryFn: ({ signal }) =>
+        listSubscriptions({ customer_id: id }, limit, cursor || undefined, signal),
+      enabled: Boolean(id),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load subscriptions" },
+    }),
+  customerPayments: (id: string, limit: number, cursor: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.customer(id), "payments", { limit, cursor }],
+      queryFn: ({ signal }) =>
+        listPayments({ customer_id: id }, { limit, cursor: cursor || undefined }, signal),
+      enabled: Boolean(id),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load payments" },
+    }),
+  customerPaymentMethodsPage: (id: string, limit: number, cursor: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.customer(id), "payment-methods", { limit, cursor }],
+      queryFn: ({ signal }) =>
+        listCustomerPaymentMethods(id, { limit, cursor: cursor || undefined }, signal),
+      enabled: Boolean(id),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load payment methods" },
+    }),
+  customerEntitlements: (id: string, limit: number, cursor: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.customer(id), "entitlements", { limit, cursor }],
+      queryFn: ({ signal }) =>
+        listCustomerEntitlements(id, { limit, cursor: cursor || undefined }, signal),
+      enabled: Boolean(id),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load entitlements" },
+    }),
+  customerProductAccess: (id: string, limit: number, cursor: string) =>
+    queryOptions({
+      queryKey: [...queryKeys.customer(id), "product-access", { limit, cursor }],
+      queryFn: ({ signal }) =>
+        listCustomerProductAccess(id, { limit, cursor: cursor || undefined }, signal),
+      enabled: Boolean(id),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load product access" },
     }),
   customerUsageRates: (id: string) =>
     queryOptions({

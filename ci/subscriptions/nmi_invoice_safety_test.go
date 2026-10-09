@@ -53,7 +53,7 @@ func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
 	for _, invoice := range previous.Items {
 		existing[invoice.ID] = true
 	}
-	_, err = client.UpdateCustomerSettings(f.t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 3 * nmiInvoiceAmount}}}})
+	_, err = client.UpdateCustomer(f.t.Context(), c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 3 * nmiInvoiceAmount}}})
 	require.NoError(f.t, err)
 	_, err = recordUsage(f.t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(f.t, err)

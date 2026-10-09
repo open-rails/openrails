@@ -2234,14 +2234,14 @@ func awaitMethodDeadline(ctx context.Context, d *db.DB, prices *catalog.PriceSer
 	if sub.CurrentPeriodEndsAt == nil {
 		return time.Time{}, errors.New("awaiting a payment method without a paid-through")
 	}
-	cycleHours := 0
-	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.CurrentPeriodStartsAt != nil {
-		cycleHours = collection.CycleHoursBetween(*sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
-	} else if price, err := prices.GetByID(ctx, sub.PriceID); err == nil {
-		cycleHours = collection.BillingCycleHoursOf(price)
-	} else {
-		return time.Time{}, fmt.Errorf("load price: %w", err)
+	var price *models.Price
+	if sub.CollectionPolicy != models.CollectionPolicyEngine || sub.CurrentPeriodStartsAt == nil {
+		var err error
+		if price, err = prices.GetByID(ctx, sub.PriceID); err != nil {
+			return time.Time{}, fmt.Errorf("load price: %w", err)
+		}
 	}
+	cycleHours := caseCycleHours(sub, price)
 	policy, err := CasePolicy(ctx, d, sub)
 	if err != nil {
 		return time.Time{}, err

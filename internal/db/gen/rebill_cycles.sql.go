@@ -442,6 +442,60 @@ func (q *Queries) ListRebillCyclesByIDs(ctx context.Context, arg ListRebillCycle
 	return items, nil
 }
 
+const listRenewalDeclines = `-- name: ListRenewalDeclines :many
+SELECT c.subscription_id, d.declines, d.reason
+FROM unnest($1::uuid[], $2::timestamptz[]) AS k(subscription_id, due_at)
+JOIN billing.rebill_cycles c ON c.merchant_id = $3::uuid AND c.subscription_id = k.subscription_id AND c.due_at = k.due_at
+CROSS JOIN LATERAL (
+    SELECT count(*)::int AS declines,
+           (array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1]::text AS reason
+    FROM billing.payment_attempts pa
+    WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.category <> 'approved'
+) d
+WHERE d.declines > 0
+LIMIT $4::int
+`
+
+type ListRenewalDeclinesParams struct {
+	SubscriptionIds []uuid.UUID
+	DueAts          []time.Time
+	MerchantID      uuid.UUID
+	RowLimit        int32
+}
+
+type ListRenewalDeclinesRow struct {
+	SubscriptionID uuid.UUID
+	Declines       int32
+	Reason         string
+}
+
+// Each named subscription's declines of the renewal due at due_at: how many,
+// and the latest one's reason. One row per subscription bounds row_limit.
+func (q *Queries) ListRenewalDeclines(ctx context.Context, arg ListRenewalDeclinesParams) ([]ListRenewalDeclinesRow, error) {
+	rows, err := q.db.Query(ctx, listRenewalDeclines,
+		arg.SubscriptionIds,
+		arg.DueAts,
+		arg.MerchantID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRenewalDeclinesRow
+	for rows.Next() {
+		var i ListRenewalDeclinesRow
+		if err := rows.Scan(&i.SubscriptionID, &i.Declines, &i.Reason); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markRebillCycleMissed = `-- name: MarkRebillCycleMissed :execrows
 UPDATE billing.rebill_cycles SET missed_at = $1::timestamptz, miss_reason = $2::text
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND missed_at IS NULL

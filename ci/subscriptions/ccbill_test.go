@@ -222,7 +222,7 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 		})
 		sub := w.subscription(embedded, m.sub)
 		require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-		require.NotNil(t, sub.NextRetryAt)
+		require.NotNil(t, nextRetry(sub))
 		require.Nil(t, m.payment(failed), "a decline is an attempt, never a payment")
 		rebill := w.attempts(m.c.id)
 		require.Len(t, rebill, 1)

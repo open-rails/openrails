@@ -30,15 +30,16 @@ import { toast } from "sonner"
 
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
+import { dunningSummary } from "./dunning"
 
 const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
-// past_due IS the dunning view (#664 doctrine: park, don't cancel).
+// Dunning is past_due and awaiting_method (#664 doctrine: park, don't cancel).
 const statusTabs = [
   { value: "", label: "All" },
   { value: "active", label: "Active" },
-  { value: "past_due", label: "Dunning" },
+  { value: "dunning", label: "Dunning" },
   { value: "pending", label: "Pending" },
   { value: "canceled", label: "Canceled" },
   { value: "awaiting_method", label: "Needs card" },
@@ -84,10 +85,10 @@ const columns: ColumnDef<AdminSubscription, unknown>[] = [
     ),
   },
   {
-    header: "Retries",
+    header: "Dunning",
     cell: ({ row }) =>
-      row.original.status === "past_due" ? (
-        `${row.original.retry_attempts ?? 0} · next ${formatDate(row.original.next_retry_at)}`
+      row.original.dunning ? (
+        dunningSummary(row.original.dunning)
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
@@ -102,6 +103,7 @@ function csvEscape(v: unknown): string {
 export function SubscriptionsPage() {
   const [params, setParams] = useSearchParams()
   const status = params.get("status") ?? ""
+  const dunning = params.get("dunning") === "true"
   const rail = params.get("rail") ?? ""
   const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
@@ -112,6 +114,7 @@ export function SubscriptionsPage() {
 
   const filters = {
     ...(status ? { status } : {}),
+    ...(dunning ? { dunning: "true" } : {}),
     ...(rail ? { rail } : {}),
     ...(userId ? { customer_id: userId } : {}),
   }
@@ -257,7 +260,17 @@ export function SubscriptionsPage() {
         </div>
       </div>
 
-      <Tabs value={status} onValueChange={(v) => setParam("status", v ?? "")}>
+      <Tabs
+        value={dunning ? "dunning" : status}
+        onValueChange={(v) => {
+          const p = new URLSearchParams(params)
+          p.delete("status")
+          p.delete("dunning")
+          if (v === "dunning") p.set("dunning", "true")
+          else if (v) p.set("status", v)
+          setParams(p)
+        }}
+      >
         <TabsList
           variant="line"
           className="w-full justify-start gap-6 rounded-none p-0"

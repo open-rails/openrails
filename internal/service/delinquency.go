@@ -2,22 +2,15 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
-	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
-
-// DelinquencyState is the arrears delinquency level for one payer in one
-// currency: current | grace | delinquent (or#878).
-type DelinquencyState = delinquency.State
-
-// DelinquencySnapshot is one payer's delinquency state, its overdue exposure,
-// and when that state began.
-type DelinquencySnapshot = delinquency.Snapshot
 
 func (s *Service) delinquencyService() *delinquency.Service {
 	if s == nil || s.rt == nil || s.rt.DB == nil {
@@ -26,79 +19,51 @@ func (s *Service) delinquencyService() *delinquency.Service {
 	return delinquency.NewService(s.rt.DB, s.rt.Clock)
 }
 
-func delinquencyFromSnapshot(r DelinquencySnapshot) billing.Delinquency {
-	out := billing.Delinquency{
-		CustomerID: billing.CustomerID(r.CustomerID), Currency: r.Currency, State: billing.DelinquencyState(r.State),
-		OverdueAmount: r.OverdueAmount, OverdueInvoices: r.OverdueInvoices, EnteredAt: r.EnteredAt.UTC(), EvaluatedAt: r.EvaluatedAt.UTC(),
-	}
-	if r.OverdueStartedAt != nil {
-		since := r.OverdueStartedAt.UTC()
-		out.OverdueStartedAt = &since
-	}
-	return out
+// overdue is an open invoice still owed past its due date.
+func overdue(inv *billing.Invoice, now time.Time) bool {
+	return inv.Status == billing.InvoiceOpen && inv.AmountDue > 0 && inv.DueAt != nil && inv.DueAt.Before(now)
 }
 
-// ListCustomerDelinquency returns a customer's delinquency in every currency
-// it has owed in. An empty list means it was never overdue.
-func (s *Service) ListCustomerDelinquency(ctx context.Context, customer identity.CustomerID) (billing.ListPage[billing.Delinquency], error) {
-	var page billing.ListPage[billing.Delinquency]
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return page, pinErr
+// markDelinquent marks each overdue invoice whose customer the delinquency
+// pass found delinquent in its currency: grace has run out and new usage is
+// refused.
+func (s *Service) markDelinquent(ctx context.Context, invoices ...*billing.Invoice) error {
+	now := s.now()
+	var customers []uuid.UUID
+	seen := map[uuid.UUID]bool{}
+	for _, inv := range invoices {
+		if inv != nil && overdue(inv, now) && !seen[inv.CustomerID.UUID()] {
+			seen[inv.CustomerID.UUID()] = true
+			customers = append(customers, inv.CustomerID.UUID())
+		}
 	}
-	defer release()
-	svc := s.delinquencyService()
-	if svc == nil {
-		return page, fmt.Errorf("service not initialized")
+	if len(customers) == 0 {
+		return nil
 	}
-	rows, err := svc.ListForCustomer(ctx, customer)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return page, err
+		return err
 	}
-	page.Items = make([]billing.Delinquency, 0, len(rows))
-	for _, r := range rows {
-		page.Items = append(page.Items, delinquencyFromSnapshot(r))
-	}
-	return page, nil
-}
-
-// ListDelinquency returns the merchant's overdue roster, oldest debt first.
-func (s *Service) ListDelinquency(ctx context.Context, params billing.DelinquencyListParams) (billing.ListPage[billing.Delinquency], error) {
-	var page billing.ListPage[billing.Delinquency]
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return page, pinErr
-	}
-	defer release()
-	svc := s.delinquencyService()
-	if svc == nil {
-		return page, fmt.Errorf("service not initialized")
-	}
-	if params.State != "" && params.State != billing.DelinquencyGrace && params.State != billing.DelinquencyDelinquent {
-		return page, apperr.Invalidf("state must be grace or delinquent").WithParam("state")
-	}
-	limit, err := pagination.Limit(params.PageRequest)
+	rows, err := s.rt.DB.Gen(ctx).ListCustomersDelinquency(ctx, gen.ListCustomersDelinquencyParams{
+		MerchantID: mid.UUID(), CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies())), // #nosec G115 -- customers is at most one page (MaxPageLimit), times the currency registry
+	})
 	if err != nil {
-		return page, err
+		return err
 	}
-	var after delinquency.RosterPosition
-	present, err := pagination.Decode(params.Cursor, &after)
-	if err != nil {
-		return page, err
+	type key struct {
+		customer uuid.UUID
+		currency string
 	}
-	var from *delinquency.RosterPosition
-	if present {
-		from = &after
+	delinquent := map[key]bool{}
+	for _, row := range rows {
+		if delinquency.State(row.State) == delinquency.StateDelinquent {
+			delinquent[key{row.CustomerID, row.Currency}] = true
+		}
 	}
-	rows, err := svc.List(ctx, delinquency.State(params.State), from, int(pagination.Fetch(limit)))
-	if err != nil {
-		return page, err
+	for _, inv := range invoices {
+		if inv != nil {
+			inv.Delinquent = overdue(inv, now) && delinquent[key{inv.CustomerID.UUID(), inv.Currency}]
+		}
 	}
-	items := make([]billing.Delinquency, 0, len(rows))
-	for _, r := range rows {
-		items = append(items, delinquencyFromSnapshot(r))
-	}
-	return pagination.Cut(items, limit, func(d billing.Delinquency) any {
-		return delinquency.RosterPosition{Since: *d.OverdueStartedAt, Customer: d.CustomerID.UUID(), Currency: d.Currency}
-	}), nil
+	return nil
 }

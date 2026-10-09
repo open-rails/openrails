@@ -263,7 +263,7 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 			result, err = invoiceFromGen(invoice)
 			return err
 		}
-		if (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible") || invoice.FinalizedAt == nil || invoice.AmountDue <= 0 {
+		if (invoice.Status != "open" && invoice.Status != "uncollectible") || invoice.FinalizedAt == nil || invoice.AmountDue <= 0 {
 			return fmt.Errorf("%w: invoice is not an unchanged finalized receivable", ErrInvoiceRecoveryHeld)
 		}
 		if facts.PaidAt.Before(invoice.FinalizedAt.Add(-intents.ClockMargin)) || facts.PaidAt.After(s.now().Add(intents.ClockMargin)) {

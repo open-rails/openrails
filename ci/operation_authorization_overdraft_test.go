@@ -123,7 +123,7 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 
 	t.Run("an arrears account keeps its credit line", func(t *testing.T) {
 		arrears := customer()
-		_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: arrears, CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 500_000}}}})
+		_, err := client.UpdateCustomer(ctx, arrears, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 500_000}}})
 		require.NoError(t, err)
 		require.ErrorIs(t, open(arrears, "arrears-a", 1_000_000, floor), billing.ErrInsufficientCredits)
 		require.NoError(t, open(arrears, "arrears-a", 500_000, floor))

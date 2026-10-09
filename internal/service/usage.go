@@ -139,6 +139,9 @@ func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID
 	if err != nil {
 		return nil, err
 	}
-	out := InvoiceView(inv)
+	out := InvoiceView(inv, s.now())
+	if err := s.markDelinquent(ctx, &out); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }

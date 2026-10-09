@@ -10,7 +10,7 @@ actions `Permissions.AdminWrite`.
 - `GET /v1/admin/invoices`: a staff read. Filters: `customer_id`, `currency`, `status`, `period_starts_after`, and `period_starts_before`. Period filters select `period_starts_at` in the half-open range `[period_starts_after, period_starts_before)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
 - `GET /v1/admin/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/admin/customers/{customer_id}/payment-methods`.
 - `GET /v1/admin/invoices/{id}/payments`: payment/collection history, a cursor page, a staff read.
-- A customer's invoice profile is its `invoice_profile` customer setting, read and written with `GET` / `PATCH /v1/admin/customers/settings` ([customer settings](api/merchant-settings.md#customer-settings)). Null means none: net 0, charged automatically. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
+- A customer's invoice profile is its `invoice_profile` customer setting, read and written with `GET` / `PATCH /v1/admin/customers/{customer_id}` ([customer settings](api/merchant-settings.md#customer-settings)). Null means none: net 0, charged automatically. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
 
 `available_actions` lists only the actions whose routes' permission admits the caller. On the standalone server viewers read invoices; support and owners also act on them.
 
@@ -39,6 +39,6 @@ The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native man
 
 ## Invoice notifications
 
-Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. Collection and delinquency discover work from invoices and account policy; hosts own onboarding and any further notification policy.
+Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. An invoice still owed past its due date queues `invoice_overdue` once, at the next invoice pass. Repeating either operation does not repeat its notification. Collection and delinquency discover work from invoices and account policy; hosts own onboarding and any further notification policy.
 
 Invoice collection charges only the customer's explicit `collection_payment_method_id` for that currency; there is no fallback instrument. Funding the customer's balance repays owed money first: it pays open, past-due and uncollectible invoices without a collection in flight, oldest first, and they appear in the payment history without a rail.

@@ -147,7 +147,7 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `client.EnsureCustomers`, `billing.EnsureCustomerParams` (`Email`, `Username`, `Blocked`), `POST /customers/ensure` | Nothing to declare: a customer is your user's id, created by its first use; `client.UpdateCustomerSettings` creates one OpenRails has not seen. Emails and names come from `Deps.Contacts` or SCIM ([customer contacts](customer-contacts.md)) |
+| `client.EnsureCustomers`, `billing.EnsureCustomerParams` (`Email`, `Username`, `Blocked`), `POST /customers/ensure` | Nothing to declare: a customer is your user's id, created by its first use; `client.UpdateCustomer` creates one OpenRails has not seen. Emails and names come from `Deps.Contacts` or SCIM ([customer contacts](customer-contacts.md)) |
 | `Customer.Email`, `Username`, `Blocked` | `Customer.Contact` (`Email`, `Name`, `Username`, `Active`, `SyncedAt`), null when the directory holds none |
 | `CustomerListParams.Query` (`?q=`) | `Search` (`?search=`): email, username, name, or the customer's id |
 | `DeclaredCustomer.Email` in a billing import | Removed: the directory supplies emails |
@@ -235,7 +235,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; invoices use the per-currency collection card |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListInvoicePayments(`, `client.CreateInvoicePayment(` |
-| `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomerSettings(` with `InvoiceProfile`; `client.ListCustomerSettings(`. No profile already means net 0, charged automatically |
+| `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
@@ -302,16 +302,16 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; `/v1/admin/rails` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
-| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` |
-| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/admin/customers/settings` |
-| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
+| `/v1/admin/credits/deposit`, `/v1/admin/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` |
+| `/v1/admin/credits/balance`, `/v1/admin/credit-limit`, `/v1/admin/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
+| `/v1/admin/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
 | `PUT …/spend-delegations:upsert` | `PUT /v1/admin/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
-| `/v1/merchant/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
-| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `GET /v1/admin/customers/{customer_id}/usage` |
-| `/v1/merchant/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
-| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
-| `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`; the profile is `/v1/admin/customers/{customer_id}/billing-profile` |
-| `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
+| `/v1/admin/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
+| `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `GET /v1/admin/customers/{customer_id}/usage` |
+| `/v1/admin/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
+| `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
+| `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and collection cards; subscriptions, payments, cards, entitlements and product access are their own lists |
+| `GET /v1/admin/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |

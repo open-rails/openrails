@@ -2,12 +2,7 @@
 // Money is native units at the currency registry scale; exact wires send int64
 // decimal strings (docs/money-wire.md).
 
-import type {
-  Balance,
-  Customer,
-  Payment,
-  PaymentMethod,
-} from "./generated/wire"
+import type { Payment, SubscriptionDunning } from "./generated/wire"
 
 export type SubscriptionStatus =
   | "pending"
@@ -39,9 +34,9 @@ export interface RawSubscription {
   rail: Rail
   rail_subscription_id: string | null
   payment_method_id: string | null // pm_...
-  retry_attempts: number | null
-  next_retry_at: string | null
-  grace_ends_at: string | null
+  // The declined renewal being collected; null unless past_due or
+  // awaiting_method.
+  dunning: SubscriptionDunning | null
   cancel_type: string | null
   cancel_feedback: string | null
   canceled_at: string | null
@@ -93,18 +88,6 @@ export interface RawProductAccessGrant {
 export interface Page<T> {
   data: T[]
   next_cursor: string | null
-}
-
-// CustomerBillingProfile composes the shared Client DTOs each dedicated
-// route serves; keys and product access are each their first page.
-export interface CustomerBillingProfile {
-  customer: Customer
-  balances: Balance[]
-  subscriptions: AdminSubscription[]
-  entitlements: Page<CustomerEntitlement>
-  payments: Payment[] | null
-  payment_methods: PaymentMethod[] | null
-  product_access: Page<RawProductAccessGrant>
 }
 
 // --- Subscription admin response (list/detail) ---

@@ -61,8 +61,8 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	require.Equal(t, billing.SubscriptionAwaitingMethod, sub.Status)
 	window, err := collection.Window(monthHours)
 	require.NoError(t, err)
-	require.NotNil(t, sub.GraceEndsAt)
-	require.True(t, sub.GraceEndsAt.Equal(end.Add(window)), "the wait ends with the dunning window")
+	require.NotNil(t, sub.Dunning.FinalRetryAt)
+	require.True(t, sub.Dunning.FinalRetryAt.Equal(end.Add(window)), "the wait ends with the dunning window")
 	require.Empty(t, w.openFindings("life.due_pass.refused"), "a member-fixable refusal is not an operator finding")
 	require.True(t, e.c.hasNotification("payment_method_update_required"), "the customer is asked for a new card")
 

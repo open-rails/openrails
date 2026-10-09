@@ -1,9 +1,6 @@
 {
   "collection_policy": "provider",
-  "last_retry_at": null,
-  "retry_attempts": null,
-  "next_retry_at": null,
-  "grace_ends_at": null,
+  "dunning": null,
   "payments": [
     {
       "id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",

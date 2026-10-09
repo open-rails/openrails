@@ -122,22 +122,18 @@ A customer's policy is its `billing_policy` customer setting
 embedded and remotely:
 
 ```go
-settings, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{
-	{CustomerID: customerID, BillingPolicy: catalog.Value("cloud_monthly")},
-})
-settings, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{
-	{CustomerID: customerID, BillingPolicy: catalog.Null[string]()}, // inherit again
-})
+customer, err := client.UpdateCustomer(ctx, customerID, billing.UpdateCustomerParams{BillingPolicy: catalog.Value("cloud_monthly")})
+customer, err = client.UpdateCustomer(ctx, customerID, billing.UpdateCustomerParams{BillingPolicy: catalog.Null[string]()}) // inherit again
 ```
 
-Over HTTP, `PATCH /v1/admin/customers/settings` with
-`{"items":[{"customer_id":"…","billing_policy":"cloud_monthly"}]}` assigns
-it, and `"billing_policy": null` clears it. `GET
-/v1/admin/customers/settings?ids=…` reads it. This is the explicit
-assignment, not the effective tier or default policy.
+Over HTTP, `PATCH /v1/admin/customers/{customer_id}` with
+`{"billing_policy":"cloud_monthly"}` assigns it, and `"billing_policy": null`
+clears it. `GET
+/v1/admin/customers/{customer_id}` reads it, as `settings.billing_policy`.
+This is the explicit assignment, not the effective tier or default policy.
 
-The read needs `Permissions.AdminRead` and the write `AdminWrite`. Customer
-self-service cannot change this resource. The customer and policy must already exist under the
+The read needs `AdminRead` and the write `AdminWrite`. Customer self-service
+cannot change it. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer
 is implicitly created. Missing, blank, non-string policy names and unknown

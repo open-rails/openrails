@@ -15,7 +15,7 @@ import (
 )
 
 // A customer's settings are one document: a write changes only the fields it
-// names, a read lists them back, and clearing a field returns it to its
+// names and answers the customer, and clearing a field returns it to its
 // default.
 func TestCustomerSettingsDocument(t *testing.T) {
 	t.Parallel()
@@ -24,94 +24,89 @@ func TestCustomerSettingsDocument(t *testing.T) {
 	a, b := w.newCustomer(), w.newCustomer()
 	net30 := billing.InvoiceProfile{NetTermsDays: 30, CollectionMethod: billing.CollectSendInvoice, PONumber: "PO-7",
 		BillingContacts: []billing.InvoiceContact{{Name: "AP", Email: "ap@example.test"}}, Tax: map[string]any{}}
+	defaults := billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}
 	for _, tp := range []topology{embedded, remote} {
 		client := w.client[tp]
-		fresh, err := client.ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{a.cid()}})
+		fresh, err := client.GetCustomer(t.Context(), a.cid())
 		require.NoError(t, err)
-		require.Equal(t, []billing.CustomerSettings{{CustomerID: a.cid(), CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}}, fresh.Items, "a customer starts at every default")
+		require.Equal(t, defaults, fresh.Settings, "a customer starts at every default")
 
-		updated, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{
-			{CustomerID: b.cid(), TrustLevels: []billing.TrustLevel{{Currency: "usd", TrustLevel: " gold "}}},
-			{CustomerID: a.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, BillingPolicy: catalog.Value("enterprise"), InvoiceProfile: catalog.Value(net30)},
-		})
+		updated, err := client.UpdateCustomer(t.Context(), b.cid(), billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "usd", TrustLevel: " gold "}}})
 		require.NoError(t, err)
-		require.Equal(t, []billing.CustomerID{b.cid(), a.cid()}, []billing.CustomerID{updated[0].CustomerID, updated[1].CustomerID}, "request order")
-		require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "gold"}}, updated[0].TrustLevels)
-		require.Equal(t, []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, updated[1].CreditLimits)
-		require.Equal(t, "enterprise", *updated[1].BillingPolicy)
-		require.Equal(t, net30, *updated[1].InvoiceProfile)
+		require.Equal(t, b.cid(), updated.ID)
+		require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "gold"}}, updated.Settings.TrustLevels)
+		updated, err = client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, BillingPolicy: catalog.Value("enterprise"), InvoiceProfile: catalog.Value(net30)})
+		require.NoError(t, err)
+		require.Equal(t, []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, updated.Settings.CreditLimits)
+		require.Equal(t, "enterprise", *updated.Settings.BillingPolicy)
+		require.Equal(t, net30, *updated.Settings.InvoiceProfile)
 
 		// A field the write does not name is unchanged.
-		updated, err = client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: a.cid(), TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "silver"}}}})
+		updated, err = client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "silver"}}})
 		require.NoError(t, err)
-		require.Equal(t, []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, updated[0].CreditLimits)
-		require.Equal(t, "enterprise", *updated[0].BillingPolicy)
-		require.Equal(t, net30, *updated[0].InvoiceProfile)
+		require.Equal(t, []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}, updated.Settings.CreditLimits)
+		require.Equal(t, "enterprise", *updated.Settings.BillingPolicy)
+		require.Equal(t, net30, *updated.Settings.InvoiceProfile)
 
-		read, err := client.ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{a.cid(), b.cid(), billing.CustomerID(uuid.New())}})
+		read, err := client.GetCustomer(t.Context(), a.cid())
 		require.NoError(t, err)
-		require.Len(t, read.Items, 2, "an unknown customer is absent")
-		require.ElementsMatch(t, []billing.CustomerSettings{updated[0], {CustomerID: b.cid(), CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "gold"}}}}, read.Items)
+		require.Equal(t, updated, read, "the write answers what the read does")
 
 		// Clearing every field returns the document to its defaults.
-		cleared, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{
-			{CustomerID: a.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD"}}, TrustLevels: []billing.TrustLevel{{Currency: "USD"}}, BillingPolicy: catalog.Null[string](), InvoiceProfile: catalog.Null[billing.InvoiceProfile]()},
-			{CustomerID: b.cid(), TrustLevels: []billing.TrustLevel{{Currency: "USD"}}},
-		})
+		cleared, err := client.UpdateCustomer(t.Context(), a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD"}}, TrustLevels: []billing.TrustLevel{{Currency: "USD"}}, BillingPolicy: catalog.Null[string](), InvoiceProfile: catalog.Null[billing.InvoiceProfile]()})
 		require.NoError(t, err)
-		for i, c := range []*customer{a, b} {
-			require.Equal(t, billing.CustomerSettings{CustomerID: c.cid(), CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}, cleared[i])
-		}
+		require.Equal(t, defaults, cleared.Settings)
+		cleared, err = client.UpdateCustomer(t.Context(), b.cid(), billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "USD"}}})
+		require.NoError(t, err)
+		require.Equal(t, defaults, cleared.Settings)
 	}
 
 	// ids names records alone, 1 to 100 of them, as one comma list.
 	for _, query := range []string{"ids=" + a.id + "&limit=1", "ids=" + a.id + "&ids=" + b.id, "ids=" + strings.Repeat(a.id+",", 100) + a.id, "ids="} {
-		status, body := w.staffJSON(http.MethodGet, "/v1/admin/customers/settings?"+query, nil)
+		status, body := w.staffJSON(http.MethodGet, "/v1/admin/customers?"+query, nil)
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", query, body)
 		require.Equal(t, "invalid_query", body["error"].(map[string]any)["code"], "%s: %v", query, body)
 	}
 
 	// Without ids, every customer is listed, newest first, a page at a time.
-	first, err := w.client[remote].ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{PageRequest: billing.PageRequest{Limit: 1}})
+	first, err := w.client[remote].ListCustomers(t.Context(), billing.CustomerListParams{PageRequest: billing.PageRequest{Limit: 1}})
 	require.NoError(t, err)
-	require.Equal(t, b.cid(), first.Items[0].CustomerID)
-	second, err := w.client[remote].ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{PageRequest: billing.PageRequest{Limit: 1, Cursor: first.Next}})
+	require.Equal(t, b.cid(), first.Items[0].ID)
+	second, err := w.client[remote].ListCustomers(t.Context(), billing.CustomerListParams{PageRequest: billing.PageRequest{Limit: 1, Cursor: first.Next}})
 	require.NoError(t, err)
-	require.Equal(t, a.cid(), second.Items[0].CustomerID)
+	require.Equal(t, a.cid(), second.Items[0].ID)
 }
 
-// A batch is validated whole and written all or none: one invalid item
-// changes nothing, and its refusal names the item's field.
-func TestCustomerSettingsBatchIsAllOrNone(t *testing.T) {
+// A write is validated whole before anything is written: a refusal names
+// the field and changes nothing.
+func TestCustomerSettingsRefusals(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	declareBillingPolicy(t, w, "enterprise")
-	a, b := w.newCustomer(), w.newCustomer()
-	valid := map[string]any{"customer_id": a.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "10000000"}}}
+	a := w.newCustomer()
 	for _, refused := range []struct {
-		item        map[string]any
+		customer    string
+		body        map[string]any
 		status      int
 		code, param string
 	}{
-		{map[string]any{"customer_id": b.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "-1"}}}, http.StatusBadRequest, "invalid_param", "items[1].credit_limits[0].amount"},
-		{map[string]any{"customer_id": b.id, "trust_levels": []any{map[string]any{"currency": "XXX", "trust_level": "gold"}}}, http.StatusBadRequest, "currency_unsupported", "items[1].trust_levels[0].currency"},
-		{map[string]any{"customer_id": b.id, "invoice_profile": map[string]any{"net_terms_days": 30, "collection_method": "wire"}}, http.StatusBadRequest, "invalid_param", "items[1].invoice_profile.collection_method"},
-		{map[string]any{"customer_id": a.id}, http.StatusBadRequest, "invalid_param", "items[1].customer_id"},
-		{map[string]any{"customer_id": b.id, "billing_policy": "undeclared"}, http.StatusNotFound, "billing_policy_not_found", "items[1].billing_policy"},
+		{a.id, map[string]any{"credit_limits": []any{map[string]any{"currency": "USD", "amount": "10000000"}, map[string]any{"currency": "EUR", "amount": "-1"}}}, http.StatusBadRequest, "invalid_param", "credit_limits[1].amount"},
+		{a.id, map[string]any{"credit_limits": []any{map[string]any{"currency": "USD", "amount": "10000000"}}, "trust_levels": []any{map[string]any{"currency": "XXX", "trust_level": "gold"}}}, http.StatusBadRequest, "currency_unsupported", "trust_levels[0].currency"},
+		{a.id, map[string]any{"invoice_profile": map[string]any{"net_terms_days": 30, "collection_method": "wire"}}, http.StatusBadRequest, "invalid_param", "invoice_profile.collection_method"},
+		{a.id, map[string]any{"credit_limits": []any{map[string]any{"currency": "USD", "amount": "10000000"}}, "billing_policy": "undeclared"}, http.StatusNotFound, "billing_policy_not_found", "billing_policy"},
 	} {
-		// The host's key: a person's writes are limited per item.
-		status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{valid, refused.item}})
+		// The host's key: a person's writes are limited per request.
+		status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/"+refused.customer, refused.body)
 		require.Equal(t, refused.status, status, "%v", body)
 		e := body["error"].(map[string]any)
 		require.Equal(t, refused.code, e["code"], "%v", body)
-		require.Equal(t, refused.param, e["param"], "%v", body)
+		if refused.param != "" {
+			require.Equal(t, refused.param, e["param"], "%v", body)
+		}
 	}
-	status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{}})
-	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-
-	read, err := w.client[remote].ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{a.cid()}})
+	read, err := w.client[remote].GetCustomer(t.Context(), a.cid())
 	require.NoError(t, err)
-	require.Empty(t, read.Items[0].CreditLimits, "a refused batch writes nothing")
+	require.Empty(t, read.Settings.CreditLimits, "a refused write changes nothing")
 }
 
 // Every settings field can change a customer's spending authority, so every
@@ -131,17 +126,16 @@ func TestCustomerSettingsStepUp(t *testing.T) {
 		{"invoice_profile": map[string]any{"net_terms_days": 15, "collection_method": "send_invoice", "po_number": "", "tax": map[string]any{}, "billing_contacts": []any{}, "memo": ""}},
 		{},
 	} {
-		item["customer_id"] = c.id
-		body := map[string]any{"items": []any{item}}
-		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/settings", body)
+		body := item
+		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
 		require.Equal(t, http.StatusForbidden, status, "%v: %v", item, refused)
 		require.Equal(t, "step_up_required", refused["error"].(map[string]any)["code"], "%v: %v", item, refused)
-		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/admin/customers/settings", body)
+		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
 		require.Equal(t, http.StatusOK, status, "%v: %v", item, answered)
 	}
-	status, body := w.merchantJSON(stale, http.MethodGet, "/v1/admin/customers/settings?ids="+c.id, nil)
+	status, body := w.merchantJSON(stale, http.MethodGet, "/v1/admin/customers/"+c.id, nil)
 	require.Equal(t, http.StatusOK, status, "a read needs no step-up: %v", body)
-	status, body = w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": c.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "2000000"}}}}})
+	status, body = w.hostJSON(http.MethodPatch, "/v1/admin/customers/"+c.id, map[string]any{"credit_limits": []any{map[string]any{"currency": "USD", "amount": "2000000"}}})
 	require.Equal(t, http.StatusOK, status, "the host's API key needs no sign-in: %v", body)
 }
 

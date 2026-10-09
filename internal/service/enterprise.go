@@ -247,9 +247,9 @@ func (s *Service) GetOutstandingOwed(ctx context.Context, payer identity.Custome
 	return out, err
 }
 
-// MarkInvoicesPastDue flips the merchant's overdue open receivables to
-// past_due (the host-visible dunning signal). Returns the number flipped.
-func (s *Service) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, error) {
+// NotifyOverdueInvoices tells each payer once about each invoice still owed
+// past its due date. Returns the number of new notices.
+func (s *Service) NotifyOverdueInvoices(ctx context.Context, now time.Time) (int, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return 0, pinErr
@@ -259,7 +259,7 @@ func (s *Service) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, 
 	if s == nil || s.rt == nil {
 		return 0, fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().MarkInvoicesPastDue(ctx, now)
+	return s.moneyService().NotifyOverdueInvoices(ctx, now)
 }
 
 // ChargeOutstanding collects the merchant's chargeable open/past-due

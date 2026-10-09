@@ -1,5 +1,19 @@
 # Changelog
 
+## The customer's summary
+
+- `getAccount()` reads `GET /me`: the balance per currency, the card that
+  pays each currency, and the unread notice count.
+- `Invoice.delinquent`: overdue past grace; new usage in its currency is
+  refused until it is paid.
+
+## A subscription's dunning is one object
+
+- `Subscription.dunning` (`SubscriptionDunning`) replaces `grace_ends_at` and
+  `next_retry_at`: the declines so far, the retries left, the next and the
+  final retry, and whether it waits for a new card. Null unless the
+  subscription is `past_due` or `awaiting_method`.
+
 ## The public catalog is under /catalog
 
 - `listProducts()` reads `GET /catalog/products` (was `GET /products`).

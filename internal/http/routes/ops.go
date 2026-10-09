@@ -39,8 +39,6 @@ var opsRoutes = []Route{
 		Request: billing.ResolveFindingParams{}, Responses: []Reply{{200, billing.FindingResolution{}}}, Errors: codes("finding_action_failed", "finding_not_actionable", "idempotency_key_reused", "invalid_param", "payment_not_found", "payment_not_refundable", "provider_cancel_held", "rebill_terms_committed", "refund_failed", "refund_rail_unavailable", "refund_unsupported", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminResolveFinding)},
 	{Method: GET, Path: "/v1/me/notifications", Group: Customer, Auth: AuthCustomer,
 		Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Notification]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.GetNotifications)},
-	{Method: GET, Path: "/v1/me/notifications/unread-count", Group: Customer, Auth: AuthCustomer,
-		Responses: []Reply{{200, billing.UnreadCount{}}}, Handler: h(handlers.GetUnreadNotificationCount)},
 	{Method: POST, Path: "/v1/me/notifications/read", Group: Customer, Auth: AuthCustomer,
 		Request: billing.MarkNotificationsReadParams{}, Responses: []Reply{{200, billing.CustomerNotificationLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.MarkMyNotificationsRead)},
 

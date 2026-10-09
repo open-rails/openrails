@@ -224,7 +224,7 @@ products:
 	var provisionedPSP uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))
 	require.Equal(t, w.psp["nmi"].UUID(), provisionedPSP)
-	_, err = client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: buyer.cid()}})
+	_, err = client.UpdateCustomer(t.Context(), buyer.cid(), billing.UpdateCustomerParams{})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 	_, err = merchantarchive.RestoreCatalog(t.Context(), provisioned, mid, bytes.NewReader(artifact.Bytes()))

@@ -59,9 +59,9 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 	for name, c := range callers {
 		writer := name != "viewer API key"
 		customer := uuid.NewString()
-		w := call(t, handler, ownerSession, http.MethodPatch, "/v1/admin/customers/settings", shop, map[string]any{"items": []any{map[string]any{"customer_id": customer}}})
+		w := call(t, handler, ownerSession, http.MethodPatch, "/v1/admin/customers/"+customer, shop, map[string]any{})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		w = call(t, handler, c.token, http.MethodPatch, "/v1/admin/customers/settings", c.selector, map[string]any{"items": []any{map[string]any{"customer_id": customer}}})
+		w = call(t, handler, c.token, http.MethodPatch, "/v1/admin/customers/"+customer, c.selector, map[string]any{})
 		require.Equal(t, writer, w.Code == http.StatusOK, "%s edits customers: %s", name, w.Body.String())
 
 		w = call(t, handler, c.token, http.MethodPost, "/v1/admin/credit-grants", c.selector, map[string]any{"items": []any{map[string]any{
@@ -77,22 +77,20 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 			require.Contains(t, w.Body.String(), `"1000000000"`)
 		}
 
-		w = call(t, handler, c.token, http.MethodPatch, "/v1/admin/customers/settings", c.selector, map[string]any{"items": []any{map[string]any{
-			"customer_id": customer, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1000000000000"}},
-		}}})
+		w = call(t, handler, c.token, http.MethodPatch, "/v1/admin/customers/"+customer, c.selector, map[string]any{
+			"credit_limits": []any{map[string]any{"currency": "USD", "amount": "1000000000000"}},
+		})
 		if !writer {
 			require.Equal(t, http.StatusForbidden, w.Code, "%s opens a credit line: %s", name, w.Body.String())
 			require.Contains(t, w.Body.String(), "permission_required")
 		} else {
 			require.Equal(t, http.StatusOK, w.Code, "%s opens a credit line: %s", name, w.Body.String())
 		}
-		w = call(t, handler, c.token, http.MethodGet, "/v1/admin/customers/settings?ids="+customer, c.selector, nil)
+		w = call(t, handler, c.token, http.MethodGet, "/v1/admin/customers/"+customer, c.selector, nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var settings struct {
-			Data []billing.CustomerSettings `json:"data"`
-		}
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&settings))
-		require.Len(t, settings.Data, 1)
-		require.Equal(t, writer, len(settings.Data[0].CreditLimits) == 1 && settings.Data[0].CreditLimits[0].Amount == 1_000_000_000_000, "%s: %v", name, settings.Data)
+		var read billing.Customer
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&read))
+		limits := read.Settings.CreditLimits
+		require.Equal(t, writer, len(limits) == 1 && limits[0].Amount == 1_000_000_000_000, "%s: %v", name, limits)
 	}
 }

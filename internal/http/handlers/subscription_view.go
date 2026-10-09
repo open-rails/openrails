@@ -10,7 +10,7 @@ import (
 // subscriptionView projects a merchant-side subscription read onto the shared
 // Client DTO, with its recovery payment history.
 func subscriptionView(in *subscriptions.AdminSubscriptionResponse, now time.Time) billing.Subscription {
-	out := subscriptions.SubscriptionView(in.Subscription, in.Price, now)
+	out := subscriptions.SubscriptionView(in.Subscription, in.Price, in.Dunning, now)
 	for _, p := range in.Payments {
 		out.Payments = append(out.Payments, PaymentToAPI(p, nil))
 	}

@@ -31,18 +31,18 @@ without a limit or level, a null `billing_policy` inherits the tier's or the
 default policy, and a null `invoice_profile` invoices at net 0, charged
 automatically.
 
-- `Client.ListCustomerSettings` (`GET /v1/admin/customers/settings`) lists
-  them, newest customer first. `ids=a,b` instead reads 1 to 100 named
-  customers in one page, with no other parameter; an unknown one is absent.
-- `Client.UpdateCustomerSettings` (`PATCH /v1/admin/customers/settings`)
-  changes 1 to 100 distinct customers, all or none, and answers their settings
-  in request order. An item changes only the fields it names:
-  `credit_limits` and `trust_levels` merge by currency (amount `"0"` or level
-  `""` clears one), and `null` clears `billing_policy` or `invoice_profile`.
-- The batch is validated whole before anything is written. A refusal names
-  the field, as in `items[1].credit_limits[0].amount`. A customer that does
-  not exist is `404 customer_not_found` (settings never create one), and an
-  undeclared policy is `404 billing_policy_not_found`.
+- `Client.GetCustomer` (`GET /v1/admin/customers/{customer_id}`) answers
+  them as the customer's `settings`; `Client.ListCustomers` does for each
+  customer it lists.
+- `Client.UpdateCustomer` (`PATCH /v1/admin/customers/{customer_id}`)
+  changes one customer's settings and answers the customer. It changes only
+  the fields it names: `credit_limits` and `trust_levels` merge by currency
+  (amount `"0"` or level `""` clears one), and `null` clears `billing_policy`
+  or `invoice_profile`.
+- The change is validated whole before anything is written. A refusal names
+  the field, as in `credit_limits[0].amount`. A customer that does not exist
+  is `404 customer_not_found` (settings never create one), and an undeclared
+  policy is `404 billing_policy_not_found`.
 - The read needs `Permissions.AdminRead` and the write `AdminWrite`. Every
   field can change the customer's spending authority, so the write is
   sensitive: a person needs a recent sign-in for it (`step_up_required`). Writes count against the

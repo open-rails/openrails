@@ -610,7 +610,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		} else if !errors.Is(derr, pgx.ErrNoRows) {
 			return derr
 		}
-		if invoiceRow.Status != "open" && invoiceRow.Status != "past_due" || invoiceRow.CollectionIntentID != nil {
+		if invoiceRow.Status != "open" || invoiceRow.CollectionIntentID != nil {
 			return ErrInvoiceActionNotAllowed
 		}
 		if amount > invoiceRow.AmountDue {

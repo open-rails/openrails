@@ -61,22 +61,22 @@ describe("invoice requests and cache", () => {
 
   it("leaves filtering and paging to the server", async () => {
     const queries = client()
-    await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "past_due" }, 25, "cur_2"))
+    await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "open", overdue: "true" }, 25, "cur_2"))
     await queries.fetchQuery(invoiceQueries.payments("invoice-1", 20, "cur_3"))
     expect(requests.map((r) => r.query)).toEqual([
-      "currency=JPY&status=past_due&limit=25&cursor=cur_2", "limit=20&cursor=cur_3",
+      "currency=JPY&status=open&overdue=true&limit=25&cursor=cur_2", "limit=20&cursor=cur_3",
     ])
   })
 
   it("reads a customer without a profile as none, and any other failure as one", async () => {
     const queries = client()
-    routes["GET /admin/customers/settings"] = (request) => ({
-      data: [{ customer_id: "customer-1", credit_limits: [], trust_levels: [], billing_policy: null, invoice_profile: null }],
-      next_cursor: null, query: request.query,
+    routes["GET /admin/customers/customer-1"] = () => ({
+      id: "customer-1",
+      settings: { credit_limits: [], trust_levels: [], billing_policy: null, invoice_profile: null },
     })
     expect(await queries.fetchQuery(invoiceQueries.profile("customer-1"))).toBeNull()
-    expect(requests.at(-1)!.query).toBe("ids=customer-1")
-    routes["GET /admin/customers/settings"] = () =>
+    expect(calls(requests).at(-1)).toBe("GET /admin/customers/customer-1")
+    routes["GET /admin/customers/customer-2"] = () =>
       Response.json({ error: { code: "service_unavailable", message: "down" } }, { status: 503 })
     await expect(queries.fetchQuery(invoiceQueries.profile("customer-2"))).rejects.toThrow("down")
   })
@@ -99,9 +99,9 @@ describe("invoice requests and cache", () => {
     const queries = client()
     const invoiceKey = invoiceKeys.detail("invoice-1")
     queries.setQueryData(invoiceKey, { po_number: "OLD" })
-    routes["PATCH /admin/customers/settings"] = (request) => ({ items: (request.body as { items: unknown[] }).items })
+    routes["PATCH /admin/customers/customer-1"] = (request) => ({ id: "customer-1", settings: request.body })
     await exec(queries, invoiceProfileMutation(queries, "customer-1"), profile({ net_terms_days: 7, po_number: "NEW" }))
-    expect(calls(requests)).toEqual(["PATCH /admin/customers/settings"])
+    expect(calls(requests)).toEqual(["PATCH /admin/customers/customer-1"])
     expect(queries.getQueryData(invoiceKey)).toEqual({ po_number: "OLD" })
   })
 })

@@ -31,6 +31,17 @@ describe("wire fixtures", () => {
       product: { display_name: "Pro" },
       card: { brand: "visa", last4: "4242" },
     })
+    const dunning = {
+      attempts: 2,
+      retries_left: 3,
+      next_retry_at: "2026-09-18T00:00:00Z",
+      final_retry_at: "2026-09-29T00:00:00Z",
+      waiting_for_new_card: false,
+      last_failure_reason: "insufficient_funds",
+    }
+    expect(
+      subscriptionSchema.parse({ ...subscriptionFixture, status: "past_due", dunning }).dunning
+    ).toEqual(dunning)
   })
 
   it("decodes the error envelope", async () => {
@@ -51,6 +62,29 @@ describe("wire fixtures", () => {
 })
 
 describe("createBillingClient", () => {
+  it("reads the customer's summary", async () => {
+    const account = {
+      id: "7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a",
+      balances: [
+        {
+          currency: "USD",
+          billing_mode: "arrears",
+          balance_amount: "0",
+          held_amount: "0",
+          available_amount: "0",
+          owed_amount: "9223372036854775807",
+        },
+      ],
+      collection_payment_methods: [{ currency: "USD", payment_method_id: "pm_1" }],
+      unread_notifications: 2,
+    }
+    const fetch = vi.fn(async () => json(200, account))
+    const client = createBillingClient({ baseUrl: "https://shop.test/billing/v1/", fetch })
+    expect(await client.getAccount()).toEqual(account)
+    const [url] = fetch.mock.calls[0] as unknown as [string]
+    expect(url).toBe("https://shop.test/billing/v1/me")
+  })
+
   it("targets the mount, encodes ids and attaches the bearer", async () => {
     const fetch = vi.fn(async () => json(200, subscriptionFixture))
     const client = createBillingClient({

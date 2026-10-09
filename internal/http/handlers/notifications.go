@@ -93,21 +93,6 @@ func MarkMyNotificationsRead(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// GetUnreadNotificationCount handles GET /v1/me/notifications/unread-count.
-func GetUnreadNotificationCount(r *httprequest.Request) {
-	ctx := r.Request.Context()
-	merchantID, customerID, ok := customerScope(r)
-	if !ok {
-		return
-	}
-	count, err := r.State.DB.Gen(ctx).CountUnreadCustomerNotifications(ctx, gen.CountUnreadCustomerNotificationsParams{MerchantID: merchantID, CustomerID: customerID})
-	if err != nil {
-		r.InternalError("count unread notifications failed", err)
-		return
-	}
-	r.SuccessJSON(billing.UnreadCount{UnreadCount: count})
-}
-
 // customerNotificationPage runs a keyset notification query for one page.
 func customerNotificationPage(page billing.PageRequest, fetch func(*time.Time, *uuid.UUID, int32) ([]gen.BillingNotification, error)) (billing.ListPage[billing.Notification], error) {
 	limit, err := pagination.Limit(page)

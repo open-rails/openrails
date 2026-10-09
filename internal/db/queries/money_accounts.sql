@@ -129,9 +129,49 @@ FROM (
     UNION
     SELECT currency FROM billing.invoices
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-      AND status IN ('open', 'past_due') AND amount_due > 0
+      AND status = 'open' AND amount_due > 0
 ) currencies
 ORDER BY currency;
+
+-- name: ListCustomersBalanceCurrencies :many
+-- ListCustomerBalanceCurrencies for many customers: at most one row per
+-- customer and registered currency, which bounds row_limit.
+SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
+FROM (
+    SELECT customer_id, currency FROM billing.ledger_accounts
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+      AND account_type = 'customer_balance'
+    UNION ALL
+    SELECT customer_id, currency FROM billing.money_settings
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+    UNION ALL
+    SELECT customer_id, currency FROM billing.invoice_items
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+      AND invoice_id IS NULL AND status = 'pending'
+    UNION ALL
+    SELECT customer_id, currency FROM billing.invoices
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+      AND status = 'open' AND amount_due > 0
+) currencies
+ORDER BY customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListCustomersMoneyAccounts :many
+-- The named customers' balance and arrears accounts with their O(1)
+-- balances: at most two per customer and registered currency.
+SELECT a.customer_id::uuid AS customer_id, a.currency, a.account_type, (a.credits_posted - a.debits_posted)::bigint AS balance
+FROM billing.ledger_accounts a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND a.account_type IN ('customer_balance', 'arrears_liability')
+ORDER BY a.customer_id, a.currency, a.account_type
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListCustomersMoneySettings :many
+-- At most one row per customer and registered currency.
+SELECT * FROM billing.money_settings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+ORDER BY customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCustomerSettingsAccounts :many
 -- The customers' credit limits and trust levels, by currency. A customer has

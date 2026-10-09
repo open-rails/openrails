@@ -30,9 +30,8 @@ func ListCustomers(r *httprequest.Request) {
 	r.SuccessJSON(page)
 }
 
-// ListCustomerDelinquency lists a customer's delinquency in every currency it
-// has owed in.
-func ListCustomerDelinquency(r *httprequest.Request) {
+// GetCustomer reads one customer.
+func GetCustomer(r *httprequest.Request) {
 	customer, ok := customerParam(r)
 	if !ok {
 		return
@@ -41,32 +40,10 @@ func ListCustomerDelinquency(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	page, err := svc.ListCustomerDelinquency(r.Request.Context(), customer)
+	out, err := svc.GetCustomer(r.Request.Context(), customer)
 	if err != nil {
-		writeRefusal(r, err, "delinquency read failed")
+		writeRefusal(r, err, "customer read failed")
 		return
 	}
-	r.SuccessJSON(page)
-}
-
-// ListDelinquency lists the merchant's overdue customers, oldest debt first.
-func ListDelinquency(r *httprequest.Request) {
-	var params billing.DelinquencyListParams
-	if !r.BindQuery(&params) {
-		return
-	}
-	var ok bool
-	if params.PageRequest, ok = r.Page(); !ok {
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	page, err := svc.ListDelinquency(r.Request.Context(), params)
-	if err != nil {
-		writeRefusal(r, err, "delinquency list failed")
-		return
-	}
-	r.SuccessJSON(page)
+	r.SuccessJSON(out)
 }

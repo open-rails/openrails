@@ -156,3 +156,18 @@ WHERE id IN (
       AND NOT EXISTS (SELECT 1 FROM billing.payment_attempts a WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id)
     LIMIT sqlc.arg(row_limit)::int
 );
+
+-- name: ListRenewalDeclines :many
+-- Each named subscription's declines of the renewal due at due_at: how many,
+-- and the latest one's reason. One row per subscription bounds row_limit.
+SELECT c.subscription_id, d.declines, d.reason
+FROM unnest(sqlc.arg(subscription_ids)::uuid[], sqlc.arg(due_ats)::timestamptz[]) AS k(subscription_id, due_at)
+JOIN billing.rebill_cycles c ON c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.subscription_id = k.subscription_id AND c.due_at = k.due_at
+CROSS JOIN LATERAL (
+    SELECT count(*)::int AS declines,
+           (array_agg(pa.reason ORDER BY pa.attempted_at DESC, pa.id DESC))[1]::text AS reason
+    FROM billing.payment_attempts pa
+    WHERE pa.merchant_id = c.merchant_id AND pa.cycle_id = c.id AND pa.category <> 'approved'
+) d
+WHERE d.declines > 0
+LIMIT sqlc.arg(row_limit)::int;

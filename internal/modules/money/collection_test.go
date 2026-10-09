@@ -87,36 +87,36 @@ func TestInvoiceCollectionEligibility(t *testing.T) {
 		retry     bool // manual retry surface
 		scheduled bool // automatic sweep
 	}{
-		{name: "new open invoice due", invoice: inv(func(i *models.Invoice) { i.DueAt = &past }), scheduled: true},
+		{name: "new open invoice past due", invoice: inv(func(i *models.Invoice) { i.DueAt = &past }), retry: true, scheduled: true},
 		{name: "open invoice not yet due", invoice: inv(func(i *models.Invoice) { i.DueAt = &future })},
 		{name: "open after a failure", invoice: inv(func(i *models.Invoice) {
 			i.CollectionFailureCount = 1
 			i.NextCollectionAttemptAt = &past
 		}), retry: true, scheduled: true},
-		{name: "past due retry at exactly now", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "past_due", 1, &now
+		{name: "retry at exactly now", invoice: inv(func(i *models.Invoice) {
+			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "open", 1, &now
 		}), retry: true, scheduled: true},
-		{name: "past due retry in future", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "past_due", 1, &future
+		{name: "retry in future", invoice: inv(func(i *models.Invoice) {
+			i.Status, i.CollectionFailureCount, i.NextCollectionAttemptAt = "open", 1, &future
 		}), retry: true},
 		{name: "failed without a scheduled retry", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionFailureCount = "past_due", 1
+			i.Status, i.CollectionFailureCount = "open", 1
 		}), retry: true},
 		{name: "uncollectible", invoice: inv(func(i *models.Invoice) { i.Status = "uncollectible" }), retry: true},
 		{name: "below minimum threshold", invoice: inv(func(i *models.Invoice) {}), threshold: 101},
 		{name: "at minimum threshold", invoice: inv(func(i *models.Invoice) {}), threshold: 100, scheduled: true},
 		{name: "collection operation live", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionIntentID = "past_due", &live
+			i.Status, i.CollectionIntentID = "open", &live
 		})},
 		{name: "manual remittance", invoice: inv(func(i *models.Invoice) {
-			i.Status, i.CollectionMethod = "past_due", CollectionSendInvoice
+			i.Status, i.CollectionMethod = "open", CollectionSendInvoice
 		})},
 		{name: "paid", invoice: inv(func(i *models.Invoice) { i.Status, i.AmountDue = "paid", 0 })},
-		{name: "past due with nothing owed", invoice: inv(func(i *models.Invoice) { i.Status, i.AmountDue = "past_due", 0 })},
+		{name: "nothing owed", invoice: inv(func(i *models.Invoice) { i.Status, i.AmountDue = "open", 0 })},
 		{name: "nil invoice"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.retry, invoiceCollectionRetryable(tt.invoice), "manual retry")
+			require.Equal(t, tt.retry, invoiceCollectionRetryable(tt.invoice, now), "manual retry")
 			require.Equal(t, tt.scheduled, scheduledInvoiceCollectionEligible(tt.invoice, tt.threshold, now), "scheduled")
 		})
 	}

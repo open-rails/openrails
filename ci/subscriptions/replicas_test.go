@@ -123,9 +123,9 @@ func TestReplicasSettledBeforeAdmission(t *testing.T) {
 			require.Equal(t, billing.SubscriptionPastDue, retry.Status)
 			late.setDecline(visa.Last4, "", "") // the member's bank now approves
 			// first falls due before late's retry, so a pass reaches it first.
-			require.True(t, f.periodEnd(first).Before(*retry.NextRetryAt))
+			require.True(t, f.periodEnd(first).Before(*nextRetry(retry)))
 			lock := f.lockCustomer(first)
-			f.advance(retry.NextRetryAt.Sub(f.base.clock.Now()) + time.Second)
+			f.advance(nextRetry(retry).Sub(f.base.clock.Now()) + time.Second)
 			a.refreshProviders() // The earlier customer lock keeps every due pass behind the intended barrier.
 			passes := f.startPasses(b)
 			lock.awaitWaiters(b) // b has read both as due and waits on the first
@@ -454,10 +454,10 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 			f.passes()
 			sub := f.subscription(e)
 			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-			require.NotNil(t, sub.NextRetryAt)
+			require.NotNil(t, nextRetry(sub))
 			require.Equal(t, 2, f.submissions(e))
 
-			f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
+			f.advance(nextRetry(sub).Sub(f.base.clock.Now()) - time.Minute)
 			a.refreshProviders()
 			a.settleCollectionScans()
 			f.advance(2 * time.Minute)
@@ -658,10 +658,10 @@ func TestReplicasProviderOwned(t *testing.T) {
 		f.passes()
 		sub := f.replicas[2].subscription(embedded, l.sub)
 		require.Equal(t, billing.SubscriptionPastDue, sub.Status, "a decline is never retried at once")
-		require.NotNil(t, sub.NextRetryAt)
-		require.WithinDuration(t, end.Add(48*time.Hour), *sub.NextRetryAt, time.Second, "first retry is the schedule's +2d from NMI's decline")
+		require.NotNil(t, nextRetry(sub))
+		require.WithinDuration(t, end.Add(48*time.Hour), *nextRetry(sub), time.Second, "first retry is the schedule's +2d from NMI's decline")
 		require.Zero(t, len(f.base.nmi.Attempts()))
-		f.advance(sub.NextRetryAt.Sub(f.base.clock.Now()) - time.Minute)
+		f.advance(nextRetry(sub).Sub(f.base.clock.Now()) - time.Minute)
 		f.any().refreshProviders()
 		f.passes()
 		require.Zero(t, len(f.base.nmi.Attempts()), "nothing before the scheduled retry")

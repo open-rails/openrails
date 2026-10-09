@@ -2,7 +2,7 @@
 
 The API is served on one port under `/v1`. A standalone server serves it at the
 root; an embedded host mounts the same routes beneath its prefix (usually
-`/billing`), so `/v1/me/balance` there is `/billing/v1/me/balance`.
+`/billing`), so `/v1/me/balance/transactions` there is `/billing/v1/me/balance/transactions`.
 
 - **Every route**, with its tier, permission, request and response:
   [routes.md](routes.md).

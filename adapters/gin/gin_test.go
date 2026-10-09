@@ -89,7 +89,7 @@ func TestInventoryMountsNatively(t *testing.T) {
 		{http.MethodGet, "/api/pay/v1/config", http.StatusOK},
 		{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
 		{http.MethodPost, "/api/pay/v1/admin/product-access", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXYZ/billing-profile", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXYZ/balance", http.StatusMethodNotAllowed},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 		{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},
 	} {

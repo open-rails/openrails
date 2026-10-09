@@ -90,7 +90,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                            notHTTPIntentPayload,
 	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":        notHTTPIntentPayload,
 	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":             notHTTPIntentPayload,
-	"internal/modules/delinquency/service.go:Snapshot.OverdueAmount overdue_amount":                                          notHTTPInternalRow,
 	"billing/metrics.go:MetricsQuery.Limit limit":                                                                            notMoneyPageSize,
 	"billing/metrics.go:MetricsLimits.MaxLimit max_limit":                                                                    notMoneyPageSize,
 	"internal/modules/money/invoice_profile.go:CustomerInvoiceProfile.Tax tax":                                               notMoneyTaxFacts,

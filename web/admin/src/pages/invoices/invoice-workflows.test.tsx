@@ -104,38 +104,31 @@ it("pages the payment history by cursor", async () => {
 })
 
 it("creates the profile of a customer who has none", async () => {
-  routes["GET /admin/customers/settings"] = {
-    data: [
-      {
-        customer_id: "cus_1",
-        credit_limits: [],
-        trust_levels: [],
-        billing_policy: null,
-        invoice_profile: null,
-      },
-    ],
-    next_cursor: null,
+  routes["GET /admin/customers/cus_1"] = {
+    id: "cus_1",
+    settings: {
+      credit_limits: [],
+      trust_levels: [],
+      billing_policy: null,
+      invoice_profile: null,
+    },
   }
-  routes["PATCH /admin/customers/settings"] = (request) => ({
-    items: (request.body as { items: unknown[] }).items,
+  routes["PATCH /admin/customers/cus_1"] = (request) => ({
+    id: "cus_1",
+    settings: request.body,
   })
   await show(<CustomerInvoiceProfileSection customerId="cus_1" />)
   await vi.waitFor(() => expect(text()).toContain("Save invoice profile"))
   await click("Save invoice profile")
   await vi.waitFor(() => expect(text()).toContain("Invoice profile saved"))
   expect(requests.find((r) => r.method === "PATCH")!.body).toEqual({
-    items: [
-      {
-        customer_id: "cus_1",
-        invoice_profile: {
-          net_terms_days: 0,
-          collection_method: "charge_automatically",
-          po_number: "",
-          memo: "",
-          billing_contacts: [],
-          tax: {},
-        },
-      },
-    ],
+    invoice_profile: {
+      net_terms_days: 0,
+      collection_method: "charge_automatically",
+      po_number: "",
+      memo: "",
+      billing_contacts: [],
+      tax: {},
+    },
   })
 })

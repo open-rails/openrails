@@ -29,6 +29,8 @@ type GetSubscriptionsFilters struct {
 	CanceledAfter  *time.Time         `form:"canceled_after" time_format:"2006-01-02"`
 	CanceledBefore *time.Time         `form:"canceled_before" time_format:"2006-01-02"`
 	ExpiresBefore  *time.Time         `form:"expires_before" time_format:"2006-01-02"`
+	// Dunning keeps the subscriptions past_due or awaiting_method.
+	Dunning bool `form:"dunning"`
 	// IDs, when not nil, reads those subscriptions instead, in one page.
 	IDs []uuid.UUID `form:"-"`
 }
@@ -214,6 +216,7 @@ func (f GetSubscriptionsFilters) repo() SubscriptionFilters {
 		UserID: customer, Status: f.Status, PriceID: f.PriceID.UUID(), Rail: f.Rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
+		Dunning: f.Dunning,
 	}
 }
 

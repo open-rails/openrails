@@ -123,7 +123,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	// An invoice for usage on credit, paid from the next funding: invoice
 	// payments, credit grants and their ledger.
 	d := w.newCustomer()
-	_, err = w.client[remote].UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: d.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}}})
+	_, err = w.client[remote].UpdateCustomer(ctx, d.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
 	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: d.cid(), Invoker: d.id, Currency: "USD", EventType: "ids", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -172,7 +172,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 	customer, funded := "/v1/admin/customers/"+c.id, "/v1/admin/customers/"+d.id
 	invoice := invoices.Items[0].ID.String()
 	fixtures := map[string]struct{ path, query, table, set, key string }{
-		"GET /v1/admin/customers/settings":                           {"/v1/admin/customers/settings", "", "customers", "", "customer_id"},
 		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
 		"GET /v1/admin/catalog/products":                             {"/v1/admin/catalog/products", "", "products", "", ""},
 		"GET /v1/admin/catalog/prices":                               {"/v1/admin/catalog/prices", "", "prices", "", ""},

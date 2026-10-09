@@ -24,6 +24,8 @@ export {
   type BillingErrorBody,
 } from "./errors"
 export type {
+  Account,
+  Balance,
   CardSetup,
   CardSummary,
   Currency,
@@ -45,6 +47,7 @@ export type {
   Product,
   SolanaToken,
   Subscription,
+  SubscriptionDunning,
   SubscriptionProduct,
   SubscriptionStatus,
   TierChange,

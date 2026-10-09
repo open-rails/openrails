@@ -1,4 +1,8 @@
-import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
+import {
+  ApiError,
+  collectCursorPages,
+  selectedMerchant,
+} from "@/lib/api/client"
 import type {
   CreatePriceParams,
   UpdateProductParams,
@@ -23,7 +27,7 @@ import {
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
-  getCustomerSettings,
+  getCustomer,
   getPriceByKey,
   getProduct,
   grantProductAccess,
@@ -49,7 +53,7 @@ import {
   revokeApiKey,
   revokeProductAccess,
   revokeTeamInvite,
-  updateCustomerSettings,
+  updateCustomer,
   updatePrice,
   updateProduct,
   type DefaultUsageRateCardRequest,
@@ -865,9 +869,7 @@ export const adminMutations = {
         currency: string
         amount: string
       }) =>
-        updateCustomerSettings([
-          { customer_id: customerId, credit_limits: [{ currency, amount }] },
-        ]),
+        updateCustomer(customerId, { credit_limits: [{ currency, amount }] }),
     })
   },
   lookupCustomerControls: () => {
@@ -881,8 +883,11 @@ export const adminMutations = {
         customerId: string
         currency: string
       }) => {
-        const settings = await getCustomerSettings(customerId)
-        if (!settings) throw new Error("No customer has this ID")
+        const { settings } = await getCustomer(customerId).catch((err) => {
+          if (err instanceof ApiError && err.status === 404)
+            throw new Error("No customer has this ID")
+          throw err
+        })
         const code = currency.toUpperCase()
         return {
           currency: code,

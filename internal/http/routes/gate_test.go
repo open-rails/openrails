@@ -70,7 +70,7 @@ var sensitiveRoutes = []string{
 	"GET /v1/merchant/api-keys",
 	"PATCH /v1/admin/catalog/prices/{id}",
 	"PATCH /v1/admin/catalog/products/{id}",
-	"PATCH /v1/admin/customers/settings",
+	"PATCH /v1/admin/customers/{customer_id}",
 	"PATCH /v1/admin/psps/{id}",
 	"PATCH /v1/merchant/team/{user_id}",
 	"POST /v1/admin/admissions",
@@ -298,7 +298,7 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			require.Equal(t, want, rec.take(), "%s as %s", r.Key(), who.SubjectKind)
 			checked++
 		}
-		require.Greater(t, checked, 170)
+		require.Greater(t, checked, 165)
 		if billingauth.Interactive(who) {
 			require.Greater(t, sensitive, 20)
 		}
@@ -328,7 +328,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, code, r.Key())
 		gated++
 	}
-	require.Greater(t, gated, 170)
+	require.Greater(t, gated, 165)
 }
 
 // Every gated handler re-checks the verdict the gate bound: reached without
@@ -380,12 +380,12 @@ func TestCustomerGate(t *testing.T) {
 		mux := router.NewMux(table, "/v1/me", rt)
 		env := newEnv(rt, Options{})
 		env.Customers = a
-		route, _ := Lookup(GET, "/v1/me/balance")
-		mux.Handle(GET, "/balance", func(r *httprequest.Request) {
+		route, _ := Lookup(GET, "/v1/me")
+		mux.Handle(GET, "", func(r *httprequest.Request) {
 			seen, _ = r.CustomerScope()
 			r.NoContent()
 		}, env.gates(route)...)
-		req := httptest.NewRequest(GET, "/v1/me/balance", nil)
+		req := httptest.NewRequest(GET, "/v1/me", nil)
 		for k, v := range header {
 			req.Header.Set(k, v)
 		}

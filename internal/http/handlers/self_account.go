@@ -28,13 +28,23 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	return identity.CustomerID(scope.Customer()), true
 }
 
-// GetMyBalance returns the customer's own money in one currency.
-func GetMyBalance(r *httprequest.Request) {
+// GetMe answers the customer's own summary: money per currency, the card
+// that pays each currency, and unread notices.
+func GetMe(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	getBalance(r, payer)
+	svc, ok := billingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.GetCustomerAccount(r.Request.Context(), payer)
+	if err != nil {
+		r.InternalError("account read failed", err)
+		return
+	}
+	r.SuccessJSON(out)
 }
 
 // ListMyBalanceTransactions lists the customer's own ledger in one currency.

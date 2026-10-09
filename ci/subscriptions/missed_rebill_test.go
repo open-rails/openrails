@@ -294,7 +294,7 @@ func TestNMIScheduleLostWebhookFoundByPull(t *testing.T) {
 			}
 			require.Equal(t, "insufficient_funds", str(rows[0].Reason))
 			require.Equal(t, billing.SubscriptionPastDue, sub.Status, "the decline opens dunning")
-			require.NotNil(t, sub.NextRetryAt)
+			require.NotNil(t, nextRetry(sub))
 		})
 	}
 }

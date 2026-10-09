@@ -83,8 +83,8 @@ func TestEngineNMISharedOrderFindsEarlierCharge(t *testing.T) {
 	require.NotNil(t, declined)
 	w.nmi.SetDecline(visa.Last4, "")
 	sub := w.subscription(embedded, e.sub)
-	require.NotNil(t, sub.NextRetryAt)
-	w.advance(sub.NextRetryAt.Add(-time.Minute).Sub(w.clock.Now()))
+	require.NotNil(t, nextRetry(sub))
+	w.advance(nextRetry(sub).Add(-time.Minute).Sub(w.clock.Now()))
 	w.refreshProviders()
 	w.settleCollectionScans()
 	// The processor approved the period under the same order after all.
@@ -92,7 +92,7 @@ func TestEngineNMISharedOrderFindsEarlierCharge(t *testing.T) {
 	// preflight, rather than importing the changed transaction in setup.
 	paid := w.nmi.AddSale(nmimock.Sale{OrderID: declined.OrderID, Vault: declined.Vault, Amount: declined.Amount, At: end.Add(time.Second)})
 	attempts := len(w.nmi.Attempts())
-	w.advance(sub.NextRetryAt.Add(time.Second).Sub(w.clock.Now()))
+	w.advance(nextRetry(sub).Add(time.Second).Sub(w.clock.Now()))
 	w.runRenewals()
 	w.until(func() bool { return w.subscription(embedded, e.sub).CurrentPeriodEndsAt.After(end) }, "the retry completes from the earlier charge")
 	require.Equal(t, attempts, len(w.nmi.Attempts()), "the retry sent nothing")

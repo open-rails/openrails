@@ -56,7 +56,6 @@ type InvoiceStatus string
 const (
 	InvoiceDraft         InvoiceStatus = "draft"
 	InvoiceOpen          InvoiceStatus = "open"
-	InvoicePastDue       InvoiceStatus = "past_due"
 	InvoicePaid          InvoiceStatus = "paid"
 	InvoiceVoided        InvoiceStatus = "voided"
 	InvoiceUncollectible InvoiceStatus = "uncollectible"
@@ -64,7 +63,7 @@ const (
 
 // InvoiceStatuses lists every invoice status.
 func InvoiceStatuses() []InvoiceStatus {
-	return []InvoiceStatus{InvoiceDraft, InvoiceOpen, InvoicePastDue, InvoicePaid, InvoiceVoided, InvoiceUncollectible}
+	return []InvoiceStatus{InvoiceDraft, InvoiceOpen, InvoicePaid, InvoiceVoided, InvoiceUncollectible}
 }
 
 // InvoiceCollectionMethod is how an invoice is paid: charged to the
@@ -116,10 +115,14 @@ type Invoice struct {
 	CollectionMethod InvoiceCollectionMethod `json:"collection_method"`
 	IssuedAt         *time.Time              `json:"issued_at"`
 	DueAt            *time.Time              `json:"due_at"`
-	PaidAt           *time.Time              `json:"paid_at"`
-	VoidedAt         *time.Time              `json:"voided_at"`
-	UncollectibleAt  *time.Time              `json:"uncollectible_at"`
-	FinalizedAt      *time.Time              `json:"finalized_at"`
+	// Delinquent marks an invoice overdue past the merchant's grace (and over
+	// its floor) in its currency: the customer's new usage in that currency is
+	// refused until its overdue invoices are paid.
+	Delinquent      bool       `json:"delinquent"`
+	PaidAt          *time.Time `json:"paid_at"`
+	VoidedAt        *time.Time `json:"voided_at"`
+	UncollectibleAt *time.Time `json:"uncollectible_at"`
+	FinalizedAt     *time.Time `json:"finalized_at"`
 	// ExternalInvoiceID is the invoice's id at a provider that mirrors it.
 	ExternalInvoiceID         *string    `json:"external_invoice_id"`
 	CollectionFailureCount    int32      `json:"collection_failure_count"`
@@ -178,7 +181,8 @@ type InvoicePayment struct {
 
 // InvoiceListParams selects invoices, newest period first; every filter is
 // optional. PeriodStartsAfter (inclusive) and PeriodStartsBefore (exclusive)
-// bound the invoice's period_starts_at.
+// bound the invoice's period_starts_at. Overdue keeps the open invoices still
+// owed past their due date; one leaves only when paid, voided or written off.
 //
 // IDs instead reads 1 to MaxBatchItems named invoices in one page, whatever
 // their state; unknown ones are absent.
@@ -189,6 +193,7 @@ type InvoiceListParams struct {
 	Status             InvoiceStatus
 	PeriodStartsAfter  *time.Time
 	PeriodStartsBefore *time.Time
+	Overdue            bool
 	PageRequest
 }
 

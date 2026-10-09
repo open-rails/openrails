@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (228), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (224), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -56,7 +56,7 @@ A customer acting on its own account.
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` |  |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` |  |
-| GET | `/v1/me/balance` | customer | — | — | 200 `Balance` |  |
+| GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
 | GET | `/v1/me/invoices` | customer | — | — | 200 `ListPage<Invoice>` |  |
@@ -75,7 +75,6 @@ A customer acting on its own account.
 | POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `PaymentMethodSetup` |  |
 | POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` |  |
-| GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 `UnreadCount` |  |
 | POST | `/v1/me/notifications/read` | customer | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` |  |
 
 ## Admin
@@ -124,11 +123,8 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/product-access` | merchant | `AdminWrite` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
 | DELETE | `/v1/admin/customers/{customer_id}/product-access/{id}` | merchant | `AdminWrite` | — | 204 — | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers` | merchant | `AdminRead` | — | 200 `ListPage<Customer>` |  |
-| GET | `/v1/admin/customers/settings` | merchant | `AdminRead` | — | 200 `ListPage<CustomerSettings>` |  |
-| PATCH | `/v1/admin/customers/settings` | merchant | `AdminWrite` | `UpdateCustomerSettingsBatchParams` | 200 `CustomerSettingsBatch` | sensitive; limit `grant` |
-| GET | `/v1/admin/customers/{customer_id}/billing-profile` | merchant | `AdminRead` | — | 200 `CustomerBillingProfile` |  |
-| GET | `/v1/admin/customers/{customer_id}/delinquency` | merchant | `AdminRead` | — | 200 `ListPage<Delinquency>` |  |
-| GET | `/v1/admin/delinquency` | merchant | `AdminRead` | — | 200 `ListPage<Delinquency>` |  |
+| GET | `/v1/admin/customers/{customer_id}` | merchant | `AdminRead` | — | 200 `Customer` |  |
+| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `AdminWrite` | `UpdateCustomerParams` | 200 `Customer` | sensitive; limit `grant` |
 | POST | `/v1/admin/credit-grants` | merchant | `AdminWrite` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
 | GET | `/v1/admin/customers/{customer_id}/credit-grants` | merchant | `AdminRead` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/admin/customers/{customer_id}/credit-grants/{id}` | merchant | `AdminRead` | — | 200 `CreditGrant` |  |

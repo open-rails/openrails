@@ -61,20 +61,22 @@ import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
 import { CustomerCreditSupportSection } from "./credits"
+import { CursorPager } from "@/components/cursor-pager"
+import { useCursorPages } from "@/lib/cursor-pages"
+import { dunningSummary } from "@/pages/subscriptions/dunning"
+
+const LIST_PAGE = 20
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const { data: profile, isPending: loading } = useQuery(
+  const { data: customer, isPending: loading } = useQuery(
     adminQueries.customer(customerId)
   )
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!profile)
+  if (!customer)
     return <p className="text-sm text-muted-foreground">Customer not found.</p>
-  const payments = profile.payments ?? []
-  const methods = profile.payment_methods ?? []
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -89,12 +91,11 @@ export function CustomerDetailPage() {
         </Button>
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">
-            {profile.customer.contact?.name ||
-              profile.customer.contact?.email ||
-              "Customer"}
+            {customer.contact?.name || customer.contact?.email || "Customer"}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
-            {profile.customer.id}
+            {customer.id} · since {formatDate(customer.created_at)} · last
+            seen {formatDate(customer.last_seen_at)}
           </p>
         </div>
         <div className="ml-auto flex gap-2">
@@ -103,11 +104,11 @@ export function CustomerDetailPage() {
         </div>
       </div>
 
-      <CustomerContactCard contact={profile.customer.contact} />
+      <CustomerContactCard contact={customer.contact} />
 
-      {profile.balances.length > 0 && (
+      {customer.balances.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {profile.balances.map((b) => (
+          {customer.balances.map((b) => (
             <Card key={b.currency}>
               <CardHeader className="pb-1">
                 <CardTitle className="text-xs font-normal text-muted-foreground uppercase">
@@ -128,251 +129,317 @@ export function CustomerDetailPage() {
         </div>
       )}
 
+      {customer.balances.some((b) => BigInt(b.owed_amount) > 0n) && (
+        <p className="text-sm">
+          <Link
+            className="underline-offset-2 hover:underline"
+            to={`/invoices?customer_id=${customer.id}&overdue=true`}
+          >
+            Overdue invoices
+          </Link>
+        </p>
+      )}
+
       <CustomerCreditSupportSection
         customerId={customerId}
-        currencies={profile.balances.map((balance) => balance.currency)}
+        currencies={customer.balances.map((balance) => balance.currency)}
       />
       <CustomerUsageRatesSection customerId={customerId} />
       <CustomerInvoiceProfileSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Subscriptions</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {profile.subscriptions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No subscriptions.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-muted-foreground">
-                        Subscription
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Status
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Rail
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Period ends
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {profile.subscriptions.map((s) => (
-                      <LinkedTableRow key={s.id} to={`/subscriptions/${s.id}`}>
-                        <TableCell>
-                          <Link
-                            className="text-xs underline-offset-2 hover:underline"
-                            to={`/subscriptions/${s.id}`}
-                          >
-                            {shortId(s.id, 13)}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={s.status} />
-                        </TableCell>
-                        <TableCell>{s.rail}</TableCell>
-                        <TableCell className="tabular-nums">
-                          {formatDate(s.current_period_ends_at)}
-                        </TableCell>
-                      </LinkedTableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Payments</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {payments.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No payments.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-muted-foreground">
-                        Payment
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Status
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Amount
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Kind
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Rail
-                      </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Purchased
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {payments.map((p) => (
-                      <LinkedTableRow key={p.id} to={`/payments/${p.id}`}>
-                        <TableCell>
-                          <Link
-                            className="text-xs underline-offset-2 hover:underline"
-                            to={`/payments/${p.id}`}
-                          >
-                            {shortId(p.id, 13)}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={p.status} />
-                        </TableCell>
-                        <TableCell className="tabular-nums">
-                          {formatNativeAmount(p.amount, p.currency)}
-                        </TableCell>
-                        <TableCell>{p.kind}</TableCell>
-                        <TableCell>{p.rail ?? p.channel}</TableCell>
-                        <TableCell className="tabular-nums">
-                          {formatDate(p.created_at)}
-                        </TableCell>
-                      </LinkedTableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Payment methods</CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  void queryClient.invalidateQueries({
-                    queryKey: queryKeys.customer(customerId),
-                  })
-                }
-              >
-                Refresh payment methods
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {methods.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No payment methods on file.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-3">
-                  {methods.map((pm) => (
-                    <div key={pm.id} className="rounded-md border p-3 text-sm">
-                      <p className="font-medium">{formatCard(pm.card)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {pm.rail} · exp {formatCardExpiry(pm.card)}
-                      </p>
-                      <CollectionDefaultBadges
-                        currencies={pm.collection_currencies ?? []}
-                      />
-                      {pm.health.expiry_status &&
-                        pm.health.expiry_status !== "valid" && (
-                          <Badge
-                            variant="secondary"
-                            className="mt-1 bg-held-surface text-held"
-                          >
-                            {pm.health.expiry_status}
-                          </Badge>
-                        )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <CustomerSubscriptions customerId={customerId} />
+          <CustomerPayments customerId={customerId} />
+          <CustomerPaymentMethods customerId={customerId} />
         </div>
         <div className="grid gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Entitlements</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-3 text-xs text-muted-foreground">
-                The keys of the products this customer holds now.
-              </p>
-              {profile.entitlements.data.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No entitlements.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {profile.entitlements.data.map((e) => (
-                    <Badge key={e.entitlement} variant="secondary">
-                      {e.entitlement}
-                    </Badge>
-                  ))}
-                  {profile.entitlements.next_cursor && (
-                    <span className="text-xs text-muted-foreground">
-                      and more
-                    </span>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Product access</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {profile.product_access.data.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No product access.
-                </p>
-              ) : (
-                <div className="grid gap-4">
-                  {profile.product_access.data.map((g) => (
-                    <div key={g.id} className="flex min-w-0 items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <p className="truncate text-sm font-medium">
-                            {g.product_name || shortId(g.product_id, 13)}
-                          </p>
-                          <StatusBadge status={g.status} />
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {g.source_type === "grant"
-                            ? `Granted (${g.grant_reason ?? "staff"})${g.note ? `: ${g.note}` : ""}`
-                            : g.source_type}
-                        </p>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          {g.ends_at
-                            ? `Ends ${formatDate(g.ends_at)}`
-                            : "No end date"}
-                        </p>
-                      </div>
-                      <RevokeProductAccessButton
-                        customerId={customerId}
-                        grantId={g.id}
-                        label="Revoke product access"
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <CustomerEntitlements customerId={customerId} />
+          <CustomerProductAccess customerId={customerId} />
         </div>
       </div>
     </div>
+  )
+}
+
+function CustomerSubscriptions({ customerId }: { customerId: string }) {
+  const pages = useCursorPages(customerId)
+  const { data, isFetching } = useQuery(
+    adminQueries.customerSubscriptions(customerId, LIST_PAGE, pages.cursor)
+  )
+  const subscriptions = data?.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Subscriptions</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {subscriptions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No subscriptions.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-muted-foreground">
+                  Subscription
+                </TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground">Rail</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Period ends
+                </TableHead>
+                <TableHead className="text-muted-foreground">Dunning</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {subscriptions.map((s) => (
+                <LinkedTableRow key={s.id} to={`/subscriptions/${s.id}`}>
+                  <TableCell>
+                    <Link
+                      className="text-xs underline-offset-2 hover:underline"
+                      to={`/subscriptions/${s.id}`}
+                    >
+                      {shortId(s.id, 13)}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={s.status} />
+                  </TableCell>
+                  <TableCell>{s.rail}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {formatDate(s.current_period_ends_at)}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {s.dunning ? dunningSummary(s.dunning) : "—"}
+                  </TableCell>
+                </LinkedTableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        <CursorPager
+          pages={pages}
+          nextCursor={data?.next_cursor}
+          busy={isFetching}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function CustomerPayments({ customerId }: { customerId: string }) {
+  const pages = useCursorPages(customerId)
+  const { data, isFetching } = useQuery(
+    adminQueries.customerPayments(customerId, LIST_PAGE, pages.cursor)
+  )
+  const payments = data?.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Payments</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {payments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No payments.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-muted-foreground">Payment</TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground">Amount</TableHead>
+                <TableHead className="text-muted-foreground">Kind</TableHead>
+                <TableHead className="text-muted-foreground">Rail</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Purchased
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {payments.map((p) => (
+                <LinkedTableRow key={p.id} to={`/payments/${p.id}`}>
+                  <TableCell>
+                    <Link
+                      className="text-xs underline-offset-2 hover:underline"
+                      to={`/payments/${p.id}`}
+                    >
+                      {shortId(p.id, 13)}
+                    </Link>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={p.status} />
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {formatNativeAmount(p.amount, p.currency)}
+                  </TableCell>
+                  <TableCell>{p.kind}</TableCell>
+                  <TableCell>{p.rail ?? p.channel}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {formatDate(p.created_at)}
+                  </TableCell>
+                </LinkedTableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        <CursorPager
+          pages={pages}
+          nextCursor={data?.next_cursor}
+          busy={isFetching}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function CustomerPaymentMethods({ customerId }: { customerId: string }) {
+  const queryClient = useQueryClient()
+  const pages = useCursorPages(customerId)
+  const { data, isFetching } = useQuery(
+    adminQueries.customerPaymentMethodsPage(customerId, LIST_PAGE, pages.cursor)
+  )
+  const methods = data?.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Payment methods</CardTitle>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            void queryClient.invalidateQueries({
+              queryKey: [...queryKeys.customer(customerId), "payment-methods"],
+            })
+          }
+        >
+          Refresh payment methods
+        </Button>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {methods.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No payment methods on file.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {methods.map((pm) => (
+              <div key={pm.id} className="rounded-md border p-3 text-sm">
+                <p className="font-medium">{formatCard(pm.card)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {pm.rail} · exp {formatCardExpiry(pm.card)}
+                </p>
+                <CollectionDefaultBadges
+                  currencies={pm.collection_currencies ?? []}
+                />
+                {pm.health.expiry_status &&
+                  pm.health.expiry_status !== "valid" && (
+                    <Badge
+                      variant="secondary"
+                      className="mt-1 bg-held-surface text-held"
+                    >
+                      {pm.health.expiry_status}
+                    </Badge>
+                  )}
+              </div>
+            ))}
+          </div>
+        )}
+        <CursorPager
+          pages={pages}
+          nextCursor={data?.next_cursor}
+          busy={isFetching}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function CustomerEntitlements({ customerId }: { customerId: string }) {
+  const pages = useCursorPages(customerId)
+  const { data, isFetching } = useQuery(
+    adminQueries.customerEntitlements(customerId, LIST_PAGE, pages.cursor)
+  )
+  const keys = data?.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Entitlements</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <p className="text-xs text-muted-foreground">
+          The keys of the products this customer holds now.
+        </p>
+        {keys.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No entitlements.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {keys.map((e) => (
+              <Badge key={e.entitlement} variant="secondary">
+                {e.entitlement}
+              </Badge>
+            ))}
+          </div>
+        )}
+        <CursorPager
+          pages={pages}
+          nextCursor={data?.next_cursor}
+          busy={isFetching}
+        />
+      </CardContent>
+    </Card>
+  )
+}
+
+function CustomerProductAccess({ customerId }: { customerId: string }) {
+  const pages = useCursorPages(customerId)
+  const { data, isFetching } = useQuery(
+    adminQueries.customerProductAccess(customerId, LIST_PAGE, pages.cursor)
+  )
+  const grants = data?.data ?? []
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm">Product access</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {grants.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No product access.</p>
+        ) : (
+          <div className="grid gap-4">
+            {grants.map((g) => (
+              <div key={g.id} className="flex min-w-0 items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate text-sm font-medium">
+                      {g.product_name || shortId(g.product_id, 13)}
+                    </p>
+                    <StatusBadge status={g.status} />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {g.source_type === "grant"
+                      ? `Granted (${g.grant_reason ?? "staff"})${g.note ? `: ${g.note}` : ""}`
+                      : g.source_type}
+                  </p>
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {g.ends_at ? `Ends ${formatDate(g.ends_at)}` : "No end date"}
+                  </p>
+                </div>
+                <RevokeProductAccessButton
+                  customerId={customerId}
+                  grantId={g.id}
+                  label="Revoke product access"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        <CursorPager
+          pages={pages}
+          nextCursor={data?.next_cursor}
+          busy={isFetching}
+        />
+      </CardContent>
+    </Card>
   )
 }
 

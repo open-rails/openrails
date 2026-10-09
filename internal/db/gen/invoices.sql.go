@@ -24,7 +24,7 @@ SET amount_paid = amount_paid + $3::bigint,
     next_collection_attempt_at = CASE WHEN amount_due = $3::bigint THEN NULL ELSE next_collection_attempt_at END,
     updated_at = $4::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $5
-  AND status IN ('open', 'past_due', 'uncollectible')
+  AND status IN ('open', 'uncollectible')
   AND collection_intent_id IS NULL
   AND amount_due >= $3::bigint
 `
@@ -67,7 +67,7 @@ SET amount_paid = amount_paid + $3::bigint,
     last_collection_failure_message = CASE WHEN amount_due - $3::bigint <= 0 THEN NULL ELSE last_collection_failure_message END,
     updated_at = $4::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $5
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due >= $3::bigint
 `
 
@@ -137,7 +137,7 @@ func (q *Queries) AttachPendingInvoiceItemsToInvoice(ctx context.Context, arg At
 
 const claimInvoiceCollection = `-- name: ClaimInvoiceCollection :execrows
 UPDATE billing.invoices
-SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
+SET status = 'open',
     next_collection_attempt_at = NULL,
     uncollectible_at = NULL,
     collection_intent_id = $3::uuid,
@@ -145,7 +145,7 @@ SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $5
-  AND status IN ('open', 'past_due', 'uncollectible')
+  AND status IN ('open', 'uncollectible')
   AND amount_due > 0
   AND collection_intent_id IS NULL
 `
@@ -158,10 +158,9 @@ type ClaimInvoiceCollectionParams struct {
 	InvoiceID  uuid.UUID
 }
 
-// Points the invoice at its one live collection operation. Claiming says
-// nothing about lateness (status is the clock's reading, or#828/or#878);
-// reclaiming an `uncollectible` invoice reopens it (a manual retry undoing a
-// terminal outcome). The previous failure code stays as forensics.
+// Points the invoice at its one live collection operation; reclaiming an
+// `uncollectible` invoice reopens it (a manual retry undoing a terminal
+// outcome). The previous failure code stays as forensics.
 func (q *Queries) ClaimInvoiceCollection(ctx context.Context, arg ClaimInvoiceCollectionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimInvoiceCollection,
 		arg.MerchantID,
@@ -759,7 +758,7 @@ JOIN billing.money_settings s
  AND s.customer_id = i.customer_id
  AND s.currency = i.currency
 WHERE i.merchant_id = $1
-  AND i.status IN ('open', 'past_due')
+  AND i.status = 'open'
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
   AND s.collection_payment_method_id IS NOT NULL
@@ -1160,7 +1159,7 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
     WHERE i.merchant_id = s.merchant_id
       AND i.customer_id = s.customer_id
       AND i.currency = s.currency
-      AND i.status IN ('open', 'past_due')
+      AND i.status = 'open'
       AND i.amount_due > 0
 ) >= COALESCE(
     pol.threshold,
@@ -1215,7 +1214,7 @@ const listOwedInvoiceClaims = `-- name: ListOwedInvoiceClaims :many
 SELECT id, amount_due, collection_intent_id
 FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3::text
-  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+  AND status IN ('open', 'uncollectible') AND amount_due > 0
 ORDER BY due_at NULLS FIRST, created_at, id
 FOR UPDATE
 `
@@ -1363,7 +1362,7 @@ WITH billed AS (
 SELECT s.id
 FROM billing.invoices s, billed b
 WHERE s.merchant_id = $1 AND s.customer_id = $2 AND s.currency = $3
-  AND s.status IN ('open', 'past_due', 'uncollectible')
+  AND s.status IN ('open', 'uncollectible')
   AND s.amount_paid + s.amount_due < s.total_amount
   AND s.id <> $4::uuid
   AND s.period_starts_at <= b.last_at AND s.period_ends_at > b.first_at
@@ -1412,7 +1411,7 @@ SET status = 'uncollectible',
     uncollectible_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id IS NULL
 RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
 `
@@ -1476,44 +1475,33 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 	return i, err
 }
 
-const markInvoicesPastDue = `-- name: MarkInvoicesPastDue :one
-WITH overdue AS (
-    UPDATE billing.invoices
-    SET status = 'past_due', updated_at = $1::timestamptz
-    WHERE merchant_id = $2::uuid
-      AND status = 'open' AND amount_due > 0
-      AND due_at IS NOT NULL AND due_at < $1::timestamptz
-    RETURNING merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
-), candidates AS (
-    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at FROM overdue
-    UNION ALL
-    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
-    FROM billing.invoices
-    WHERE merchant_id = $2::uuid
-      AND status = 'past_due' AND amount_due > 0
-      AND due_at IS NOT NULL AND due_at < $1::timestamptz
-), notices AS (
+const notifyOverdueInvoices = `-- name: NotifyOverdueInvoices :one
+WITH notices AS (
     INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
            jsonb_build_object('invoice_id', id,
                               'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
                               'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
            NULL, $1::timestamptz
-    FROM candidates
+    FROM billing.invoices
+    WHERE merchant_id = $2::uuid
+      AND status = 'open' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < $1::timestamptz
     ON CONFLICT (merchant_id, id) DO NOTHING
+    RETURNING id
 )
-SELECT count(*) FROM overdue
+SELECT count(*) FROM notices
 `
 
-type MarkInvoicesPastDueParams struct {
+type NotifyOverdueInvoicesParams struct {
 	Now        time.Time
 	MerchantID uuid.UUID
 }
 
-// Invoice transitions and payer notifications commit in one statement. Collection
-// failures may already have set past_due; those invoices still need their notice.
-func (q *Queries) MarkInvoicesPastDue(ctx context.Context, arg MarkInvoicesPastDueParams) (int64, error) {
-	row := q.db.QueryRow(ctx, markInvoicesPastDue, arg.Now, arg.MerchantID)
+// Tells each payer once about each open invoice past its due date; the notice
+// id is the invoice's, so a later pass adds none.
+func (q *Queries) NotifyOverdueInvoices(ctx context.Context, arg NotifyOverdueInvoicesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, notifyOverdueInvoices, arg.Now, arg.MerchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -1523,11 +1511,7 @@ const recordInvoiceCollectionFailure = `-- name: RecordInvoiceCollectionFailure 
 UPDATE billing.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, $3::timestamptz),
-    status = CASE
-        WHEN $4::boolean THEN 'uncollectible'
-        WHEN $5::timestamptz IS NULL THEN status
-        ELSE 'past_due'
-    END,
+    status = CASE WHEN $4::boolean THEN 'uncollectible' ELSE status END,
     next_collection_attempt_at = $5::timestamptz,
     last_collection_failure_code = $6,
     last_collection_failure_message = $7,
@@ -1537,7 +1521,7 @@ SET collection_failure_count = collection_failure_count + 1,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $8
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id = $9::uuid
 `
 
@@ -1562,11 +1546,10 @@ type RecordInvoiceCollectionFailureParams struct {
 //	                                  customer must fix their instrument.
 //	a next attempt                 -> bucket 1. Still dunning.
 //
-// Bucket 2 leaves `status` exactly where it was on purpose. A decline bucket
-// answers "what do we do about the CARD"; `past_due` is a reading of the CLOCK
-// (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
-// (or#878). Our decision to stop attempting must not age the customer's
-// invoice: it stays open, it stays collectible, and it stays theirs to settle.
+// Only a terminal outcome changes `status`. A decline bucket answers "what do
+// we do about the CARD"; being overdue is a reading of the CLOCK (due_at <
+// now) and belongs to the delinquency axis (or#878). The invoice stays open,
+// collectible and the customer's to settle.
 func (q *Queries) RecordInvoiceCollectionFailure(ctx context.Context, arg RecordInvoiceCollectionFailureParams) (int64, error) {
 	result, err := q.db.Exec(ctx, recordInvoiceCollectionFailure,
 		arg.MerchantID,
@@ -1630,7 +1613,7 @@ SET next_collection_attempt_at = $3::timestamptz,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = $4
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due > 0
   AND collection_method = 'charge_automatically'
   AND collection_failure_count > 0
@@ -1742,7 +1725,7 @@ WITH s AS (
     SELECT i.id, i.customer_id, i.currency, i.period_starts_at, i.period_ends_at
     FROM billing.invoices i
     WHERE i.merchant_id = $2::uuid AND i.id = ANY($3::uuid[])
-      AND i.status IN ('open', 'past_due', 'uncollectible')
+      AND i.status IN ('open', 'uncollectible')
       AND i.amount_paid + i.amount_due < i.total_amount
 ), own AS (
     SELECT s.id, COALESCE(SUM(ii.amount), 0)::bigint AS amount
@@ -1813,7 +1796,7 @@ SET collection_failure_count = collection_failure_count + 1,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = $6::uuid
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id IS NULL
 `
 
@@ -1899,7 +1882,7 @@ const sumOwedInvoiceClaims = `-- name: SumOwedInvoiceClaims :one
 SELECT COALESCE(SUM(amount_due), 0)::bigint AS amount
 FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3::text
-  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+  AND status IN ('open', 'uncollectible') AND amount_due > 0
 `
 
 type SumOwedInvoiceClaimsParams struct {
@@ -2009,7 +1992,7 @@ SET status = 'voided',
     voided_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
-  AND status IN ('draft', 'open', 'past_due')
+  AND status IN ('draft', 'open')
   AND collection_intent_id IS NULL
 RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
 `

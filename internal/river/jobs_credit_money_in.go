@@ -133,12 +133,12 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 	}
 
 	if job.Args.Collect {
-		// #798: overdue net-N receivables flip to past_due before collection —
-		// the host-visible dunning signal even when no charger is armed.
-		if n, err := w.Money.MarkInvoicesPastDue(ctx, now); err != nil {
+		// #798: payers hear about overdue net-N receivables before collection,
+		// even when no charger is armed.
+		if n, err := w.Money.NotifyOverdueInvoices(ctx, now); err != nil {
 			return err
 		} else if n > 0 {
-			logger.WithField("invoices", n).Info("invoices marked past_due")
+			logger.WithField("invoices", n).Info("overdue invoice notices queued")
 		}
 		if w.Intents == nil {
 			logger.Debug("invoice collection runner not configured; skipping collection")

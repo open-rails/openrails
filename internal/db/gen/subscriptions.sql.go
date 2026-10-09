@@ -101,6 +101,7 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
+  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.deleted_at IS NULL
 `
 
@@ -115,6 +116,7 @@ type CountSubscriptionsFilteredParams struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	Dunning        bool
 }
 
 func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubscriptionsFilteredParams) (int64, error) {
@@ -129,6 +131,7 @@ func (q *Queries) CountSubscriptionsFiltered(ctx context.Context, arg CountSubsc
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.Dunning,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -1791,10 +1794,11 @@ WHERE sub.merchant_id = $1::uuid AND ($2::uuid IS NULL OR sub.customer_id = $2::
   AND ($8::timestamptz IS NULL OR sub.canceled_at >= $8::timestamptz)
   AND ($9::timestamptz IS NULL OR sub.canceled_at <= $9::timestamptz)
   AND ($10::timestamptz IS NULL OR sub.current_period_ends_at <= $10::timestamptz)
-  AND ($11::timestamptz IS NULL OR (sub.created_at, sub.id) < ($11::timestamptz, $12::uuid))
+  AND (NOT $11::boolean OR sub.status IN ('past_due', 'awaiting_method'))
+  AND ($12::timestamptz IS NULL OR (sub.created_at, sub.id) < ($12::timestamptz, $13::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC, sub.id DESC
-LIMIT $13::int
+LIMIT $14::int
 `
 
 type ListSubscriptionsPageParams struct {
@@ -1808,6 +1812,7 @@ type ListSubscriptionsPageParams struct {
 	CanceledAfter  *time.Time
 	CanceledBefore *time.Time
 	ExpiresBefore  *time.Time
+	Dunning        bool
 	AfterAt        *time.Time
 	AfterID        *uuid.UUID
 	RowLimit       int32
@@ -1827,6 +1832,7 @@ func (q *Queries) ListSubscriptionsPage(ctx context.Context, arg ListSubscriptio
 		arg.CanceledAfter,
 		arg.CanceledBefore,
 		arg.ExpiresBefore,
+		arg.Dunning,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,

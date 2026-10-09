@@ -12,7 +12,7 @@ import (
 // scheduled plan change and the access it grants. Derived flags are evaluated
 // at the response's read time.
 func (r *UserSubscriptionResponse) View() billing.Subscription {
-	out := SubscriptionView(r.Subscription, r.Price, r.EvaluationTime())
+	out := SubscriptionView(r.Subscription, r.Price, r.Dunning, r.EvaluationTime())
 	if out.ScheduledChange != nil {
 		out.ScheduledChange.Price = r.ScheduledPrice.PublicView()
 		out.ScheduledChange.Product = r.ScheduledProduct.Summary()
@@ -23,10 +23,10 @@ func (r *UserSubscriptionResponse) View() billing.Subscription {
 
 // SubscriptionView is the one projection of a subscription row onto the
 // shared billing.Subscription: the merchant and self routes both serve it.
-func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Time) billing.Subscription {
+// dunning is the case DunningViews read, nil when none.
+func SubscriptionView(sub *models.Subscription, price *models.Price, dunning *billing.SubscriptionDunning, now time.Time) billing.Subscription {
 	out := billing.Subscription{
-		CollectionPolicy: string(sub.CollectionPolicy),
-		LastRetryAt:      sub.LastRetryAt, RetryAttempts: sub.RetryAttempts, NextRetryAt: sub.NextRetryAt, GraceEndsAt: sub.GraceEndsAt, DeletionScheduledAt: sub.DeletionScheduledAt,
+		CollectionPolicy: string(sub.CollectionPolicy), Dunning: dunning, DeletionScheduledAt: sub.DeletionScheduledAt,
 		ID: billing.SubscriptionID(sub.ID), CustomerID: billing.CustomerID(sub.CustomerID), ProductID: billing.ProductID(sub.ProductID), PriceID: billing.PriceID(sub.PriceID),
 		Quantity: sub.Quantity,
 		PSPID:    billing.PSPID(sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: normalize.OptionalString(sub.RailSubscriptionID), Status: billing.SubscriptionStatus(sub.Status),

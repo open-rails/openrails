@@ -52,6 +52,7 @@ import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { ChangeTierDialog } from "@/pages/subscriptions/change-tier-dialog"
+import { dunningSummary } from "@/pages/subscriptions/dunning"
 
 export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
@@ -174,9 +175,18 @@ export function SubscriptionDetailPage() {
             )}
           </div>
         </Fact>
-        <Fact label="Grace ends">{formatDate(sub.grace_ends_at)}</Fact>
-        <Fact label="Retries">
-          {sub.retry_attempts ?? 0} · next {formatDate(sub.next_retry_at)}
+        <Fact label="Dunning">
+          {sub.dunning ? dunningSummary(sub.dunning) : "—"}
+        </Fact>
+        <Fact
+          label={
+            sub.dunning?.waiting_for_new_card ? "Card deadline" : "Final retry"
+          }
+        >
+          {formatDate(sub.dunning?.final_retry_at)}
+        </Fact>
+        <Fact label="Last decline">
+          {sub.dunning?.last_failure_reason ?? "—"}
         </Fact>
         <Fact label="Canceled">
           {sub.canceled_at

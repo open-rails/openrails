@@ -150,7 +150,7 @@ WITH billed AS (
 SELECT s.id
 FROM billing.invoices s, billed b
 WHERE s.merchant_id = $1 AND s.customer_id = $2 AND s.currency = sqlc.arg(currency)
-  AND s.status IN ('open', 'past_due', 'uncollectible')
+  AND s.status IN ('open', 'uncollectible')
   AND s.amount_paid + s.amount_due < s.total_amount
   AND s.id <> sqlc.arg(invoice_id)::uuid
   AND s.period_starts_at <= b.last_at AND s.period_ends_at > b.first_at
@@ -166,7 +166,7 @@ WITH s AS (
     SELECT i.id, i.customer_id, i.currency, i.period_starts_at, i.period_ends_at
     FROM billing.invoices i
     WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = ANY(sqlc.arg(statement_ids)::uuid[])
-      AND i.status IN ('open', 'past_due', 'uncollectible')
+      AND i.status IN ('open', 'uncollectible')
       AND i.amount_paid + i.amount_due < i.total_amount
 ), own AS (
     SELECT s.id, COALESCE(SUM(ii.amount), 0)::bigint AS amount
@@ -244,7 +244,7 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
     WHERE i.merchant_id = s.merchant_id
       AND i.customer_id = s.customer_id
       AND i.currency = s.currency
-      AND i.status IN ('open', 'past_due')
+      AND i.status = 'open'
       AND i.amount_due > 0
 ) >= COALESCE(
     pol.threshold,
@@ -261,7 +261,7 @@ JOIN billing.money_settings s
  AND s.customer_id = i.customer_id
  AND s.currency = i.currency
 WHERE i.merchant_id = $1
-  AND i.status IN ('open', 'past_due')
+  AND i.status = 'open'
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
   AND s.collection_payment_method_id IS NOT NULL
@@ -284,19 +284,14 @@ ORDER BY i.due_at NULLS FIRST, i.created_at ASC;
 --                                     customer must fix their instrument.
 --   a next attempt                 -> bucket 1. Still dunning.
 --
--- Bucket 2 leaves `status` exactly where it was on purpose. A decline bucket
--- answers "what do we do about the CARD"; `past_due` is a reading of the CLOCK
--- (MarkInvoicesPastDue, due_at < now) and belongs to the delinquency axis
--- (or#878). Our decision to stop attempting must not age the customer's
--- invoice: it stays open, it stays collectible, and it stays theirs to settle.
+-- Only a terminal outcome changes `status`. A decline bucket answers "what do
+-- we do about the CARD"; being overdue is a reading of the CLOCK (due_at <
+-- now) and belongs to the delinquency axis (or#878). The invoice stays open,
+-- collectible and the customer's to settle.
 UPDATE billing.invoices
 SET collection_failure_count = collection_failure_count + 1,
     collection_failed_at = COALESCE(collection_failed_at, sqlc.arg(now)::timestamptz),
-    status = CASE
-        WHEN sqlc.arg(terminal)::boolean THEN 'uncollectible'
-        WHEN sqlc.narg(next_attempt_at)::timestamptz IS NULL THEN status
-        ELSE 'past_due'
-    END,
+    status = CASE WHEN sqlc.arg(terminal)::boolean THEN 'uncollectible' ELSE status END,
     next_collection_attempt_at = sqlc.narg(next_attempt_at)::timestamptz,
     last_collection_failure_code = sqlc.narg(failure_code),
     last_collection_failure_message = sqlc.narg(failure_message),
@@ -306,7 +301,7 @@ SET collection_failure_count = collection_failure_count + 1,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = sqlc.arg(invoice_id)
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id = sqlc.arg(intent_id)::uuid;
 
 -- name: StopInvoiceCollection :execrows
@@ -323,7 +318,7 @@ SET collection_failure_count = collection_failure_count + 1,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = sqlc.arg(invoice_id)::uuid
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id IS NULL;
 
 -- name: ResumeStoppedInvoiceCollection :execrows
@@ -342,42 +337,31 @@ SET next_collection_attempt_at = sqlc.arg(now)::timestamptz,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = sqlc.arg(currency)
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due > 0
   AND collection_method = 'charge_automatically'
   AND collection_failure_count > 0
   AND next_collection_attempt_at IS NULL
   AND collection_intent_id IS NULL;
 
--- name: MarkInvoicesPastDue :one
--- Invoice transitions and payer notifications commit in one statement. Collection
--- failures may already have set past_due; those invoices still need their notice.
-WITH overdue AS (
-    UPDATE billing.invoices
-    SET status = 'past_due', updated_at = sqlc.arg(now)::timestamptz
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND status = 'open' AND amount_due > 0
-      AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
-    RETURNING merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
-), candidates AS (
-    SELECT * FROM overdue
-    UNION ALL
-    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
-    FROM billing.invoices
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND status = 'past_due' AND amount_due > 0
-      AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
-), notices AS (
+-- name: NotifyOverdueInvoices :one
+-- Tells each payer once about each open invoice past its due date; the notice
+-- id is the invoice's, so a later pass adds none.
+WITH notices AS (
     INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
            jsonb_build_object('invoice_id', id,
                               'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
                               'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
            NULL, sqlc.arg(now)::timestamptz
-    FROM candidates
+    FROM billing.invoices
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND status = 'open' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
     ON CONFLICT (merchant_id, id) DO NOTHING
+    RETURNING id
 )
-SELECT count(*) FROM overdue;
+SELECT count(*) FROM notices;
 
 -- name: SumPendingInvoiceItemAmountBySourceInPeriod :many
 -- #798: rated charge per accrual source for the statement's per-category
@@ -421,7 +405,7 @@ SET amount_paid = amount_paid + sqlc.arg(snapshot)::bigint,
     last_collection_failure_message = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN NULL ELSE last_collection_failure_message END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due >= sqlc.arg(snapshot)::bigint;
 
 -- name: SetInvoiceExternalID :execrows
@@ -522,12 +506,11 @@ WHERE p.merchant_id = $1
   AND p.invoice_id = $3;
 
 -- name: ClaimInvoiceCollection :execrows
--- Points the invoice at its one live collection operation. Claiming says
--- nothing about lateness (status is the clock's reading, or#828/or#878);
--- reclaiming an `uncollectible` invoice reopens it (a manual retry undoing a
--- terminal outcome). The previous failure code stays as forensics.
+-- Points the invoice at its one live collection operation; reclaiming an
+-- `uncollectible` invoice reopens it (a manual retry undoing a terminal
+-- outcome). The previous failure code stays as forensics.
 UPDATE billing.invoices
-SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
+SET status = 'open',
     next_collection_attempt_at = NULL,
     uncollectible_at = NULL,
     collection_intent_id = sqlc.arg(intent_id)::uuid,
@@ -535,7 +518,7 @@ SET status = CASE WHEN status = 'uncollectible' THEN 'past_due' ELSE status END,
 WHERE merchant_id = $1
   AND customer_id = $2
   AND id = sqlc.arg(invoice_id)
-  AND status IN ('open', 'past_due', 'uncollectible')
+  AND status IN ('open', 'uncollectible')
   AND amount_due > 0
   AND collection_intent_id IS NULL;
 
@@ -559,7 +542,7 @@ SET status = 'voided',
     voided_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
-  AND status IN ('draft', 'open', 'past_due')
+  AND status IN ('draft', 'open')
   AND collection_intent_id IS NULL
 RETURNING *;
 
@@ -569,7 +552,7 @@ SET status = 'uncollectible',
     uncollectible_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND collection_intent_id IS NULL
 RETURNING *;
 
@@ -607,7 +590,7 @@ LIMIT sqlc.arg(page_size)::int;
 SELECT id, amount_due, collection_intent_id
 FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)::text
-  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+  AND status IN ('open', 'uncollectible') AND amount_due > 0
 ORDER BY due_at NULLS FIRST, created_at, id
 FOR UPDATE;
 
@@ -615,7 +598,7 @@ FOR UPDATE;
 SELECT COALESCE(SUM(amount_due), 0)::bigint AS amount
 FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)::text
-  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0;
+  AND status IN ('open', 'uncollectible') AND amount_due > 0;
 
 -- name: ApplyInvoiceBalancePayment :execrows
 -- Pays an invoice from the customer's funded balance. An invoice with a
@@ -631,6 +614,6 @@ SET amount_paid = amount_paid + sqlc.arg(amount)::bigint,
     next_collection_attempt_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN NULL ELSE next_collection_attempt_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
-  AND status IN ('open', 'past_due', 'uncollectible')
+  AND status IN ('open', 'uncollectible')
   AND collection_intent_id IS NULL
   AND amount_due >= sqlc.arg(amount)::bigint;

@@ -274,7 +274,7 @@ func TestStandaloneCustomers(t *testing.T) {
 			target, _ = merchanttarget.FromContext(r.Context())
 			w.WriteHeader(http.StatusNoContent)
 		}))
-		r := httptest.NewRequest(http.MethodGet, "/v1/me/balance", nil)
+		r := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 		if authorization != "" {
 			r.Header.Set("Authorization", authorization)
 		}

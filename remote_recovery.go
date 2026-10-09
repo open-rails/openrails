@@ -18,6 +18,9 @@ func (c *Client) ListSubscriptions(ctx context.Context, params billing.Subscript
 	if params.Status != "" {
 		q.Set("status", string(params.Status))
 	}
+	if params.Dunning {
+		q.Set("dunning", "true")
+	}
 	if params.Rail != "" {
 		q.Set("rail", params.Rail)
 	}

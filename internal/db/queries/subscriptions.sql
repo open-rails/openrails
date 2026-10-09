@@ -229,6 +229,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
   AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
   AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
   AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND sub.deleted_at IS NULL;
 
 -- One page of a subscription list, newest first; after_at/after_id is the
@@ -244,6 +245,7 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(customer_id):
   AND (sqlc.narg(canceled_after)::timestamptz IS NULL OR sub.canceled_at >= sqlc.narg(canceled_after)::timestamptz)
   AND (sqlc.narg(canceled_before)::timestamptz IS NULL OR sub.canceled_at <= sqlc.narg(canceled_before)::timestamptz)
   AND (sqlc.narg(expires_before)::timestamptz IS NULL OR sub.current_period_ends_at <= sqlc.narg(expires_before)::timestamptz)
+  AND (NOT sqlc.arg(dunning)::boolean OR sub.status IN ('past_due', 'awaiting_method'))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (sub.created_at, sub.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC, sub.id DESC

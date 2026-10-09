@@ -145,15 +145,15 @@ func TestEngineCadenceFirstDecline(t *testing.T) {
 		switch {
 		case hours < collection.MinRetryCycleHours:
 			require.Equal(t, billing.SubscriptionCanceled, sub.Status, "the first decline is terminal below 96h")
-			require.Nil(t, sub.NextRetryAt)
+			require.Nil(t, nextRetry(sub))
 		case hours < collection.MonthlyCycleHours:
 			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-			require.NotNil(t, sub.NextRetryAt)
-			require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "weekly tier retries a day later")
+			require.NotNil(t, nextRetry(sub))
+			require.Equal(t, 24*time.Hour, nextRetry(sub).Sub(first).Round(time.Hour), "weekly tier retries a day later")
 		default:
 			require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-			require.NotNil(t, sub.NextRetryAt)
-			require.Equal(t, 48*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "monthly tier retries two days later")
+			require.NotNil(t, nextRetry(sub))
+			require.Equal(t, 48*time.Hour, nextRetry(sub).Sub(first).Round(time.Hour), "monthly tier retries two days later")
 		}
 	})
 }

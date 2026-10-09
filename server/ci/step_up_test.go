@@ -36,7 +36,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": customer}}}},
+		{http.MethodPatch, "/v1/admin/customers/" + customer, map[string]any{}},
 		{http.MethodPost, "/v1/admin/product-access", map[string]any{"items": []any{map[string]any{"customer_id": customer, "product_id": "prod_" + uuid.NewString(), "hours": 24}}}},
 		{http.MethodPost, "/v1/admin/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
@@ -60,6 +60,6 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	var minted struct{ Secret string }
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&minted))
 	key := minted.Secret
-	w = call(t, handler, key, http.MethodPatch, "/v1/admin/customers/settings", "", map[string]any{"items": []any{map[string]any{"customer_id": uuid.NewString()}}})
+	w = call(t, handler, key, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), "", map[string]any{})
 	require.Equal(t, http.StatusOK, w.Code, "an API key carries no sign-in to step up: %s", w.Body.String())
 }

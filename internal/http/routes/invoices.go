@@ -18,7 +18,7 @@ var (
 // the customer who owes them.
 var invoicesRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/invoices", Group: Admin, Auth: AuthMerchant, Name: "ListInvoices", Level: LevelRead,
-		Query: params(cursorPage, idsParam, text("currency"), text("customer_id"), text("period_starts_after"), text("period_starts_before"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Invoice]{}}}, Errors: codes("invalid_cursor"), Bind: gated(handlers.ListInvoices)},
+		Query: params(cursorPage, idsParam, text("currency"), text("customer_id"), Param{Name: "overdue", Kind: "boolean"}, text("period_starts_after"), text("period_starts_before"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Invoice]{}}}, Errors: codes("invalid_cursor"), Bind: gated(handlers.ListInvoices)},
 	{Method: GET, Path: "/v1/admin/invoices/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetInvoice", Level: LevelRead,
 		Responses: []Reply{{200, billing.Invoice{}}}, Errors: invoiceErrors, Bind: gated(handlers.GetInvoice)},
 	{Method: GET, Path: "/v1/admin/invoices/{id}/payments", Group: Admin, Auth: AuthMerchant, Name: "ListInvoicePayments", Level: LevelRead,

@@ -59,8 +59,8 @@ func TestEngineRebillAttempts(t *testing.T) {
 					e.setDecline(visa.Last4, "", "")
 				}
 				sub := w.subscription(e.tp, e.sub)
-				require.NotNil(t, sub.NextRetryAt)
-				w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+				require.NotNil(t, nextRetry(sub))
+				w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 				w.runRenewals()
 			}
 			require.Equal(t, billing.SubscriptionActive, w.subscription(e.tp, e.sub).Status)
@@ -117,7 +117,7 @@ func TestNMIScheduleRebillAttempts(t *testing.T) {
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
 	w.nmi.SetDecline(visa.Last4, "")
-	w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+	w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
 

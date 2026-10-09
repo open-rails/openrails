@@ -86,7 +86,7 @@ func (w *world) arrearsInvoice(c *customer) billing.InvoiceID {
 	const owed = 50_000_000 // the default invoice threshold
 	before, err := client.ListInvoices(ctx, billing.InvoiceListParams{CustomerID: c.cid()})
 	require.NoError(w.t, err)
-	_, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: owed}}}})
+	_, err = client.UpdateCustomer(ctx, c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: owed}}})
 	require.NoError(w.t, err)
 	request, expires := uuid.NewString(), w.clock.Now().Add(time.Hour)
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: c.cid(), Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})
@@ -242,7 +242,7 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
 	// The customer is billed in arrears, on this card.
-	_, err := w.client[embedded].UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: e.c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}}})
+	_, err := w.client[embedded].UpdateCustomer(t.Context(), e.c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
 	require.NoError(t, err)
 	e.c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": e.method, "currency": "USD"})
 	pm := w.methodRow(e.method, "rail_method_ref")

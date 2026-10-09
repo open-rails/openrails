@@ -660,6 +660,15 @@ their paid-period boundary and runs retries whose `next_retry_at` has passed.
 A subscription it cannot process raises a standing `life.due_pass.refused`
 finding (resolved automatically once it processes) and never fails the pass.
 
+**Reading a case.** `GET /v1/admin/subscriptions?dunning=true` lists the open
+cases, `past_due` and `awaiting_method`, each with its `dunning`: `attempts`
+(declined charges so far), `retries_left` and `final_retry_at` (from the policy
+the case opened under), `next_retry_at`, `waiting_for_new_card` (canceled at
+`final_retry_at` unless a card arrives) and `last_failure_reason`. A
+provider-owned subscription carries no `retries_left` or `final_retry_at`: the
+provider runs its own retries, and `next_retry_at` is its next attempt when
+OpenRails knows it (CCBill reports it; Stripe's is not stored). A case leaves the list when it is paid or its retries give up.
+
 **Missed rebills.** Every 15 minutes the rebill watch looks for renewals with
 no attempt past their deadline (engine: 1h; `nmi_schedule`: 24h, after reading
 NMI's Query API and schedule) and raises one `life.rebill.missed` finding per

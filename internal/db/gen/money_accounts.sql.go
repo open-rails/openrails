@@ -180,7 +180,7 @@ FROM (
     UNION
     SELECT currency FROM billing.invoices
     WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-      AND status IN ('open', 'past_due') AND amount_due > 0
+      AND status = 'open' AND amount_due > 0
 ) currencies
 ORDER BY currency
 `
@@ -248,6 +248,154 @@ func (q *Queries) ListCustomerSettingsAccounts(ctx context.Context, arg ListCust
 			&i.Currency,
 			&i.CreditLimitAmount,
 			&i.Tier,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomersBalanceCurrencies = `-- name: ListCustomersBalanceCurrencies :many
+SELECT DISTINCT customer_id::uuid AS customer_id, currency::text AS currency
+FROM (
+    SELECT customer_id, currency FROM billing.ledger_accounts
+    WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+      AND account_type = 'customer_balance'
+    UNION ALL
+    SELECT customer_id, currency FROM billing.money_settings
+    WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+    UNION ALL
+    SELECT customer_id, currency FROM billing.invoice_items
+    WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+      AND invoice_id IS NULL AND status = 'pending'
+    UNION ALL
+    SELECT customer_id, currency FROM billing.invoices
+    WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+      AND status = 'open' AND amount_due > 0
+) currencies
+ORDER BY customer_id, currency
+LIMIT $3::int
+`
+
+type ListCustomersBalanceCurrenciesParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
+}
+
+type ListCustomersBalanceCurrenciesRow struct {
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// ListCustomerBalanceCurrencies for many customers: at most one row per
+// customer and registered currency, which bounds row_limit.
+func (q *Queries) ListCustomersBalanceCurrencies(ctx context.Context, arg ListCustomersBalanceCurrenciesParams) ([]ListCustomersBalanceCurrenciesRow, error) {
+	rows, err := q.db.Query(ctx, listCustomersBalanceCurrencies, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomersBalanceCurrenciesRow
+	for rows.Next() {
+		var i ListCustomersBalanceCurrenciesRow
+		if err := rows.Scan(&i.CustomerID, &i.Currency); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomersMoneyAccounts = `-- name: ListCustomersMoneyAccounts :many
+SELECT a.customer_id::uuid AS customer_id, a.currency, a.account_type, (a.credits_posted - a.debits_posted)::bigint AS balance
+FROM billing.ledger_accounts a
+WHERE a.merchant_id = $1::uuid AND a.customer_id = ANY($2::uuid[])
+  AND a.account_type IN ('customer_balance', 'arrears_liability')
+ORDER BY a.customer_id, a.currency, a.account_type
+LIMIT $3::int
+`
+
+type ListCustomersMoneyAccountsParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
+}
+
+type ListCustomersMoneyAccountsRow struct {
+	CustomerID  uuid.UUID
+	Currency    string
+	AccountType string
+	Balance     int64
+}
+
+// The named customers' balance and arrears accounts with their O(1)
+// balances: at most two per customer and registered currency.
+func (q *Queries) ListCustomersMoneyAccounts(ctx context.Context, arg ListCustomersMoneyAccountsParams) ([]ListCustomersMoneyAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listCustomersMoneyAccounts, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomersMoneyAccountsRow
+	for rows.Next() {
+		var i ListCustomersMoneyAccountsRow
+		if err := rows.Scan(
+			&i.CustomerID,
+			&i.Currency,
+			&i.AccountType,
+			&i.Balance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomersMoneySettings = `-- name: ListCustomersMoneySettings :many
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+ORDER BY customer_id, currency
+LIMIT $3::int
+`
+
+type ListCustomersMoneySettingsParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
+}
+
+// At most one row per customer and registered currency.
+func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustomersMoneySettingsParams) ([]BillingMoneySetting, error) {
+	rows, err := q.db.Query(ctx, listCustomersMoneySettings, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingMoneySetting
+	for rows.Next() {
+		var i BillingMoneySetting
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.BillingMode,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tier,
+			&i.Currency,
+			&i.CreditLimitAmount,
+			&i.CollectionPaymentMethodID,
 		); err != nil {
 			return nil, err
 		}

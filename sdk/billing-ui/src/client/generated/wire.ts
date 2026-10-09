@@ -175,6 +175,13 @@ export type CurrencyUnits = {
   minor_decimals: number
 }
 
+export type CustomerAccount = {
+  id: string
+  balances: Balance[]
+  collection_payment_methods: CollectionPaymentMethod[]
+  unread_notifications: number
+}
+
 export type CustomerAmount = {
   min_amount: string
   max_amount: string
@@ -230,10 +237,11 @@ export type Invoice = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string | null
-  status: "draft" | "open" | "paid" | "past_due" | "uncollectible" | "voided"
+  status: "draft" | "open" | "paid" | "uncollectible" | "voided"
   collection_method: "charge_automatically" | "send_invoice"
   issued_at: string | null
   due_at: string | null
+  delinquent: boolean
   paid_at: string | null
   voided_at: string | null
   uncollectible_at: string | null
@@ -638,10 +646,7 @@ export type StripeEngineAuthentication = {
 export type Subscription = {
   collection_policy: string
   recovery?: PaymentRecovery
-  last_retry_at: string | null
-  retry_attempts: number | null
-  next_retry_at: string | null
-  grace_ends_at: string | null
+  dunning: SubscriptionDunning | null
   deletion_scheduled_at?: string
   payments?: Payment[]
   id: string
@@ -684,6 +689,15 @@ export type SubscriptionAccess = {
   rail?: string
   starts_at: string
   ends_at?: string
+}
+
+export type SubscriptionDunning = {
+  attempts: number
+  retries_left: number | null
+  next_retry_at: string | null
+  final_retry_at: string | null
+  waiting_for_new_card: boolean
+  last_failure_reason: "authentication_required" | "blocked_by_psp" | "call_issuer" | "card_not_supported" | "communication_error" | "currency_not_supported" | "do_not_honor" | "duplicate_transaction" | "expired_card" | "fraudulent" | "gateway_rejected" | "generic_decline" | "incorrect_address" | "incorrect_cvc" | "incorrect_number" | "incorrect_zip" | "insufficient_funds" | "invalid_account" | "invalid_expiry" | "invalid_pin" | "invalid_request" | "issuer_unavailable" | "lost_card" | "merchant_config" | "no_such_issuer" | "over_limit" | "pickup_card" | "processing_error" | "restricted_card" | "retry_later" | "security_violation" | "stolen_card" | "stop_recurring" | "transaction_not_allowed" | "try_again_later" | "unknown" | "update_cardholder_data" | null
 }
 
 export type SubscriptionRetryNowResult = {
@@ -753,10 +767,6 @@ export type TokenQuote = {
   fx_currency: string
   quoted_at: string
   expires_at: string
-}
-
-export type UnreadCount = {
-  unread_count: number
 }
 
 export type Usage = {

@@ -53,7 +53,7 @@ FROM billing.invoices
 WHERE merchant_id = $2
   AND customer_id = $3
   AND currency = $4
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due > 0
   AND due_at IS NOT NULL
   AND due_at < $1::timestamptz
@@ -90,21 +90,24 @@ func (q *Queries) GetOverdueInvoiceAggregate(ctx context.Context, arg GetOverdue
 	return i, err
 }
 
-const listCustomerDelinquency = `-- name: ListCustomerDelinquency :many
+const listCustomersDelinquency = `-- name: ListCustomersDelinquency :many
 SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
 WHERE merchant_id = $1
-  AND customer_id = $2
-ORDER BY currency
+  AND customer_id = ANY($2::uuid[])
+ORDER BY customer_id, currency
+LIMIT $3::int
 `
 
-type ListCustomerDelinquencyParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+type ListCustomersDelinquencyParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
 }
 
-// Every currency for one payer (the per-payer API read).
-func (q *Queries) ListCustomerDelinquency(ctx context.Context, arg ListCustomerDelinquencyParams) ([]BillingCustomerDelinquency, error) {
-	rows, err := q.db.Query(ctx, listCustomerDelinquency, arg.MerchantID, arg.CustomerID)
+// Every currency the named customers have been overdue in: at most one row
+// per customer and registered currency, which bounds row_limit.
+func (q *Queries) ListCustomersDelinquency(ctx context.Context, arg ListCustomersDelinquencyParams) ([]BillingCustomerDelinquency, error) {
+	rows, err := q.db.Query(ctx, listCustomersDelinquency, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +145,7 @@ SELECT q.merchant_id
 FROM (
     SELECT i.merchant_id
       FROM billing.invoices i
-     WHERE i.status IN ('open', 'past_due')
+     WHERE i.status = 'open'
        AND i.amount_due > 0
        AND i.due_at IS NOT NULL
        AND i.due_at < $1::timestamptz
@@ -178,68 +181,6 @@ func (q *Queries) ListDelinquencyWorkMerchants(ctx context.Context, arg ListDeli
 			return nil, err
 		}
 		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listDelinquentCustomers = `-- name: ListDelinquentCustomers :many
-SELECT merchant_id, customer_id, currency, state, overdue_started_at, entered_at, overdue_amount, overdue_invoices, transition_seq, evaluated_at, created_at, updated_at FROM billing.customer_delinquency
-WHERE merchant_id = $1
-  AND state <> 'current'
-  AND ($2::text IS NULL OR state = $2::text)
-  AND ($3::timestamptz IS NULL
-   OR (overdue_started_at, customer_id, currency) > ($3::timestamptz, $4::uuid, $5::text))
-ORDER BY overdue_started_at, customer_id, currency
-LIMIT $6
-`
-
-type ListDelinquentCustomersParams struct {
-	MerchantID            uuid.UUID
-	State                 *string
-	AfterOverdueStartedAt *time.Time
-	AfterCustomer         *uuid.UUID
-	AfterCurrency         *string
-	RowLimit              int64
-}
-
-// The operator's roster: who is overdue, worst first. `current` rows are never
-// returned — a settled payer is not a row anyone needs to look at.
-func (q *Queries) ListDelinquentCustomers(ctx context.Context, arg ListDelinquentCustomersParams) ([]BillingCustomerDelinquency, error) {
-	rows, err := q.db.Query(ctx, listDelinquentCustomers,
-		arg.MerchantID,
-		arg.State,
-		arg.AfterOverdueStartedAt,
-		arg.AfterCustomer,
-		arg.AfterCurrency,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingCustomerDelinquency
-	for rows.Next() {
-		var i BillingCustomerDelinquency
-		if err := rows.Scan(
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Currency,
-			&i.State,
-			&i.OverdueStartedAt,
-			&i.EnteredAt,
-			&i.OverdueAmount,
-			&i.OverdueInvoices,
-			&i.TransitionSeq,
-			&i.EvaluatedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -324,7 +265,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) pol ON true
 WHERE i.merchant_id = $1
-  AND i.status IN ('open', 'past_due')
+  AND i.status = 'open'
   AND i.amount_due > 0
   AND i.due_at IS NOT NULL
   AND i.due_at < $2::timestamptz

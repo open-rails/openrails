@@ -11,7 +11,7 @@ import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Customer } from "@/lib/api/generated/wire"
-import { formatDate, shortId } from "@/lib/format"
+import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
@@ -48,11 +48,32 @@ const columns: ColumnDef<Customer, unknown>[] = [
       ),
   },
   {
+    header: "Balance",
+    cell: ({ row }) => {
+      const balances = row.original.balances
+      if (!balances.length)
+        return <span className="text-muted-foreground">—</span>
+      return (
+        <div className="flex flex-col gap-0.5 tabular-nums">
+          {balances.map((b) => (
+            <span key={b.currency}>
+              {formatNativeAmount(b.balance_amount, b.currency)}
+              {BigInt(b.owed_amount) > 0n && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  · owed {formatNativeAmount(b.owed_amount, b.currency)}
+                </span>
+              )}
+            </span>
+          ))}
+        </div>
+      )
+    },
+  },
+  {
     header: "Customer",
     cell: ({ row }) => (
-      <span className="text-xs text-muted-foreground">
-        {shortId(row.original.id, 13)}
-      </span>
+      <span className="font-mono text-xs">{shortId(row.original.id, 13)}</span>
     ),
   },
   {

@@ -47,7 +47,7 @@ func TestClientRequestShapes(t *testing.T) {
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
 		"/v1/admin/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
-		"/v1/admin/customers/settings":                              `{"data":[{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}],"next_cursor":null}`,
+		"/v1/admin/customers":                                       `{"data":[{"id":"` + customer + `","settings":{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}}],"next_cursor":null}`,
 		"/v1/admin/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
 		"/v1/admin/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
 		"/v1/admin/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
@@ -105,18 +105,26 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, "gold", item["trust_level"])
 			require.Equal(t, "42", item["accrual_rate_delta_per_hour"])
 		}},
-		{"settings read names each customer", func() error {
-			page, err := client.ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{typedCustomer, typedCustomer}})
-			if err == nil && page.Items[0].TrustLevels[0].TrustLevel != "gold" {
+		{"customer read names each customer", func() error {
+			page, err := client.ListCustomers(t.Context(), billing.CustomerListParams{IDs: []billing.CustomerID{typedCustomer, typedCustomer}})
+			if err == nil && page.Items[0].Settings.TrustLevels[0].TrustLevel != "gold" {
 				err = errors.New("settings not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/admin/customers/settings", "ids=" + customer + "%2C" + customer, nil},
-		{"settings write sends only the named fields", func() error {
-			_, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: typedCustomer, BillingPolicy: catalog.Null[string]()}})
+		}, http.MethodGet, "/v1/admin/customers", "ids=" + customer + "%2C" + customer, nil},
+		{"overdue invoices", func() error {
+			_, err := client.ListInvoices(t.Context(), billing.InvoiceListParams{Overdue: true})
 			return err
-		}, http.MethodPatch, "/v1/admin/customers/settings", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, map[string]any{"items": []any{map[string]any{"customer_id": customer, "billing_policy": nil}}}, b)
+		}, http.MethodGet, "/v1/admin/invoices", "overdue=true", nil},
+		{"subscriptions in dunning", func() error {
+			_, err := client.ListSubscriptions(t.Context(), billing.SubscriptionListParams{Dunning: true})
+			return err
+		}, http.MethodGet, "/v1/admin/subscriptions", "dunning=true", nil},
+		{"settings write sends only the named fields", func() error {
+			_, err := client.UpdateCustomer(t.Context(), typedCustomer, billing.UpdateCustomerParams{BillingPolicy: catalog.Null[string]()})
+			return err
+		}, http.MethodPatch, "/v1/admin/customers/" + customer, "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, map[string]any{"billing_policy": nil}, b)
 		}},
 		{"credit grant source ids are opaque query values", func() error {
 			page, err := client.ListCreditGrants(t.Context(), typedCustomer, billing.CreditGrantListParams{SourceID: "../source/receipt?part=1&currency=JPY"})
@@ -301,19 +309,14 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PaymentMethodListParams{})
 			return err
 		},
-		"settings customer": func() error {
-			_, err := c.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{{}}})
-			return err
-		},
-		"empty settings ids": func() error {
-			_, err := c.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{}})
+		"empty customer ids": func() error {
+			_, err := c.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{}})
 			return err
 		},
 		"settings update customer": func() error {
-			_, err := c.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{}})
+			_, err := c.UpdateCustomer(ctx, billing.CustomerID{}, billing.UpdateCustomerParams{})
 			return err
 		},
-		"empty settings update": func() error { _, err := c.UpdateCustomerSettings(ctx, nil); return err },
 		"settled payment customer": func() error {
 			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID{}, price)
 			return err
@@ -519,8 +522,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"provisioning token": func() error { return c.DeleteProvisioningToken(ctx, billing.ProvisioningTokenID{}) },
-		"billing profile":    func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
-		"delinquency":        func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
+		"get customer":       func() error { _, err := c.GetCustomer(ctx, zero); return err },
 		"credit grant": func() error {
 			_, err := c.GetCreditGrant(ctx, billing.CustomerID(uuid.New()), billing.CreditGrantID{})
 			return err

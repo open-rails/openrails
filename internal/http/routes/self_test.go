@@ -52,7 +52,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	token := fake.Person(userA)
 	auth := map[string]string{"Authorization": "Bearer " + token}
 	for _, route := range []string{
-		"GET /v1/me/balance", "GET /v1/me/balance/transactions", "GET /v1/me/spend-limits",
+		"GET /v1/me", "GET /v1/me/balance/transactions", "GET /v1/me/spend-limits",
 		"PUT /v1/me/collection-payment-method", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
 		"PUT /v1/me/subscriptions/sub_1/payment-method", "POST /v1/me/subscriptions/sub_1/change-tier",
 	} {
@@ -65,14 +65,14 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	delegated.Invoker = billingauth.Invoker{Issuer: "https://cozy.example", ID: "u_42"}
 	invoker := map[string]string{"Authorization": "Bearer " + fake.Issue(authtest.Grant{Identity: delegated})}
 	require.True(t, passedGates(reach(payer, http.MethodGet, "/v1/me/spend-limits", invoker)))
-	for _, route := range []string{"GET /v1/me/balance", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout-sessions"} {
+	for _, route := range []string{"GET /v1/me", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout-sessions"} {
 		method, path, _ := strings.Cut(route, " ")
 		require.Equal(t, http.StatusForbidden, reach(payer, method, path, invoker), route)
 	}
 
-	require.Equal(t, http.StatusUnauthorized, reach(payer, http.MethodGet, "/v1/me/balance", map[string]string{"Authorization": "Bearer forged"}))
+	require.Equal(t, http.StatusUnauthorized, reach(payer, http.MethodGet, "/v1/me", map[string]string{"Authorization": "Bearer forged"}))
 	require.Equal(t, http.StatusUnauthorized, reach(payer, http.MethodGet, "/v1/me/spend-limits", map[string]string{"Authorization": "Bearer forged"}))
-	require.Equal(t, http.StatusConflict, reach(payer, http.MethodGet, "/v1/me/balance", map[string]string{"Authorization": "Bearer " + token, merchant.SelectorHeader: "id:" + merchantB.String()}),
+	require.Equal(t, http.StatusConflict, reach(payer, http.MethodGet, "/v1/me", map[string]string{"Authorization": "Bearer " + token, merchant.SelectorHeader: "id:" + merchantB.String()}),
 		"a browser cannot select a merchant other than the mount's")
 }
 

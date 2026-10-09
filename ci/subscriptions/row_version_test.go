@@ -41,7 +41,8 @@ func TestStaleSubscriptionImageNeverReverts(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	sub := w.subscription(embedded, e.sub)
-	require.NotNil(t, sub.NextRetryAt)
-	require.True(t, sub.NextRetryAt.Equal(retry), "the other writer's retry schedule survives")
+	var stored *time.Time
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT next_retry_at FROM billing.subscriptions WHERE id = $1`), id).Scan(&stored))
+	require.NotNil(t, stored)
+	require.True(t, stored.Equal(retry), "the other writer's retry schedule survives")
 }

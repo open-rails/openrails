@@ -146,6 +146,22 @@ export const nextActionSchema = z.object({
 })
 export type NextAction = z.infer<typeof nextActionSchema>
 
+/**
+ * A declined renewal being collected. `retries_left` and `final_retry_at`
+ * follow the merchant's dunning policy; both are null when the provider runs
+ * the retries. While `waiting_for_new_card`, nothing is charged until the card
+ * is replaced, and the subscription ends at `final_retry_at`.
+ */
+export const subscriptionDunningSchema = z.object({
+  attempts: z.number(),
+  retries_left: z.number().nullish(),
+  next_retry_at: time.nullish(),
+  final_retry_at: time.nullish(),
+  waiting_for_new_card: z.boolean(),
+  last_failure_reason: z.string().nullish(),
+})
+export type SubscriptionDunning = z.infer<typeof subscriptionDunningSchema>
+
 export const subscriptionSchema = z.object({
   id: z.string(),
   status: subscriptionStatusSchema,
@@ -166,8 +182,8 @@ export const subscriptionSchema = z.object({
   cancel_mode: z.string().nullish(),
   cancel_portal_url: z.string().nullish(),
   access: z.object({ starts_at: time, ends_at: time.nullish() }).nullish(),
-  grace_ends_at: time.nullish(),
-  next_retry_at: time.nullish(),
+  /** Null unless the subscription is `past_due` or `awaiting_method`. */
+  dunning: subscriptionDunningSchema.nullish(),
   price: priceSchema.nullish(),
   product: subscriptionProductSchema.nullish(),
   /** The change waiting for the next renewal, with its price and product. */
@@ -303,6 +319,31 @@ export const paymentSchema = z.object({
 })
 export type Payment = z.infer<typeof paymentSchema>
 
+/** A customer's money in one currency. */
+export const balanceSchema = z.object({
+  currency: z.string(),
+  billing_mode: z.string(),
+  balance_amount: amount,
+  held_amount: amount,
+  available_amount: amount,
+  owed_amount: amount,
+})
+export type Balance = z.infer<typeof balanceSchema>
+
+/**
+ * The signed-in customer's summary (`GET /me`): money per currency, the card
+ * that pays each currency's invoices, and how many notices are unread.
+ */
+export const accountSchema = z.object({
+  id: z.string(),
+  balances: z.array(balanceSchema),
+  collection_payment_methods: z.array(
+    z.object({ currency: z.string(), payment_method_id: z.string() })
+  ),
+  unread_notifications: z.number(),
+})
+export type Account = z.infer<typeof accountSchema>
+
 export const invoiceSchema = z.object({
   id: z.string(),
   currency: z.string(),
@@ -315,6 +356,8 @@ export const invoiceSchema = z.object({
   status: z.string(),
   issued_at: time.nullish(),
   due_at: time.nullish(),
+  /** Overdue past grace: new usage in its currency is refused until paid. */
+  delinquent: z.boolean().nullish(),
   paid_at: time.nullish(),
   recovery: paymentRecoverySchema.nullish(),
   created_at: time,

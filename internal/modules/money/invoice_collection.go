@@ -406,20 +406,20 @@ func scheduledInvoiceCollectionKey(invoiceID uuid.UUID, ordinal int64) string {
 	return fmt.Sprintf("%s:%s:attempt:%d", TypeInvoiceCollection, invoiceID, ordinal)
 }
 
-// invoiceCollectionRetryable gates the MANUAL retry surface. `open` counts once
-// the invoice has failed at least once (or#828): a bucket-2 stop deliberately
-// leaves the status alone. A never-attempted open invoice is not "retryable".
-func invoiceCollectionRetryable(invoice *models.Invoice) bool {
+// invoiceCollectionRetryable gates the MANUAL retry surface: an uncollectible
+// invoice, or an open one that has failed at least once (or#828) or is past
+// its due date. A never-attempted invoice not yet due is not "retryable".
+func invoiceCollectionRetryable(invoice *models.Invoice, now time.Time) bool {
 	return invoice != nil && invoice.CollectionIntentID == nil &&
 		invoice.CollectionMethod == CollectionChargeAutomatically &&
-		(invoice.Status == "past_due" || invoice.Status == "uncollectible" ||
-			(invoice.Status == "open" && invoice.CollectionFailureCount > 0)) &&
+		(invoice.Status == "uncollectible" ||
+			(invoice.Status == "open" && (invoice.CollectionFailureCount > 0 || (invoice.DueAt != nil && invoice.DueAt.Before(now))))) &&
 		invoice.AmountDue > 0
 }
 
 func scheduledInvoiceCollectionEligible(invoice *models.Invoice, minThreshold int64, now time.Time) bool {
 	if invoice == nil || invoice.CollectionIntentID != nil || invoice.CollectionMethod != CollectionChargeAutomatically ||
-		(invoice.Status != "open" && invoice.Status != "past_due") || invoice.AmountDue <= 0 ||
+		invoice.Status != "open" || invoice.AmountDue <= 0 ||
 		(minThreshold > 0 && invoice.AmountDue < minThreshold) {
 		return false
 	}
@@ -501,9 +501,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		eligible := scheduledInvoiceCollectionEligible(invoice, opts.minThreshold, now)
 		if opts.manual {
-			eligible = invoiceCollectionRetryable(invoice)
+			eligible = invoiceCollectionRetryable(invoice, now)
 			if opts.initiator == charge.InitiatorCustomer {
-				eligible = invoice.CollectionIntentID == nil && invoice.AmountDue > 0 && (invoice.Status == "open" || invoice.Status == "past_due" || invoice.Status == "uncollectible")
+				eligible = invoice.CollectionIntentID == nil && invoice.AmountDue > 0 && (invoice.Status == "open" || invoice.Status == "uncollectible")
 			}
 		}
 		if !eligible {

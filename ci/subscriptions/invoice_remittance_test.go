@@ -28,10 +28,10 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			w := newWorld(t)
 			ctx, client, payer := t.Context(), w.client[remote], w.newCustomer()
 			const owed = int64(50_000_000)
-			_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{
-				CustomerID: payer.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 2 * owed}},
+			_, err := client.UpdateCustomer(ctx, payer.cid(), billing.UpdateCustomerParams{
+				CreditLimits:   []billing.CreditLimit{{Currency: "USD", Amount: 2 * owed}},
 				InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice, NetTermsDays: 30}),
-			}})
+			})
 			require.NoError(t, err)
 			invoice := func() *billing.Invoice {
 				_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})

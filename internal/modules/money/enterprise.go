@@ -30,10 +30,9 @@ func (s *MoneyService) SweepUsage(ctx context.Context, payer identity.CustomerID
 	return s.sweepCatalogRateCardUsage(ctx, payer, currency, from, to)
 }
 
-// MarkInvoicesPastDue transitions the merchant's overdue open receivables
-// (due_at < now, amount_due > 0) to past_due. Returns the number flipped.
-// Queues one overdue notice per invoice, including already-past-due failures.
-func (s *MoneyService) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, error) {
+// NotifyOverdueInvoices queues one overdue notice per open invoice still owed
+// past its due date. Returns the number of new notices.
+func (s *MoneyService) NotifyOverdueInvoices(ctx context.Context, now time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
 	}
@@ -47,7 +46,7 @@ func (s *MoneyService) MarkInvoicesPastDue(ctx context.Context, now time.Time) (
 	var n int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		n, e = s.db.Gen(ctx).MarkInvoicesPastDue(ctx, gen.MarkInvoicesPastDueParams{
+		n, e = s.db.Gen(ctx).NotifyOverdueInvoices(ctx, gen.NotifyOverdueInvoicesParams{
 			MerchantID: tid.UUID(), Now: now.UTC(),
 		})
 		return e

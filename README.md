@@ -692,12 +692,11 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/invoices` | invoices |
 | `GET /billing/v1/me/invoices/{id}` | one invoice |
 | `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
-| `GET /billing/v1/me/balance` | prepaid balance |
+| `GET /billing/v1/me` | balance per currency, the card that pays each currency, and unread notices |
 | `GET /billing/v1/me/balance/transactions` | its balance transactions |
 | `GET /billing/v1/me/usage` | metered usage |
 | `GET /billing/v1/me/spend-limits` | spending limits |
 | `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
-| `GET /billing/v1/me/notifications/unread-count` | how many are unread |
 | `POST /billing/v1/me/notifications/read` | mark up to 100 read |
 
 **Webhooks and provisioning** (other systems pushing to OpenRails; no user signs in)

@@ -266,15 +266,15 @@ func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
 	a.w.runRenewals()
 	sub := a.w.subscription(embedded, a.sub)
 	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-	require.NotNil(t, sub.NextRetryAt)
+	require.NotNil(t, nextRetry(sub))
 	require.Equal(t, paidThrough, a.periodEnd())
 	require.Len(t, a.providerLedger(), 1)
 	firstAttempt := a.w.stripe.submitted("/v1/payment_intents")
 	require.Len(t, firstAttempt, 2, "initial payment and declined renewal")
 	a.setDecline(visa.Last4, "", "")
-	advance := sub.NextRetryAt.Sub(a.w.clock.Now()) + time.Second
+	advance := nextRetry(sub).Sub(a.w.clock.Now()) + time.Second
 	providerClock.Advance(advance)
-	a.w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+	a.w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
 	require.Len(t, a.providerLedger(), 2)

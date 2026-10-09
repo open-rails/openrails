@@ -18,6 +18,9 @@ func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListPar
 	if params.PeriodStartsBefore != nil {
 		q.Set("period_starts_before", params.PeriodStartsBefore.UTC().Format(time.RFC3339Nano))
 	}
+	if params.Overdue {
+		q.Set("overdue", "true")
+	}
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}

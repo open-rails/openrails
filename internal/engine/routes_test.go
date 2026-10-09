@@ -141,10 +141,10 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 		method, path string
 		code         int
 	}{
-		{http.MethodGet, "/api/pay/v1/me/balance", http.StatusUnauthorized},
+		{http.MethodGet, "/api/pay/v1/me", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/me/checkout-sessions", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/admin/psps", http.StatusUnauthorized},
-		{http.MethodOptions, "/api/pay/v1/me/balance", http.StatusNoContent},
+		{http.MethodOptions, "/api/pay/v1/me", http.StatusNoContent},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 	} {
 		rec := serve(mux, tc.method, tc.path, "{}", "Authorization", "Bearer invalid")
@@ -329,7 +329,7 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 	me, platformRoutes := 0, 0
 	for _, route := range routes {
 		switch {
-		case strings.HasPrefix(route.Path, "/v1/me/"):
+		case route.Path == "/v1/me" || strings.HasPrefix(route.Path, "/v1/me/"):
 			me++
 		case strings.HasPrefix(route.Path, "/api/v1/merchants/"):
 			platformRoutes++

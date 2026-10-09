@@ -222,7 +222,9 @@ reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
 |---|---|---|
-| Look up a customer (profile, balances, entitlements, history) | `GET /v1/admin/customers/{customer_id}/billing-profile` | Customers → search |
+| Look up a customer (settings, balances, arrears, collection cards) | `GET /v1/admin/customers/{customer_id}` | Customers → search |
+| Find overdue invoices | `GET /v1/admin/invoices?overdue=true` (each says whether it is `delinquent`) | Invoices → Overdue only |
+| Follow failed renewals | `GET /v1/admin/subscriptions?dunning=true` (each with its `dunning`) | Subscriptions → Dunning |
 | Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `DELETE /v1/admin/customers/{customer_id}/product-access/{id}` | Customers → profile |
 | Record an off-channel/manual purchase | `POST /v1/admin/customers/{customer_id}/payments/off-channel` | Customers → profile |
 | List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
@@ -233,7 +235,7 @@ reference: [api/routes.md](api/routes.md).
 | Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` | Customers → profile |
 | Ask what a grant key did | `GET /v1/admin/customers/{customer_id}/credit-grants?source_id=` | — |
 | Spend delegations (per-customer agent budgets) | `PUT /v1/admin/customers/{customer_id}/spend-delegations`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
-| Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/settings` | Settings; Customers → profile |
+| Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/{customer_id}` | Customers → profile |
 | Catalog over HTTP | `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
 | Operational alerts / findings | `GET /v1/admin/notifications`, `GET /v1/admin/findings` | Ops |

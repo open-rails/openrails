@@ -107,6 +107,7 @@ type UserSubscriptionResponse struct {
 	ScheduledPrice   *models.Price
 	ScheduledProduct *models.Product
 	Access           *billing.SubscriptionAccess
+	Dunning          *billing.SubscriptionDunning
 }
 
 // EvaluationTime defaults only for responses constructed without a service.
@@ -226,6 +227,7 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 	if err != nil {
 		return fmt.Errorf("failed to load subscription prices: %w", err)
 	}
+	subs := make([]*models.Subscription, 0, len(responses))
 	for _, resp := range responses {
 		if price := prices[resp.Subscription.PriceID]; price != nil {
 			resp.Price = price
@@ -237,6 +239,14 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 				resp.ScheduledProduct = price.Product
 			}
 		}
+		subs = append(subs, resp.Subscription)
+	}
+	dunning, err := DunningViews(ctx, s.SubscriptionService.Database(), subs, prices)
+	if err != nil {
+		return fmt.Errorf("load subscription dunning: %w", err)
+	}
+	for _, resp := range responses {
+		resp.Dunning = dunning[resp.Subscription.ID]
 	}
 	return nil
 }

@@ -76,10 +76,10 @@ func TestLimitedModeHoldsAwaitingMethodExpiry(t *testing.T) {
 	w.runRenewals()
 	sub := w.subscription(embedded, e.sub)
 	require.Equal(t, billing.SubscriptionAwaitingMethod, sub.Status)
-	require.NotNil(t, sub.GraceEndsAt)
+	require.NotNil(t, sub.Dunning.FinalRetryAt)
 	w.cfg = func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeLimited }
 	w.restart()
-	w.advanceHealthyTo(sub.GraceEndsAt.Add(time.Hour))
+	w.advanceHealthyTo(sub.Dunning.FinalRetryAt.Add(time.Hour))
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, e.sub).Status, "limited mode cancels nothing locally")
 	require.Contains(t, w.openFindings("life.terminal_outcome.held"), e.sub.UUID().String())

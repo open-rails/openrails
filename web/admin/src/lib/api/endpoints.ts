@@ -13,8 +13,6 @@ import type {
   CatalogDriftRefresh,
   CreateOffChannelPaymentParams,
   CreatePriceParams,
-  CustomerSettings,
-  CustomerSettingsBatch,
   Customer,
   ListPage,
   Meter,
@@ -29,13 +27,13 @@ import type {
   RatePrice,
   RebillCycle,
   RefundPaymentParams,
-  UpdateCustomerSettingsParams,
+  UpdateCustomerParams,
   UpdatePriceParams,
   UpdateProductParams,
 } from "./generated/wire"
 import type {
   AdminSubscription,
-  CustomerBillingProfile,
+  CustomerEntitlement,
   Finding,
   FindingsGauges,
   MerchantAPIKey,
@@ -73,10 +71,29 @@ export const listCustomers = (
     signal,
   })
 
-export const getCustomerProfile = (customerId: string, signal?: AbortSignal) =>
-  api<CustomerBillingProfile>(
-    `/admin/customers/${customerId}/billing-profile`,
-    { signal }
+// getCustomer is one customer: settings, and per currency its balance,
+// arrears and collection card. Its lists are their own routes.
+export const getCustomer = (customerId: string, signal?: AbortSignal) =>
+  api<Customer>(`/admin/customers/${customerId}`, { signal })
+
+export const listCustomerEntitlements = (
+  customerId: string,
+  page: PageRequest,
+  signal?: AbortSignal
+) =>
+  api<ListPage<CustomerEntitlement>>(
+    `/admin/customers/${customerId}/entitlements`,
+    { query: { ...page }, signal }
+  )
+
+export const listCustomerProductAccess = (
+  customerId: string,
+  page: PageRequest,
+  signal?: AbortSignal
+) =>
+  api<ListPage<RawProductAccessGrant>>(
+    `/admin/customers/${customerId}/product-access`,
+    { query: { ...page }, signal }
   )
 
 export const listCustomerPaymentMethods = (
@@ -173,6 +190,8 @@ export const createOffChannelPayment = async (
 
 export interface SubscriptionFilters {
   status?: string
+  // dunning "true" keeps the subscriptions past_due or awaiting_method.
+  dunning?: string
   rail?: string
   customer_id?: string
   price_id?: string
@@ -743,25 +762,12 @@ export const changeTeamRole = (userId: string, role: string) =>
 export const removeTeamMember = (userId: string) =>
   api<void>(`/merchant/team/${userId}`, { method: "DELETE" })
 
-// getCustomerSettings is one customer's settings; null when the customer
-// does not exist.
-export const getCustomerSettings = async (
-  customerId: string,
-  signal?: AbortSignal
-) => {
-  const page = await api<ListPage<CustomerSettings>>(
-    "/admin/customers/settings",
-    { query: { ids: customerId }, signal }
-  )
-  return page.data[0] ?? null
-}
-
-// updateCustomerSettings changes only the fields each item names, all or
-// none.
-export const updateCustomerSettings = (items: UpdateCustomerSettingsParams[]) =>
-  api<CustomerSettingsBatch>("/admin/customers/settings", {
+// updateCustomer changes only the settings params names and answers the
+// customer.
+export const updateCustomer = (customerId: string, params: UpdateCustomerParams) =>
+  api<Customer>(`/admin/customers/${customerId}`, {
     method: "PATCH",
-    body: { items },
+    body: params,
   })
 
 // --- Alerting: webhooks (#736) ---

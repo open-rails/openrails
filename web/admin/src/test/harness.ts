@@ -179,7 +179,7 @@ export const anInvoice = (id: string, overrides: Partial<Invoice> = {}): Invoice
   subtotal_amount: "0", total_amount: "0", amount_paid: "0", amount_due: "0",
   line_items: [], money_movements: null, po_number: null, tax: null, billing_contacts: [],
   memo: null, status: "open", collection_method: "charge_automatically", issued_at: null,
-  due_at: null, paid_at: null, voided_at: null, uncollectible_at: null, finalized_at: null,
+  due_at: null, delinquent: false, paid_at: null, voided_at: null, uncollectible_at: null, finalized_at: null,
   external_invoice_id: null, collection_failure_count: 0, collection_failed_at: null,
   next_collection_attempt_at: null, last_collection_failure_code: null, recovery: null,
   available_actions: [], created_at: WHEN,

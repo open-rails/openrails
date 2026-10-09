@@ -85,12 +85,10 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 	aliceKeys, bobKeys := map[billing.MerchantID]string{}, map[billing.MerchantID]string{}
 	for _, m := range []shop{first, second} {
 		at := openrails.ForMerchantID(m.id)
-		var ids []billing.UpdateCustomerSettingsParams
 		for user := range customers[m.id] {
-			ids = append(ids, billing.UpdateCustomerSettingsParams{CustomerID: billing.CustomerID(uuid.MustParse(user))})
+			_, err := engine.UpdateCustomer(ctx, billing.CustomerID(uuid.MustParse(user)), billing.UpdateCustomerParams{}, at)
+			require.NoError(t, err)
 		}
-		_, err := engine.UpdateCustomerSettings(ctx, ids, at)
-		require.NoError(t, err)
 		aliceKeys[m.id], bobKeys[m.id] = m.slug+":alice", m.slug+":bob"
 		pass, err := engine.CreateProduct(ctx, billing.CreateProductParams{Key: "pass", DisplayName: m.slug, Entitlements: []string{aliceKeys[m.id]}}, at)
 		require.NoError(t, err)
@@ -262,7 +260,9 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 		require.Nil(t, markRead(aliceToken, other(m, first, second).slug, notes[m.id])[notes[m.id]])
 	}
 	for _, m := range []shop{first, second} {
-		require.JSONEq(t, `{"unread_count":1}`, read(me(aliceToken, "/notifications/unread-count", m.slug)), "Alice's notifications are unread")
+		var account billing.CustomerAccount
+		require.NoError(t, json.Unmarshal([]byte(read(me(aliceToken, "", m.slug))), &account))
+		require.EqualValues(t, 1, account.UnreadNotifications, "Alice's notifications are unread")
 	}
 
 	// The reader is false where OpenRails bound nothing.

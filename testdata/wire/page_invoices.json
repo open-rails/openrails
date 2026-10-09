@@ -42,6 +42,7 @@
       "collection_method": "charge_automatically",
       "issued_at": null,
       "due_at": "2026-09-16T00:00:00.123456789Z",
+      "delinquent": true,
       "paid_at": null,
       "voided_at": null,
       "uncollectible_at": null,

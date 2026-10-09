@@ -36,11 +36,11 @@ func TestMerchantDunningPolicy(t *testing.T) {
 	var offsets []time.Duration
 	for range 5 {
 		sub := w.subscription(embedded, e.sub)
-		if sub.NextRetryAt == nil {
+		if nextRetry(sub) == nil {
 			break
 		}
-		offsets = append(offsets, sub.NextRetryAt.Sub(first).Round(time.Hour))
-		w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+		offsets = append(offsets, nextRetry(sub).Sub(first).Round(time.Hour))
+		w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 		w.runRenewals()
 	}
 	require.Equal(t, []time.Duration{24 * time.Hour, 48 * time.Hour}, offsets)
@@ -70,7 +70,7 @@ func TestDunningAccessPolicy(t *testing.T) {
 			require.Equal(t, access == billing.DunningAccessKeep, e.c.entitled(e.ent), "access during dunning follows the policy")
 
 			e.setDecline(visa.Last4, "", "")
-			w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+			w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 			w.runRenewals()
 			require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 			require.True(t, e.c.entitled(e.ent), "the recovered renewal restores access")
@@ -100,7 +100,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 				require.Equal(t, http.StatusOK, w.deliver(rail, l.providerRenewal(true)))
 			} else {
 				// NMI never retries: OpenRails dunning's first retry recovers it.
-				next := w.subscription(embedded, l.sub).NextRetryAt
+				next := nextRetry(w.subscription(embedded, l.sub))
 				require.NotNil(t, next)
 				w.advanceHealthyTo(next.Add(time.Second))
 				w.runRenewals()
@@ -127,13 +127,13 @@ func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	w.runRenewals()
 	sub := w.subscription(embedded, e.sub)
 	require.Equal(t, billing.SubscriptionPastDue, sub.Status)
-	require.Equal(t, 24*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour))
+	require.Equal(t, 24*time.Hour, nextRetry(sub).Sub(first).Round(time.Hour))
 
 	edited := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{36, 60}}}}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: edited}))
-	w.advanceHealthyTo(sub.NextRetryAt.Add(time.Second))
+	w.advanceHealthyTo(nextRetry(sub).Add(time.Second))
 	w.runRenewals()
 	sub = w.subscription(embedded, e.sub)
-	require.NotNil(t, sub.NextRetryAt)
-	require.Equal(t, 48*time.Hour, sub.NextRetryAt.Sub(first).Round(time.Hour), "the case keeps the policy it opened with")
+	require.NotNil(t, nextRetry(sub))
+	require.Equal(t, 48*time.Hour, nextRetry(sub).Sub(first).Round(time.Hour), "the case keeps the policy it opened with")
 }

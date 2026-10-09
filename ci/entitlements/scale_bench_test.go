@@ -134,8 +134,8 @@ func TestEntitlementScaleBenchmark(t *testing.T) {
 			_, err := client.CheckProductAccess(ctx, whale, billing.CheckProductAccessParams{ProductIDs: ids})
 			require.NoError(t, err)
 		}))
-		row("GetCustomerBillingProfile (console)", n, measure(t, 20, nil, func() {
-			_, err := client.GetCustomerBillingProfile(ctx, whale)
+		row("GetCustomer (console)", n, measure(t, 20, nil, func() {
+			_, err := client.GetCustomer(ctx, whale)
 			require.NoError(t, err)
 		}))
 		day := 24

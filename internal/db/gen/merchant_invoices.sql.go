@@ -149,9 +149,11 @@ WHERE merchant_id = $1::uuid
   AND ($5::timestamptz IS NULL OR period_starts_at >= $5::timestamptz)
   AND ($6::timestamptz IS NULL OR period_starts_at < $6::timestamptz)
   AND ($7::timestamptz IS NULL
-       OR (period_starts_at, id) < ($7::timestamptz, $8::uuid))
+   OR (status = 'open' AND amount_due > 0 AND due_at < $7::timestamptz))
+  AND ($8::timestamptz IS NULL
+       OR (period_starts_at, id) < ($8::timestamptz, $9::uuid))
 ORDER BY period_starts_at DESC, id DESC
-LIMIT $9::int
+LIMIT $10::int
 `
 
 type ListInvoicesPageParams struct {
@@ -161,13 +163,15 @@ type ListInvoicesPageParams struct {
 	Status             *string
 	PeriodStartsAfter  *time.Time
 	PeriodStartsBefore *time.Time
+	OverdueAt          *time.Time
 	AfterAt            *time.Time
 	AfterID            *uuid.UUID
 	RowLimit           int32
 }
 
 // One page of invoices, newest period first, after a (period_starts_at, id)
-// cursor; every filter is optional.
+// cursor; every filter is optional. overdue_at keeps the open invoices still
+// owed past their due date at that instant.
 func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPageParams) ([]BillingInvoice, error) {
 	rows, err := q.db.Query(ctx, listInvoicesPage,
 		arg.MerchantID,
@@ -176,6 +180,7 @@ func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPagePara
 		arg.Status,
 		arg.PeriodStartsAfter,
 		arg.PeriodStartsBefore,
+		arg.OverdueAt,
 		arg.AfterAt,
 		arg.AfterID,
 		arg.RowLimit,

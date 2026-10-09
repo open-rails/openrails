@@ -10,7 +10,7 @@ SELECT q.merchant_id
 FROM (
     SELECT i.merchant_id
       FROM billing.invoices i
-     WHERE i.status IN ('open', 'past_due')
+     WHERE i.status = 'open'
        AND i.amount_due > 0
        AND i.due_at IS NOT NULL
        AND i.due_at < sqlc.arg(now)::timestamptz
@@ -62,7 +62,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) pol ON true
 WHERE i.merchant_id = sqlc.arg(merchant_id)
-  AND i.status IN ('open', 'past_due')
+  AND i.status = 'open'
   AND i.amount_due > 0
   AND i.due_at IS NOT NULL
   AND i.due_at < sqlc.arg(now)::timestamptz
@@ -84,7 +84,7 @@ FROM billing.invoices
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND currency = sqlc.arg(currency)
-  AND status IN ('open', 'past_due')
+  AND status = 'open'
   AND amount_due > 0
   AND due_at IS NOT NULL
   AND due_at < sqlc.arg(now)::timestamptz;
@@ -105,24 +105,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND currency = sqlc.arg(currency);
 
--- name: ListCustomerDelinquency :many
--- Every currency for one payer (the per-payer API read).
+-- name: ListCustomersDelinquency :many
+-- Every currency the named customers have been overdue in: at most one row
+-- per customer and registered currency, which bounds row_limit.
 SELECT * FROM billing.customer_delinquency
 WHERE merchant_id = sqlc.arg(merchant_id)
-  AND customer_id = sqlc.arg(customer_id)
-ORDER BY currency;
-
--- name: ListDelinquentCustomers :many
--- The operator's roster: who is overdue, worst first. `current` rows are never
--- returned — a settled payer is not a row anyone needs to look at.
-SELECT * FROM billing.customer_delinquency
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND state <> 'current'
-  AND (sqlc.narg(state)::text IS NULL OR state = sqlc.narg(state)::text)
-  AND (sqlc.narg(after_overdue_started_at)::timestamptz IS NULL
-   OR (overdue_started_at, customer_id, currency) > (sqlc.narg(after_overdue_started_at)::timestamptz, sqlc.narg(after_customer)::uuid, sqlc.narg(after_currency)::text))
-ORDER BY overdue_started_at, customer_id, currency
-LIMIT sqlc.arg(row_limit);
+  AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+ORDER BY customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: UpsertCustomerDelinquency :one
 -- One evaluation, atomic, returning BOTH the state that was there and the state

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
-	"slices"
 	"strings"
 	"time"
 
@@ -13,13 +12,13 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -28,67 +27,14 @@ import (
 // maxTrustLevelBytes bounds a stored trust level.
 const maxTrustLevelBytes = 64
 
-// ListCustomerSettings lists customers' settings, newest customer first. IDs
-// instead reads the named customers in one page; unknown ones are absent.
-func (s *Service) ListCustomerSettings(ctx context.Context, params billing.CustomerSettingsListParams) (billing.ListPage[billing.CustomerSettings], error) {
-	var page billing.ListPage[billing.CustomerSettings]
-	if params.IDs != nil && (len(params.IDs) == 0 || len(params.IDs) > billing.MaxBatchItems) {
-		return page, apperr.Invalidf("ids must hold 1 to %d customers", billing.MaxBatchItems).WithParam("ids")
-	}
-	limit, err := pagination.Limit(params.PageRequest)
-	if err != nil {
-		return page, err
-	}
-	afterAt, afterID, err := pagination.After(params.Cursor)
-	if err != nil {
-		return page, err
-	}
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return page, err
-	}
-	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return page, err
-	}
-	q := s.rt.DB.Gen(ctx)
-	var customers billing.ListPage[gen.BillingCustomer]
-	if params.IDs != nil {
-		if customers.Items, err = q.ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)}); err != nil {
-			return page, err
-		}
-	} else {
-		rows, err := q.ListCustomers(ctx, gen.ListCustomersParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)})
-		if err != nil {
-			return page, err
-		}
-		customers = pagination.Cut(rows, limit, func(c gen.BillingCustomer) any {
-			return pagination.TimeID{At: c.CreatedAt, ID: c.ID}
-		})
-	}
-	keys := make([]uuid.UUID, len(customers.Items))
-	for i, c := range customers.Items {
-		keys[i] = c.ID
-	}
-	docs, err := customerSettings(ctx, q, mid.UUID(), keys)
-	if err != nil {
-		return page, err
-	}
-	page.Items = make([]billing.CustomerSettings, len(keys))
-	for i, id := range keys {
-		page.Items[i] = docs[id]
-	}
-	page.Next = customers.Next
-	return page, nil
-}
-
-// UpdateCustomerSettings changes 1 to billing.MaxBatchItems distinct
-// customers' settings, all or none, and answers their settings in request
-// order. The whole batch is validated before anything is written; a customer
+// UpdateCustomer changes one customer's settings and answers the customer.
+// The change is validated whole before anything is written; a customer
 // OpenRails has not seen is created.
-func (s *Service) UpdateCustomerSettings(ctx context.Context, items []billing.UpdateCustomerSettingsParams) ([]billing.CustomerSettings, error) {
-	changes, err := validateCustomerSettings(items)
+func (s *Service) UpdateCustomer(ctx context.Context, customer identity.CustomerID, params billing.UpdateCustomerParams) (*billing.Customer, error) {
+	if customer.IsZero() {
+		return nil, apperr.Invalidf("customer_id is required").WithParam("customer_id")
+	}
+	change, err := validateCustomerSettings(customer.UUID(), params)
 	if err != nil {
 		return nil, err
 	}
@@ -101,54 +47,38 @@ func (s *Service) UpdateCustomerSettings(ctx context.Context, items []billing.Up
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]uuid.UUID, len(changes))
-	for i, c := range changes {
-		keys[i] = c.customer
-	}
-	var docs map[uuid.UUID]billing.CustomerSettings
 	err = s.rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		now := s.rt.Clock.Now().UTC()
-		// Share the policy declarations' lock before reading them, then lock
-		// the customers in one order so concurrent batches never deadlock.
+		// Share the policy declarations' lock before reading them.
 		if _, err := q.ReadMerchantSettingsLock(ctx, mid.UUID()); err != nil {
 			return err
 		}
-		order := slices.Clone(changes)
-		slices.SortFunc(order, func(a, b customerSettingsChange) int {
-			return strings.Compare(a.customer.String(), b.customer.String())
-		})
 		// A customer is the host's subject: one OpenRails has not billed yet
 		// is created, as every commerce write does.
-		for _, c := range order {
-			if err := db.EnsureCustomerRowQ(ctx, q, mid.UUID(), c.customer); err != nil {
-				return err
-			}
-			if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: c.customer, MerchantID: mid.UUID()}); err != nil {
-				return err
-			}
+		if err := db.EnsureCustomerRowQ(ctx, q, mid.UUID(), change.customer); err != nil {
+			return err
 		}
-		for _, c := range changes {
-			if err := c.apply(ctx, q, mid.UUID(), now); err != nil {
-				return err
-			}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: change.customer, MerchantID: mid.UUID()}); err != nil {
+			return err
 		}
-		docs, err = customerSettings(ctx, q, mid.UUID(), keys)
-		return err
+		return change.apply(ctx, q, mid.UUID(), s.rt.Clock.Now().UTC())
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]billing.CustomerSettings, len(keys))
-	for i, id := range keys {
-		out[i] = docs[id]
+	row, err := s.rt.DB.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: change.customer})
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	out, err := s.customers(ctx, mid, []gen.BillingCustomer{row})
+	if err != nil {
+		return nil, err
+	}
+	return &out[0], nil
 }
 
-// customerSettingsChange is one validated, canonical item.
+// customerSettingsChange is one validated, canonical change.
 type customerSettingsChange struct {
-	item           int
 	customer       uuid.UUID
 	creditLimits   []billing.CreditLimit
 	trustLevels    []billing.TrustLevel
@@ -158,72 +88,54 @@ type customerSettingsChange struct {
 	invoiceProfile *money.CustomerInvoiceProfile
 }
 
-func validateCustomerSettings(items []billing.UpdateCustomerSettingsParams) ([]customerSettingsChange, error) {
-	if len(items) == 0 || len(items) > billing.MaxBatchItems {
-		return nil, apperr.Invalidf("items must hold 1 to %d customers", billing.MaxBatchItems).WithParam("items")
+func validateCustomerSettings(customer uuid.UUID, params billing.UpdateCustomerParams) (customerSettingsChange, error) {
+	c := customerSettingsChange{customer: customer}
+	currencies := map[string]bool{}
+	for j, limit := range params.CreditLimits {
+		field := fmt.Sprintf("credit_limits[%d]", j)
+		currency, err := settingsCurrency(limit.Currency, field+".currency", currencies)
+		if err != nil {
+			return c, err
+		}
+		if limit.Amount < 0 {
+			return c, apperr.Invalidf("amount must be nonnegative").WithParam(field + ".amount")
+		}
+		c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: currency, Amount: limit.Amount})
 	}
-	out := make([]customerSettingsChange, len(items))
-	seen := make(map[billing.CustomerID]bool, len(items))
-	for i, item := range items {
-		param := func(field string) string { return apperr.ItemParam(i, field) }
-		if item.CustomerID.IsZero() {
-			return nil, apperr.Invalidf("customer_id is required").WithParam(param("customer_id"))
+	currencies = map[string]bool{}
+	for j, level := range params.TrustLevels {
+		field := fmt.Sprintf("trust_levels[%d]", j)
+		currency, err := settingsCurrency(level.Currency, field+".currency", currencies)
+		if err != nil {
+			return c, err
 		}
-		if seen[item.CustomerID] {
-			return nil, apperr.Invalidf("customer %s is named twice", item.CustomerID).WithParam(param("customer_id"))
+		name := strings.TrimSpace(level.TrustLevel)
+		if len(name) > maxTrustLevelBytes {
+			return c, apperr.Invalidf("trust_level exceeds %d bytes", maxTrustLevelBytes).WithParam(field + ".trust_level")
 		}
-		seen[item.CustomerID] = true
-		c := customerSettingsChange{item: i, customer: item.CustomerID.UUID()}
-
-		currencies := map[string]bool{}
-		for j, limit := range item.CreditLimits {
-			field := fmt.Sprintf("credit_limits[%d]", j)
-			currency, err := settingsCurrency(limit.Currency, param(field+".currency"), currencies)
-			if err != nil {
-				return nil, err
-			}
-			if limit.Amount < 0 {
-				return nil, apperr.Invalidf("amount must be nonnegative").WithParam(param(field + ".amount"))
-			}
-			c.creditLimits = append(c.creditLimits, billing.CreditLimit{Currency: currency, Amount: limit.Amount})
-		}
-		currencies = map[string]bool{}
-		for j, level := range item.TrustLevels {
-			field := fmt.Sprintf("trust_levels[%d]", j)
-			currency, err := settingsCurrency(level.Currency, param(field+".currency"), currencies)
-			if err != nil {
-				return nil, err
-			}
-			name := strings.TrimSpace(level.TrustLevel)
-			if len(name) > maxTrustLevelBytes {
-				return nil, apperr.Invalidf("trust_level exceeds %d bytes", maxTrustLevelBytes).WithParam(param(field + ".trust_level"))
-			}
-			c.trustLevels = append(c.trustLevels, billing.TrustLevel{Currency: currency, TrustLevel: name})
-		}
-
-		if item.BillingPolicy.Set {
-			c.setPolicy = true
-			if !item.BillingPolicy.Null {
-				name, err := merchantconfig.NormalizeBillingPolicyName(item.BillingPolicy.Value)
-				if err != nil {
-					return nil, apperr.Invalidf("%s", err).WithParam(param("billing_policy"))
-				}
-				c.policy = &name
-			}
-		}
-		if item.InvoiceProfile.Set {
-			c.setProfile = true
-			if !item.InvoiceProfile.Null {
-				profile, err := validInvoiceProfile(item.InvoiceProfile.Value, param("invoice_profile"))
-				if err != nil {
-					return nil, err
-				}
-				c.invoiceProfile = profile
-			}
-		}
-		out[i] = c
+		c.trustLevels = append(c.trustLevels, billing.TrustLevel{Currency: currency, TrustLevel: name})
 	}
-	return out, nil
+	if params.BillingPolicy.Set {
+		c.setPolicy = true
+		if !params.BillingPolicy.Null {
+			name, err := merchantconfig.NormalizeBillingPolicyName(params.BillingPolicy.Value)
+			if err != nil {
+				return c, apperr.Invalidf("%s", err).WithParam("billing_policy")
+			}
+			c.policy = &name
+		}
+	}
+	if params.InvoiceProfile.Set {
+		c.setProfile = true
+		if !params.InvoiceProfile.Null {
+			profile, err := validInvoiceProfile(params.InvoiceProfile.Value, "invoice_profile")
+			if err != nil {
+				return c, err
+			}
+			c.invoiceProfile = profile
+		}
+	}
+	return c, nil
 }
 
 func settingsCurrency(code, param string, seen map[string]bool) (string, error) {
@@ -304,7 +216,7 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 			}
 		} else {
 			if _, err := q.LockBillingPolicyName(ctx, gen.LockBillingPolicyNameParams{MerchantID: mid, Name: *c.policy}); errors.Is(err, pgx.ErrNoRows) {
-				return ErrBillingPolicyNotFound.WithParam(apperr.ItemParam(c.item, "billing_policy"))
+				return ErrBillingPolicyNotFound.WithParam("billing_policy")
 			} else if err != nil {
 				return err
 			}
@@ -327,7 +239,7 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, customers []uuid.UUID) (map[uuid.UUID]billing.CustomerSettings, error) {
 	out := make(map[uuid.UUID]billing.CustomerSettings, len(customers))
 	for _, id := range customers {
-		out[id] = billing.CustomerSettings{CustomerID: billing.CustomerID(id), CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}
+		out[id] = billing.CustomerSettings{CreditLimits: []billing.CreditLimit{}, TrustLevels: []billing.TrustLevel{}}
 	}
 	if len(customers) == 0 {
 		return out, nil

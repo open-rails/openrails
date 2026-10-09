@@ -53,7 +53,7 @@ current ──overdue──► grace ──past the grace window, over the floor
   are signalled.
 
 Every state is **derived** from the customer's overdue open receivables
-(`min(due_at)`, `sum(amount_due)` over `open`/`past_due` invoices) against the
+(`min(due_at)`, `sum(amount_due)` over `open` invoices past `due_at`) against the
 merchant's policy. The stored row exists only to remember when a state started
 and whether its transition has already been announced — recompute it any time
 and you get the same answer.
@@ -155,14 +155,12 @@ dedupe key, so a re-run never instructs you to shut the same customer off twice.
 
 ## Reading the state
 
-- `GET /v1/admin/delinquency` (`Client.ListDelinquency`): the overdue roster
-  (grace + delinquent, oldest debt first), a cursor page. `?state=delinquent`
-  filters. Customers in good standing are never returned: it is an exception list,
-  not a customer directory. The policy it is judged against is in the merchant's
-  settings (`arrears_grace_days`, `arrears_delinquency_floor`).
-- `GET /v1/admin/customers/{customer_id}/delinquency`
-  (`Client.ListCustomerDelinquency`): one customer, per currency. An empty list
-  means the customer has never been overdue.
+- `GET /v1/admin/invoices?overdue=true` (`Client.ListInvoices` with
+  `Overdue`): the invoices still owed past their due date. One leaves only
+  when paid, voided or written off. Each is `delinquent` once the customer is
+  past grace in its currency: new usage there is refused. The policy is in the
+  merchant's settings (`arrears_grace_days`, `arrears_delinquency_floor`).
+- A refused admission says why: `deny_code` `delinquent_unpaid_invoice`.
 
 Both are read-only. The state is a reading of invoice truth, so it is settled by
 paying the invoice, never by an API call.

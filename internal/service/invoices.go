@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -18,7 +19,7 @@ import (
 
 // InvoiceView is an invoice on the wire, with the merchant actions its state
 // allows; Recovery is left to single-invoice reads.
-func InvoiceView(inv *models.Invoice) billing.Invoice {
+func InvoiceView(inv *models.Invoice, now time.Time) billing.Invoice {
 	items := make([]billing.InvoiceLineItem, 0, len(inv.LineItems))
 	for _, li := range inv.LineItems {
 		items = append(items, billing.InvoiceLineItem{EventType: li.EventType, Amount: li.Amount, Count: li.Count, Dimensions: li.Dimensions})
@@ -62,7 +63,7 @@ func InvoiceView(inv *models.Invoice) billing.Invoice {
 		CollectionFailedAt:        inv.CollectionFailedAt,
 		NextCollectionAttemptAt:   inv.NextCollectionAttemptAt,
 		LastCollectionFailureCode: inv.LastCollectionFailureCode,
-		AvailableActions:          money.InvoiceActions(inv),
+		AvailableActions:          money.InvoiceActions(inv, now),
 		CreatedAt:                 inv.CreatedAt,
 	}
 }
@@ -98,7 +99,14 @@ func (s *Service) ListInvoices(ctx context.Context, p billing.InvoiceListParams)
 	}
 	out := billing.ListPage[billing.Invoice]{Items: make([]billing.Invoice, 0, len(page.Items)), Next: page.Next}
 	for i := range page.Items {
-		out.Items = append(out.Items, InvoiceView(&page.Items[i]))
+		out.Items = append(out.Items, InvoiceView(&page.Items[i], s.now()))
+	}
+	views := make([]*billing.Invoice, len(out.Items))
+	for i := range out.Items {
+		views[i] = &out.Items[i]
+	}
+	if err := s.markDelinquent(ctx, views...); err != nil {
+		return billing.ListPage[billing.Invoice]{}, err
 	}
 	return out, nil
 }
@@ -121,8 +129,11 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id 
 	if err != nil {
 		return nil, err
 	}
-	out := InvoiceView(inv)
+	out := InvoiceView(inv, s.now())
 	if out.Recovery, err = s.invoiceRecovery(ctx, inv); err != nil {
+		return nil, err
+	}
+	if err := s.markDelinquent(ctx, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -139,7 +150,7 @@ func (s *Service) invoiceRecovery(ctx context.Context, invoice *models.Invoice) 
 		}
 		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(row.ID), Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
-	case invoice.AmountDue <= 0 || (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible"):
+	case invoice.AmountDue <= 0 || (invoice.Status != "open" && invoice.Status != "uncollectible"):
 		out.BlockedReason = "invoice_not_payable"
 	default:
 		out.Retryable = true
@@ -190,7 +201,10 @@ func (s *Service) ApplyInvoiceAction(ctx context.Context, payer identity.Custome
 	if err != nil {
 		return nil, err
 	}
-	out := InvoiceView(inv)
+	out := InvoiceView(inv, s.now())
+	if err := s.markDelinquent(ctx, &out); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }
 
@@ -212,8 +226,8 @@ func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.Cus
 		if err != nil {
 			return err
 		}
-		out = &billing.InvoiceCollection{Invoice: InvoiceView(result.Invoice), Payment: InvoicePaymentView(result.Attempt), Replayed: result.Replayed}
-		return nil
+		out = &billing.InvoiceCollection{Invoice: InvoiceView(result.Invoice, s.now()), Payment: InvoicePaymentView(result.Attempt), Replayed: result.Replayed}
+		return s.markDelinquent(ctx, &out.Invoice)
 	})
 	return out, err
 }
@@ -234,8 +248,8 @@ func (s *Service) PayInvoice(ctx context.Context, payer identity.CustomerID, inv
 		if err := customerPaymentRefusal(result.Operation); err != nil {
 			return err
 		}
-		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice), Payment: InvoicePaymentView(result.Attempt), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}, Replayed: result.Replayed}
-		return nil
+		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice, s.now()), Payment: InvoicePaymentView(result.Attempt), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}, Replayed: result.Replayed}
+		return s.markDelinquent(ctx, &out.Invoice)
 	})
 	return out, err
 }

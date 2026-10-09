@@ -55,7 +55,7 @@ session identity embedded). There is **no `:user_id` anywhere** — a browser cr
 can only ever act on itself. In embedded mode, prepend the mount prefix to every path.
 
 ```
-GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
+GET  /v1/me                               balances, collection cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
@@ -72,7 +72,7 @@ GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a
 PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
 POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deployments)
-GET  /v1/me/notifications[.../unread-count]   billing notifications
+GET  /v1/me/notifications                 billing notifications
 ```
 
 The public catalog needs no auth: `GET /v1/catalog/products` returns each product on sale with

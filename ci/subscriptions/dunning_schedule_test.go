@@ -47,10 +47,10 @@ func TestDunningScheduleParity(t *testing.T) {
 			for i := range want {
 				s := w.subscription(embedded, sub)
 				require.Equal(t, billing.SubscriptionPastDue, s.Status)
-				require.NotNil(t, s.NextRetryAt)
-				got = append(got, s.NextRetryAt.Sub(declined))
+				require.NotNil(t, nextRetry(s))
+				got = append(got, nextRetry(s).Sub(declined))
 				if i < len(want)-1 {
-					w.advanceHealthyTo(*s.NextRetryAt)
+					w.advanceHealthyTo(*nextRetry(s))
 					w.runRenewals()
 				}
 			}

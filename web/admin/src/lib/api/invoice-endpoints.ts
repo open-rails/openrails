@@ -1,5 +1,5 @@
 import { api, type PageRequest } from "./client"
-import { getCustomerSettings, updateCustomerSettings } from "./endpoints"
+import { getCustomer, updateCustomer } from "./endpoints"
 import type {
   CreateInvoicePaymentParams,
   Invoice,
@@ -17,6 +17,8 @@ export interface InvoiceFilters {
   customer_id?: string
   currency?: string
   status?: string
+  // overdue "true" keeps the open invoices still owed past their due date.
+  overdue?: string
   period_starts_after?: string
   period_starts_before?: string
 }
@@ -46,15 +48,15 @@ export const listInvoicePayments = (
 export const getInvoiceProfile = async (
   customerId: string,
   signal?: AbortSignal
-) => (await getCustomerSettings(customerId, signal))?.invoice_profile ?? null
+) => (await getCustomer(customerId, signal)).settings.invoice_profile ?? null
 export const putInvoiceProfile = async (
   customerId: string,
   profile: InvoiceProfile
 ) => {
-  const { items } = await updateCustomerSettings([
-    { customer_id: customerId, invoice_profile: profile },
-  ])
-  return items[0].invoice_profile
+  const { settings } = await updateCustomer(customerId, {
+    invoice_profile: profile,
+  })
+  return settings.invoice_profile
 }
 export interface InvoiceActionRequest {
   id: string

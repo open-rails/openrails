@@ -163,20 +163,15 @@ describe("collection defaults", () => {
     expect(badges()).not.toContain("Collection default")
   })
 
-  it("refreshes the profile and saved-method views together", async () => {
+  it("refreshes the customer's page and saved-method views together", async () => {
     const method = aPaymentMethod("pm_a", { collection_currencies: ["USD"] })
     let methods = [method, aPaymentMethod("pm_b")]
-    routes["/admin/customers/cus_a/billing-profile"] = () => ({
-      customer: { id: "cus_a", email: null, created_at: "2026-09-16T00:00:00Z", last_seen_at: "2026-09-16T00:00:00Z" },
-      balances: [], subscriptions: [], entitlements: { data: [], next_cursor: null }, payments: [],
-      payment_methods: methods, product_access: { data: [], next_cursor: null },
-    })
-    // One method per page: the picker list walks every page.
+    // One method per page: both views walk the cursor.
     routes["/admin/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
     const queries = client()
-    const profile = adminQueries.customer("cus_a")
+    const page = adminQueries.customerPaymentMethodsPage("cus_a", 20, "")
     const saved = adminQueries.customerPaymentMethods("cus_a")
-    const load = () => Promise.all([queries.fetchQuery(profile), queries.fetchQuery(saved)])
+    const load = () => Promise.all([queries.fetchQuery(page), queries.fetchQuery(saved)])
     await load()
 
     // The same customer subtree the Refresh payment methods action invalidates.
@@ -184,10 +179,10 @@ describe("collection defaults", () => {
     await queries.invalidateQueries({ queryKey: queryKeys.customer("cus_a") })
     await load()
 
-    expect(queries.getQueryData(profile.queryKey)!.payment_methods![0].collection_currencies).toEqual([])
+    expect(queries.getQueryData(page.queryKey)!.data[0].collection_currencies).toEqual([])
     expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.collection_currencies])).toEqual([["pm_a", []], ["pm_b", []]])
-    expect(requests.filter((r) => r.path.endsWith("/payment-methods")).map((r) => r.query)).toEqual([
-      "limit=100", "limit=100&cursor=1", "limit=100", "limit=100&cursor=1",
+    expect(requests.filter((r) => r.path.endsWith("/payment-methods")).map((r) => r.query).sort()).toEqual([
+      "limit=100", "limit=100", "limit=100&cursor=1", "limit=100&cursor=1", "limit=20", "limit=20",
     ])
     queries.clear()
   })

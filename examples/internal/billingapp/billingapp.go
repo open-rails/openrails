@@ -84,14 +84,11 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 			r.PolicyWindows = len(policy.SpendWindows)
 		}
 	}
-	if _, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: payer, CreditLimits: []billing.CreditLimit{{Currency: in.Currency}}}}); err != nil {
+	read, err := client.UpdateCustomer(ctx, payer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: in.Currency}}})
+	if err != nil {
 		return r, fmt.Errorf("set credit limit: %w", err)
 	}
-	settings, err := client.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{payer}})
-	if err != nil || len(settings.Items) != 1 {
-		return r, fmt.Errorf("read credit limit: %w", err)
-	}
-	for _, limit := range settings.Items[0].CreditLimits {
+	for _, limit := range read.Settings.CreditLimits {
 		if limit.Currency == in.Currency {
 			r.CreditLimit = limit.Amount
 		}
@@ -191,13 +188,13 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	terms, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{
-		CustomerID: invoice.CustomerID, InvoiceProfile: catalog.Value(billing.InvoiceProfile{NetTermsDays: 14, CollectionMethod: billing.CollectSendInvoice}),
-	}})
+	terms, err := client.UpdateCustomer(ctx, invoice.CustomerID, billing.UpdateCustomerParams{
+		InvoiceProfile: catalog.Value(billing.InvoiceProfile{NetTermsDays: 14, CollectionMethod: billing.CollectSendInvoice}),
+	})
 	if err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)
 	}
-	r.InvoiceProfileSet = terms[0].InvoiceProfile.NetTermsDays == 14
+	r.InvoiceProfileSet = terms.Settings.InvoiceProfile != nil && terms.Settings.InvoiceProfile.NetTermsDays == 14
 	payment := billing.CreateInvoicePaymentParams{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
 	paid, err := client.CreateInvoicePayment(ctx, invoiceID, payment)
 	if err != nil {
