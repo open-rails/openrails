@@ -139,7 +139,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "owner", roles[iam.UserSubject(customer.ID)].Name())
 
-	raw, err := os.ReadFile(filepath.Join("..", "config", "bootstrap.example.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)
 	manifest, err := authkit.ParseBootstrapManifestYAML(raw)
 	require.NoError(t, err)
