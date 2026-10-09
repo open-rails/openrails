@@ -54,6 +54,7 @@ import type {
 } from "@/lib/api/generated/wire"
 import type { DefaultUsageRateCardRequest } from "@/lib/api/endpoints"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
+import { formatCap } from "@/lib/duration"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import {
@@ -500,7 +501,7 @@ function summarizeAllowance(allowance?: Allowance): string {
   if (allowance.included !== undefined) {
     return `${allowance.included.toLocaleString()} included`
   }
-  return `From ${allowance.accrue_from}, capped at ${allowance.cap}`
+  return `From ${allowance.accrue_from}${allowance.cap ? `, capped at ${formatCap(allowance.cap)}` : ""}`
 }
 
 function PerUnitFields({
@@ -1069,7 +1070,7 @@ function AllowanceFields({
                     label="Accrual cap"
                     value={field.state.value}
                     onChange={field.handleChange}
-                    placeholder="30d"
+                    placeholder="30 days"
                   />
                 )}
               </form.Field>

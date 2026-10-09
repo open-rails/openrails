@@ -51,6 +51,7 @@ import {
   shortId,
   supportedCurrencies,
 } from "@/lib/format"
+import { parseHours } from "@/lib/duration"
 import { toastApiError } from "@/lib/toast"
 import { adminMutations } from "@/lib/mutations"
 import { CatalogApplicationDialog } from "@/pages/catalog/application-dialog"
@@ -692,6 +693,9 @@ function PriceRow({
   )
 }
 
+const durationError = ({ value }: { value: string }) =>
+  !value || parseHours(value) ? undefined : "Use hours, days or weeks, such as 30 days"
+
 function PriceDialog({ products }: { products: Product[] }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
@@ -701,23 +705,22 @@ function PriceDialog({ products }: { products: Product[] }) {
       productId: "",
       amount: "",
       currency: "USD",
-      durationHours: "",
-      billingHours: "",
+      accessDuration: "",
+      billingInterval: "",
     },
     onSubmit: async ({ value }) => {
       const unitAmount = nativeAmountFromInput(value.amount, value.currency)
       if (unitAmount === null || BigInt(unitAmount) <= 0n) return
+      const accessHours = parseHours(value.accessDuration)
+      const billingHours = parseHours(value.billingInterval)
+      if ((value.accessDuration && !accessHours) || (value.billingInterval && !billingHours)) return
       try {
         await createPrice.mutateAsync({
           product_id: value.productId,
           unit_amount: unitAmount,
           currency: value.currency,
-          ...(value.durationHours
-            ? { access_duration_hours: Number(value.durationHours) }
-            : {}),
-          ...(value.billingHours
-            ? { billing_interval_hours: Number(value.billingHours) }
-            : {}),
+          ...(accessHours ? { access_duration_hours: accessHours } : {}),
+          ...(billingHours ? { billing_interval_hours: billingHours } : {}),
         })
         form.reset()
         toast.success("Price created")
@@ -855,25 +858,26 @@ function PriceDialog({ products }: { products: Product[] }) {
                 </form.Field>
               </div>
             </Field>
-            <form.Field name="durationHours">
+            <form.Field name="accessDuration" validators={{ onBlur: durationError }}>
               {(field) => (
                 <Field
                   label="Access duration"
                   id="pr-dur"
-                  hint="In hours. Leave it empty for access that never expires."
+                  hint="Such as 30 days, 1 week or 12 hours. Leave it empty for access that never expires."
                 >
                   <Input
                     id="pr-dur"
-                    type="number"
-                    min="1"
+                    placeholder="Never expires"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
                   />
+                  <FormFieldErrors errors={field.state.meta.errors} />
                 </Field>
               )}
             </form.Field>
-            <form.Field name="billingHours">
+            <form.Field name="billingInterval" validators={{ onBlur: durationError }}>
               {(field) => (
                 <div className="grid gap-3 rounded-md border p-3">
                   <div className="flex items-center justify-between gap-4">
@@ -881,21 +885,20 @@ function PriceDialog({ products }: { products: Product[] }) {
                     <Switch
                       id="pr-renew"
                       checked={!!field.state.value}
-                      onCheckedChange={(checked) => field.handleChange(checked ? "720" : "")}
+                      onCheckedChange={(checked) => field.handleChange(checked ? "30 days" : "")}
                     />
                   </div>
                   {field.state.value ? (
-                    <Field label="Billing interval" id="pr-billing" hint="Hours between payments, until the customer cancels.">
+                    <Field label="Billing interval" id="pr-billing" hint="Time between payments, such as 30 days, until the customer cancels.">
                       <Input
                         id="pr-billing"
-                        type="number"
-                        min="1"
-                        step="1"
                         required
                         value={field.state.value}
                         onBlur={field.handleBlur}
                         onChange={(event) => field.handleChange(event.target.value)}
+                        aria-invalid={field.state.meta.errors.length > 0}
                       />
+                      <FormFieldErrors errors={field.state.meta.errors} />
                     </Field>
                   ) : (
                     <p className="text-xs text-muted-foreground">One-time payment.</p>
@@ -918,17 +921,21 @@ function PriceDialog({ products }: { products: Product[] }) {
                   state.values.productId,
                   state.values.amount,
                   state.values.currency,
+                  state.values.accessDuration,
+                  state.values.billingInterval,
                   state.isSubmitting,
                 ] as const
               }
             >
-              {([productId, amount, currency, isSubmitting]) => (
+              {([productId, amount, currency, accessDuration, billingInterval, isSubmitting]) => (
                 <Button
                   type="submit"
                   disabled={
                     isSubmitting ||
                     !productId ||
-                    BigInt(nativeAmountFromInput(amount, currency) ?? "0") <= 0n
+                    BigInt(nativeAmountFromInput(amount, currency) ?? "0") <= 0n ||
+                    durationError({ value: accessDuration }) !== undefined ||
+                    durationError({ value: billingInterval }) !== undefined
                   }
                 >
                   {isSubmitting ? "Creating…" : "Create price"}

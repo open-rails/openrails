@@ -1,20 +1,6 @@
 import type { Price } from "@/lib/api/generated/wire"
+import { formatHours } from "@/lib/duration"
 import { formatNativeAmount } from "@/lib/format"
-
-// Durations are fixed hours; whole weeks and days get exact readable labels.
-export function durationLabel(hours: number): string {
-  const units: [number, string][] = [
-    [168, "week"],
-    [24, "day"],
-  ]
-  for (const [size, name] of units) {
-    if (hours % size === 0) {
-      const count = hours / size
-      return `${count} ${name}${count === 1 ? "" : "s"}`
-    }
-  }
-  return `${hours} hour${hours === 1 ? "" : "s"}`
-}
 
 // priceIntervalLabel renders a price's renewal cadence — shared between the
 // catalog list and the #777 price-change wizard so "currency + interval
@@ -23,10 +9,10 @@ export function priceIntervalLabel(
   price: Pick<Price, "billing_interval_hours" | "access_duration_hours">
 ): string {
   if (price.billing_interval_hours) {
-    return `every ${durationLabel(price.billing_interval_hours)}`
+    return `every ${formatHours(price.billing_interval_hours)}`
   }
   if (price.access_duration_hours) {
-    return `${durationLabel(price.access_duration_hours)} once`
+    return `${formatHours(price.access_duration_hours)} once`
   }
   return "one-time"
 }

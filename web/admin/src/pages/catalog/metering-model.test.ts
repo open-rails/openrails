@@ -88,6 +88,10 @@ describe("usage rate amounts", () => {
     [{ allowanceMode: "included" as const, allowanceIncluded: "500" }, { included: 500 }],
     [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: " Active Seats ", allowanceCap: "30d" },
       { accrue_from: "active-seats", cap: "30d" }],
+    [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: "seats", allowanceCap: "1 week" },
+      { accrue_from: "seats", cap: "7d" }],
+    [{ allowanceMode: "accrual" as const, allowanceAccrueFrom: "seats", allowanceCap: "36 hours" },
+      { accrue_from: "seats", cap: "36h" }],
   ])("builds the %o allowance", (values, allowance) => {
     expect(buildRateCardRequest(rate({ unitAmount: "1", ...values })).allowance).toEqual(allowance)
   })

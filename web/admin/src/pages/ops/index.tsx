@@ -28,6 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { Finding } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
+import { formatSeconds } from "@/lib/duration"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -347,7 +348,7 @@ function WorkerHealthTab() {
               </TableCell>
               <TableCell>
                 {w.expected_period_seconds
-                  ? `${w.expected_period_seconds}s`
+                  ? formatSeconds(w.expected_period_seconds)
                   : "—"}
               </TableCell>
             </TableRow>

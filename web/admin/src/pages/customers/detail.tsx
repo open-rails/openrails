@@ -53,6 +53,7 @@ import {
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
+import { parseHours } from "@/lib/duration"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
@@ -436,12 +437,14 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     enabled: open,
   })
   const form = useForm({
-    defaultValues: { productId: "", hours: "", note: "" },
+    defaultValues: { productId: "", duration: "", note: "" },
     onSubmit: async ({ value }) => {
+      const hours = parseHours(value.duration)
+      if (value.duration && !hours) return
       try {
         await grant.mutateAsync({
           productId: value.productId,
-          hours: value.hours ? Number(value.hours) : undefined,
+          hours: hours ?? undefined,
           note: value.note.trim() || undefined,
         })
         toast.success("Product access granted")
@@ -520,28 +523,23 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
               )}
             </form.Field>
             <form.Field
-              name="hours"
+              name="duration"
               validators={{
-                onChange: ({ value }) => {
-                  if (!value) return undefined
-                  const hours = Number(value)
-                  return Number.isInteger(hours) && hours >= 1
+                onChange: ({ value }) =>
+                  !value || parseHours(value)
                     ? undefined
-                    : "Enter at least 1 hour"
-                },
+                    : "Use hours, days or weeks, such as 30 days",
               }}
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="pa-hours">How long it lasts</Label>
+                  <Label htmlFor="pa-duration">How long it lasts</Label>
                   <p className="text-[13px] text-muted-foreground">
-                    In hours, after any access they already have. Leave it
-                    empty and the access never expires.
+                    Such as 30 days or 1 week, after any access they already
+                    have. Leave it empty and the access never expires.
                   </p>
                   <Input
-                    id="pa-hours"
-                    type="number"
-                    min="1"
+                    id="pa-duration"
                     placeholder="Never expires"
                     value={field.state.value}
                     onBlur={field.handleBlur}

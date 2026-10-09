@@ -463,7 +463,7 @@ function RepriceNoticeWindowForm({
         <form.Subscribe selector={(state) => state.values.days}>
           {(days) => (
             <dl>
-              <SettingDetail label="Notice period" value={`${days} days`} />
+              <SettingDetail label="Notice period" value={`${days} ${Number(days) === 1 ? "day" : "days"}`} />
             </dl>
           )}
         </form.Subscribe>

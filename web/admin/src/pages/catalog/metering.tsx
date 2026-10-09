@@ -42,6 +42,7 @@ import { ApiError } from "@/lib/api/client"
 import type {
   Meter,
 } from "@/lib/api/generated/wire"
+import { formatCap } from "@/lib/duration"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -628,7 +629,7 @@ function DefaultRateSection({
               card.allowance?.included !== undefined
                 ? `${card.allowance.included.toLocaleString()} included`
                 : card.allowance?.accrue_from
-                  ? `Accrues from ${card.allowance.accrue_from}, capped at ${card.allowance.cap}`
+                  ? `Accrues from ${card.allowance.accrue_from}${card.allowance.cap ? `, capped at ${formatCap(card.allowance.cap)}` : ""}`
                   : "None"
             }
           />

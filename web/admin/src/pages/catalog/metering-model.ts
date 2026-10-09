@@ -17,6 +17,7 @@ import {
   nativeAmountToInput,
   supportedCurrencies,
 } from "@/lib/format"
+import { capToHours, formatCap, hoursToCap, parseHours } from "@/lib/duration"
 
 export interface KeyValueRow {
   key: string
@@ -204,7 +205,7 @@ export function rateCardFormValues(
     allowanceMode,
     allowanceIncluded: integerToInput(allowance?.included),
     allowanceAccrueFrom: allowance?.accrue_from ?? "",
-    allowanceCap: allowance?.cap ?? "",
+    allowanceCap: allowance?.cap ? formatCap(allowance.cap) : "",
   }
 }
 
@@ -450,14 +451,14 @@ function buildAllowance(
   if (!accrueFrom) {
     rateCardError("allowance-source", "Select the allowance source meter.")
   }
-  const cap = values.allowanceCap.trim().toLowerCase()
-  if (!/^\d+[hd]$/.test(cap)) {
+  const hours = parseHours(values.allowanceCap) ?? capToHours(values.allowanceCap)
+  if (!hours) {
     rateCardError(
       "allowance-cap",
-      "Allowance cap must be a whole number of hours or days."
+      "Allowance cap must be whole hours, days or weeks, such as 30 days."
     )
   }
-  return { accrue_from: accrueFrom, cap }
+  return { accrue_from: accrueFrom, cap: hoursToCap(hours) }
 }
 
 function rowsToMap(rows: KeyValueRow[], name: string): Record<string, string> {
