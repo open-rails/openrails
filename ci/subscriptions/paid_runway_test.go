@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -25,7 +24,7 @@ func TestBuyingAgainDuringPaidRunway(t *testing.T) {
 		status, body := e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/cancel", "", map[string]any{"reason": "too expensive"})
 		require.Equal(t, http.StatusOK, status, "%v", body)
 		before := len(e.providerLedger())
-		_, err := e.c.enroll(e.rail, e.price, e.ent, e.method)
+		_, err := e.c.checkout(embedded, order{price: pid(e.price), rail: e.rail, method: e.method, successURL: "https://e2e.test/return"})
 		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionResumable)
 		require.Len(t, e.providerLedger(), before, "nothing is charged for the paid runway")
 		status, body = e.c.call(http.MethodPost, "/subscriptions/"+e.sub.String()+"/resume", "", nil)
@@ -46,22 +45,11 @@ func TestBuyingAgainDuringPaidRunway(t *testing.T) {
 		w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the NMI schedule is deleted")
 		method := l.c.saveCard("nmi", visa)
 		before := len(w.nmi.Ledger(""))
-		_, err = l.reenroll(method)
+		_, err = l.checkoutAgain(method)
 		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionPaidThrough)
 		require.Len(t, w.nmi.Ledger(""), before, "nothing is charged for the paid runway")
 		w.advanceHealthyTo(end.Add(time.Minute))
-		attempt, err := l.reenroll(method)
-		require.NoError(t, err)
-		require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
+		require.Equal(t, "succeeded", l.reenroll(method).Status)
 		require.Len(t, w.nmi.Ledger(""), before+1)
-	})
-}
-
-// enroll buys a membership through checkout and answers its refusal.
-func (c *customer) enroll(rail, priceID, entitlement, method string) (*billing.CheckoutAttempt, error) {
-	return createCheckoutAttempt(c.w.t.Context(), c.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
-		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	})
 }
