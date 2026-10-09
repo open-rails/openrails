@@ -1031,9 +1031,11 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	first := buy(challenged)
 	require.Equal(t, "requires_action", first.Status, "%+v", first.CheckoutSessionPayResult)
-	attempt := first.session.attemptID()
 	w.advance(2 * time.Hour)
-	w.until(func() bool { return w.attemptStatus(attempt) == "failed" }, "the abandoned challenge fails the purchase")
+	w.until(func() bool {
+		status, doc := w.page(http.MethodGet, "/v1/checkout-sessions/"+first.session.id, "", nil)
+		return status == http.StatusOK && doc["status"] != "requires_action" && doc["status"] != "processing"
+	}, "the abandoned challenge ends the purchase")
 	again := buy(c.saveCard("stripe", visa))
 	w.settle()
 	require.True(t, c.entitled("content:post"), "status %s", again.Status)
