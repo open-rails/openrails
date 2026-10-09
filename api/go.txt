@@ -1572,9 +1572,6 @@ pkg openrails/billing, type CloseOperationAuthorizationParams struct, Reference 
 pkg openrails/billing, type CollectionPaymentMethod struct
 pkg openrails/billing, type CollectionPaymentMethod struct, Currency string `json:"currency"`
 pkg openrails/billing, type CollectionPaymentMethod struct, PaymentMethodID PaymentMethodID `json:"payment_method_id"`
-pkg openrails/billing, type ConfirmCheckoutAttemptParams struct
-pkg openrails/billing, type ConfirmCheckoutAttemptParams struct, Signature string `json:"signature"`
-pkg openrails/billing, type ConfirmCheckoutAttemptParams struct, Wallet string `json:"wallet"`
 pkg openrails/billing, type CreateAPIKeyParams struct
 pkg openrails/billing, type CreateAPIKeyParams struct, Name string `json:"name"`
 pkg openrails/billing, type CreateAPIKeyParams struct, Role string `json:"role"`
