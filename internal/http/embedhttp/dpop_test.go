@@ -46,8 +46,23 @@ func (proofAuthority) KnownPermission(iam.Perm) bool { return true }
 
 type proofVerifier struct{ proofAuthority }
 
+// AuthenticateRequest verifies the DPoP-bound access token; its permissions
+// are checked as a resource server checks them: from the token.
 func (v proofVerifier) AuthenticateRequest(ctx context.Context, r *http.Request) (auth.Principal, error) {
-	return verify.AuthenticateRequest(ctx, v.proofAuthority, r)
+	p, err := verify.AuthenticateRequest(ctx, v.proofAuthority, r)
+	if err != nil {
+		return nil, err
+	}
+	return tokenGrants{p, v.group}, nil
+}
+
+type tokenGrants struct {
+	auth.Principal
+	group string
+}
+
+func (p tokenGrants) Can(_ context.Context, scope auth.Scope, perm string) (bool, error) {
+	return scope.ID == p.group && perm == billing.MerchantCatalogRead, nil
 }
 
 type proofDirectory struct{ row merchants.Merchant }
@@ -62,7 +77,7 @@ func (d proofDirectory) GetBySlug(context.Context, string) (*merchants.Merchant,
 }
 
 func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
-	const issuer = "https://delegating-app.test"
+	const issuer = "https://sync-app.test"
 	const origin = "https://billing.test"
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -93,9 +108,9 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 	require.NoError(t, err)
 	x, y := base64.RawURLEncoding.EncodeToString(public[1:33]), base64.RawURLEncoding.EncodeToString(public[33:])
 	thumb := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"` + x + `","y":"` + y + `"}`))
-	delegated := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "billing", "delegated_sub": "delegated-actor", "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{billing.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}})
-	delegated.Header["typ"], delegated.Header["kid"] = "delegated-access+jwt", "proof-issuer"
-	access, err := delegated.SignedString(rsaKey)
+	bound := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": issuer, "aud": "billing", "sub": "sync-app", "client_id": "sync-app", "jti": uuid.NewString(), "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "permissions": []string{billing.MerchantCatalogRead}, "cnf": map[string]any{"jkt": base64.RawURLEncoding.EncodeToString(thumb[:])}})
+	bound.Header["typ"], bound.Header["kid"] = "at+jwt", "proof-issuer"
+	access, err := bound.SignedString(rsaKey)
 	require.NoError(t, err)
 	proof := func(method, path string) string {
 		hash := sha256.Sum256([]byte(access))
@@ -115,7 +130,7 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 			w.WriteHeader(401)
 			return
 		}
-		require.Equal(t, billingauth.Delegated, identity.Kind)
+		require.Equal(t, billingauth.Machine, identity.Kind)
 		require.Contains(t, r.RequestURI, "/v1/merchant/")
 		principal, err := gate.Authorize(r.Context(), r, billing.MerchantCatalogRead)
 		if err != nil {
