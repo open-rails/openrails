@@ -142,6 +142,9 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	w.settleCollectionScans()
 	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	w.restart()
+	// Each restart's own refresh finishes before the provider history changes
+	// or the replay begins: one landing later observes the foreign sale first.
+	w.settleRefreshes()
 	answer := payNMIInvoice(t.Context(), w, c, invoice, method, "fence-race")
 	require.NoError(t, answer.err)
 	require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
@@ -162,6 +165,7 @@ func TestInvoicePreflightCannotRetireConcurrentSubmissionFence(t *testing.T) {
 	w.cfg = nil
 	w.advance(time.Minute)
 	w.restart()
+	w.settleRefreshes()
 	result := make(chan invoiceAnswer, 1)
 	go func() { result <- payNMIInvoice(t.Context(), w, c, invoice, method, "fence-race") }()
 	select {
@@ -219,6 +223,7 @@ func TestInvoicePreflightResolvesUnsentAcceptedOperation(t *testing.T) {
 			w.settleCollectionScans()
 			w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 			w.restart()
+			w.settleRefreshes() // the readonly process's own refresh precedes the sale
 			answer := payNMIInvoice(t.Context(), w, c, invoice, method, "accepted-unsent")
 			require.NoError(t, answer.err)
 			require.Equal(t, http.StatusAccepted, answer.status, string(answer.body))
