@@ -24,6 +24,10 @@ Successful local actions return 200; an unresolved collection answers 202 with i
 
 A never-attempted open invoice is not manually retryable. Retry eligibility applies to past-due/uncollectible automatic invoices and open automatic invoices with a prior failure. While `collection_intent_id` names a live operation the invoice accepts no support mutation; an operation the verifier cannot settle is resolved with `openrails intents resolve` (exact provider receipt or provider-confirmed non-execution, see [provider uncertainty](provider-uncertainty.md)). There is no unpark/force-resend operation.
 
+## Period statements
+
+Each period's statement totals its charges. When threshold invoices already bill some of them, `total_amount` includes those charges, `amount_due` is only what the statement bills itself, and `amount_paid` adds what those invoices received for the period: each invoice's payments apply to its oldest charges first. The statement stays `open` until nothing is due on it and those charges are paid, and becomes `paid` with the payment that completes them. One waiting only on other invoices offers only `void`.
+
 ## Amount units
 
 Invoice and ledger amounts use the currency registry's native units; the scale of each currency is in `GET /v1/currencies`. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.

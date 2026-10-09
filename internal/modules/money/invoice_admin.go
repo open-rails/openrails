@@ -104,7 +104,12 @@ func InvoiceActions(invoice *models.Invoice) []billing.InvoiceAction {
 	case "draft":
 		actions = append(actions, billing.InvoiceActionVoid)
 	case "open", "past_due":
-		actions = append(actions, billing.InvoiceActionVoid, billing.InvoiceActionUncollectible, billing.InvoiceActionRecordPayment)
+		actions = append(actions, billing.InvoiceActionVoid)
+		// A statement waiting only on other invoices has nothing due to pay
+		// or write off.
+		if invoice.AmountDue > 0 {
+			actions = append(actions, billing.InvoiceActionUncollectible, billing.InvoiceActionRecordPayment)
+		}
 	}
 	return actions
 }

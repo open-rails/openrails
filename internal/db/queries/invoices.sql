@@ -106,6 +106,107 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
   AND invoice_at >= sqlc.arg(period_starts_at)::timestamptz
   AND invoice_at < sqlc.arg(period_ends_at)::timestamptz;
 
+-- name: SumBilledInvoiceItemAmountInPeriod :one
+-- A period's charges that invoices already bill: what its statement waits on.
+SELECT COALESCE(SUM(amount), 0)::bigint
+FROM billing.invoice_items
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
+  AND invoice_id IS NOT NULL
+  AND invoice_at >= sqlc.arg(period_starts_at)::timestamptz
+  AND invoice_at < sqlc.arg(period_ends_at)::timestamptz;
+
+-- name: LockInvoicesBillingPeriod :many
+-- The invoices billing a period's charges, share-locked while its statement
+-- reads their payments: a payment to one commits first, or waits and then
+-- finds the committed statement.
+SELECT i.id
+FROM billing.invoices i
+WHERE i.merchant_id = $1 AND i.customer_id = $2
+  AND i.id IN (
+      SELECT ii.invoice_id FROM billing.invoice_items ii
+      WHERE ii.merchant_id = $1 AND ii.customer_id = $2 AND ii.currency = sqlc.arg(currency)
+        AND ii.invoice_id IS NOT NULL
+        AND ii.invoice_at >= sqlc.arg(period_starts_at)::timestamptz
+        AND ii.invoice_at < sqlc.arg(period_ends_at)::timestamptz)
+ORDER BY i.id
+FOR SHARE;
+
+-- name: SumInvoiceItemAmountBilledBy :one
+-- The charges an invoice bills itself; a statement's total adds the charges of
+-- its period other invoices bill.
+SELECT COALESCE(SUM(amount), 0)::bigint
+FROM billing.invoice_items
+WHERE merchant_id = $1 AND invoice_id = sqlc.arg(invoice_id)::uuid;
+
+-- name: LockStatementsAwaitingInvoice :many
+-- The statements waiting on an invoice's charges: their period holds one, and
+-- not all they state is paid or due on them. Locked so payments to two of
+-- their invoices recompute them one after the other.
+WITH billed AS (
+    SELECT MIN(invoice_at) AS first_at, MAX(invoice_at) AS last_at
+    FROM billing.invoice_items
+    WHERE merchant_id = $1 AND invoice_id = sqlc.arg(invoice_id)::uuid
+)
+SELECT s.id
+FROM billing.invoices s, billed b
+WHERE s.merchant_id = $1 AND s.customer_id = $2 AND s.currency = sqlc.arg(currency)
+  AND s.status IN ('open', 'past_due', 'uncollectible')
+  AND s.amount_paid + s.amount_due < s.total_amount
+  AND s.id <> sqlc.arg(invoice_id)::uuid
+  AND s.period_starts_at <= b.last_at AND s.period_ends_at > b.first_at
+ORDER BY s.id
+FOR UPDATE OF s;
+
+-- name: SettleStatementCoverage :execrows
+-- A statement's amount_paid is its own payments plus what the invoices billing
+-- the rest of its period's charges received for them; each such invoice's
+-- payments apply to its charges oldest first. The statement is paid once
+-- nothing is due on it and those charges are all paid.
+WITH s AS (
+    SELECT i.id, i.customer_id, i.currency, i.period_starts_at, i.period_ends_at
+    FROM billing.invoices i
+    WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = ANY(sqlc.arg(statement_ids)::uuid[])
+      AND i.status IN ('open', 'past_due', 'uncollectible')
+      AND i.amount_paid + i.amount_due < i.total_amount
+), own AS (
+    SELECT s.id, COALESCE(SUM(ii.amount), 0)::bigint AS amount
+    FROM s
+    LEFT JOIN billing.invoice_items ii ON ii.merchant_id = sqlc.arg(merchant_id)::uuid AND ii.invoice_id = s.id
+    GROUP BY s.id
+), coverage AS (
+    SELECT s.id, ii.invoice_id, MIN(s.period_starts_at) AS period_starts_at, SUM(ii.amount)::bigint AS amount
+    FROM s
+    JOIN billing.invoice_items ii
+      ON ii.merchant_id = sqlc.arg(merchant_id)::uuid AND ii.customer_id = s.customer_id AND ii.currency = s.currency
+     AND ii.invoice_id IS NOT NULL AND ii.invoice_id <> s.id
+     AND ii.invoice_at >= s.period_starts_at AND ii.invoice_at < s.period_ends_at
+    GROUP BY s.id, ii.invoice_id
+), received AS (
+    SELECT c.id, SUM(LEAST(GREATEST(b.amount_paid - COALESCE(earlier.amount, 0), 0), c.amount))::bigint AS amount
+    FROM coverage c
+    JOIN billing.invoices b ON b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.id = c.invoice_id
+    LEFT JOIN LATERAL (
+        SELECT SUM(e.amount) AS amount
+        FROM billing.invoice_items e
+        WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.invoice_id = c.invoice_id
+          AND e.invoice_at < c.period_starts_at
+    ) earlier ON true
+    GROUP BY c.id
+), settled AS (
+    SELECT own.id, own.amount AS own_amount, LEAST(COALESCE(received.amount, 0), i.total_amount - own.amount) AS received,
+           i.amount_due = 0 AND COALESCE(received.amount, 0) >= i.total_amount - own.amount AS paid
+    FROM own
+    JOIN billing.invoices i ON i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = own.id
+    LEFT JOIN received ON received.id = own.id
+)
+UPDATE billing.invoices i
+SET amount_paid = settled.own_amount - i.amount_due + settled.received,
+    status = CASE WHEN settled.paid THEN 'paid' ELSE i.status END,
+    paid_at = CASE WHEN settled.paid THEN sqlc.arg(now)::timestamptz ELSE i.paid_at END,
+    updated_at = sqlc.arg(now)::timestamptz
+FROM settled
+WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = settled.id;
+
 -- name: ListInvoiceThresholdCandidates :many
 --
 -- or#897: the trigger amount is the BOUND billing policy's
@@ -288,11 +389,16 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 ORDER BY invoice_at ASC, source_id ASC;
 
 -- name: ApplyInvoicePaymentSnapshot :execrows
+-- Settling what is due leaves a statement open while other invoices still
+-- owe part of its period.
 UPDATE billing.invoices
 SET amount_paid = amount_paid + sqlc.arg(snapshot)::bigint,
     amount_due = GREATEST(0, amount_due - sqlc.arg(snapshot)::bigint),
-    status = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN 'paid' ELSE status END,
-    paid_at = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
+    status = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint > 0 THEN status
+                  WHEN amount_paid + sqlc.arg(snapshot)::bigint >= total_amount THEN 'paid'
+                  ELSE 'open' END,
+    paid_at = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 AND amount_paid + sqlc.arg(snapshot)::bigint >= total_amount
+                   THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
     next_collection_attempt_at = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN NULL ELSE next_collection_attempt_at END,
     last_collection_failure_code = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN NULL ELSE last_collection_failure_code END,
     last_collection_failure_message = CASE WHEN amount_due - sqlc.arg(snapshot)::bigint <= 0 THEN NULL ELSE last_collection_failure_message END,
@@ -491,8 +597,11 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)::t
 UPDATE billing.invoices
 SET amount_paid = amount_paid + sqlc.arg(amount)::bigint,
     amount_due = amount_due - sqlc.arg(amount)::bigint,
-    status = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN 'paid' ELSE status END,
-    paid_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
+    status = CASE WHEN amount_due <> sqlc.arg(amount)::bigint THEN status
+                  WHEN amount_paid + sqlc.arg(amount)::bigint >= total_amount THEN 'paid'
+                  ELSE 'open' END,
+    paid_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint AND amount_paid + sqlc.arg(amount)::bigint >= total_amount
+                   THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
     next_collection_attempt_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN NULL ELSE next_collection_attempt_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/statement"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -25,7 +26,9 @@ import (
 // totals come from the money ledger; both are snapshotted on the invoice.
 // Idempotent: re-finalizing the same (period, currency) returns the existing
 // invoice. Arrears invoices with owed accrual become open receivables; prepaid
-// / zero-due invoices are marked paid informational statements.
+// / zero-due invoices are marked paid informational statements, unless
+// threshold invoices bill part of the period: the statement stays open until
+// they are paid.
 func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*models.Invoice, error) {
 	return s.finalizeInvoice(ctx, payer, currency, from, to, basisAny)
 }
@@ -207,6 +210,21 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 			basis == basisActivity && pendingItems == 0 && len(totals) == 0 && len(movs) == 0:
 			return nil
 		}
+		// A statement also states its period's charges that threshold invoices
+		// already bill, and is paid only once they are (#1147). A threshold
+		// invoice states only what it bills.
+		var covered int64
+		if basis != basisPending {
+			period := gen.LockInvoicesBillingPeriodParams{MerchantID: tenantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto}
+			if _, err := q.LockInvoicesBillingPeriod(ctx, period); err != nil {
+				return err
+			}
+			sum, err := q.SumBilledInvoiceItemAmountInPeriod(ctx, gen.SumBilledInvoiceItemAmountInPeriodParams(period))
+			if err != nil {
+				return err
+			}
+			covered = sum
+		}
 		pendingReceivable, perr := q.SumPendingInvoiceItemAmountInPeriod(ctx, gen.SumPendingInvoiceItemAmountInPeriodParams{
 			MerchantID:     tenantID,
 			CustomerID:     payerID,
@@ -255,7 +273,7 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 		now := s.now()
 		invoiceID := uuidutil.NewV7()
 		invoiceNumber := fmt.Sprintf("INV-%s", invoiceID.String())
-		totalAmount := receivable
+		totalAmount := receivable + covered
 		amountPaid := receivable - due
 		amountDue := due
 		status := "open"
@@ -271,14 +289,13 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 				collectionMethod = m
 			}
 		}
+		if totalAmount == 0 {
+			// Nothing billed: prepaid usage was paid as it was spent.
+			totalAmount, amountPaid = usageTotal, usageTotal
+		}
 		var paidAt *time.Time
-		if amountDue == 0 {
-			status = "paid"
-			if receivable == 0 {
-				totalAmount = usageTotal
-				amountPaid = usageTotal
-			}
-			paidAt = &now
+		if amountDue == 0 && amountPaid == totalAmount {
+			status, paidAt = "paid", &now
 		}
 		inv = &models.Invoice{
 			ID:               invoiceID,
@@ -399,7 +416,19 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 				return fmt.Errorf("invoice issued notification: %w", err)
 			}
 		}
-		return nil
+		if covered == 0 {
+			return nil
+		}
+		// What the billing invoices already received counts at once.
+		if _, err := q.SettleStatementCoverage(ctx, gen.SettleStatementCoverageParams{MerchantID: tenantID, StatementIds: []uuid.UUID{inv.ID}, Now: now}); err != nil {
+			return err
+		}
+		row, err := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{MerchantID: tenantID, CustomerID: payerID, ID: inv.ID})
+		if err != nil {
+			return err
+		}
+		inv, err = invoiceFromGen(row)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -600,6 +629,9 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		}
 		if n == 0 {
 			return fmt.Errorf("invoice payment was not applied")
+		}
+		if e := statement.Follow(ctx, q, tid.UUID(), payer.UUID(), invoiceRow.Currency, id, now); e != nil {
+			return e
 		}
 		// Settle the arrears liability via a #512 ledger owed-payment transfer
 		// (DR processor_clearing / CR arrears_liability).

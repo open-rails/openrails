@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/statement"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -76,6 +77,9 @@ func Repay(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, lot gen.Bi
 		}
 		if n != 1 {
 			return 0, fmt.Errorf("owed repayment: invoice %s changed under the customer lock", invoice)
+		}
+		if err := statement.Follow(ctx, q, merchantID, customer, currency, invoice, now); err != nil {
+			return 0, err
 		}
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID: uuidutil.NewV7(), MerchantID: merchantID, CustomerID: customer, InvoiceID: invoice,

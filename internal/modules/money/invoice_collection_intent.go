@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/statement"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -481,6 +482,9 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 			// receipt stays on the operation and the pointer keeps every
 			// further collection off this invoice until an operator repairs it.
 			return fmt.Errorf("invoice %s no longer accepts the frozen snapshot %d; confirmed charge %s needs repair", p.InvoiceID, p.Amount, transactionID)
+		}
+		if err := statement.Follow(ctx, q, intent.MerchantID, p.CustomerID, normalizeCurrency(p.Currency), p.InvoiceID, now); err != nil {
+			return err
 		}
 		if ext := optionalString(externalInvoiceID); ext != nil {
 			if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, ExternalInvoiceID: ext, Now: now}); err != nil {

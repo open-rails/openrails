@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/statement"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -226,14 +227,21 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 		if other {
 			return fmt.Errorf("%w: transaction already belongs to another payment", ErrInvoiceRecoveryHeld)
 		}
-		if invoice.AmountPaid < 0 || invoice.AmountDue < 0 || invoice.TotalAmount < invoice.AmountPaid || invoice.TotalAmount-invoice.AmountPaid != invoice.AmountDue {
+		// A statement also states charges of its period other invoices bill,
+		// and what they received; its receivable is the charges it bills.
+		billed, err := q.SumInvoiceItemAmountBilledBy(ctx, gen.SumInvoiceItemAmountBilledByParams{MerchantID: mid.UUID(), InvoiceID: invoice.ID})
+		if err != nil {
+			return err
+		}
+		ownPaid := billed - invoice.AmountDue
+		if received := invoice.AmountPaid - ownPaid; invoice.AmountPaid < 0 || invoice.AmountDue < 0 || ownPaid < 0 || received < 0 || received > invoice.TotalAmount-billed {
 			return fmt.Errorf("%w: invoice monetary snapshot is inconsistent", ErrInvoiceRecoveryHeld)
 		}
 		allocations, err := q.InvoiceRecoveryAllocationTotal(ctx, gen.InvoiceRecoveryAllocationTotalParams{MerchantID: mid.UUID(), InvoiceID: invoice.ID, Currency: invoice.Currency})
 		if err != nil {
 			return err
 		}
-		if !allocations.Consistent || allocations.Amount != invoice.AmountPaid {
+		if !allocations.Consistent || allocations.Amount != ownPaid {
 			return fmt.Errorf("%w: retained invoice allocations are incomplete", ErrInvoiceRecoveryHeld)
 		}
 		prior, err := q.GetInvoiceRecoveryPayment(ctx, gen.GetInvoiceRecoveryPaymentParams{MerchantID: mid.UUID(), PspID: receipt.psp, TransactionID: facts.Sale.TransactionID})
@@ -241,7 +249,7 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 			return err
 		}
 		if len(prior) > 0 {
-			if invoice.Status != "paid" || invoice.AmountDue != 0 || len(prior) != 1 || prior[0].InvoiceID != invoice.ID || prior[0].CustomerID != invoice.CustomerID || prior[0].Amount != charged || prior[0].Currency != invoice.Currency || prior[0].Status != "settled" || prior[0].Channel != string(models.ChannelRail) || prior[0].Rail == nil || *prior[0].Rail != "nmi" || prior[0].LedgerTransferID == nil {
+			if (invoice.Status != "paid" && invoice.Status != "open") || invoice.AmountDue != 0 || len(prior) != 1 || prior[0].InvoiceID != invoice.ID || prior[0].CustomerID != invoice.CustomerID || prior[0].Amount != charged || prior[0].Currency != invoice.Currency || prior[0].Status != "settled" || prior[0].Channel != string(models.ChannelRail) || prior[0].Rail == nil || *prior[0].Rail != "nmi" || prior[0].LedgerTransferID == nil {
 				return fmt.Errorf("%w: transaction allocation conflicts", ErrInvoiceRecoveryHeld)
 			}
 			transfer, err := q.GetInvoiceRecoveryLedgerTransfer(ctx, gen.GetInvoiceRecoveryLedgerTransferParams{MerchantID: mid.UUID(), TransferID: *prior[0].LedgerTransferID})
@@ -255,7 +263,7 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 			result, err = invoiceFromGen(invoice)
 			return err
 		}
-		if (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible") || invoice.FinalizedAt == nil || invoice.AmountDue <= 0 || invoice.AmountPaid < 0 || invoice.TotalAmount < invoice.AmountPaid || invoice.TotalAmount-invoice.AmountPaid != invoice.AmountDue {
+		if (invoice.Status != "open" && invoice.Status != "past_due" && invoice.Status != "uncollectible") || invoice.FinalizedAt == nil || invoice.AmountDue <= 0 {
 			return fmt.Errorf("%w: invoice is not an unchanged finalized receivable", ErrInvoiceRecoveryHeld)
 		}
 		if facts.PaidAt.Before(invoice.FinalizedAt.Add(-intents.ClockMargin)) || facts.PaidAt.After(s.now().Add(intents.ClockMargin)) {
@@ -274,6 +282,9 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 		}
 		if applied != 1 {
 			return fmt.Errorf("%w: invoice changed under recovery lock", ErrInvoiceRecoveryHeld)
+		}
+		if err := statement.Follow(ctx, q, mid.UUID(), invoice.CustomerID, invoice.Currency, invoice.ID, facts.PaidAt); err != nil {
+			return err
 		}
 		key := receipt.psp.String() + ":" + facts.Sale.TransactionID
 		transfer, err := ledger.New(q, mid.UUID()).PayOwed(ctx, invoice.CustomerID, invoice.Currency, invoice.AmountDue, ledger.Coord{Operation: ledger.OpInvoicePayment, Source: "observed_invoice_payment", SourceID: key}, &invoice.ID)

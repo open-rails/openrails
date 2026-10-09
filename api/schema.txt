@@ -23,6 +23,7 @@ migration 0019_product_access.up.sql sha256:fee52c1fbafd1af152efd83a5116f1f164e6
 migration 0020_product_access_cutover.up.sql sha256:7840a26f86166d6fb76936789d2aff19d126969d1fbe3cfab00ce9204b86a3c9
 migration 0021_entitlement_cache.up.sql sha256:9c4b60cee1998e589501b2142c4e2fdf08c0a1614ec6d29c4bb3d2df85fb5371
 migration 0022_partition_race.up.sql sha256:6532f6a6254907507a3050ae4b42f05b79103b541be27cb9ff8d07707db8e097
+migration 0023_statement_coverage.up.sql sha256:b23f0cefea13ef00bdfd6057af36e113aafea7bbda12e4ba04ff1e0a0601db02
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -748,6 +749,7 @@ table billing.invoice_items
   constraint invoice_items_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint invoice_items_pkey PRIMARY KEY (merchant_id, id)
   constraint invoice_items_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'voided'::text])))
+  index CREATE INDEX invoice_items_billed_invoice_at_idx ON billing.invoice_items USING btree (merchant_id, customer_id, currency, invoice_at) WHERE (invoice_id IS NOT NULL)
   index CREATE INDEX invoice_items_customer_id_currency_invoice_at_idx ON billing.invoice_items USING btree (merchant_id, customer_id, currency, invoice_at) WHERE ((invoice_id IS NULL) AND (status = 'pending'::text))
   index CREATE UNIQUE INDEX invoice_items_customer_id_currency_source_type_source_id_key ON billing.invoice_items USING btree (merchant_id, customer_id, currency, source_type, source_id)
   index CREATE INDEX invoice_items_invoice_id_idx ON billing.invoice_items USING btree (merchant_id, invoice_id)
@@ -845,6 +847,7 @@ table billing.invoices
   constraint invoices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint invoices_pkey PRIMARY KEY (merchant_id, id)
   constraint invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text])))
+  index CREATE INDEX invoices_awaiting_period_starts_at_idx ON billing.invoices USING btree (merchant_id, customer_id, currency, period_starts_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text, 'uncollectible'::text])) AND ((amount_paid + amount_due) < total_amount))
   index CREATE INDEX invoices_collection_intent_id_idx ON billing.invoices USING btree (merchant_id, collection_intent_id) WHERE (collection_intent_id IS NOT NULL)
   index CREATE INDEX invoices_customer_id_currency_due_at_idx ON billing.invoices USING btree (merchant_id, customer_id, currency, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0))
   index CREATE UNIQUE INDEX invoices_customer_id_currency_id_key ON billing.invoices USING btree (merchant_id, customer_id, currency, id)
