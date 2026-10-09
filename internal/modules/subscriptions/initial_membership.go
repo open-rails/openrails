@@ -92,6 +92,9 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 	if _, err := hex.DecodeString(p.RequestFingerprint); err != nil {
 		return p, err
 	}
+	if p.Terms.Quantity > 1 && in.Rail != string(models.RailNMI) && in.Rail != string(models.RailStripe) {
+		return p, errors.New("only an NMI or Stripe engine membership has seats")
+	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
 		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !p.Upgrade()) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")

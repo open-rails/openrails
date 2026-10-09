@@ -60,6 +60,10 @@ type Subscription struct {
 	// Scheduled tier change (for downgrades that take effect at end of period)
 	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
 
+	// Quantity is the seats each period bills; above 1 only on an engine
+	// NMI or Stripe subscription.
+	Quantity int `json:"quantity"`
+
 	// AccessDurationHoursSnapshot is the accepted access duration for this paid phase.
 	// nil has no scheduled expiry; changing price does not change past promises.
 	AccessDurationHoursSnapshot *int `json:"access_duration_hours_snapshot"`

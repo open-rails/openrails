@@ -158,7 +158,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return err
 			}
 			current := namedProfile(p.Name)
-			return emit(current, project(p, current, r.Values))
+			out := project(p, current, r.Values)
+			if p.Name == "subscriptions" {
+				for i, c := range current.Columns {
+					if c.Name == "quantity" && out[i] == nil {
+						out[i] = new("1") // Archives before seats bill one.
+					}
+				}
+			}
+			return emit(current, out)
 		}
 		return emit(p, r.Values)
 	})

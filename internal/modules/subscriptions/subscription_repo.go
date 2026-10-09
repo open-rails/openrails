@@ -45,6 +45,10 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		ct := string(*s.CancelType)
 		cancelType = &ct
 	}
+	quantity, err := safecast.Convert[int32](s.Quantity)
+	if err != nil {
+		return gen.CreateSubscriptionParams{}, fmt.Errorf("subscription quantity: %w", err)
+	}
 	return gen.CreateSubscriptionParams{
 		ID:                          s.ID,
 		CustomerID:                  s.CustomerID,
@@ -54,6 +58,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		AccessDurationHoursSnapshot: models.IntPtrTo32(s.AccessDurationHoursSnapshot),
 		Status:                      string(s.Status),
 		PspID:                       s.PspID,
+		Quantity:                    quantity,
 		StartedAt:                   s.StartedAt,
 		EndedAt:                     s.EndedAt,
 		CurrentPeriodStartsAt:       s.CurrentPeriodStartsAt,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -162,11 +163,36 @@ func abs(v int) int {
 }
 
 // modelBUpgradeOf reads the upgrade inputs from the subscription's current
-// period on its current price and the target price's cycle.
-func modelBUpgradeOf(sub *models.Subscription, current, target *models.Price) ModelBUpgrade {
+// period on its current price and seats, and the target price's cycle at
+// quantity seats.
+func modelBUpgradeOf(sub *models.Subscription, current, target *models.Price, quantity int) (ModelBUpgrade, error) {
+	old, err := seatPriceAmount(current, sub.Quantity)
+	if err != nil {
+		return ModelBUpgrade{}, err
+	}
+	next, err := seatPriceAmount(target, quantity)
+	if err != nil {
+		return ModelBUpgrade{}, err
+	}
+	u := providerUpgradeOf(sub, current, target)
+	u.Old, u.New = old, next
+	return u, nil
+}
+
+// providerUpgradeOf is a provider-owned subscription's upgrade, which always
+// bills one seat.
+func providerUpgradeOf(sub *models.Subscription, current, target *models.Price) ModelBUpgrade {
 	return ModelBUpgrade{
 		Old: PriceAmountOf(current), New: PriceAmountOf(target),
 		PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt,
 		NewCycleHours: target.RecurringCycleHours(),
 	}
+}
+
+// seatPriceAmount is a price for quantity seats.
+func seatPriceAmount(p *models.Price, quantity int) (PriceAmount, error) {
+	amount := PriceAmountOf(p)
+	total, err := subscriptions.SeatAmount(amount.Micros, quantity)
+	amount.Micros = total
+	return amount, err
 }

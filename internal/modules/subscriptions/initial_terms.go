@@ -28,13 +28,16 @@ type InitialMembershipTerms struct {
 	PriceID             uuid.UUID               `json:"price_id"`
 	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
 	ProductName         string                  `json:"product_name"`
-	Amount              int64                   `json:"amount,string"`
-	RecurringAmount     int64                   `json:"recurring_amount,string"`
-	Currency            string                  `json:"currency"`
-	AcceptedAt          time.Time               `json:"accepted_at"`
-	PeriodStart         time.Time               `json:"period_start"`
-	PeriodEnd           time.Time               `json:"period_end"`
-	Pending             bool                    `json:"pending"`
+	// Quantity is the seats the membership bills; RecurringAmount is the unit
+	// price times Quantity.
+	Quantity        int       `json:"quantity"`
+	Amount          int64     `json:"amount,string"`
+	RecurringAmount int64     `json:"recurring_amount,string"`
+	Currency        string    `json:"currency"`
+	AcceptedAt      time.Time `json:"accepted_at"`
+	PeriodStart     time.Time `json:"period_start"`
+	PeriodEnd       time.Time `json:"period_end"`
+	Pending         bool      `json:"pending"`
 	// Entitlements is the keys an enrollment admitted before product access,
 	// kept only to reproduce its quote fingerprint. Access follows ProductID.
 	Entitlements json.RawMessage `json:"entitlements,omitempty"`
@@ -71,6 +74,9 @@ func (t InitialMembershipTerms) Validate() error {
 			return errors.New("initial membership instants must have PostgreSQL microsecond precision")
 		}
 	}
+	if t.Quantity < 1 || (t.Quantity > 1 && t.CollectionPolicy != models.CollectionPolicyEngine) || t.RecurringAmount%int64(t.Quantity) != 0 {
+		return errors.New("initial membership quantity contradicts its recurring amount")
+	}
 	if t.Currency != strings.ToUpper(strings.TrimSpace(t.Currency)) || (t.Amount > 0) != (t.PaymentID != uuid.Nil) || (t.Pending && (t.Amount != 0 || !t.PeriodStart.After(t.AcceptedAt))) {
 		return errors.New("initial membership phase contradicts its accepted payment")
 	}
@@ -86,8 +92,14 @@ func (t InitialMembershipTerms) Validate() error {
 	return err
 }
 
+// UnitAmount is the price of one seat.
+func (t InitialMembershipTerms) UnitAmount() int64 {
+	return t.RecurringAmount / int64(max(t.Quantity, 1))
+}
+
 // UnmarshalJSON preserves already accepted operations from before access and billing were separated.
 // Only an absent access field uses that operation's original billing period; explicit null is indefinite.
+// An operation accepted before seats bills one.
 func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	type plain InitialMembershipTerms
 	var decoded plain
@@ -104,6 +116,9 @@ func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	if _, present := fields["access_duration_hours"]; !present {
 		hours := int(decoded.PeriodEnd.Sub(decoded.PeriodStart) / time.Hour)
 		decoded.AccessDurationHours = &hours
+	}
+	if _, present := fields["quantity"]; !present {
+		decoded.Quantity = 1
 	}
 	*t = InitialMembershipTerms(decoded)
 	return nil

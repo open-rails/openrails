@@ -24448,6 +24448,9 @@
           "price_id": {
             "type": "string"
           },
+          "quantity": {
+            "type": "integer"
+          },
           "psp_id": {
             "type": "string"
           },
@@ -24615,6 +24618,7 @@
           "customer_id",
           "product_id",
           "price_id",
+          "quantity",
           "psp_id",
           "rail",
           "rail_subscription_id",

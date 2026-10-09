@@ -339,7 +339,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	var productID, psp, subscription uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT id FROM billing.products WHERE merchant_id = $1 AND key = $2`), w.merchant, product.Key).Scan(&productID))
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, rail, psp_id, status, collection_policy, started_at) VALUES ($1, $2, $3, 'stripe', $4, 'pending', 'provider', now()) RETURNING id`),
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, rail, psp_id, status, collection_policy, started_at, quantity) VALUES ($1, $2, $3, 'stripe', $4, 'pending', 'provider', now(), 1) RETURNING id`),
 		w.merchant, customer.UUID(), productID, psp).Scan(&subscription))
 
 	// Subscription history: 400 changes past 25 months, 3 just inside it, and

@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -133,7 +134,7 @@ func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ..
 			return nil
 		}
 		to, ok := legacy[table]
-		if !ok || len(to.Columns) == len(from.Columns) && table != "grants" {
+		if !ok || slices.Equal(to.Columns, from.Columns) && table != "grants" {
 			return write(values)
 		}
 		row := make([]*string, len(to.Columns))

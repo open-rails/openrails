@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
+var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "quantity": integerValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "cancel_after_initial": booleanValue, "access_duration_hours": nullable(integerValue), "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)),
 	"replaces": object(map[string]jsonRule{"subscription_id": uuidValue, "price_id": uuidValue, "period_end": textValue, "credit": moneyStringValue})})
 
 var creditGrantJSON = nullable(func(v any) bool {

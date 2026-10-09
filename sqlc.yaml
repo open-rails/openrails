@@ -26,6 +26,7 @@ sql:
       - "internal/migrate/postgres/0021_entitlement_cache.up.sql"
       - "internal/migrate/postgres/0024_cost_resolutions.up.sql"
       - "internal/migrate/postgres/0025_cost_refusals.up.sql"
+      - "internal/migrate/postgres/0029_subscription_quantity.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

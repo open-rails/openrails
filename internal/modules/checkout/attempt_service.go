@@ -813,7 +813,7 @@ func quoteInitialMembership(ctx context.Context, session *models.CheckoutAttempt
 	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
 		return ErrCheckoutAttemptExpired
 	}
-	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour)}
+	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, CancelAfterInitial: !sessionAutoRenew(session), SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Quantity: 1, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour)}
 	if err := terms.Validate(); err != nil {
 		return err
 	}

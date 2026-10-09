@@ -186,6 +186,10 @@ func ValidateValues(p Profile, values []*string) error {
 				if x <= 0 || x > int64(catalog.MaxDurationHours) {
 					return bad()
 				}
+			case "subscriptions.quantity":
+				if x < 1 {
+					return bad()
+				}
 			}
 		case "boolean":
 			if v != "true" && v != "false" {

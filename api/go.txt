@@ -3184,6 +3184,7 @@ pkg openrails/billing, type Subscription struct, Price *Price `json:"price,omite
 pkg openrails/billing, type Subscription struct, PriceID PriceID `json:"price_id"`
 pkg openrails/billing, type Subscription struct, Product *ProductSummary `json:"product,omitempty"`
 pkg openrails/billing, type Subscription struct, ProductID ProductID `json:"product_id"`
+pkg openrails/billing, type Subscription struct, Quantity int `json:"quantity"`
 pkg openrails/billing, type Subscription struct, Rail string `json:"rail"`
 pkg openrails/billing, type Subscription struct, RailSubscriptionID *string `json:"rail_subscription_id"`
 pkg openrails/billing, type Subscription struct, Recovery *PaymentRecovery `json:"recovery,omitempty"`

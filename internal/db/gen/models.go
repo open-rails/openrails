@@ -1526,6 +1526,8 @@ type BillingSubscription struct {
 	DunningPolicy       []byte
 	// Access duration accepted for the current paid phase in hours; NULL means no scheduled expiry. Retained independently of repricing.
 	AccessDurationHoursSnapshot *int32
+	// Seats: renewals bill the unit price times this. Above 1 only on an engine-owned NMI or Stripe subscription; provider-owned and Solana subscriptions bill one unit.
+	Quantity int32
 }
 
 // A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle). Retention: permanent, never pruned.

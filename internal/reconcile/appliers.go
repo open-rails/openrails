@@ -209,7 +209,9 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 	if err != nil {
 		return MaterializeResult{}, err
 	}
+	// A provider-owned subscription bills one seat.
 	rows, err := w.DB.Gen(ctx).ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
+		Quantity:           1,
 		MerchantID:         tid.UUID(),
 		Status:             string(a.Status),
 		Rail:               a.Rail,

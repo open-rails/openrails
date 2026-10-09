@@ -200,6 +200,7 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		ProductID:                   s.ProductID,
 		PriceID:                     DerefUUID(s.PriceID),
 		ScheduledPriceID:            s.ScheduledPriceID,
+		Quantity:                    int(s.Quantity),
 		Status:                      SubscriptionStatus(s.Status),
 		StartedAt:                   s.StartedAt,
 		EndedAt:                     s.EndedAt,

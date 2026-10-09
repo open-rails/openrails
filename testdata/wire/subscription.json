@@ -71,6 +71,7 @@
   "customer_id": "22222222-2222-2222-2222-222222222222",
   "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "quantity": 1,
   "psp_id": "psp_55555555-5555-5555-5555-555555555555",
   "rail": "nmi",
   "rail_subscription_id": "rail-sub-1",

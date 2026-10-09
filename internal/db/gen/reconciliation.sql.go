@@ -2809,22 +2809,23 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    access_duration_hours_snapshot, customer_id, psp_id, collection_policy, quantity
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::text,
        $3, NULLIF($4::text, ''),
        $5::timestamptz,
        $6::timestamptz,
        COALESCE($7::timestamptz, now()),
-       pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider')
+       pr.access_duration_hours, $8, $9::uuid, COALESCE(NULLIF($10::text,''),'provider'),
+       $11::int
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
-WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
+WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $12
   AND NOT EXISTS (
       SELECT 1 FROM billing.subscriptions s
       WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4::text
         AND s.deleted_at IS NULL
-        AND s.rail = ANY ($12::text[])
+        AND s.rail = ANY ($13::text[])
         -- or#893: every writer resolves a PSP now, including the declared
         -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
         -- provider subscription id is only unique within a gateway account.
@@ -2844,6 +2845,7 @@ type ReconcileMaterializeSubscriptionParams struct {
 	CustomerID         uuid.UUID
 	PspID              uuid.UUID
 	CollectionPolicy   string
+	Quantity           int32
 	PriceID            uuid.UUID
 	Rails              []string
 }
@@ -2871,6 +2873,7 @@ func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg Reco
 		arg.CustomerID,
 		arg.PspID,
 		arg.CollectionPolicy,
+		arg.Quantity,
 		arg.PriceID,
 		arg.Rails,
 	)

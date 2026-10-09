@@ -2361,6 +2361,7 @@ export type Subscription = {
   customer_id: string
   product_id: string
   price_id: string
+  quantity: number
   psp_id: string
   rail: string
   rail_subscription_id: string | null

@@ -288,7 +288,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 				}
 				return sub, nil, nil
 			}
-			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
+			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || sub.Quantity != terms.Quantity || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
 				return nil, nil, errors.New("pending membership contradicts accepted first paid period")
 			}
 		}
@@ -517,10 +517,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			CurrentPeriodStartsAt: &periodStartsAt,
 			CurrentPeriodEndsAt:   &periodEndsAt,
 			StartedAt:             periodStartsAt,
+			Quantity:              1,
 		}
 
 		if terms := params.Prepared; terms != nil {
-			subscription.ID, subscription.PspID = terms.SubscriptionID, terms.PSPID
+			subscription.ID, subscription.PspID, subscription.Quantity = terms.SubscriptionID, terms.PSPID, terms.Quantity
 			subscription.CollectionPolicy = terms.CollectionPolicy
 			subscription.PaymentMethodID = &terms.PaymentMethodID
 			metadata, err := json.Marshal(params.PaymentMetadata)

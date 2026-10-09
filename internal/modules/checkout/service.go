@@ -1298,7 +1298,7 @@ func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
-	quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, currentPrice, newPrice), now)
+	quote, err := QuoteModelBUpgrade(providerUpgradeOf(existingSub, currentPrice, newPrice), now)
 	if err != nil {
 		return nil, err
 	}
@@ -1465,7 +1465,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		// #268 Model B: Stripe resets the cycle to now and invoices the
 		// proration immediately. The frozen now-amount is the local estimate
 		// (matching the preview); Stripe finalizes the exact proration.
-		quote, err := QuoteModelBUpgrade(modelBUpgradeOf(existingSub, currentPrice, newPrice), now)
+		quote, err := QuoteModelBUpgrade(providerUpgradeOf(existingSub, currentPrice, newPrice), now)
 		if err != nil {
 			return nil, err
 		}

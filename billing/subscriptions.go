@@ -46,11 +46,15 @@ type Subscription struct {
 	DeletionScheduledAt *time.Time       `json:"deletion_scheduled_at,omitempty"`
 	// Payments is the subscription's recovery history: the same Payment shape
 	// GET /v1/merchant/payments serves.
-	Payments              []Payment          `json:"payments,omitempty"`
-	ID                    SubscriptionID     `json:"id"`
-	CustomerID            CustomerID         `json:"customer_id"`
-	ProductID             ProductID          `json:"product_id"`
-	PriceID               PriceID            `json:"price_id"`
+	Payments   []Payment      `json:"payments,omitempty"`
+	ID         SubscriptionID `json:"id"`
+	CustomerID CustomerID     `json:"customer_id"`
+	ProductID  ProductID      `json:"product_id"`
+	PriceID    PriceID        `json:"price_id"`
+	// Quantity is the seats each period bills: the price's unit amount times
+	// Quantity. Only an engine-owned NMI or Stripe subscription has more than
+	// one.
+	Quantity              int                `json:"quantity"`
 	PSPID                 PSPID              `json:"psp_id"`
 	Rail                  string             `json:"rail"`
 	RailSubscriptionID    *string            `json:"rail_subscription_id"`

@@ -54,7 +54,11 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 	if sub.PaymentMethodID == nil {
 		return terms, ErrPaymentMethodStale
 	}
-	quote, err := QuoteModelBUpgrade(modelBUpgradeOf(sub, current, target), now)
+	upgrade, err := modelBUpgradeOf(sub, current, target, sub.Quantity)
+	if err != nil {
+		return terms, err
+	}
+	quote, err := QuoteModelBUpgrade(upgrade, now)
 	if err != nil {
 		return terms, err
 	}
@@ -66,7 +70,7 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(),
 		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: target.ID, PaymentMethodID: *sub.PaymentMethodID,
-		ProductName: product.DisplayName, Amount: quote.ChargeNow, RecurringAmount: target.Amount, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours,
+		ProductName: product.DisplayName, Quantity: sub.Quantity, Amount: quote.ChargeNow, RecurringAmount: upgrade.New.Micros, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours,
 		AcceptedAt: quote.PeriodStart, PeriodStart: quote.PeriodStart, PeriodEnd: quote.PeriodEnd,
 		Replaces: &subscriptions.ReplacedMembership{SubscriptionID: sub.ID, PriceID: sub.PriceID, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(), Credit: quote.Credit},
 	}
