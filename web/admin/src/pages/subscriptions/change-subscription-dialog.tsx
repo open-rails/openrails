@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -21,7 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { Rail, ScheduledChange, SubscriptionStatus } from "@/lib/api/types"
+import type {
+  ChangeSubscriptionParams,
+  Rail,
+  ScheduledChange,
+  SubscriptionStatus,
+} from "@/lib/api/types"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "@/lib/format"
@@ -29,44 +35,50 @@ import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import {
-  adminTierChangeBlockReason,
-  tierChangeOptionLabel,
-  tierChangeOptions,
-} from "@/pages/subscriptions/tier-change-options"
+  adminSubscriptionChangeBlockReason,
+  initialSeats,
+  subscriptionChangeOptionLabel,
+  subscriptionChangeOptions,
+} from "@/pages/subscriptions/subscription-change-options"
 
-interface ChangeTierDialogProps {
+interface ChangeSubscriptionDialogProps {
   subscriptionId: string
   customerId?: string
   productId: string
   priceId: string
+  quantity: number | null
   currency?: string
+  collectionPolicy?: string
   scheduledChange?: ScheduledChange | null
   rail: Rail
   status: SubscriptionStatus
 }
 
-export function ChangeTierDialog(props: ChangeTierDialogProps) {
+export function ChangeSubscriptionDialog(props: ChangeSubscriptionDialogProps) {
   return (
-    <ChangeTierForm
+    <ChangeSubscriptionForm
       key={`${selectedMerchant() ?? ""}:${props.subscriptionId}`}
       {...props}
     />
   )
 }
 
-function ChangeTierForm({
+function ChangeSubscriptionForm({
   subscriptionId,
   customerId,
   productId,
   priceId,
+  quantity,
   currency,
+  collectionPolicy,
   scheduledChange,
   rail,
   status,
-}: ChangeTierDialogProps) {
+}: ChangeSubscriptionDialogProps) {
   const [open, setOpen] = React.useState(false)
   const [selectedPriceId, setSelectedPriceId] = React.useState("")
-  const [reviewedPriceId, setReviewedPriceId] = React.useState("")
+  const [seats, setSeats] = React.useState("")
+  const [reviewedKey, setReviewedKey] = React.useState("")
   // A dismissed dialog or another preview cannot establish non-execution.
   // Retain each submitted request's key until its outcome is definitive.
   const attempts = React.useRef(new Map<string, string>())
@@ -79,21 +91,21 @@ function ChangeTierForm({
   )
   const queryClient = useQueryClient()
   const preview = useMutation(
-    adminMutations.previewSubscriptionTierChange(subscriptionId)
+    adminMutations.previewSubscriptionChange(subscriptionId)
   )
   const change = useMutation(
-    adminMutations.changeSubscriptionTier(
+    adminMutations.changeSubscription(
       queryClient,
       subscriptionId,
       customerId
     )
   )
   const productsQuery = useQuery({
-    ...adminQueries.allProducts({ errorAction: "Load tier-change plans" }),
+    ...adminQueries.allProducts({ errorAction: "Load subscription plans" }),
     enabled: open,
   })
   const pricesQuery = useQuery({
-    ...adminQueries.allPrices({ errorAction: "Load tier-change prices" }),
+    ...adminQueries.allPrices({ errorAction: "Load subscription prices" }),
     enabled: open,
   })
 
@@ -101,18 +113,41 @@ function ChangeTierForm({
   const prices = pricesQuery.data?.data ?? []
   const currentProduct = products.find((product) => product.id === productId)
   const currentPrice = prices.find((price) => price.id === priceId)
-  const options = tierChangeOptions({
+  const options = subscriptionChangeOptions({
     currentProduct,
+    currentPrice,
     currentCurrency: currency ?? currentPrice?.currency,
     products,
     prices,
+    scheduledChange,
   })
   const selected = options.find((option) => option.price.id === selectedPriceId)
+  const bounds = selected?.price.quantity
+  const seatCount = Number(seats)
+  const seatsValid =
+    !bounds ||
+    (Number.isInteger(seatCount) &&
+      seatCount >= bounds.min &&
+      seatCount <= bounds.max)
+  // The current price with its seats changes back from a scheduled change.
+  const request: ChangeSubscriptionParams | undefined =
+    selected && seatsValid
+      ? {
+          price_id: selected.price.id,
+          ...(bounds ? { quantity: seatCount } : {}),
+        }
+      : undefined
+  const unchanged =
+    selected?.direction === "current" &&
+    !scheduledChange &&
+    (!bounds || seatCount === quantity)
+  const requestKey = request ? JSON.stringify(request) : ""
   const reviewed =
-    reviewedPriceId === selectedPriceId ? preview.data : undefined
-  const blockReason = adminTierChangeBlockReason({
+    requestKey && reviewedKey === requestKey ? preview.data : undefined
+  const blockReason = adminSubscriptionChangeBlockReason({
     rail,
     status,
+    collectionPolicy,
     scheduledChange,
   })
 
@@ -123,8 +158,18 @@ function ChangeTierForm({
 
   const handleSelect = (value: string | null) => {
     view.current++
+    const price = options.find((option) => option.price.id === value)?.price
     setSelectedPriceId(value ?? "")
-    setReviewedPriceId("")
+    setSeats(String(price ? (initialSeats(price, quantity) ?? "") : ""))
+    setReviewedKey("")
+    preview.reset()
+    change.reset()
+  }
+
+  const handleSeats = (value: string) => {
+    view.current++
+    setSeats(value)
+    setReviewedKey("")
     preview.reset()
     change.reset()
   }
@@ -145,16 +190,16 @@ function ChangeTierForm({
             disabled={Boolean(blockReason) && !change.variables}
             title={blockReason}
           >
-            Change tier
+            Change subscription
           </Button>
         }
       />
       <DialogContent className={DIALOG_WIDE}>
         <DialogHeader>
-          <DialogTitle>Change subscription tier</DialogTitle>
+          <DialogTitle>Change subscription</DialogTitle>
           <DialogDescription>
-            Choose a plan in the same tier group, then review the charge and
-            effective time.
+            Choose a plan in the same tier group or new seats. A staff change
+            takes effect at the next renewal and charges nothing now.
           </DialogDescription>
         </DialogHeader>
 
@@ -178,7 +223,7 @@ function ChangeTierForm({
               <SelectContent>
                 {options.map((option) => (
                   <SelectItem key={option.price.id} value={option.price.id}>
-                    {tierChangeOptionLabel(option)}
+                    {subscriptionChangeOptionLabel(option)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -200,13 +245,41 @@ function ChangeTierForm({
             )}
           </div>
 
+          {bounds && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="subscription-seats">Seats</Label>
+              <Input
+                id="subscription-seats"
+                type="number"
+                inputMode="numeric"
+                min={bounds.min}
+                max={bounds.max}
+                value={seats}
+                onChange={(event) => handleSeats(event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                {bounds.min} to {bounds.max} seats.
+              </p>
+            </div>
+          )}
+
           {reviewed && selected && (
             <div className="grid gap-3" aria-live="polite">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm font-medium">Review</span>
-                <Badge variant="secondary">{reviewed.action}</Badge>
+                <Badge variant="secondary">
+                  {reviewed.effective === "now" ? "Immediate" : "At renewal"}
+                </Badge>
               </div>
               <dl className="grid grid-cols-2 gap-x-8 gap-y-3 border-y py-4 text-sm">
+                {reviewed.quantity !== null && (
+                  <div className="grid gap-1">
+                    <dt className="text-xs text-muted-foreground">Seats</dt>
+                    <dd className="font-medium tabular-nums">
+                      {reviewed.quantity}
+                    </dd>
+                  </div>
+                )}
                 <div className="grid gap-1">
                   <dt className="text-xs text-muted-foreground">Due now</dt>
                   <dd className="font-medium tabular-nums">
@@ -287,16 +360,17 @@ function ChangeTierForm({
           {!reviewed ? (
             <Button
               type="button"
-              disabled={!selectedPriceId || preview.isPending}
+              disabled={!request || unchanged || preview.isPending}
               onClick={async () => {
+                if (!request) return
                 const currentView = view.current
                 try {
-                  await preview.mutateAsync(selectedPriceId)
+                  await preview.mutateAsync(request)
                   if (view.current !== currentView) return
-                  setReviewedPriceId(selectedPriceId)
+                  setReviewedKey(requestKey)
                 } catch (error) {
                   if (view.current === currentView) {
-                    toastApiError(error, "Preview tier change")
+                    toastApiError(error, "Preview subscription change")
                   }
                 }
               }}
@@ -311,18 +385,19 @@ function ChangeTierForm({
                 (Boolean(change.data) && change.data?.status !== "processing")
               }
               onClick={async () => {
+                if (!request) return
                 const currentView = view.current
                 const changeKey =
-                  attempts.current.get(selectedPriceId) ?? crypto.randomUUID()
-                attempts.current.set(selectedPriceId, changeKey)
+                  attempts.current.get(requestKey) ?? crypto.randomUUID()
+                attempts.current.set(requestKey, changeKey)
                 const completeAttempt = () => {
-                  if (attempts.current.get(selectedPriceId) === changeKey) {
-                    attempts.current.delete(selectedPriceId)
+                  if (attempts.current.get(requestKey) === changeKey) {
+                    attempts.current.delete(requestKey)
                   }
                 }
                 try {
                   const result = await change.mutateAsync({
-                    priceId: selectedPriceId,
+                    change: request,
                     idempotencyKey: changeKey,
                   })
                   if (
@@ -334,13 +409,14 @@ function ChangeTierForm({
                   if (view.current !== currentView) return
                   if (result.status === "succeeded") {
                     toast.success(
-                      result.action === "upgrade"
-                        ? "Subscription upgraded"
-                        : "Downgrade scheduled"
+                      result.effective === "now"
+                        ? "Subscription changed"
+                        : "Change scheduled for the next renewal"
                     )
                     handleOpenChange(false)
                     setSelectedPriceId("")
-                    setReviewedPriceId("")
+                    setSeats("")
+                    setReviewedKey("")
                     preview.reset()
                     change.reset()
                   }
@@ -363,7 +439,7 @@ function ChangeTierForm({
                     completeAttempt()
                   }
                   if (view.current === currentView) {
-                    toastApiError(error, "Change subscription tier")
+                    toastApiError(error, "Change subscription")
                   }
                 }
               }}
@@ -376,7 +452,7 @@ function ChangeTierForm({
                     : change.data.status === "blocked"
                       ? "Change blocked"
                       : "Action required"
-                  : `Confirm ${reviewed.action}`}
+                  : "Confirm change"}
             </Button>
           )}
         </DialogFooter>

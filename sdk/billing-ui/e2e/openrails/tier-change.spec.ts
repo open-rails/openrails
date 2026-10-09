@@ -1,4 +1,4 @@
-// The client's tier-change preview against real AuthKit + OpenRails. The
+// The client's change preview against real AuthKit + OpenRails. The
 // seeded catalog declares no tier group, so every target is refused; jsdom
 // tests cover the preview itself (src/client/catalog.test.ts).
 import { expect, test } from "@playwright/test"
@@ -12,7 +12,7 @@ const billing = (baseURL: string | undefined, token?: string) =>
     getToken: () => token,
   })
 
-test("tier-change preview answers its owner and refuses the seeded targets", async ({
+test("change preview answers its owner and refuses the seeded targets", async ({
   request,
   baseURL,
 }) => {
@@ -26,18 +26,20 @@ test("tier-change preview answers its owner and refuses the seeded targets", asy
   const [sub] = (await client.listSubscriptions()).data
   const target = seeded.one_time_price_id
 
-  await expect(client.previewTierChange(sub.id, target)).rejects.toMatchObject({
+  await expect(client.previewSubscriptionChange(sub.id, { priceId: target })).rejects.toMatchObject({
     status: 400,
     code: "invalid_param",
     message: "cannot change to a different tier group",
   })
   await expect(
-    client.previewTierChange(sub.id, sub.price!.id)
+    client.previewSubscriptionChange(sub.id, { priceId: sub.price!.id })
   ).rejects.toMatchObject({ status: 409, message: "already on this plan" })
   await expect(
-    billing(baseURL, other.access_token).previewTierChange(sub.id, target)
+    billing(baseURL, other.access_token).previewSubscriptionChange(sub.id, {
+      priceId: target,
+    })
   ).rejects.toMatchObject({ status: 404 })
   await expect(
-    billing(baseURL).previewTierChange(sub.id, target)
+    billing(baseURL).previewSubscriptionChange(sub.id, { priceId: target })
   ).rejects.toMatchObject({ status: 401 })
 })

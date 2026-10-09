@@ -29,8 +29,8 @@ import {
   productSchema,
   solanaTokensSchema,
   subscriptionSchema,
-  tierChangePreviewSchema,
-  tierChangeSchema,
+  subscriptionChangePreviewSchema,
+  subscriptionChangeSchema,
   type Account,
   type CardSetup,
   type CheckoutSessionLink,
@@ -47,8 +47,8 @@ import {
   type Product,
   type SolanaToken,
   type Subscription,
-  type TierChange,
-  type TierChangePreview,
+  type SubscriptionChange,
+  type SubscriptionChangePreview,
 } from "./types"
 
 export interface BillingClientOptions {
@@ -91,6 +91,16 @@ export interface ListOptions {
 }
 
 /** A cursor list read: pass the previous page's `next_cursor` for the next. */
+/**
+ * A subscription change: another price of its tier group, other seats of a
+ * per-seat price, or both. A quantity for a price that is not per seat is
+ * refused (`quantity_not_allowed`).
+ */
+export interface SubscriptionChangeInput {
+  priceId?: string
+  quantity?: number
+}
+
 export interface CursorOptions {
   limit?: number
   cursor?: string | null
@@ -378,45 +388,53 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       )
     },
 
-    /** What `changeTier` would charge now and at the next renewal. */
-    previewTierChange(
+    /** What `changeSubscription` would charge now and at the next renewal. */
+    previewSubscriptionChange(
       subscriptionId: string,
-      priceId: string,
+      change: SubscriptionChangeInput,
       signal?: AbortSignal
-    ): Promise<TierChangePreview> {
+    ): Promise<SubscriptionChangePreview> {
       return json(
-        tierChangePreviewSchema,
-        `/me/subscriptions/${id(subscriptionId)}/change-tier/preview`,
+        subscriptionChangePreviewSchema,
+        `/me/subscriptions/${id(subscriptionId)}/change/preview`,
         {
           method: "POST",
-          body: { price_id: priceId } satisfies wire.ChangeTierParams,
+          body: {
+            price_id: change.priceId,
+            quantity: change.quantity,
+          } satisfies wire.ChangeSubscriptionParams,
           signal,
         }
       )
     },
 
     /**
-     * Moves the subscription to another price of its tier group: an upgrade
-     * charges the saved card now, a downgrade applies at period end.
+     * Moves the subscription to another price of its tier group, to other
+     * seats of a per-seat price, or both. An upgrade and more seats charge
+     * the saved card now; a downgrade and fewer seats apply at period end.
      * `idempotencyKey` identifies this attempt; reuse it until the change
-     * resolves (`processing`, a `subscription_change_in_flight` refusal or a lost
-     * response) so the stored result replays instead of charging twice. A
-     * wallet next action (Solana) is completed with `signWalletAction` and
+     * resolves (`processing`, a `subscription_change_in_flight` refusal or a
+     * lost response) so the stored result replays instead of charging twice.
+     * A wallet next action (Solana) is completed with `signWalletAction` and
      * the change repeated with `signature`.
      */
-    changeTier(
+    changeSubscription(
       subscriptionId: string,
-      input: { priceId: string; idempotencyKey: string; signature?: string }
-    ): Promise<TierChange> {
+      input: SubscriptionChangeInput & {
+        idempotencyKey: string
+        signature?: string
+      }
+    ): Promise<SubscriptionChange> {
       return json(
-        tierChangeSchema,
-        `/me/subscriptions/${id(subscriptionId)}/change-tier`,
+        subscriptionChangeSchema,
+        `/me/subscriptions/${id(subscriptionId)}/change`,
         {
           method: "POST",
           body: {
             price_id: input.priceId,
+            quantity: input.quantity,
             signature: input.signature,
-          } satisfies wire.CustomerChangeTierParams,
+          } satisfies wire.CustomerChangeSubscriptionParams,
           headers: { "Idempotency-Key": input.idempotencyKey },
         }
       )

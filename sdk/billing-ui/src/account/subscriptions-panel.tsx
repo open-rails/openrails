@@ -268,7 +268,7 @@ export function SubscriptionsPanel({
                     {pending &&
                     pending !== "resume" &&
                     pending !== "payment_method" &&
-                    pending !== "change_tier" ? (
+                    pending !== "change" ? (
                       <Spinner />
                     ) : null}
                     {t("subscriptions.cancel")}

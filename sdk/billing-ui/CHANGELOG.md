@@ -14,6 +14,21 @@
   final retry, and whether it waits for a new card. Null unless the
   subscription is `past_due` or `awaiting_method`.
 
+## Subscription changes and seats
+
+- `changeTier` and `previewTierChange` are `changeSubscription(id,
+  { priceId?, quantity?, idempotencyKey, signature? })` and
+  `previewSubscriptionChange(id, { priceId?, quantity? })`, on
+  `POST /me/subscriptions/{id}/change[/preview]`. `TierChange` and
+  `TierChangePreview` are `SubscriptionChange` and `SubscriptionChangePreview`:
+  no `action`, a `quantity`. `useSubscriptions().changeTier` is
+  `changeSubscription`, its pending state `change`, and its host event
+  `subscription.changed`.
+- `Subscription` has `quantity` and `scheduled_quantity`: the seats of a
+  per-seat price, null otherwise. The `tier_change_*` codes are
+  `subscription_change_*`, and `quantity_not_allowed` refuses seats on a price
+  without them.
+
 ## The public catalog is under /catalog
 
 - `listProducts()` reads `GET /catalog/products` (was `GET /products`).

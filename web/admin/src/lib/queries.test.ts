@@ -7,7 +7,7 @@ import { ApiError } from "@/lib/api/client"
 import { adminQueries, collectPages, queryKeys } from "@/lib/queries"
 import { queryClient, shouldRetry } from "@/lib/query-client"
 import { toastApiError } from "@/lib/toast"
-import { tierChangeOptions } from "@/pages/subscriptions/tier-change-options"
+import { subscriptionChangeOptions } from "@/pages/subscriptions/subscription-change-options"
 import { aPrice, aProduct, calls, client, selectMerchant, server } from "@/test/harness"
 
 vi.mock("@/lib/toast", () => ({ toastApiError: vi.fn() }))
@@ -120,7 +120,7 @@ describe("complete collections", () => {
 
     expect([allProducts.data.length, allPrices.data.length]).toEqual([1001, 1001])
     expect(calls(requests)).toHaveLength(22)
-    const options = tierChangeOptions({
+    const options = subscriptionChangeOptions({
       currentProduct: allProducts.data[0],
       currentCurrency: "USD",
       products: allProducts.data,

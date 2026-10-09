@@ -127,11 +127,11 @@ describe("catalog", () => {
   })
 })
 
-describe("tier change", () => {
+describe("subscription change", () => {
   const preview = {
-    object: "tier_change_preview",
-    action: "upgrade",
+    object: "subscription_change_preview",
     price_id: "price_2",
+    quantity: 3,
     rail: "nmi",
     currency: "USD",
     amount_due_now: "5000000",
@@ -148,9 +148,14 @@ describe("tier change", () => {
       apiError(400, "invalid_param", "cannot change to a different tier group"),
       json(200, { ...preview, amount_due_now: 5 })
     )
-    expect(await client.previewTierChange("sub_a/b", "price_2")).toEqual({
-      action: "upgrade",
+    expect(
+      await client.previewSubscriptionChange("sub_a/b", {
+        priceId: "price_2",
+        quantity: 3,
+      })
+    ).toEqual({
       price_id: "price_2",
+      quantity: 3,
       rail: "nmi",
       currency: "USD",
       amount_due_now: "5000000",
@@ -162,31 +167,29 @@ describe("tier change", () => {
     })
     const sent = request()
     expect(sent).toMatchObject({
-      url: "/billing/v1/me/subscriptions/sub_a%2Fb/change-tier/preview",
+      url: "/billing/v1/me/subscriptions/sub_a%2Fb/change/preview",
       method: "POST",
-      body: { price_id: "price_2" },
+      body: { price_id: "price_2", quantity: 3 },
     })
     expect(sent.headers.has("Idempotency-Key")).toBe(false)
 
     await expect(
-      client.previewTierChange("sub_1", "price_3")
+      client.previewSubscriptionChange("sub_1", { priceId: "price_3" })
     ).rejects.toMatchObject({
       status: 400,
       code: "invalid_param",
       message: "cannot change to a different tier group",
     })
     await expect(
-      client.previewTierChange("sub_1", "price_2")
+      client.previewSubscriptionChange("sub_1", { priceId: "price_2" })
     ).rejects.toMatchObject({ code: "invalid_response" })
   })
 
-  it("changes tier under the caller's idempotency key", async () => {
+  it("changes under the caller's idempotency key", async () => {
     const { client, request } = served(
       json(200, {
-        object: "tier_change",
+        object: "subscription_change",
         status: "succeeded",
-        mode: "tier_change",
-        action: "upgrade",
         effective: "now",
         price_id: "price_2",
         payment: { rail: "nmi" },
@@ -197,13 +200,12 @@ describe("tier change", () => {
         next_charge_date: "2026-10-16T00:00:00Z",
       })
     )
-    const change = await client.changeTier("sub_1", {
+    const change = await client.changeSubscription("sub_1", {
       priceId: "price_2",
       idempotencyKey: "key-1",
     })
     expect(change).toMatchObject({
       status: "succeeded",
-      action: "upgrade",
       effective: "now",
       subscription_id: "sub_2",
       amount_due_now: "5000000",
@@ -211,7 +213,7 @@ describe("tier change", () => {
     })
     const sent = request()
     expect(sent).toMatchObject({
-      url: "/billing/v1/me/subscriptions/sub_1/change-tier",
+      url: "/billing/v1/me/subscriptions/sub_1/change",
       method: "POST",
       body: { price_id: "price_2" },
     })
@@ -221,9 +223,8 @@ describe("tier change", () => {
   it("returns an unresolved change and names the one in flight", async () => {
     const { client, fetch } = served(
       json(202, {
-        object: "tier_change",
+        object: "subscription_change",
         status: "processing",
-        mode: "tier_change",
         price_id: "price_2",
         payment: { rail: "stripe" },
         amount_due_now: "0",
@@ -231,9 +232,8 @@ describe("tier change", () => {
         operation_id: "op_1",
       }),
       json(200, {
-        object: "tier_change",
+        object: "subscription_change",
         status: "requires_action",
-        mode: "tier_change",
         price_id: "price_2",
         payment: { rail: "stripe" },
         next_action: { type: "payment_authentication" },
@@ -252,22 +252,22 @@ describe("tier change", () => {
       new Response(null, { status: 503 })
     )
     const input = { priceId: "price_2", idempotencyKey: "key-1" }
-    expect(await client.changeTier("sub_1", input)).toMatchObject({
+    expect(await client.changeSubscription("sub_1", input)).toMatchObject({
       status: "processing",
       operation_id: "op_1",
     })
-    expect(await client.changeTier("sub_1", input)).toMatchObject({
+    expect(await client.changeSubscription("sub_1", input)).toMatchObject({
       status: "requires_action",
       next_action: { type: "payment_authentication" },
       operation_id: "op_1",
     })
-    await expect(client.changeTier("sub_1", input)).rejects.toMatchObject({
+    await expect(client.changeSubscription("sub_1", input)).rejects.toMatchObject({
       status: 409,
       code: "subscription_change_in_flight",
       metadata: { operation_id: "op_1" },
     })
     // A write is never retried: the caller replays its key.
-    await expect(client.changeTier("sub_1", input)).rejects.toMatchObject({
+    await expect(client.changeSubscription("sub_1", input)).rejects.toMatchObject({
       status: 503,
     })
     expect(fetch).toHaveBeenCalledTimes(4)
@@ -365,9 +365,7 @@ describe("Solana", () => {
 
   it("answers a tier change's wallet step and repeats it signed", async () => {
     const change = {
-      object: "tier_change",
-      mode: "tier_change",
-      action: "upgrade",
+      object: "subscription_change",
       effective: "now",
       price_id: "price_2",
       payment: { rail: "solana" },
@@ -389,13 +387,13 @@ describe("Solana", () => {
       json(200, { ...change, status: "succeeded", subscription_id: "sub_2" })
     )
     const input = { priceId: "price_2", idempotencyKey: "key-1" }
-    expect(await client.changeTier("sub_1", input)).toMatchObject({
+    expect(await client.changeSubscription("sub_1", input)).toMatchObject({
       status: "requires_action",
       next_action: { type: "solana_sign_transactions", transactions: ["dHg="] },
     })
     expect(request().body).toEqual({ price_id: "price_2" })
     expect(
-      await client.changeTier("sub_1", { ...input, signature: "sig" })
+      await client.changeSubscription("sub_1", { ...input, signature: "sig" })
     ).toMatchObject({ status: "succeeded", subscription_id: "sub_2" })
     const sent = request(1)
     expect(sent.body).toEqual({ price_id: "price_2", signature: "sig" })

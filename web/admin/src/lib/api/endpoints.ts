@@ -44,8 +44,9 @@ import type {
   PriceMigration,
   PriceMigrationCancel,
   PriceMigrationPreview,
-  TierChangePreview,
-  TierChangeResult,
+  ChangeSubscriptionParams,
+  SubscriptionChange,
+  SubscriptionChangePreview,
   TeamInvite,
   TeamInviteResult,
   TeamMember,
@@ -216,23 +217,26 @@ export const changeSubscriptionPaymentMethod = (
     body: { payment_method_id: paymentMethodId },
   })
 
-export const previewSubscriptionTierChange = (id: string, priceId: string) =>
-  api<TierChangePreview>(`/admin/subscriptions/${id}/change-tier/preview`, {
+export const previewSubscriptionChange = (
+  id: string,
+  change: ChangeSubscriptionParams
+) =>
+  api<SubscriptionChangePreview>(`/admin/subscriptions/${id}/change/preview`, {
     method: "POST",
-    body: { price_id: priceId },
+    body: change,
   })
 
-// A tier change is a durable operation keyed by this header: the same key
-// replays its result, so a retry must reuse the key of the reviewed change.
-export const changeSubscriptionTier = (
+// A change is a durable operation keyed by this header: the same key replays
+// its result, so a retry must reuse the key of the reviewed change.
+export const changeSubscription = (
   id: string,
-  priceId: string,
+  change: ChangeSubscriptionParams,
   idempotencyKey: string
 ) =>
-  api<TierChangeResult>(`/admin/subscriptions/${id}/change-tier`, {
+  api<SubscriptionChange>(`/admin/subscriptions/${id}/change`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
-    body: { price_id: priceId },
+    body: change,
   })
 
 // --- Payments ---

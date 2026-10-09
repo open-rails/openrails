@@ -14,6 +14,7 @@ export {
   type CheckoutSourceOptions,
   type ListOptions,
   type SendSolanaTransaction,
+  type SubscriptionChangeInput,
 } from "./client"
 export {
   BillingError,
@@ -50,8 +51,8 @@ export type {
   SubscriptionDunning,
   SubscriptionProduct,
   SubscriptionStatus,
-  TierChange,
-  TierChangePreview,
+  SubscriptionChange,
+  SubscriptionChangePreview,
 } from "./types"
 export {
   amountToDecimal,

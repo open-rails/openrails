@@ -168,6 +168,10 @@ export const subscriptionSchema = z.object({
   rail: z.string().nullish(),
   product_id: z.string().nullish(),
   price_id: z.string().nullish(),
+  /** Seats of a per-seat price; null otherwise. */
+  quantity: z.number().nullish(),
+  /** Seats the next renewal bills, when a change waits for it. */
+  scheduled_quantity: z.number().nullish(),
   psp_id: z.string().nullish(),
   payment_method_id: z.string().nullish(),
   started_at: time.nullish(),
@@ -376,38 +380,39 @@ export const currencySchema = z.object({
 })
 export type Currency = z.infer<typeof currencySchema>
 
-export const tierChangePreviewSchema = z.object({
-  /** `upgrade | downgrade` */
-  action: z.string(),
+export const subscriptionChangePreviewSchema = z.object({
   price_id: z.string(),
+  /** Seats of a per-seat price; null otherwise. */
+  quantity: z.number().nullish(),
   rail: z.string().nullish(),
   currency: z.string(),
-  /** Charged immediately; `"0"` for a downgrade. */
+  /** Charged immediately; `"0"` for a change at period end. */
   amount_due_now: amount,
   /** The new price, charged at the next renewal. */
   next_charge_amount: amount,
   next_charge_date: time.nullish(),
   /** `now | period_end` */
   effective: z.string(),
-  /** The rail finalizes the exact amount (Stripe upgrades). */
+  /** The rail finalizes the exact amount (Stripe provider changes). */
   is_estimate: z.boolean().nullish(),
   message: z.string().nullish(),
 })
-export type TierChangePreview = z.infer<typeof tierChangePreviewSchema>
+export type SubscriptionChangePreview = z.infer<
+  typeof subscriptionChangePreviewSchema
+>
 
-export const tierChangeSchema = z.object({
+export const subscriptionChangeSchema = z.object({
   /** `succeeded | processing | requires_action | blocked` */
   status: z.string(),
-  /** `upgrade | downgrade` */
-  action: z.string().nullish(),
   /** `now | period_end` */
   effective: z.string().nullish(),
   price_id: z.string().nullish(),
+  quantity: z.number().nullish(),
   /** The subscription now carrying the plan (an upgrade may open a successor). */
   subscription_id: z.string().nullish(),
   /** `payment_authentication` uses `operation_id`. */
   next_action: nextActionSchema.nullish(),
-  /** When a scheduled downgrade takes effect. */
+  /** When a change at period end takes effect. */
   delayed_start: time.nullish(),
   currency: z.string().nullish(),
   amount_due_now: amount.nullish(),
@@ -417,7 +422,7 @@ export const tierChangeSchema = z.object({
   /** The durable operation: unresolved while `processing`, the payment to authenticate on `requires_action`. */
   operation_id: z.string().nullish(),
 })
-export type TierChange = z.infer<typeof tierChangeSchema>
+export type SubscriptionChange = z.infer<typeof subscriptionChangeSchema>
 
 const tokenUnits = z.string().regex(/^\d+$/, "units must be a uint64 string")
 

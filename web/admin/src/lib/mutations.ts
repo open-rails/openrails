@@ -15,7 +15,7 @@ import {
   cancelSubscription,
   changeTeamRole,
   changeSubscriptionPaymentMethod,
-  changeSubscriptionTier,
+  changeSubscription,
   createApiKey,
   createPrice,
   createProduct,
@@ -40,7 +40,7 @@ import {
   updatePSP,
   putUsageMeter,
   previewPriceMigration,
-  previewSubscriptionTierChange,
+  previewSubscriptionChange,
   applyCatalog,
   refreshCatalogDrift,
   refundPayment,
@@ -73,6 +73,7 @@ import {
   type Widget,
 } from "@/lib/api/metrics"
 import type {
+  ChangeSubscriptionParams,
   Customer,
 } from "@/lib/api/generated/wire"
 import type { MerchantSettings, AdminSubscription } from "@/lib/api/types"
@@ -310,21 +311,16 @@ export const adminMutations = {
         ]),
     })
   },
-  previewSubscriptionTierChange: (subscriptionId: string) => {
+  previewSubscriptionChange: (subscriptionId: string) => {
     const keys = merchantQueryKeys()
     const subscriptionsKey = keys.subscriptions()
     return mutationOptions({
-      mutationKey: [
-        ...subscriptionsKey,
-        subscriptionId,
-        "change-tier",
-        "preview",
-      ],
-      mutationFn: (priceId: string) =>
-        previewSubscriptionTierChange(subscriptionId, priceId),
+      mutationKey: [...subscriptionsKey, subscriptionId, "change", "preview"],
+      mutationFn: (change: ChangeSubscriptionParams) =>
+        previewSubscriptionChange(subscriptionId, change),
     })
   },
-  changeSubscriptionTier: (
+  changeSubscription: (
     queryClient: QueryClient,
     subscriptionId: string,
     customerId?: string
@@ -334,12 +330,15 @@ export const adminMutations = {
     const customerKey = customerId ? keys.customer(customerId) : undefined
     const paymentsKey = keys.payments()
     return mutationOptions({
-      mutationKey: [...subscriptionsKey, subscriptionId, "change-tier"],
-      mutationFn: (change: { priceId: string; idempotencyKey: string }) =>
-        changeSubscriptionTier(
+      mutationKey: [...subscriptionsKey, subscriptionId, "change"],
+      mutationFn: (request: {
+        change: ChangeSubscriptionParams
+        idempotencyKey: string
+      }) =>
+        changeSubscription(
           subscriptionId,
-          change.priceId,
-          change.idempotencyKey
+          request.change,
+          request.idempotencyKey
         ),
       onSuccess: () =>
         Promise.all([

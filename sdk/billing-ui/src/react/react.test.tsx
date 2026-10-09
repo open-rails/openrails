@@ -180,21 +180,21 @@ describe("plan change", () => {
     expect(server.calls).toEqual(["GET /catalog/products"])
   })
 
-  it("changes tier, refetches the list and notifies the host", async () => {
+  it("changes the subscription, refetches the list and notifies the host", async () => {
     const server = fakeBilling()
     const onChange = vi.fn()
     const { result } = setup(() => useSubscriptions(), server, { onChange })
     await waitFor(() => expect(result.current.subscriptions).toHaveLength(1))
     const id = result.current.subscriptions![0].id
 
-    let done!: ReturnType<typeof result.current.changeTier>
+    let done!: ReturnType<typeof result.current.changeSubscription>
     act(() => {
-      done = result.current.changeTier(id, {
+      done = result.current.changeSubscription(id, {
         priceId: "price_plus",
         idempotencyKey: "key-1",
       })
     })
-    expect(result.current.pending[id]).toBe("change_tier")
+    expect(result.current.pending[id]).toBe("change")
     const change = await act(() => done)
     expect(change).toMatchObject({
       status: "succeeded",
@@ -205,24 +205,24 @@ describe("plan change", () => {
       expect(result.current.subscriptions![0].price?.id).toBe("price_plus")
     )
     expect(onChange).toHaveBeenCalledWith({
-      type: "subscription.tier_changed",
+      type: "subscription.changed",
       subscriptionId: id,
       change,
     })
   })
 
-  it("returns a tier-change refusal instead of throwing", async () => {
+  it("returns a change refusal instead of throwing", async () => {
     const server = fakeBilling()
     const onChange = vi.fn()
     const { result } = setup(() => useSubscriptions(), server, { onChange })
     await waitFor(() => expect(result.current.subscriptions).not.toBeNull())
     const id = result.current.subscriptions![0].id
-    server.fail[`POST /me/subscriptions/${id}/change-tier`] = apiError(
+    server.fail[`POST /me/subscriptions/${id}/change`] = apiError(
       409,
       "subscription_change_renewal_due"
     )
     const refused = await act(() =>
-      result.current.changeTier(id, {
+      result.current.changeSubscription(id, {
         priceId: "price_plus",
         idempotencyKey: "key-1",
       })

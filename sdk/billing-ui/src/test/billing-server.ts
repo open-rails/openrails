@@ -240,10 +240,10 @@ export function fakeBilling(
         })
         return json(200, sub)
       }
-      if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/change-tier$/))) {
+      if ((m = key.match(/^POST \/me\/subscriptions\/([^/]+)\/change$/))) {
         const sub = findSub(decodeURIComponent(m[1]))
         if (!sub) return apiError(404, "resource_not_found")
-        // Like OpenRails: a tier change without a client key is refused.
+        // Like OpenRails: a change without a client key is refused.
         if (!new Headers(init.headers).get("Idempotency-Key"))
           return apiError(400, "subscription_change_idempotency_key_required")
         const target = state.products.find((p) =>
@@ -254,9 +254,7 @@ export function fakeBilling(
           (x) => x.id === body.price_id
         )!
         const change = {
-          object: "tier_change",
-          mode: "tier_change",
-          action: "upgrade",
+          object: "subscription_change",
           effective: "now",
           price_id: price.id,
           payment: { rail: sub.rail },

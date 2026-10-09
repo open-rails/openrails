@@ -51,7 +51,7 @@ import {
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
-import { ChangeTierDialog } from "@/pages/subscriptions/change-tier-dialog"
+import { ChangeSubscriptionDialog } from "@/pages/subscriptions/change-subscription-dialog"
 import { dunningSummary } from "@/pages/subscriptions/dunning"
 
 export function SubscriptionDetailPage() {
@@ -96,12 +96,14 @@ export function SubscriptionDetailPage() {
           {resumable && (
             <ResumeButton id={sub.id} customerId={sub.customer_id} />
           )}
-          <ChangeTierDialog
+          <ChangeSubscriptionDialog
             subscriptionId={sub.id}
             customerId={sub.customer_id}
             productId={sub.product_id}
             priceId={sub.price_id}
+            quantity={sub.quantity}
             currency={sub.price?.currency}
+            collectionPolicy={sub.collection_policy}
             scheduledChange={sub.scheduled_change}
             rail={sub.rail}
             status={sub.status}
@@ -175,6 +177,13 @@ export function SubscriptionDetailPage() {
             )}
           </div>
         </Fact>
+        {sub.quantity !== null && (
+          <Fact label="Seats">
+            {sub.quantity}
+            {sub.scheduled_change?.quantity != null &&
+              ` → ${sub.scheduled_change.quantity} at renewal`}
+          </Fact>
+        )}
         <Fact label="Dunning">
           {sub.dunning ? dunningSummary(sub.dunning) : "—"}
         </Fact>

@@ -4,6 +4,7 @@ import {
   isWalletAction,
   signWalletAction,
   type SendSolanaTransaction,
+  type SubscriptionChangeInput,
 } from "../client/client"
 import { localError, toBillingError, type BillingError } from "../client/errors"
 import type {
@@ -12,7 +13,7 @@ import type {
   PaymentMethod,
   Product,
   Subscription,
-  TierChange,
+  SubscriptionChange,
 } from "../client/types"
 import { useBillingContext } from "./context"
 import { useRemote } from "./remote"
@@ -25,7 +26,7 @@ export type SubscriptionAction =
   | "cancel"
   | "resume"
   | "payment_method"
-  | "change_tier"
+  | "change"
   | "signing"
   | "confirming"
 
@@ -64,11 +65,11 @@ export interface SubscriptionsState {
    * `requires_action`, or to the error. A Solana change is signed with
    * `sendTransaction` and resolves once the chain confirms it.
    */
-  changeTier: (
+  changeSubscription: (
     subscriptionId: string,
-    input: { priceId: string; idempotencyKey: string },
+    input: SubscriptionChangeInput & { idempotencyKey: string },
     sendTransaction?: SendSolanaTransaction
-  ) => Promise<TierChange | BillingError>
+  ) => Promise<SubscriptionChange | BillingError>
 }
 
 function usePending<A extends string>() {
@@ -182,15 +183,15 @@ export function useSubscriptions(
   )
 
   // An upgrade may open a successor subscription: notify refetches the list.
-  const changeTier = useCallback(
+  const changeSubscription = useCallback(
     async (
       id: string,
-      input: { priceId: string; idempotencyKey: string },
+      input: SubscriptionChangeInput & { idempotencyKey: string },
       sendTransaction?: SendSolanaTransaction
     ) => {
-      mark(id, "change_tier")
+      mark(id, "change")
       try {
-        let change = await client.changeTier(id, input)
+        let change = await client.changeSubscription(id, input)
         if (
           change.status === "requires_action" &&
           isWalletAction(change.next_action) &&
@@ -202,10 +203,10 @@ export function useSubscriptions(
             sendTransaction
           )
           mark(id, "confirming")
-          change = await client.changeTier(id, { ...input, signature })
+          change = await client.changeSubscription(id, { ...input, signature })
         }
         notify({
-          type: "subscription.tier_changed",
+          type: "subscription.changed",
           subscriptionId: id,
           change,
         })
@@ -229,7 +230,7 @@ export function useSubscriptions(
     cancel,
     resume,
     setPaymentMethod,
-    changeTier,
+    changeSubscription,
   }
 }
 

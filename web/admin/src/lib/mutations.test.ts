@@ -49,10 +49,10 @@ const cases: Case[] = [
     "POST /admin/subscriptions/sub_1/resume", [...customerTree, ...subTree]],
   ["changes the subscription payment method", (c, g) => g(M.changeSubscriptionPaymentMethod(c, "sub_1", "cus_1"), "pm_1"),
     "PUT /admin/subscriptions/sub_1/payment-method", [...customerTree, ...subTree], { payment_method_id: "pm_1" }],
-  ["previews a tier change without touching the cache", (_c, g) => g(M.previewSubscriptionTierChange("sub_1"), "price_2"),
-    "POST /admin/subscriptions/sub_1/change-tier/preview", []],
-  ["applies a reviewed tier change", (c, g) => g(M.changeSubscriptionTier(c, "sub_1", "cus_1"), { priceId: "price_2", idempotencyKey: "tier-key-1" }),
-    "POST /admin/subscriptions/sub_1/change-tier", [...customerTree, "payment", "payments", ...subTree], { price_id: "price_2" }],
+  ["previews a change without touching the cache", (_c, g) => g(M.previewSubscriptionChange("sub_1"), { price_id: "price_2" }),
+    "POST /admin/subscriptions/sub_1/change/preview", [], { price_id: "price_2" }],
+  ["applies a reviewed change", (c, g) => g(M.changeSubscription(c, "sub_1", "cus_1"), { change: { price_id: "price_2", quantity: 3 }, idempotencyKey: "change-key-1" }),
+    "POST /admin/subscriptions/sub_1/change", [...customerTree, "payment", "payments", ...subTree], { price_id: "price_2", quantity: 3 }],
   ["grants a product until an instant", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), { productId: "prod_1", endsAt: effectiveAt }),
     "POST /admin/product-access", customerTree, { items: [{ customer_id: "cus_1", product_id: "prod_1", ends_at: effectiveAt }] }],
   ["grants a product for hours with a note", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), { productId: "prod_1", hours: 48, note: "support fix" }),
@@ -136,15 +136,15 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   )
 })
 
-it("sends the selected merchant, the caller's tier key and a fresh refund key", async () => {
+it("sends the selected merchant, the caller's change key and a fresh refund key", async () => {
   const queryClient = client()
   selectMerchant("merchant-a")
   const once = { amount: "1000000", reason: "", revokeAccess: false }
-  await exec(queryClient, M.changeSubscriptionTier(queryClient, "sub_1", "cus_1"), { priceId: "price_2", idempotencyKey: "tier-key-1" })
+  await exec(queryClient, M.changeSubscription(queryClient, "sub_1", "cus_1"), { change: { price_id: "price_2" }, idempotencyKey: "change-key-1" })
   await exec(queryClient, M.refundPayment(queryClient, "pay_1"), once)
   await exec(queryClient, M.refundPayment(queryClient, "pay_1"), once)
   expect(requests[0].headers.get("OpenRails-Merchant")).toBe("merchant-a")
-  expect(requests[0].headers.get("Idempotency-Key")).toBe("tier-key-1")
+  expect(requests[0].headers.get("Idempotency-Key")).toBe("change-key-1")
   // A refund is a new operation every time it is submitted.
   const keys = requests.slice(1).map((r) => r.headers.get("Idempotency-Key"))
   expect(keys[0]).toMatch(/^[\da-f-]{36}$/)

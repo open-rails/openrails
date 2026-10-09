@@ -153,7 +153,7 @@ export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> =
 export const aPrice = (id: string, productId: string, overrides: Partial<Price> = {}): Price => ({
   id, key: id, revision: 0, product_id: productId, archived: false, currency: "USD",
   unit_amount: "20000000", access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: null, trial_duration_hours: null,
-  psps: {}, pending_manual_actions: [], created_at: WHEN, updated_at: WHEN,
+  quantity: null, psps: {}, pending_manual_actions: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,
 })
 
@@ -162,7 +162,7 @@ export const aPayment = (id: string, overrides: Partial<Payment> = {}): Payment 
   currency: "USD", customer_id: "cus_1", subscription_id: null, order_id: null, invoice_id: null, price_id: "price_1",
   price: null, product: null, channel: "rail", rail: "nmi", psp_id: "psp_1",
   transaction_id: `txn_${id}`, card: null, failure: null, refunded_payment_id: null,
-  reason: null, refunds: [], created_at: WHEN,
+  reason: null, refunds: [], quantity: null, created_at: WHEN,
   ...overrides,
 })
 export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {}): PaymentMethod => ({

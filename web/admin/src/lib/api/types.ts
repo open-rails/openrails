@@ -26,6 +26,8 @@ export interface RawSubscription {
   // The change waiting for the next renewal (a migration's move or a
   // scheduled downgrade), or null.
   scheduled_change?: import("./generated/wire").ScheduledChange | null
+  quantity: number | null // seats; null for a price without them
+  collection_policy?: string
   status: SubscriptionStatus
   started_at: string
   ended_at: string | null
@@ -98,8 +100,9 @@ export interface AdminSubscription extends RawSubscription {
 }
 
 export type {
-  TierChange as TierChangeResult,
-  TierChangePreview,
+  ChangeSubscriptionParams,
+  SubscriptionChange,
+  SubscriptionChangePreview,
 } from "./generated/wire"
 
 // --- Catalog ---

@@ -150,19 +150,22 @@ routes; `GET /config` is always served.
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `listProducts()` (each product embeds its prices on sale)                                           | `GET /catalog/products`                                         |
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
-| `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
-| `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |
+| `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
+| `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
 | `listSolanaTokens({ priceId, wallet })`                                                             | `GET /solana/tokens`                                            |
 
 ```ts
-const preview = await billing.previewTierChange(sub.id, price.id) // amount_due_now, effective
-const change = await billing.changeTier(sub.id, {
-  priceId: price.id,
+const preview = await billing.previewSubscriptionChange(sub.id, { quantity: 5 }) // amount_due_now, effective
+const change = await billing.changeSubscription(sub.id, {
+  quantity: 5,
   idempotencyKey,
 })
 ```
 
-- `changeTier` is a money write. Mint one `idempotencyKey` per attempt and
+- A change moves to another price of the tier group (`priceId`), to other
+  seats of a per-seat price (`quantity`), or both. More seats and an upgrade
+  charge now; fewer seats and a downgrade apply at the next renewal.
+- `changeSubscription` is a money write. Mint one `idempotencyKey` per attempt and
   reuse it until the change resolves (`status: "processing"`, a
   `subscription_change_in_flight` refusal naming `metadata.operation_id`, a 5xx or a
   lost response), so OpenRails replays the stored result instead of charging
@@ -171,7 +174,7 @@ const change = await billing.changeTier(sub.id, {
 - A rail that needs the customer's own step answers `requires_action` with a
   `next_action`. Solana's is `solana_sign_transactions`:
   `signWalletAction(change.next_action, send)` signs and sends its
-  transactions and returns the signature; repeat `changeTier` with the same
+  transactions and returns the signature; repeat `changeSubscription` with the same
   key and `signature`. `cancelSubscription(id, { reason, signature? })` works
   the same way: its answer is the subscription, unchanged and carrying
   `next_action` until the signed cancel lands. The hooks run this when given
@@ -215,11 +218,11 @@ provider:
 - `renderSubscriptionFooter={(s) => ...}` adds host content under a
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
-  `changeTier`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
+  `changeSubscription`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
   `remove`, `setCollection`), `usePayments` (cursor pages), `useProducts` (the
   catalog).
   Actions resolve to `null` or a `BillingError`; they never throw.
-  `changeTier` resolves to the `TierChange` instead of `null`. Cancel, resume
+  `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume
   and the card change answer the subscription, which replaces the row.
 - Money is exact: `/me` amounts are int64 native-unit strings, scaled by the
   OpenRails currency registry (`currencies` option to extend it).

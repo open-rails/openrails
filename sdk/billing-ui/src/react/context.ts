@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react"
 
 import type { BillingClient } from "../client/client"
-import type { TierChange } from "../client/types"
+import type { SubscriptionChange } from "../client/types"
 import type { ConfigStore } from "./config"
 
 export type BillingChange =
@@ -15,10 +15,10 @@ export type BillingChange =
       paymentMethodId: string
     }
   | {
-      type: "subscription.tier_changed"
+      type: "subscription.changed"
       subscriptionId: string
       /** `status` may still be `processing` or `requires_action`. */
-      change: TierChange
+      change: SubscriptionChange
     }
   | {
       type:

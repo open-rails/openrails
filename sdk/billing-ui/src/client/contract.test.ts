@@ -24,9 +24,12 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.cancelSubscription("sub_1", { reason: "why not" }),
     () => client.resumeSubscription("sub_1"),
     () => client.setSubscriptionPaymentMethod("sub_1", "pm_1"),
-    () => client.previewTierChange("sub_1", "price_1"),
+    () => client.previewSubscriptionChange("sub_1", { priceId: "price_1" }),
     () =>
-      client.changeTier("sub_1", { priceId: "price_1", idempotencyKey: "k" }),
+      client.changeSubscription("sub_1", {
+        priceId: "price_1",
+        idempotencyKey: "k",
+      }),
     () => client.listPaymentMethods(),
     () => client.addPaymentMethod({ psp_id: "psp_1", payment_token: "tok" }),
     () => client.createCardSetup({ pspId: "psp_1", idempotencyKey: "k" }),
