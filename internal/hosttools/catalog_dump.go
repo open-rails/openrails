@@ -91,7 +91,7 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 	}
 	m := &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}
 	merchantID := tid.UUID()
-	productIDs, byID, err := dumpCatalogProducts(ctx, database, merchantID)
+	byID, err := dumpCatalogProducts(ctx, database, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,23 +104,28 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Applica
 	if err := dumpCatalogRateCards(ctx, database, merchantID, byID); err != nil {
 		return nil, err
 	}
-	for _, id := range productIDs {
-		if p := byID[id]; p != nil {
-			m.Products = append(m.Products, *p)
+	if len(byID) > 0 {
+		m.Products = map[string]catalog.ApplyProduct{}
+		for _, p := range byID {
+			m.Products[p.key] = p.ApplyProduct
 		}
 	}
 	return m, nil
 }
 
-func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]uuid.UUID, map[uuid.UUID]*catalog.ApplyProduct, error) {
+type dumpedProduct struct {
+	key string
+	catalog.ApplyProduct
+}
+
+func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) (map[uuid.UUID]*dumpedProduct, error) {
 	rows, err := database.Gen(ctx).ListLiveCatalogProducts(ctx, merchantID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list catalog products: %w", err)
+		return nil, fmt.Errorf("list catalog products: %w", err)
 	}
-	var ids []uuid.UUID
-	byID := map[uuid.UUID]*catalog.ApplyProduct{}
+	byID := map[uuid.UUID]*dumpedProduct{}
 	for _, row := range rows {
-		p := catalog.ApplyProduct{Key: row.Key}
+		var p catalog.ApplyProduct
 		p.DisplayName = catalog.Value(row.DisplayName)
 		p.Description = catalog.Value(row.Description)
 		p.TierRank = catalog.Value(int(row.TierRank))
@@ -133,7 +138,7 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		if len(row.CreditGrant) > 0 && string(row.CreditGrant) != "null" {
 			p.CreditGrant = catalog.Field[catalog.CreditGrantSpec]{Set: true}
 			if err := json.Unmarshal(row.CreditGrant, &p.CreditGrant.Value); err != nil {
-				return nil, nil, fmt.Errorf("decode product %q credit grant: %w", row.Key, err)
+				return nil, fmt.Errorf("decode product %q credit grant: %w", row.Key, err)
 			}
 		}
 		p.Entitlements = catalog.Value([]string{})
@@ -141,23 +146,21 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		if len(row.Entitlements) == 0 || string(row.Entitlements) == "null" {
 			p.Entitlements = catalog.Value([]string{})
 		} else if err := json.Unmarshal(row.Entitlements, &p.Entitlements.Value); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		ids = append(ids, row.ID)
-		cp := p
-		byID[row.ID] = &cp
+		byID[row.ID] = &dumpedProduct{key: row.Key, ApplyProduct: p}
 	}
-	return ids, byID, nil
+	return byID, nil
 }
 
-func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.ApplyMeter, error) {
+func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) (map[string]catalog.ApplyMeter, error) {
 	rows, err := database.Gen(ctx).ListCatalogMeters(ctx, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog meters: %w", err)
 	}
-	var out []catalog.ApplyMeter
+	var out map[string]catalog.ApplyMeter
 	for _, row := range rows {
-		m := catalog.ApplyMeter{Key: row.Key}
+		var m catalog.ApplyMeter
 		m.EventType = catalog.Value(row.EventType)
 		m.ValueProperty = catalog.Value(row.ValueProperty)
 		m.Aggregation = catalog.Value(catalog.Aggregation(row.Aggregation))
@@ -166,12 +169,15 @@ func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if err := json.Unmarshal(row.GroupBy, &m.GroupBy.Value); err != nil {
 			return nil, err
 		}
-		out = append(out, m)
+		if out == nil {
+			out = map[string]catalog.ApplyMeter{}
+		}
+		out[row.Key] = m
 	}
 	return out, nil
 }
 
-func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*dumpedProduct) error {
 	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
 	// are translated at push time, so no price-attached metered shape exists.
 	rows, err := database.Gen(ctx).ListLiveCatalogPricesWithPSPLinks(ctx, merchantID)
@@ -183,7 +189,7 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 		if p == nil {
 			continue
 		}
-		price := catalog.ApplyPrice{Key: row.Key}
+		var price catalog.ApplyPrice
 		price.UnitAmount = catalog.Value(row.Amount)
 		price.Currency = catalog.Value(row.Currency)
 		price.BillingIntervalHours = catalog.Null[int]()
@@ -219,12 +225,15 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 			price.PSPs.Value = append(price.PSPs.Value, provider)
 		}
 		sort.Strings(price.PSPs.Value)
-		p.Prices = append(p.Prices, price)
+		if p.Prices == nil {
+			p.Prices = map[string]catalog.ApplyPrice{}
+		}
+		p.Prices[row.Key] = price
 	}
 	return nil
 }
 
-func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.ApplyProduct) error {
+func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*dumpedProduct) error {
 	rows, err := database.Gen(ctx).ListCatalogProductRateCards(ctx, merchantID)
 	if err != nil {
 		return fmt.Errorf("list catalog rate cards: %w", err)

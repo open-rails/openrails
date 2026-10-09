@@ -191,20 +191,20 @@ func TestCatalogApplicationSyncsMetersAndRateCards(t *testing.T) {
 	apply := func(unitAmount string) {
 		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 meters:
-- key: %[1]s-runtime
-  event_type: droplet.usage
-  value_property: $.seconds
-  aggregation: sum
+  %[1]s-runtime:
+    event_type: droplet.usage
+    value_property: $.seconds
+    aggregation: sum
 products:
-- key: %[1]s
-  display_name: Metered
-  rate_cards:
-  - meter: %[1]s-runtime
-    price:
-      model: per_unit
-      currency: usd
-      per_unit:
-        unit_amount: "%[2]s"
+  %[1]s:
+    display_name: Metered
+    rate_cards:
+    - meter: %[1]s-runtime
+      price:
+        model: per_unit
+        currency: usd
+        per_unit:
+          unit_amount: "%[2]s"
 `, key, unitAmount)))
 		require.NoError(t, err)
 		_, err = client.ApplyCatalog(t.Context(), params)

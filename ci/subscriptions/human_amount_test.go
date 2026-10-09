@@ -55,7 +55,7 @@ func TestHumanAmountCatalogUsesExactCurrencyNativeUnits(t *testing.T) {
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			key := "human-amount-" + tc.key
-			document := fmt.Sprintf("schema_version: 1\nproducts:\n- key: %s\n  display_name: Human money\n  prices:\n  - key: buy\n    amount: %s\n", key, tc.amount)
+			document := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Human money\n    prices:\n      buy:\n        amount: %s\n", key, tc.amount)
 			status, original := applyHumanAmountYAML(t, w, document)
 			require.Equal(t, http.StatusOK, status)
 			require.False(t, original.Replayed)
@@ -66,8 +66,8 @@ func TestHumanAmountCatalogUsesExactCurrencyNativeUnits(t *testing.T) {
 			var replay billing.CatalogApplicationReceipt
 			status = w.staffCall(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
 				"schema_version": 1,
-				"products": []any{map[string]any{"key": key, "display_name": "Human money", "prices": []any{map[string]any{
-					"key": "buy", "currency": tc.currency, "unit_amount": strconv.FormatInt(tc.native, 10),
+				"products": map[string]any{key: map[string]any{"display_name": "Human money", "prices": map[string]any{"buy": map[string]any{
+					"currency": tc.currency, "unit_amount": strconv.FormatInt(tc.native, 10),
 				}}}},
 			}, &replay)
 			require.Equal(t, http.StatusOK, status)
@@ -89,17 +89,17 @@ func TestHumanAmountInvalidInputCannotMutateCatalog(t *testing.T) {
 		"0.0000001 USD", "0.0000000001 SOL", "0.0000001 USDC", "0.00001 JPY",
 		"9223372036854.775808 USD", "9223372036.854775808 SOL", "9223372036854.775808 USDC",
 	} {
-		document := fmt.Sprintf("schema_version: 1\nproducts:\n- key: rejected-money\n  display_name: Reject\n  prices:\n  - key: buy\n    amount: %q\n", amount)
+		document := fmt.Sprintf("schema_version: 1\nproducts:\n  rejected-money:\n    display_name: Reject\n    prices:\n      buy:\n        amount: %q\n", amount)
 		status, _ := applyHumanAmountYAML(t, w, document)
 		require.Equal(t, http.StatusBadRequest, status, amount)
 	}
 	for _, literal := range []string{"null", "9.99", "true", "[]", "{currency: USD, value: 9.99}"} {
-		document := fmt.Sprintf("schema_version: 1\nproducts:\n- key: rejected-money\n  display_name: Reject\n  prices:\n  - key: buy\n    amount: %s\n", literal)
+		document := fmt.Sprintf("schema_version: 1\nproducts:\n  rejected-money:\n    display_name: Reject\n    prices:\n      buy:\n        amount: %s\n", literal)
 		status, _ := applyHumanAmountYAML(t, w, document)
 		require.Equal(t, http.StatusBadRequest, status, literal)
 	}
 	for _, extra := range []string{"currency: USD", "currency: null", "unit_amount: 9990000", "unit_amount: null"} {
-		document := fmt.Sprintf("schema_version: 1\nproducts:\n- key: rejected-money\n  display_name: Reject\n  prices:\n  - key: buy\n    amount: 9.99 USD\n    %s\n", extra)
+		document := fmt.Sprintf("schema_version: 1\nproducts:\n  rejected-money:\n    display_name: Reject\n    prices:\n      buy:\n        amount: 9.99 USD\n        %s\n", extra)
 		status, _ := applyHumanAmountYAML(t, w, document)
 		require.Equal(t, http.StatusBadRequest, status, extra)
 	}

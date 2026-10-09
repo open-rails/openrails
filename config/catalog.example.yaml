@@ -24,39 +24,39 @@ schema_version: 1
 #     calendar_month to reset on the 1st; collection cadence is policy, #643).
 # ───────────────────────────────────────────────────────────────────────
 meters:
-  - key: droplet-runtime          # host heartbeats uptime seconds per droplet
+  droplet-runtime: # host heartbeats uptime seconds per droplet
     event_type: droplet.usage
     value_property: $.seconds
     aggregation: sum
     group_by: { size_slug: $.size_slug, region: $.region, resource_id: $.droplet_id }
-  - key: public-egress            # outbound bytes per droplet (ingress is free)
+  public-egress: # outbound bytes per droplet (ingress is free)
     event_type: network.egress
     value_property: $.bytes
     aggregation: sum
     group_by: { region: $.region, resource_id: $.droplet_id }
-  - key: volume-storage           # GiB held × seconds in the interval
+  volume-storage: # GiB held × seconds in the interval
     event_type: volume.usage
     value_property: $.gib_seconds
     aggregation: sum
     group_by: { resource_id: $.volume_id }
-  - key: spaces-storage
+  spaces-storage:
     event_type: spaces.storage
     value_property: $.gib_seconds
     aggregation: sum
-  - key: spaces-egress
+  spaces-egress:
     event_type: spaces.egress
     value_property: $.bytes
     aggregation: sum
-  - key: snapshot-storage
+  snapshot-storage:
     event_type: snapshot.usage
     value_property: $.gib_seconds
     aggregation: sum
-  - key: lb-runtime               # load-balancer node uptime seconds
+  lb-runtime: # load-balancer node uptime seconds
     event_type: load_balancer.usage
     value_property: $.seconds
     aggregation: sum
     group_by: { lb_type: $.lb_type, resource_id: $.lb_id }
-  - key: db-runtime               # managed-database node uptime seconds
+  db-runtime: # managed-database node uptime seconds
     event_type: database.usage
     value_property: $.seconds
     aggregation: sum
@@ -67,7 +67,7 @@ products:
   # 3600), each SKU capped at its monthly price (maximum_amount). No floor:
   # a droplet alive 30s bills ~$0.0005. The cell's `included` feeds the
   # pooled egress allowance in the next card.
-  - key: droplet
+  droplet:
     display_name: Droplet
     rate_cards:
       - meter: droplet-runtime
@@ -101,7 +101,7 @@ products:
 
   # Block storage — provisioned capacity, billed hourly while the volume
   # exists (attached or not). $0.10 / GiB-month.
-  - key: volume
+  volume:
     display_name: Block Storage Volume
     rate_cards:
       - meter: volume-storage
@@ -115,7 +115,7 @@ products:
 
   # Spaces — $5/mo base bundling 250 GiB storage + 1 TiB egress (pooled
   # across all buckets); overage $0.02/GiB-mo storage, $0.01/GiB egress.
-  - key: spaces
+  spaces:
     display_name: Spaces Object Storage
     rate_cards:
       - price:
@@ -143,7 +143,7 @@ products:
             round: up
 
   # Snapshots — $0.06 / GiB-month for as long as the snapshot exists.
-  - key: snapshot
+  snapshot:
     display_name: Snapshot Storage
     rate_cards:
       - meter: snapshot-storage
@@ -157,7 +157,7 @@ products:
 
   # Load Balancers — billed hourly, advertised monthly; HTTP $12 / network
   # $15 per node. Per-second with the monthly price as the cap, per type.
-  - key: load-balancer
+  load-balancer:
     display_name: Regional Load Balancer
     rate_cards:
       - meter: lb-runtime
@@ -175,7 +175,7 @@ products:
 
   # Managed Databases — billed hourly, monthly-equivalent, by node size;
   # from $15/mo. Per-second with the monthly price as the cap.
-  - key: managed-database
+  managed-database:
     display_name: Managed Database
     rate_cards:
       - meter: db-runtime

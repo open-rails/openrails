@@ -38,17 +38,17 @@ func TestEntitlementListCatalogAPI(t *testing.T) {
 	key := "opaque-list-" + uuid.NewString()[:8]
 	document, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  display_name: Opaque access
-  entitlements: ["post:101", "premium", " private key "]
+  %s:
+    display_name: Opaque access
+    entitlements: ["post:101", "premium", " private key "]
 `, key)))
 	require.NoError(t, err)
 	initial, err := w.client[embedded].ApplyCatalog(t.Context(), document)
 	require.NoError(t, err)
 	var replay billing.CatalogApplicationReceipt
 	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
-		"schema_version": 1, "products": []any{map[string]any{
-			"key": key, "display_name": "Opaque access", "entitlements": []string{" private key ", "premium", "post:101"},
+		"schema_version": 1, "products": map[string]any{key: map[string]any{
+			"display_name": "Opaque access", "entitlements": []string{" private key ", "premium", "post:101"},
 		}},
 	}, &replay))
 	require.True(t, replay.Replayed)
@@ -61,8 +61,8 @@ products:
 	require.IsType(t, []any{}, wire["entitlements"])
 	require.NotContains(t, wire, "entitlements_spec")
 
-	_, err = w.client[remote].ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{
-		{Key: key, DisplayName: catalog.Value("Renamed")},
+	_, err = w.client[remote].ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
+		key: {DisplayName: catalog.Value("Renamed")},
 	}})
 	require.NoError(t, err)
 	updated, err := w.client[embedded].GetProduct(t.Context(), product.ID)

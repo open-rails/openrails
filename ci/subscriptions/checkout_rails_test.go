@@ -23,20 +23,22 @@ import (
 // of new sale (#1078). Each option carries the browser driver and public
 // values billing-ui renders; hosts pass options through.
 
-// applyCatalog applies one product with the given price YAML through the
-// merchant catalog application, as a host does at boot.
+// applyCatalog applies one product with the given prices map YAML (keys at
+// two spaces) through the merchant catalog application, as a host does at
+// boot. {key} in prices names the product.
 func (w *world) applyCatalog(prices string) (string, error) {
 	w.t.Helper()
 	client := w.client[embedded]
 	key := "rails-" + uuid.NewString()[:8]
+	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(prices, "{key}", key), "\n"), "\n")
 	doc := fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  display_name: Rails
-  prices:
-%s
-  entitlements: ["%s"]
-`, key, strings.ReplaceAll(prices, "{key}", key), key)
+  %s:
+    display_name: Rails
+    entitlements: ["%s"]
+    prices:
+    %s
+`, key, key, strings.Join(lines, "\n    "))
 	params, err := catalog.ParseApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
 	_, err = client.ApplyCatalog(w.t.Context(), params)
@@ -84,7 +86,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 
 	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
 	require.NoError(t, err)
-	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
+	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720
@@ -94,7 +96,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
       solana:
         plan_pda: %s
         plan_id: "4242"
-  - key: "{key}-once"
+  "{key}-once":
     currency: usd
     unit_amount: 5000000
     billing_interval_hours: null
@@ -142,13 +144,13 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 
 func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
 	w := newWorld(t)
-	key, err := w.applyCatalog(`  - key: "{key}-monthly"
+	key, err := w.applyCatalog(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720
     access_duration_hours: 720
     psps: [nmi]
-  - key: "{key}-once"
+  "{key}-once":
     currency: usd
     unit_amount: 5000000
     billing_interval_hours: null
@@ -166,7 +168,7 @@ func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
 
 func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
 	w := newWorld(t)
-	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
+	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720
@@ -202,7 +204,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 		delete(psps, "nmi")
 	}
 	w.start()
-	_, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
+	_, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720
@@ -220,7 +222,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 	require.Equal(t, "price_not_sellable", status.Code, "%v", err)
 
 	// An archived CCBill price keeps serving its retained cohort.
-	_, err = w.applyCatalog(fmt.Sprintf(`  - key: "{key}-retired"
+	_, err = w.applyCatalog(fmt.Sprintf(`  "{key}-retired":
     currency: usd
     unit_amount: 19000000
     billing_interval_hours: 720

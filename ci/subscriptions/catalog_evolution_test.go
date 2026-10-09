@@ -159,10 +159,10 @@ func TestCatalogConcurrentPriceVersions(t *testing.T) {
 func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	w := newWorld(t)
 	file := func(amount int64) *catalog.Application {
-		price := catalog.ApplyPrice{Key: "purchase", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), BillingIntervalHours: catalog.Null[int](), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
-		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{
-			{Key: "video", DisplayName: catalog.Value("Video"), Archived: catalog.Value(false), Entitlements: catalog.Value([]string{"video:one"}), Prices: []catalog.ApplyPrice{price}},
-			{Key: "other-video", DisplayName: catalog.Value("Other video"), Archived: catalog.Value(false), Prices: []catalog.ApplyPrice{price}},
+		price := catalog.ApplyPrice{Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount), Archived: catalog.Value(false), BillingIntervalHours: catalog.Null[int](), AccessDurationHours: catalog.Null[int](), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int]()}
+		return &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
+			"video":       {DisplayName: catalog.Value("Video"), Archived: catalog.Value(false), Entitlements: catalog.Value([]string{"video:one"}), Prices: map[string]catalog.ApplyPrice{"purchase": price}},
+			"other-video": {DisplayName: catalog.Value("Other video"), Archived: catalog.Value(false), Prices: map[string]catalog.ApplyPrice{"purchase": price}},
 		}}
 	}
 	boot := func(app *catalog.Application) {
@@ -179,7 +179,7 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 	second, err := c.GetPriceByKey(t.Context(), "video", "purchase")
 	require.NoError(t, err)
 	require.EqualValues(t, 1, second.Revision)
-	boot(&catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: "video", DisplayName: catalog.Value("Updated display")}}})
+	boot(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"video": {DisplayName: catalog.Value("Updated display")}}})
 	for _, key := range []string{"video", "other-video"} {
 		product, err := c.GetProductByKey(t.Context(), key)
 		require.NoError(t, err)
@@ -188,9 +188,9 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 2_000_000, current.UnitAmount, "omitted prices retain their financial terms")
 	}
-	boot(&catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{
-		{Key: "video", Archived: catalog.Value(true), Prices: []catalog.ApplyPrice{{Key: "purchase", Archived: catalog.Value(true)}}},
-		{Key: "other-video", Archived: catalog.Value(true), Prices: []catalog.ApplyPrice{{Key: "purchase", Archived: catalog.Value(true)}}},
+	boot(&catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
+		"video":       {Archived: catalog.Value(true), Prices: map[string]catalog.ApplyPrice{"purchase": {Archived: catalog.Value(true)}}},
+		"other-video": {Archived: catalog.Value(true), Prices: map[string]catalog.ApplyPrice{"purchase": {Archived: catalog.Value(true)}}},
 	}})
 	product, err := c.GetProductByKey(t.Context(), "video")
 	require.NoError(t, err)
@@ -201,8 +201,10 @@ func TestDeclaredCatalogPartialArchiveAndRestoreVersions(t *testing.T) {
 		require.True(t, price.Archived)
 	}
 	restore := file(1_000_000)
-	restore.Products[0].DisplayName = catalog.Value("Video renamed")
-	restore.Products[0].Entitlements = catalog.Value([]string{"video:two"})
+	video := restore.Products["video"]
+	video.DisplayName = catalog.Value("Video renamed")
+	video.Entitlements = catalog.Value([]string{"video:two"})
+	restore.Products["video"] = video
 	boot(restore)
 	restored, err := c.GetPriceByKey(t.Context(), "video", "purchase")
 	require.NoError(t, err)
@@ -254,8 +256,8 @@ func TestCatalogArchivedVersionKeepsProviderBindings(t *testing.T) {
 	second := create(2_000_000, "bound-second")
 	_, err = c.UpdatePrice(t.Context(), second.ID, billing.UpdatePriceParams{Archived: catalog.Value(true)})
 	require.NoError(t, err)
-	_, err = c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: product.Key, Prices: []catalog.ApplyPrice{{
-		Key: "monthly", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(1_000_000)), AccessDurationHours: catalog.Value(hours), BillingIntervalHours: catalog.Value(hours), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int](), Archived: catalog.Value(true),
+	_, err = c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{product.Key: {Prices: map[string]catalog.ApplyPrice{"monthly": {
+		Currency: catalog.Value("USD"), UnitAmount: catalog.Value(int64(1_000_000)), AccessDurationHours: catalog.Value(hours), BillingIntervalHours: catalog.Value(hours), TrialUnitAmount: catalog.Null[int64](), TrialDurationHours: catalog.Null[int](), Archived: catalog.Value(true),
 	}}}}})
 	require.NoError(t, err)
 	preserved, err := c.GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
@@ -356,9 +358,9 @@ func TestCatalogRepriceStaysWithinProduct(t *testing.T) {
 func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	w := newWorld(t)
 	declaration := func(amount int64) *catalog.Application {
-		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{
-			Key: "portable", DisplayName: catalog.Value("Portable"), Prices: []catalog.ApplyPrice{{Key: "purchase", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}},
-		}}}
+		return &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
+			"portable": {DisplayName: catalog.Value("Portable"), Prices: map[string]catalog.ApplyPrice{"purchase": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}},
+		}}
 	}
 	for _, amount := range []int64{4_000_000, 7_000_000} {
 		client, err := w.bootDeclared(t.Context(), declaration(amount))

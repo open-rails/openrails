@@ -53,7 +53,7 @@ func targetCredential(_ context.Context, target CredentialTarget) (string, error
 
 func catalogApplication() *catalog.Application {
 	return &catalog.Application{SchemaVersion: 1,
-		Products: []catalog.ApplyProduct{{Key: "post", DisplayName: catalog.Value("Post")}}}
+		Products: map[string]catalog.ApplyProduct{"post": {DisplayName: catalog.Value("Post")}}}
 }
 
 // Exactly one selector, a slug or an id, reaches both the OpenRails-Merchant

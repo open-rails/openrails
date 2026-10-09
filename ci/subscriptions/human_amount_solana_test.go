@@ -40,7 +40,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 				w.start()
 				chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 				chain.runWorkers(w)
-				productKey, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-native"
+				productKey, err := w.applyCatalog(fmt.Sprintf(`  "{key}-native":
     amount: %s
     psps: [solana]
 `, tc.amount))

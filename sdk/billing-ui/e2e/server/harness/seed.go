@@ -58,22 +58,22 @@ func seedCatalog(ctx context.Context, c *openrails.Client, chain *solanafake.Nod
 func seedCards(ctx context.Context, c *openrails.Client) (string, string, error) {
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
-- key: e2e-card
-  display_name: Card membership
-  prices:
-  - key: e2e-card-once
-    currency: usd
-    unit_amount: 2990000
-    billing_interval_hours: null
-    access_duration_hours: 720
-    psps: [%s]
-  - key: e2e-card-monthly
-    currency: usd
-    unit_amount: 4990000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps: [%s]
-  entitlements: ["e2e-card"]
+  e2e-card:
+    display_name: Card membership
+    prices:
+      e2e-card-once:
+        currency: usd
+        unit_amount: 2990000
+        billing_interval_hours: null
+        access_duration_hours: 720
+        psps: [%s]
+      e2e-card-monthly:
+        currency: usd
+        unit_amount: 4990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        psps: [%s]
+    entitlements: ["e2e-card"]
 `, CardPSPKey, CardPSPKey)))
 	if err != nil {
 		return "", "", err
@@ -101,26 +101,26 @@ func seedCrypto(ctx context.Context, c *openrails.Client, chain *solanafake.Node
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
-- key: e2e-crypto
-  display_name: Crypto membership
-  prices:
-  - key: e2e-crypto-pass
-    currency: usd
-    unit_amount: 2990000
-    billing_interval_hours: null
-    access_duration_hours: 720
-    psps: [solana]
-  - key: e2e-crypto-monthly
-    currency: usd
-    unit_amount: 4990000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps: [solana]
-    psp_links:
-      solana:
-        plan_pda: %s
-        plan_id: "1078"
-  entitlements: ["e2e-crypto"]
+  e2e-crypto:
+    display_name: Crypto membership
+    prices:
+      e2e-crypto-pass:
+        currency: usd
+        unit_amount: 2990000
+        billing_interval_hours: null
+        access_duration_hours: 720
+        psps: [solana]
+      e2e-crypto-monthly:
+        currency: usd
+        unit_amount: 4990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        psps: [solana]
+        psp_links:
+          solana:
+            plan_pda: %s
+            plan_id: "1078"
+    entitlements: ["e2e-crypto"]
 `, plan)))
 	if err != nil {
 		return "", "", err

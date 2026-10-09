@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -87,18 +87,19 @@ func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 	return decoder.Decode(&f.Value)
 }
 
-// Application is one atomic merchant catalog batch. Its canonical content hash
-// is its permanent replay identity; omitted records and fields are preserved.
+// Application is one atomic merchant catalog batch. Products, prices and
+// meters are maps keyed by their key. Its canonical content hash is its
+// permanent replay identity; omitted records and fields are preserved.
 type Application struct {
-	SchemaVersion int            `json:"schema_version"`
-	Prune         bool           `json:"prune,omitempty"`
-	Products      []ApplyProduct `json:"products,omitempty"`
-	Meters        []ApplyMeter   `json:"meters,omitempty"`
+	SchemaVersion int                     `json:"schema_version"`
+	Prune         bool                    `json:"prune,omitempty"`
+	Products      map[string]ApplyProduct `json:"products,omitempty"`
+	Meters        map[string]ApplyMeter   `json:"meters,omitempty"`
 }
 
-// ApplyMeter declares one meter by key; omitted fields keep their values.
+// ApplyMeter declares the meter its map key names; omitted fields keep their
+// values.
 type ApplyMeter struct {
-	Key           string                   `json:"key"`
 	EventType     Field[string]            `json:"event_type,omitzero"`
 	ValueProperty Field[string]            `json:"value_property,omitzero"`
 	Aggregation   Field[Aggregation]       `json:"aggregation,omitzero"`
@@ -106,10 +107,9 @@ type ApplyMeter struct {
 	GroupBy       Field[map[string]string] `json:"group_by,omitzero"`
 }
 
-// ApplyProduct declares one product by key, with its prices and rate cards;
-// omitted fields keep their values.
+// ApplyProduct declares the product its map key names, with its prices and
+// rate cards; omitted fields keep their values.
 type ApplyProduct struct {
-	Key          string                 `json:"key"`
 	DisplayName  Field[string]          `json:"display_name,omitzero"`
 	Description  Field[string]          `json:"description,omitzero"`
 	TierGroup    Field[string]          `json:"tier_group,omitzero"`
@@ -117,16 +117,15 @@ type ApplyProduct struct {
 	Archived     Field[bool]            `json:"archived,omitzero"`
 	Entitlements Field[[]string]        `json:"entitlements,omitzero"`
 	CreditGrant  Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
-	Prices       []ApplyPrice           `json:"prices,omitempty"`
+	Prices       map[string]ApplyPrice  `json:"prices,omitempty"`
 	RateCards    Field[[]RateCard]      `json:"rate_cards,omitzero"`
 }
 
-// ApplyPrice declares one price by key. Its money terms are its identity: a
-// declaration with other terms under the same key is a new version of the
-// price, and the previous one is archived. ID pins the declaration to one
-// existing price.
+// ApplyPrice declares the price its map key names. Its money terms are its
+// identity: a declaration with other terms under the same key is a new
+// version of the price, and the previous one is archived. ID pins the
+// declaration to one existing price.
 type ApplyPrice struct {
-	Key                  string                              `json:"key"`
 	ID                   string                              `json:"id,omitempty"`
 	Currency             Field[string]                       `json:"currency,omitzero"`
 	UnitAmount           Field[int64]                        `json:"unit_amount,omitzero"`
@@ -146,55 +145,55 @@ func (a Application) Validate() error {
 	if a.SchemaVersion != ApplicationSchemaVersion {
 		return fmt.Errorf("unsupported catalog application schema_version %d", a.SchemaVersion)
 	}
-	products, meters := map[string]bool{}, map[string]bool{}
 	count := len(a.Products) + len(a.Meters)
-	for _, p := range a.Products {
-		prices := map[string]bool{}
-		if err := validateApplicationFields(p); err != nil {
-			return fmt.Errorf("product %q: %w", p.Key, err)
-		}
-		if err := uniqueApplicationKey(products, p.Key, "product"); err != nil {
+	for _, key := range slices.Sorted(maps.Keys(a.Products)) {
+		p := a.Products[key]
+		if err := validApplicationKey(key, "product"); err != nil {
 			return err
 		}
+		if err := validateApplicationFields(p); err != nil {
+			return fmt.Errorf("product %q: %w", key, err)
+		}
 		if p.DisplayName.Null || p.Description.Null || p.TierRank.Null || p.Archived.Null {
-			return fmt.Errorf("product %q: nonnullable field is null", p.Key)
+			return fmt.Errorf("product %q: nonnullable field is null", key)
 		}
 		if p.Entitlements.Set && (p.Entitlements.Null || p.Entitlements.Value == nil) {
-			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", p.Key)
+			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", key)
 		}
 		if _, err := NormalizeEntitlements(p.Entitlements.Value); err != nil {
-			return fmt.Errorf("product %q: %w", p.Key, err)
+			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if len(p.DisplayName.Value) > 1024 || len(p.Description.Value) > 16384 {
-			return fmt.Errorf("product %q: text exceeds catalog limit", p.Key)
+			return fmt.Errorf("product %q: text exceeds catalog limit", key)
 		}
 		count += len(p.Prices) + len(p.RateCards.Value)
-		for _, price := range p.Prices {
-			if err := validateApplicationFields(price); err != nil {
-				return fmt.Errorf("price %q: %w", price.Key, err)
+		for _, priceKey := range slices.Sorted(maps.Keys(p.Prices)) {
+			price := p.Prices[priceKey]
+			if err := validApplicationKey(priceKey, "price"); err != nil {
+				return fmt.Errorf("product %q: %w", key, err)
 			}
-			if err := uniqueApplicationKey(prices, price.Key, "price"); err != nil {
-				return err
+			if err := validateApplicationFields(price); err != nil {
+				return fmt.Errorf("price %q: %w", priceKey, err)
 			}
 			if price.Currency.Null || price.UnitAmount.Null || price.Archived.Null {
-				return fmt.Errorf("price %q: nonnullable field is null", price.Key)
+				return fmt.Errorf("price %q: nonnullable field is null", priceKey)
 			}
 			if price.UnitAmount.Set && price.UnitAmount.Value < 0 || price.TrialUnitAmount.Set && !price.TrialUnitAmount.Null && price.TrialUnitAmount.Value < 0 {
-				return fmt.Errorf("price %q: money cannot be negative", price.Key)
+				return fmt.Errorf("price %q: money cannot be negative", priceKey)
 			}
 			for _, duration := range []Field[int]{price.BillingIntervalHours, price.AccessDurationHours, price.TrialDurationHours} {
 				if duration.Set && !duration.Null && (duration.Value <= 0 || duration.Value > MaxDurationHours) {
-					return fmt.Errorf("price %q: duration must be between 1 and %d hours or null", price.Key, MaxDurationHours)
+					return fmt.Errorf("price %q: duration must be between 1 and %d hours or null", priceKey, MaxDurationHours)
 				}
 			}
 		}
 	}
-	for _, m := range a.Meters {
-		if err := validateApplicationFields(m); err != nil {
-			return fmt.Errorf("meter %q: %w", m.Key, err)
-		}
-		if err := uniqueApplicationKey(meters, m.Key, "meter"); err != nil {
+	for _, key := range slices.Sorted(maps.Keys(a.Meters)) {
+		if err := validApplicationKey(key, "meter"); err != nil {
 			return err
+		}
+		if err := validateApplicationFields(a.Meters[key]); err != nil {
+			return fmt.Errorf("meter %q: %w", key, err)
 		}
 	}
 	if count > MaxApplicationItems {
@@ -224,39 +223,34 @@ func validateApplicationFields(value any) error {
 	return nil
 }
 
-func uniqueApplicationKey(seen map[string]bool, key, kind string) error {
+// A map key is the record's key: duplicates are refused while decoding.
+func validApplicationKey(key, kind string) error {
 	if key == "" || len(key) > 255 || strings.TrimSpace(key) != key {
-		return fmt.Errorf("%s key must be a nonempty identifier of at most 255 bytes", kind)
+		return fmt.Errorf("%s key %q must be a nonempty identifier of at most 255 bytes", kind, key)
 	}
-	if seen[key] {
-		return fmt.Errorf("duplicate %s key %q", kind, key)
-	}
-	seen[key] = true
 	return nil
 }
 
-// CanonicalDigest depends only on submitted values, never current database state.
+// CanonicalDigest depends only on submitted values, never current database
+// state. JSON writes map keys sorted, so declaration order never matters.
 func (a Application) CanonicalDigest() ([32]byte, error) {
 	if err := a.Validate(); err != nil {
 		return [32]byte{}, err
 	}
-	a.Products = append([]ApplyProduct(nil), a.Products...)
-	for i := range a.Products {
-		a.Products[i].Entitlements.Value = slices.Clone(a.Products[i].Entitlements.Value)
-		slices.Sort(a.Products[i].Entitlements.Value)
-		a.Products[i].Prices = append([]ApplyPrice(nil), a.Products[i].Prices...)
-		for j := range a.Products[i].Prices {
-			p := &a.Products[i].Prices[j]
-			if p.PSPs.Value != nil {
-				p.PSPs.Value = append([]string{}, p.PSPs.Value...)
-			}
-			sort.Strings(p.PSPs.Value)
+	products := make(map[string]ApplyProduct, len(a.Products))
+	for key, p := range a.Products {
+		p.Entitlements.Value = slices.Clone(p.Entitlements.Value)
+		slices.Sort(p.Entitlements.Value)
+		prices := make(map[string]ApplyPrice, len(p.Prices))
+		for priceKey, price := range p.Prices {
+			price.PSPs.Value = slices.Clone(price.PSPs.Value)
+			slices.Sort(price.PSPs.Value)
+			prices[priceKey] = price
 		}
-		sort.Slice(a.Products[i].Prices, func(j, k int) bool { return a.Products[i].Prices[j].Key < a.Products[i].Prices[k].Key })
+		p.Prices = prices
+		products[key] = p
 	}
-	sort.Slice(a.Products, func(i, j int) bool { return a.Products[i].Key < a.Products[j].Key })
-	a.Meters = append([]ApplyMeter(nil), a.Meters...)
-	sort.Slice(a.Meters, func(i, j int) bool { return a.Meters[i].Key < a.Meters[j].Key })
+	a.Products = products
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return [32]byte{}, err

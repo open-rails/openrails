@@ -9,9 +9,9 @@ it("sends the exact YAML batch with int64 money unchanged", async () => {
   selectMerchant("merchant-one")
   const raw = `schema_version: 1
 products:
-  - key: premium
+  premium:
     prices:
-      - key: premium-usd
+      premium-usd:
         unit_amount: 9223372036854775807
 `
   const fetcher = vi.fn(async () => Response.json({ replayed: false }))

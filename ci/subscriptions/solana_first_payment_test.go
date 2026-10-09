@@ -48,7 +48,7 @@ func openSolanaShop(t *testing.T) *solanaShop {
 	w.start()
 	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, solanaPlanAmount, monthHours)
 	require.NoError(t, err)
-	key, err := w.applyCatalog(fmt.Sprintf(`  - key: "{key}-monthly"
+	key, err := w.applyCatalog(fmt.Sprintf(`  "{key}-monthly":
     currency: usd
     unit_amount: 23000000
     billing_interval_hours: 720

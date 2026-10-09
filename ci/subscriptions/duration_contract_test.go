@@ -17,15 +17,15 @@ import (
 func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	w := newWorld(t)
 	key := "durations-" + uuid.NewString()[:8]
-	apply := func(price map[string]any, create bool) billing.CatalogApplicationReceipt {
+	apply := func(priceKey string, price map[string]any, create bool) billing.CatalogApplicationReceipt {
 		t.Helper()
-		product := map[string]any{"key": key, "prices": []any{price}}
+		product := map[string]any{"prices": map[string]any{priceKey: price}}
 		if create {
 			product["display_name"] = "Duration contract"
 		}
 		var receipt billing.CatalogApplicationReceipt
 		status := w.staffCall(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
-			"schema_version": 1, "products": []any{product},
+			"schema_version": 1, "products": map[string]any{key: product},
 		}, &receipt)
 		require.Equal(t, http.StatusOK, status, "%+v", receipt)
 		return receipt
@@ -38,8 +38,8 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 		require.Equal(t, interval, price.BillingIntervalHours)
 		return price
 	}
-	initial := apply(map[string]any{
-		"key": "mixed", "currency": "USD", "unit_amount": "10000000",
+	initial := apply("mixed", map[string]any{
+		"currency": "USD", "unit_amount": "10000000",
 		"access_duration": "3 days", "billing_interval": "30 days",
 	}, true)
 	require.False(t, initial.Replayed)
@@ -48,14 +48,14 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 		{"access_duration": "72 hours", "billing_interval": "720 hours"},
 		{"access_duration_hours": 72, "billing_interval_hours": 720},
 	} {
-		terms["key"], terms["currency"], terms["unit_amount"] = "mixed", "USD", "10000000"
-		replay := apply(terms, true)
+		terms["currency"], terms["unit_amount"] = "USD", "10000000"
+		replay := apply("mixed", terms, true)
 		require.True(t, replay.Replayed, "equivalent durations must address the same catalog application")
 		require.Equal(t, initial.ApplicationID, replay.ApplicationID)
 		require.Equal(t, original.ID, read("mixed", new(72), new(720)).ID)
 	}
 	// The YAML HTTP entry point shares the normalized JSON replay identity.
-	yaml := fmt.Sprintf("schema_version: 1\nproducts:\n- key: %s\n  display_name: Duration contract\n  prices:\n  - key: mixed\n    currency: USD\n    unit_amount: 10000000\n    access_duration: 72 hours\n    billing_interval: 30 days\n", key)
+	yaml := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Duration contract\n    prices:\n      mixed:\n        currency: USD\n        unit_amount: 10000000\n        access_duration: 72 hours\n        billing_interval: 30 days\n", key)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/merchant/catalog/applications", strings.NewReader(yaml))
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/yaml")
@@ -70,20 +70,20 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	require.True(t, yamlReplay.Replayed)
 	require.Equal(t, initial.ApplicationID, yamlReplay.ApplicationID)
 
-	apply(map[string]any{"key": "mixed", "unit_amount": "12000000"}, false)
+	apply("mixed", map[string]any{"unit_amount": "12000000"}, false)
 	repriced := read("mixed", new(72), new(720))
 	require.NotEqual(t, original.ID, repriced.ID)
 	require.EqualValues(t, 12_000_000, repriced.UnitAmount)
-	apply(map[string]any{"key": "mixed", "access_duration": nil}, false)
+	apply("mixed", map[string]any{"access_duration": nil}, false)
 	read("mixed", nil, new(720))
-	apply(map[string]any{"key": "mixed", "billing_interval": nil}, false)
+	apply("mixed", map[string]any{"billing_interval": nil}, false)
 	read("mixed", nil, nil)
 
-	apply(map[string]any{"key": "finite", "currency": "USD", "unit_amount": "1000000", "access_duration": "3 days"}, false)
+	apply("finite", map[string]any{"currency": "USD", "unit_amount": "1000000", "access_duration": "3 days"}, false)
 	read("finite", new(72), nil)
-	apply(map[string]any{"key": "recurring", "currency": "USD", "unit_amount": "2000000", "billing_interval": "30 days"}, false)
+	apply("recurring", map[string]any{"currency": "USD", "unit_amount": "2000000", "billing_interval": "30 days"}, false)
 	read("recurring", nil, new(720))
-	apply(map[string]any{"key": "trial", "currency": "USD", "unit_amount": "3000000", "billing_interval": "30 days", "trial_unit_amount": "0", "trial_duration": "1 day"}, false)
+	apply("trial", map[string]any{"currency": "USD", "unit_amount": "3000000", "billing_interval": "30 days", "trial_unit_amount": "0", "trial_duration": "1 day"}, false)
 	trial := read("trial", nil, new(720))
 	require.Equal(t, new(24), trial.TrialDurationHours)
 	require.Equal(t, new(int64(0)), trial.TrialUnitAmount)
@@ -142,9 +142,9 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 		{"billing_interval": nil, "billing_interval_hours": nil},
 		{"auto_renew": false},
 	} {
-		invalid["key"], invalid["currency"], invalid["unit_amount"] = "invalid", "USD", "1000000"
+		invalid["currency"], invalid["unit_amount"] = "USD", "1000000"
 		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
-			"schema_version": 1, "products": []any{map[string]any{"key": product.Key, "prices": []any{invalid}}},
+			"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"invalid": invalid}}},
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	}

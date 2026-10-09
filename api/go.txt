@@ -3251,15 +3251,14 @@ pkg openrails/catalog, type Allowance struct, AccrueFrom string `json:"accrue_fr
 pkg openrails/catalog, type Allowance struct, Cap string `json:"cap,omitempty"`
 pkg openrails/catalog, type Allowance struct, Included int64 `json:"included,omitempty"`
 pkg openrails/catalog, type Application struct
-pkg openrails/catalog, type Application struct, Meters []ApplyMeter `json:"meters,omitempty"`
-pkg openrails/catalog, type Application struct, Products []ApplyProduct `json:"products,omitempty"`
+pkg openrails/catalog, type Application struct, Meters map[string]ApplyMeter `json:"meters,omitempty"`
+pkg openrails/catalog, type Application struct, Products map[string]ApplyProduct `json:"products,omitempty"`
 pkg openrails/catalog, type Application struct, Prune bool `json:"prune,omitempty"`
 pkg openrails/catalog, type Application struct, SchemaVersion int `json:"schema_version"`
 pkg openrails/catalog, type ApplyMeter struct
 pkg openrails/catalog, type ApplyMeter struct, Aggregation Field[Aggregation] `json:"aggregation,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, EventType Field[string] `json:"event_type,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, GroupBy Field[map[string]string] `json:"group_by,omitzero"`
-pkg openrails/catalog, type ApplyMeter struct, Key string `json:"key"`
 pkg openrails/catalog, type ApplyMeter struct, Unit Field[string] `json:"unit,omitzero"`
 pkg openrails/catalog, type ApplyMeter struct, ValueProperty Field[string] `json:"value_property,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct
@@ -3269,7 +3268,6 @@ pkg openrails/catalog, type ApplyPrice struct, BillingIntervalHours Field[int] `
 pkg openrails/catalog, type ApplyPrice struct, Currency Field[string] `json:"currency,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, CustomerAmount Field[CustomerAmount] `json:"customer_amount,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, ID string `json:"id,omitempty"`
-pkg openrails/catalog, type ApplyPrice struct, Key string `json:"key"`
 pkg openrails/catalog, type ApplyPrice struct, PSPLinks Field[map[string]map[string]string] `json:"psp_links,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, PSPs Field[[]string] `json:"psps,omitzero"`
 pkg openrails/catalog, type ApplyPrice struct, TrialDurationHours Field[int] `json:"trial_duration_hours,omitzero"`
@@ -3281,8 +3279,7 @@ pkg openrails/catalog, type ApplyProduct struct, CreditGrant Field[CreditGrantSp
 pkg openrails/catalog, type ApplyProduct struct, Description Field[string] `json:"description,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, DisplayName Field[string] `json:"display_name,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, Entitlements Field[[]string] `json:"entitlements,omitzero"`
-pkg openrails/catalog, type ApplyProduct struct, Key string `json:"key"`
-pkg openrails/catalog, type ApplyProduct struct, Prices []ApplyPrice `json:"prices,omitempty"`
+pkg openrails/catalog, type ApplyProduct struct, Prices map[string]ApplyPrice `json:"prices,omitempty"`
 pkg openrails/catalog, type ApplyProduct struct, RateCards Field[[]RateCard] `json:"rate_cards,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierGroup Field[string] `json:"tier_group,omitzero"`
 pkg openrails/catalog, type ApplyProduct struct, TierRank Field[int] `json:"tier_rank,omitzero"`

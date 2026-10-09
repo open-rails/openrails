@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -87,16 +89,17 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, err
 		}
-		for _, declared := range params.Products {
-			product, err := scoped.GetProductByKey(ctx, declared.Key)
+		for _, productKey := range slices.Sorted(maps.Keys(params.Products)) {
+			declared := params.Products[productKey]
+			product, err := scoped.GetProductByKey(ctx, productKey)
 			if err != nil && !errors.Is(err, billing.ErrNotFound) {
 				return nil, err
 			}
 			if product == nil {
 				if !declared.DisplayName.Set {
-					return nil, apperr.Invalidf("new product %q requires display_name; cannot archive unknown product", declared.Key)
+					return nil, apperr.Invalidf("new product %q requires display_name; cannot archive unknown product", productKey)
 				}
-				product = &billing.Product{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), declared.Key)), Key: declared.Key, DisplayName: declared.DisplayName.Value}
+				product = &billing.Product{ID: billing.ProductID(uuidutil.DeterministicID(uuidutil.DeterministicNamespace, mid.UUID().String(), productKey)), Key: productKey, DisplayName: declared.DisplayName.Value}
 			}
 			if declared.CreditGrant.Set {
 				product.CreditGrant = nil
@@ -128,19 +131,19 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 				// Parent activation also makes omitted live children available.
 				// Inspect their references without adding them to the declaration
 				// or changing their rows. Pruned children will remain unavailable.
-				named := map[string]bool{}
-				for _, price := range declared.Prices {
-					named[price.Key] = true
+				references = maps.Clone(declared.Prices)
+				if references == nil {
+					references = map[string]catalogwire.ApplyPrice{}
 				}
-				references = append([]catalogwire.ApplyPrice(nil), declared.Prices...)
 				for _, price := range prices {
-					if !price.Archived && !named[price.Key] && len(price.PSPs) > 0 {
-						references = append(references, catalogwire.ApplyPrice{Key: price.Key, ID: price.ID.String()})
+					if _, named := declared.Prices[price.Key]; !price.Archived && !named && len(price.PSPs) > 0 {
+						references[price.Key] = catalogwire.ApplyPrice{ID: price.ID.String()}
 					}
 				}
 			}
-			for _, decl := range references {
-				current, request, err := catalogApplicationPriceRequest(product, decl, byKey, byID)
+			for _, priceKey := range slices.Sorted(maps.Keys(references)) {
+				decl := references[priceKey]
+				current, request, err := catalogApplicationPriceRequest(product, priceKey, decl, byKey, byID)
 				if err != nil {
 					return nil, err
 				}
@@ -180,7 +183,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 						}
 					}
 				}
-				out.links[[2]string{product.Key, decl.Key}] = map[string]map[string]string{}
+				out.links[[2]string{product.Key, priceKey}] = map[string]map[string]string{}
 				names := make([]string, 0, len(wanted))
 				for key := range wanted {
 					names = append(names, key)
@@ -194,7 +197,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					}
 					unchanged := same && catalogLinkContains(links[key], link) && (request.Archived || (!current.Archived && !reactivatingProduct))
 					if unchanged {
-						out.links[[2]string{product.Key, decl.Key}][key] = cloneStringMap(links[key])
+						out.links[[2]string{product.Key, priceKey}][key] = cloneStringMap(links[key])
 						rail := links[key]["rail"]
 						if rail == "" {
 							rail = key
@@ -233,10 +236,10 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 					}
 					verificationRequest := request
 					verificationRequest.Archived = verificationRequest.Archived || product.Archived
-					out.checks = append(out.checks, catalogReferenceCheck{key: decl.Key, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
+					out.checks = append(out.checks, catalogReferenceCheck{key: priceKey, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})
 				}
 				if len(declaredRails) > 0 && !request.Archived && !product.Archived {
-					if err := requireSellablePrice(decl.Key, request, declaredRails, accounts, scoped.catalogProviderEnvironment()); err != nil {
+					if err := requireSellablePrice(priceKey, request, declaredRails, accounts, scoped.catalogProviderEnvironment()); err != nil {
 						return nil, err
 					}
 				}

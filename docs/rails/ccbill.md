@@ -63,7 +63,7 @@ maps to:
 
 ```yaml
 prices:
-  - key: premium-monthly
+  premium-monthly:
     amount: 9.99 USD
     access_duration_hours: 720
     billing_interval_hours: 720

@@ -53,22 +53,22 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		id := 5001 + i
 		pda, err := fake.Plan(merchantKey.PublicKey(), uint64(id), solanafake.DevnetDUSDMint, uint64(p.amount), monthHours)
 		require.NoError(t, err)
-		fmt.Fprintf(&doc, "- key: %s-%s\n  display_name: %s\n", p.key, sfx, p.key)
+		fmt.Fprintf(&doc, "  %s-%s:\n    display_name: %s\n", p.key, sfx, p.key)
 		if p.group != "" {
-			fmt.Fprintf(&doc, "  tier_group: %s\n  tier_rank: %d\n", p.group, p.rank)
+			fmt.Fprintf(&doc, "    tier_group: %s\n    tier_rank: %d\n", p.group, p.rank)
 		}
-		fmt.Fprintf(&doc, `  prices:
-  - key: %[1]s-%[2]s-monthly
-    currency: usd
-    unit_amount: %[3]d
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps: [solana]
-    psp_links:
-      solana:
-        plan_pda: %[4]s
-        plan_id: "%[5]d"
-  entitlements: ["%[1]s-%[2]s"]
+		fmt.Fprintf(&doc, `    prices:
+      %[1]s-%[2]s-monthly:
+        currency: usd
+        unit_amount: %[3]d
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        psps: [solana]
+        psp_links:
+          solana:
+            plan_pda: %[4]s
+            plan_id: "%[5]d"
+    entitlements: ["%[1]s-%[2]s"]
 `, p.key, sfx, p.amount, pda, id)
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))

@@ -26,14 +26,14 @@ func TestCatalogCreditEvolution(t *testing.T) {
 	}
 	initial := fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  display_name: API deposit
-  credit_grant: {currency: usd, from_payment: true}
-  prices:
-  - key: deposit
-    currency: USD
-    unit_amount: 0
-    customer_amount: {min_amount: 1000000, max_amount: 100000000}
+  %s:
+    display_name: API deposit
+    credit_grant: {currency: usd, from_payment: true}
+    prices:
+      deposit:
+        currency: USD
+        unit_amount: 0
+        customer_amount: {min_amount: 1000000, max_amount: 100000000}
 `, key)
 	apply(initial)
 	p, err := w.client[embedded].GetProductByKey(t.Context(), key)
@@ -45,10 +45,10 @@ products:
 	require.EqualValues(t, 0, first.Revision)
 	apply(fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  prices:
-  - key: deposit
-    customer_amount: {min_amount: 1000000, max_amount: 500000000}
+  %s:
+    prices:
+      deposit:
+        customer_amount: {min_amount: 1000000, max_amount: 500000000}
 `, key))
 	second, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
 	require.NoError(t, err)
@@ -64,11 +64,11 @@ products:
 	require.Equal(t, second.ID, current.ID)
 	apply(fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  credit_grant: {currency: USD, from_payment: true, expires_after_days: 30}
-  prices:
-  - key: deposit
-    customer_amount: {min_amount: 1000000, max_amount: 100000000}
+  %s:
+    credit_grant: {currency: USD, from_payment: true, expires_after_days: 30}
+    prices:
+      deposit:
+        customer_amount: {min_amount: 1000000, max_amount: 100000000}
 `, key))
 	restored, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
 	require.NoError(t, err)
@@ -84,11 +84,11 @@ products:
 	// together. History never prevents a future definition, but restore validates it.
 	apply(fmt.Sprintf(`schema_version: 1
 products:
-- key: %s
-  credit_grant: null
-  prices:
-  - key: deposit
-    archived: true
+  %s:
+    credit_grant: null
+    prices:
+      deposit:
+        archived: true
 `, key))
 	_, err = w.client[remote].UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 	require.Error(t, err, "a restored deposit must still have a funding benefit")

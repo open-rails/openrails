@@ -48,23 +48,23 @@ func TestCatalogDurationUpdatePreservesOmittedAndClearsNull(t *testing.T) {
 		access  *int
 		billing *int
 	}{
-		{"omitted", catalogwire.ApplyPrice{Key: "price"}, current.AccessDurationHours, current.BillingIntervalHours},
-		{"clear access", catalogwire.ApplyPrice{Key: "price", AccessDurationHours: catalogwire.Null[int]()}, nil, current.BillingIntervalHours},
-		{"clear billing", catalogwire.ApplyPrice{Key: "price", BillingIntervalHours: catalogwire.Null[int]()}, current.AccessDurationHours, nil},
-		{"change billing", catalogwire.ApplyPrice{Key: "price", BillingIntervalHours: catalogwire.Value(24)}, current.AccessDurationHours, intPtr(24)},
+		{"omitted", catalogwire.ApplyPrice{}, current.AccessDurationHours, current.BillingIntervalHours},
+		{"clear access", catalogwire.ApplyPrice{AccessDurationHours: catalogwire.Null[int]()}, nil, current.BillingIntervalHours},
+		{"clear billing", catalogwire.ApplyPrice{BillingIntervalHours: catalogwire.Null[int]()}, current.AccessDurationHours, nil},
+		{"change billing", catalogwire.ApplyPrice{BillingIntervalHours: catalogwire.Value(24)}, current.AccessDurationHours, intPtr(24)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, req, err := catalogApplicationPriceRequest(product, tc.decl, byKey, nil)
+			_, req, err := catalogApplicationPriceRequest(product, "price", tc.decl, byKey, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.access, req.AccessDurationHours)
 			require.Equal(t, tc.billing, req.BillingIntervalHours)
 		})
 	}
-	_, created, err := catalogApplicationPriceRequest(product, catalogwire.ApplyPrice{Key: "new", Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), AccessDurationHours: catalogwire.Value(72)}, nil, nil)
+	_, created, err := catalogApplicationPriceRequest(product, "new", catalogwire.ApplyPrice{Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), AccessDurationHours: catalogwire.Value(72)}, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, intPtr(72), created.AccessDurationHours)
 	require.Nil(t, created.BillingIntervalHours, "a finite access window must not create recurring billing")
-	_, created, err = catalogApplicationPriceRequest(product, catalogwire.ApplyPrice{Key: "new", Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), BillingIntervalHours: catalogwire.Value(720)}, nil, nil)
+	_, created, err = catalogApplicationPriceRequest(product, "new", catalogwire.ApplyPrice{Currency: catalogwire.Value("USD"), UnitAmount: catalogwire.Value[int64](10_000_000), BillingIntervalHours: catalogwire.Value(720)}, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, created.AccessDurationHours, "recurring billing must not create an access expiry")
 	require.Equal(t, intPtr(720), created.BillingIntervalHours)

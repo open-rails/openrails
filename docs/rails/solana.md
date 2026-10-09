@@ -138,7 +138,7 @@ checkout only, across every merchant and PSP.
 
   ```yaml
   prices:
-    - key: premium-monthly
+    premium-monthly:
       amount: 23 USD
       access_duration_hours: 720
       billing_interval_hours: 720

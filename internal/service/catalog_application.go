@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -175,18 +177,17 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 		}
 		cursor = page.Next
 	}
-	keep := map[string]bool{}
-	for _, decl := range params.Products {
-		keep[decl.Key] = true
-		p := existing[decl.Key]
+	for _, key := range slices.Sorted(maps.Keys(params.Products)) {
+		decl := params.Products[key]
+		p := existing[key]
 		if p == nil {
 			if decl.Archived.Set && decl.Archived.Value && !decl.DisplayName.Set {
-				return apperr.Invalidf("cannot archive unknown product %q", decl.Key)
+				return apperr.Invalidf("cannot archive unknown product %q", key)
 			}
 			if !decl.DisplayName.Set || decl.DisplayName.Null {
-				return apperr.Invalidf("new product %q requires display_name", decl.Key)
+				return apperr.Invalidf("new product %q requires display_name", key)
 			}
-			req := billing.CreateProductParams{Key: decl.Key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, Entitlements: decl.Entitlements.Value}
+			req := billing.CreateProductParams{Key: key, DisplayName: decl.DisplayName.Value, Description: decl.Description.Value, Archived: decl.Archived.Value, TierRank: decl.TierRank.Value, Entitlements: decl.Entitlements.Value}
 			if decl.CreditGrant.Set && !decl.CreditGrant.Null {
 				req.CreditGrant = &decl.CreditGrant.Value
 			}
@@ -253,7 +254,7 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 	}
 	if params.Prune {
 		for key, p := range existing {
-			if !keep[key] {
+			if _, kept := params.Products[key]; !kept {
 				if !p.Archived {
 					if _, err := s.DeactivateProduct(ctx, p.ID); err != nil {
 						return err
@@ -273,7 +274,7 @@ func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool 
 	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.Entitlements, p.Entitlements)
 }
 
-func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations []catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations map[string]catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
 	prices, err := s.ListPricesByProduct(ctx, product.ID, false)
 	if err != nil {
 		return err
@@ -284,17 +285,15 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 		byKey[p.Key] = append(byKey[p.Key], p)
 		byID[p.ID.String()] = p
 	}
-	keep := map[string]bool{}
-	for _, decl := range declarations {
-		keep[decl.Key] = true
-		current, req, err := catalogApplicationPriceRequest(product, decl, byKey, byID)
+	for _, key := range slices.Sorted(maps.Keys(declarations)) {
+		current, req, err := catalogApplicationPriceRequest(product, key, declarations[key], byKey, byID)
 		if err != nil {
 			return err
 		}
 		same := current != nil && samePriceTerms(*current, req)
-		preparedLinks, ok := s.catalogPreparedLinks[[2]string{product.Key, decl.Key}]
+		preparedLinks, ok := s.catalogPreparedLinks[[2]string{product.Key, key}]
 		if !ok {
-			return fmt.Errorf("price %q has no prepared application state", decl.Key)
+			return fmt.Errorf("price %q has no prepared application state", key)
 		}
 		if same {
 			changed := false
@@ -331,7 +330,7 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 	}
 	if prune {
 		for _, p := range prices {
-			if !p.Archived && !keep[p.Key] {
+			if _, kept := declarations[p.Key]; !p.Archived && !kept {
 				if _, err := s.DeactivatePrice(ctx, p.ID); err != nil {
 					return err
 				}
@@ -364,9 +363,10 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 		for i, m := range desired.Meters {
 			meters[m.Key] = i
 		}
-		for _, m := range params.Meters {
-			next := CatalogMeterSpec{Key: m.Key}
-			i, exists := meters[m.Key]
+		for _, key := range slices.Sorted(maps.Keys(params.Meters)) {
+			m := params.Meters[key]
+			next := CatalogMeterSpec{Key: key}
+			i, exists := meters[key]
 			if exists {
 				next = desired.Meters[i]
 			}
@@ -391,20 +391,20 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 				desired.Meters = append(desired.Meters, next)
 			}
 		}
-		for _, p := range params.Products {
-			if p.RateCards.Set {
+		for _, key := range slices.Sorted(maps.Keys(params.Products)) {
+			if p := params.Products[key]; p.RateCards.Set {
 				// Preserve all other products and payer overrides; replace exactly
 				// this named product's explicit list after existing dependency checks.
 				kept := make([]CatalogRateCardSpec, 0, len(desired.RateCards))
 				for _, card := range desired.RateCards {
-					if card.ProductKey != p.Key {
+					if card.ProductKey != key {
 						kept = append(kept, card)
 					}
 				}
 				desired.RateCards = kept
 				ordinals := map[int]bool{}
 				for i, rc := range p.RateCards.Value {
-					if err := catalogrules.ValidateRateCard(fmt.Sprintf("product %q rate card #%d", p.Key, i+1), &rc); err != nil {
+					if err := catalogrules.ValidateRateCard(fmt.Sprintf("product %q rate card #%d", key, i+1), &rc); err != nil {
 						return apperr.Invalidf("%s", err.Error())
 					}
 					ordinal := rc.Ordinal
@@ -412,7 +412,7 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 						ordinal = i + 1
 					}
 					if ordinal < 1 || ordinals[ordinal] {
-						return apperr.Invalidf("product %q has invalid or duplicate rate-card ordinal %d", p.Key, ordinal)
+						return apperr.Invalidf("product %q has invalid or duplicate rate-card ordinal %d", key, ordinal)
 					}
 					ordinals[ordinal] = true
 					price, err := json.Marshal(rc.Price)
@@ -426,44 +426,44 @@ func (s *Service) applyCatalogBilling(ctx context.Context, params catalogwire.Ap
 							return err
 						}
 					}
-					desired.RateCards = append(desired.RateCards, CatalogRateCardSpec{ProductKey: p.Key, Ordinal: ordinal, MeterKey: rc.Meter, PaymentTerm: string(rc.PaymentTerm), Filter: rc.Filter, Allowance: allowance, Price: price})
+					desired.RateCards = append(desired.RateCards, CatalogRateCardSpec{ProductKey: key, Ordinal: ordinal, MeterKey: rc.Meter, PaymentTerm: string(rc.PaymentTerm), Filter: rc.Filter, Allowance: allowance, Price: price})
 				}
 			}
 		}
 		return s.SyncCatalogSidecars(ctx, desired, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true})
 	})
 }
-func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.ApplyPrice, byKey map[string][]billing.Price, byID map[string]billing.Price) (current *billing.Price, req billing.CreatePriceParams, err error) {
+func catalogApplicationPriceRequest(product *billing.Product, key string, decl catalogwire.ApplyPrice, byKey map[string][]billing.Price, byID map[string]billing.Price) (current *billing.Price, req billing.CreatePriceParams, err error) {
 	if decl.ID != "" {
 		p, ok := byID[decl.ID]
-		if !ok || p.Key != decl.Key {
+		if !ok || p.Key != key {
 			return nil, req, apperr.Invalidf("price id does not select this product/key")
 		}
 		current = &p
 	} else {
-		for _, p := range byKey[decl.Key] {
+		for _, p := range byKey[key] {
 			if !p.Archived {
 				copy := p
 				current = &copy
 				break
 			}
 		}
-		if current == nil && len(byKey[decl.Key]) == 1 {
-			p := byKey[decl.Key][0]
+		if current == nil && len(byKey[key]) == 1 {
+			p := byKey[key][0]
 			current = &p
 		}
-		if current == nil && len(byKey[decl.Key]) > 1 {
-			for _, prior := range byKey[decl.Key] {
+		if current == nil && len(byKey[key]) > 1 {
+			for _, prior := range byKey[key] {
 				if prior.CustomerAmount != nil && !decl.CustomerAmount.Set {
-					return nil, req, apperr.Invalidf("archived deposit key %q is ambiguous; select a price id or include customer_amount in complete terms", decl.Key)
+					return nil, req, apperr.Invalidf("archived deposit key %q is ambiguous; select a price id or include customer_amount in complete terms", key)
 				}
 			}
 			if !decl.Currency.Set || !decl.UnitAmount.Set || !decl.AccessDurationHours.Set || !decl.BillingIntervalHours.Set || !decl.TrialUnitAmount.Set || !decl.TrialDurationHours.Set {
-				return nil, req, apperr.Invalidf("archived price key %q is ambiguous; select a price id or complete terms", decl.Key)
+				return nil, req, apperr.Invalidf("archived price key %q is ambiguous; select a price id or complete terms", key)
 			}
 		}
 	}
-	req = billing.CreatePriceParams{ProductID: product.ID, Key: decl.Key}
+	req = billing.CreatePriceParams{ProductID: product.ID, Key: key}
 	if current != nil {
 		req.CustomerAmount = current.CustomerAmount
 		req.UnitAmount = current.UnitAmount
@@ -476,12 +476,12 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 	}
 	if current == nil {
 		if decl.Archived.Set && decl.Archived.Value && (!decl.Currency.Set || !decl.UnitAmount.Set) {
-			return nil, req, apperr.Invalidf("cannot archive unknown price %q", decl.Key)
+			return nil, req, apperr.Invalidf("cannot archive unknown price %q", key)
 		}
 		if !decl.Currency.Set || !decl.UnitAmount.Set {
-			return nil, req, apperr.Invalidf("new price %q requires currency and unit_amount", decl.Key)
+			return nil, req, apperr.Invalidf("new price %q requires currency and unit_amount", key)
 		}
-		if len(byKey[decl.Key]) > 0 {
+		if len(byKey[key]) > 0 {
 			req.Archived = true
 		}
 	}
@@ -525,7 +525,7 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 		req.Archived = decl.Archived.Value
 	}
 	if product.Archived && decl.Archived.Set && !decl.Archived.Value {
-		return nil, req, apperr.Invalidf("cannot explicitly activate price %q under archived product", decl.Key)
+		return nil, req, apperr.Invalidf("cannot explicitly activate price %q under archived product", key)
 	}
 	req.Currency = money.NormalizeCurrency(req.Currency)
 	if decl.ID != "" && !samePriceTerms(*current, req) {
@@ -534,7 +534,7 @@ func catalogApplicationPriceRequest(product *billing.Product, decl catalogwire.A
 	// A rollback or archived declaration may select a historical financial
 	// version. Preserve that version's own provider bindings, not the currently
 	// active version's links, when links were omitted.
-	for _, candidate := range byKey[decl.Key] {
+	for _, candidate := range byKey[key] {
 		if samePriceTerms(candidate, req) {
 			copy := candidate
 			current = &copy

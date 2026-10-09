@@ -93,8 +93,8 @@ export type Allowance = {
 export type Application = {
   schema_version?: number
   prune?: boolean
-  products?: ApplyProduct[]
-  meters?: ApplyMeter[]
+  products?: Record<string, ApplyProduct>
+  meters?: Record<string, ApplyMeter>
 }
 
 export type ApplyMerchantConfigurationParams = {
@@ -105,7 +105,6 @@ export type ApplyMerchantConfigurationParams = {
 }
 
 export type ApplyMeter = {
-  key?: string
   event_type?: string | null
   value_property?: string | null
   aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count" | null
@@ -114,7 +113,6 @@ export type ApplyMeter = {
 }
 
 export type ApplyPrice = {
-  key?: string
   id?: string
   currency?: string | null
   unit_amount?: string | null
@@ -133,7 +131,6 @@ export type ApplyPrice = {
 }
 
 export type ApplyProduct = {
-  key?: string
   display_name?: string | null
   description?: string | null
   tier_group?: string | null
@@ -141,7 +138,7 @@ export type ApplyProduct = {
   archived?: boolean | null
   entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
-  prices?: ApplyPrice[]
+  prices?: Record<string, ApplyPrice>
   rate_cards?: RateCard[] | null
 }
 

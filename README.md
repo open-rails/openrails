@@ -49,51 +49,51 @@ Next, declare your catalog of products + prices as a YAML config file:
 # catalog.yaml
 schema_version: 1 # the file format
 products:
-  - key: course-101
+  course-101:
     display_name: Course 101 — Intro to CSS
     entitlements: ["course:101"]
     prices:
-      - key: purchase
+      purchase:
         amount: 4.99 USD
         access_duration: null # permanent access
-      - key: rent
+      rent:
         amount: 1.99 USD
         access_duration: 3 days # access expires 3 days after purchase
 
-  - key: course-102
+  course-102:
     display_name: Course 102 — Intro to Tailwind
     entitlements: ["course:102"]
     prices:
-      - key: purchase
+      purchase:
         amount: 4.99 USD
         access_duration: null
-      - key: rent
+      rent:
         amount: 1.99 USD
         access_duration: 3 days
 
-  - key: course-bundle
+  course-bundle:
     display_name: CSS courses 101 and 102
     entitlements: ["course:101", "course:102"] # the same keys as individual sales
     prices:
-      - key: purchase
+      purchase:
         amount: 8.99 USD # both courses at a discounted price
         access_duration: null
 
-  - key: channel-membership
+  channel-membership:
     display_name: Channel membership
     entitlements: ["channel:membership"]
     prices:
-      - key: monthly
+      monthly:
         amount: 10 USD
         access_duration: 30 days
         billing_interval: 30 days
-      - key: yearly
+      yearly:
         amount: 99 USD
         access_duration: 365 days
         billing_interval: 365 days
 ```
 
-The entitlements are arbitrary strings; OpenRails tracks these, but it's up to your application to give them meaning.
+Products and their prices are maps keyed by a stable key you choose. The entitlements are arbitrary strings; OpenRails tracks these, but it's up to your application to give them meaning.
 
 #### Build the billing client
 
@@ -627,10 +627,10 @@ product and offer:
 # catalog-update.yaml
 schema_version: 1
 products:
-  - key: channel-membership
+  channel-membership:
     display_name: Channel Plus membership
     prices:
-      - key: monthly
+      monthly:
         amount: 12.99 USD
 ```
 
@@ -654,7 +654,7 @@ list, so retain the original membership key:
 # add-membership-benefit.yaml
 schema_version: 1
 products:
-  - key: channel-membership
+  channel-membership:
     entitlements: ["channel:membership", "channel:downloads"]
 ```
 
@@ -672,9 +672,9 @@ yearly price on sale:
 # retire-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-membership
+  channel-membership:
     prices:
-      - key: monthly
+      monthly:
         archived: true
 ```
 
@@ -689,11 +689,11 @@ rental under the same course product:
 # replace-rental.yaml
 schema_version: 1
 products:
-  - key: course-101
+  course-101:
     prices:
-      - key: rent
+      rent:
         archived: true
-      - key: rental-7-days
+      rental-7-days:
         amount: 2.99 USD
         access_duration: 7 days
         billing_interval: null
@@ -709,7 +709,7 @@ extends them automatically. A price cannot move to another product.
 # retire-bundle.yaml
 schema_version: 1
 products:
-  - key: course-bundle
+  course-bundle:
     archived: true
 ```
 
@@ -722,7 +722,7 @@ keys. To make the bundle available again, apply a new batch:
 # restore-bundle.yaml
 schema_version: 1
 products:
-  - key: course-bundle
+  course-bundle:
     archived: false
 ```
 
@@ -736,9 +736,9 @@ give the complete financial terms to select the intended historical revision:
 # restore-original-monthly.yaml
 schema_version: 1
 products:
-  - key: channel-membership
+  channel-membership:
     prices:
-      - key: monthly
+      monthly:
         amount: 10 USD # the original $10 terms
         access_duration: 30 days
         billing_interval: 30 days
@@ -852,36 +852,36 @@ the creator-site catalog above.
 # api-catalog.yaml
 schema_version: 1
 products:
-  - key: api-credit-10
+  api-credit-10:
     display_name: $10 prepaid API balance
     credit_grant:
       currency: USD
       amount: 10000000 # $10 of spendable API balance
       # expires_after_days defaults to 365, starting when payment succeeds
     prices:
-      - key: purchase
+      purchase:
         amount: 10 USD
         billing_interval: null
 
-  - key: api-credit-100
+  api-credit-100:
     display_name: $100 prepaid API balance
     credit_grant:
       currency: USD
       amount: 100000000
       expires_after_days: 365
     prices:
-      - key: purchase
+      purchase:
         amount: 80 USD # grants 100 USD of balance: a bulk discount
         billing_interval: null
 
-  - key: api-deposit
+  api-deposit:
     display_name: Top up your prepaid API balance
     credit_grant:
       currency: USD
       from_payment: true # grant exactly the amount paid
       expires_after_days: 365
     prices:
-      - key: deposit
+      deposit:
         amount: 0 USD # customer_amount requires an explicit checkout amount; this is not free
         customer_amount:
           min_amount: 1000000 # at least $1
@@ -934,7 +934,7 @@ expiry promised when they were bought:
 ```yaml
 schema_version: 1
 products:
-  - key: api-credit-100
+  api-credit-100:
     credit_grant: # replaces the complete credit policy; omitted credit_grant preserves it
       currency: USD
       amount: 100000000

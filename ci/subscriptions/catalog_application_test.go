@@ -23,15 +23,15 @@ func TestCatalogApplicationContentReplay(t *testing.T) {
 	file := func(title string, amount int64) *catalog.Application {
 		params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
-- key: %[1]s
-  display_name: %[2]s
-  entitlements: ["%[1]s"]
-  prices:
-  - key: monthly
-    currency: usd
-    unit_amount: %[3]d
-    billing_interval_hours: 720
-    access_duration_hours: 720
+  %[1]s:
+    display_name: %[2]s
+    entitlements: ["%[1]s"]
+    prices:
+      monthly:
+        currency: usd
+        unit_amount: %[3]d
+        billing_interval_hours: 720
+        access_duration_hours: 720
 `, key, title, amount)))
 		require.NoError(t, err)
 		return params

@@ -65,11 +65,11 @@ func TestHumanAmountsRefuseRoundingAndAmbiguousNumbers(t *testing.T) {
 func TestApplicationHumanAmountSharesNumericIdentity(t *testing.T) {
 	var identity [32]byte
 	for i, amount := range []string{"9.99 USD", "9.990000 usd", "0009.99 USD"} {
-		application, err := ParseApplicationYAML([]byte(fmt.Sprintf("schema_version: 1\nproducts:\n- key: p\n  prices:\n  - key: monthly\n    amount: %s\n", amount)))
+		application, err := ParseApplicationYAML([]byte(fmt.Sprintf("schema_version: 1\nproducts:\n  p:\n    prices:\n      monthly:\n        amount: %s\n", amount)))
 		if err != nil {
 			t.Fatal(err)
 		}
-		price := application.Products[0].Prices[0]
+		price := application.Products["p"].Prices["monthly"]
 		if price.UnitAmount != Value[int64](9_990_000) || price.Currency != Value("USD") {
 			t.Fatalf("amount did not set both canonical money fields: %+v", price)
 		}
@@ -86,18 +86,18 @@ func TestApplicationHumanAmountSharesNumericIdentity(t *testing.T) {
 			t.Fatalf("serialized application is not normalized native units: %s", encoded)
 		}
 	}
-	numeric, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p","prices":[{"key":"monthly","unit_amount":"9990000","currency":"USD"}]}]}`))
+	numeric, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"monthly":{"unit_amount":"9990000","currency":"USD"}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if digest(t, *numeric) != identity {
 		t.Fatal("human and numeric money must address the same application")
 	}
-	omitted, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p","prices":[{"key":"monthly"}]}]}`))
+	omitted, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"monthly":{}}}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	price := omitted.Products[0].Prices[0]
+	price := omitted.Products["p"].Prices["monthly"]
 	if price.UnitAmount.Set || price.Currency.Set {
 		t.Fatal("omitted amount must preserve both existing money fields")
 	}
@@ -115,12 +115,12 @@ func TestApplicationHumanAmountRejectsMixedMoneyFields(t *testing.T) {
 		`"amount":"9.99 USD","unit_amount":"9990000","currency":"USD"`,
 		`"Amount":"9.99 USD"`,
 	} {
-		raw := fmt.Sprintf(`{"schema_version":1,"products":[{"key":"p","prices":[{"key":"monthly",%s}]}]}`, fields)
+		raw := fmt.Sprintf(`{"schema_version":1,"products":{"p":{"prices":{"monthly":{%s}}}}}`, fields)
 		if _, err := ParseApplicationJSON([]byte(raw)); err == nil {
 			t.Errorf("accepted ambiguous money fields %s", fields)
 		}
 	}
-	if _, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p","prices":[{"key":"free","amount":"0 USD"}]}]}`)); err != nil {
+	if _, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"prices":{"free":{"amount":"0 USD"}}}}}`)); err != nil {
 		t.Fatalf("zero must retain the existing catalog money rules: %v", err)
 	}
 }

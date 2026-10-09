@@ -58,7 +58,7 @@ export function CatalogApplicationDialog() {
           {
             schema_version: 1,
             prune: false,
-            products: [],
+            products: {},
           },
           null,
           2
@@ -139,8 +139,9 @@ export function CatalogApplicationDialog() {
         <DialogHeader>
           <DialogTitle>Apply catalog changes</DialogTitle>
           <DialogDescription>
-            Paste a JSON or YAML catalog batch. Each distinct batch applies once
-            per merchant; retries preserve later catalog edits. Omitted records
+            Paste a JSON or YAML catalog batch; products, prices and meters are
+            maps keyed by their key. Each distinct batch applies once per
+            merchant; retries preserve later catalog edits. Omitted records
             stay unchanged unless prune is true. With prune, omitted products
             and prices are archived, including prices under a listed product.
           </DialogDescription>

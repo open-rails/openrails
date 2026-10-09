@@ -30,7 +30,7 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	buyer := w.newCustomer()
 	method := buyer.saveCard("nmi", visa)
 	declaration := func(amount int64) *catalog.Application {
-		return &catalog.Application{SchemaVersion: 1, Products: []catalog.ApplyProduct{{Key: "retained-video", DisplayName: catalog.Value("Video"), Entitlements: catalog.Value([]string{"video:101"}), Prices: []catalog.ApplyPrice{{Key: "buy", Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}}}}
+		return &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"retained-video": {DisplayName: catalog.Value("Video"), Entitlements: catalog.Value([]string{"video:101"}), Prices: map[string]catalog.ApplyPrice{"buy": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}}}}
 	}
 	_, err := c.ApplyCatalog(t.Context(), declaration(4000000))
 	require.NoError(t, err)
@@ -46,21 +46,21 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	// Default and customer-specific rate cards belong to the catalog snapshot.
 	rates, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 meters:
-- key: requests
-  event_type: api.request
-  aggregation: count
+  requests:
+    event_type: api.request
+    aggregation: count
 products:
-- key: api-balance
-  display_name: Prepaid API balance
-  credit_grant: {currency: USD, from_payment: true, expires_after_days: 365}
-  prices:
-  - key: deposit
-    currency: USD
-    unit_amount: 0
-    customer_amount: {min_amount: 1000000, max_amount: 1000000000}
-  rate_cards:
-  - meter: requests
-    price: {model: per_unit, currency: USD, per_unit: {unit_amount: "1000"}}
+  api-balance:
+    display_name: Prepaid API balance
+    credit_grant: {currency: USD, from_payment: true, expires_after_days: 365}
+    prices:
+      deposit:
+        currency: USD
+        unit_amount: 0
+        customer_amount: {min_amount: 1000000, max_amount: 1000000000}
+    rate_cards:
+    - meter: requests
+      price: {model: per_unit, currency: USD, per_unit: {unit_amount: "1000"}}
 `))
 	require.NoError(t, err)
 	_, err = c.ApplyCatalog(t.Context(), rates)

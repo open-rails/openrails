@@ -203,12 +203,12 @@ func TestHostTransactionsBindEngineMerchant(t *testing.T) {
 // for any background retry. They need no caller-managed identity or revision.
 func TestStartupCatalogNeedsOnlyItsContent(t *testing.T) {
 	cfg := config.Config{Catalog: &catalog.Application{SchemaVersion: 1,
-		Products: []catalog.ApplyProduct{{Key: "premium", DisplayName: catalog.Value("Premium")}},
+		Products: map[string]catalog.ApplyProduct{"premium": {DisplayName: catalog.Value("Premium")}},
 	}}
 	cfg.Merchant.Slug = "merchant"
 	copied, err := declaredCatalog(cfg)
 	require.NoError(t, err)
 	require.Equal(t, cfg.Catalog, copied)
-	cfg.Catalog.Products[0].DisplayName = catalog.Value("Changed after construction")
-	require.Equal(t, "Premium", copied.Products[0].DisplayName.Value)
+	cfg.Catalog.Products["premium"] = catalog.ApplyProduct{DisplayName: catalog.Value("Changed after construction")}
+	require.Equal(t, "Premium", copied.Products["premium"].DisplayName.Value)
 }

@@ -4,42 +4,42 @@
 schema_version: 1
 
 products:
-  - key: claude-code-pro
+  claude-code-pro:
     display_name: Claude Code Pro
     description: Monthly plan with Pro API-equivalent Claude Code limits.
     tier_group: claude-code
     tier_rank: 1
     prices:
-      - key: claude-code-pro-offer-1
+      claude-code-pro-offer-1:
         amount: 20 USD
         access_duration_hours: 720
         billing_interval_hours: 8760
         psps: [stripe]
-      - key: claude-code-pro-offer-2
+      claude-code-pro-offer-2:
         amount: 200 USD
         access_duration_hours: 8760
         billing_interval_hours: 8760
         psps: [stripe]
 
-  - key: claude-code-max-5x
+  claude-code-max-5x:
     display_name: Claude Code Max 5x
     description: Monthly Max 5x plan with API-equivalent Claude Code limits.
     tier_group: claude-code
     tier_rank: 2
     prices:
-      - key: claude-code-max-5x-offer-1
+      claude-code-max-5x-offer-1:
         amount: 100 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
 
-  - key: claude-code-max-20x
+  claude-code-max-20x:
     display_name: Claude Code Max 20x
     description: Monthly Max 20x plan with API-equivalent Claude Code limits.
     tier_group: claude-code
     tier_rank: 3
     prices:
-      - key: claude-code-max-20x-offer-1
+      claude-code-max-20x-offer-1:
         amount: 200 USD
         access_duration_hours: 720
         billing_interval_hours: 720

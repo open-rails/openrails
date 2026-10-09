@@ -67,7 +67,7 @@ func newSolanaPay(t *testing.T) *solanaPay {
 	w.start()
 	p := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
 	p.runWorkers(w)
-	key, err := w.applyCatalog(`  - key: "{key}-once"
+	key, err := w.applyCatalog(`  "{key}-once":
     currency: usd
     unit_amount: 5000000
     billing_interval_hours: null

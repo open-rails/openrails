@@ -33,11 +33,11 @@ func TestExampleCatalogApplicationsParse(t *testing.T) {
 	require.Len(t, metered.Meters, 8)
 	var matrix *catalog.RatePrice
 	allowance := false
-	for _, product := range metered.Products {
+	for key, product := range metered.Products {
 		for i := range product.RateCards.Value {
 			card := &product.RateCards.Value[i]
 			allowance = allowance || card.Allowance != nil
-			if product.Key == "droplet" && card.Price.PerUnit != nil && card.Price.PerUnit.Matrix != nil {
+			if key == "droplet" && card.Price.PerUnit != nil && card.Price.PerUnit.Matrix != nil {
 				require.False(t, product.TierGroup.Set, "usage products are not tier subscriptions")
 				matrix = &card.Price
 			}

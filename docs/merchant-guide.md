@@ -34,7 +34,9 @@ written by the caller.
 
 One application selects one authorized merchant outside the document and includes
 `schema_version`, optional `prune`, `products` and supported `meters`.
-Product-local `prices` and `rate_cards` are nested under each product. See `config/catalog.example.yaml`.
+Product-local `prices` and `rate_cards` are nested under each product. Products,
+prices and meters are maps keyed by their key; the key is the record's stable
+handle (a price's key names its version chain). See `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
 family, which is what enables upgrade/downgrade between them:
@@ -43,13 +45,13 @@ family, which is what enables upgrade/downgrade between them:
 schema_version: 1
 prune: false
 products:
-  - key: novice
+  novice:
     display_name: Novice
     tier_group: membership
     tier_rank: 1
     entitlements: ["tier:novice"]
     prices:
-      - key: novice-monthly
+      novice-monthly:
         amount: 12 USD
         access_duration_hours: 720
         billing_interval_hours: 720
@@ -76,7 +78,6 @@ Price fields worth knowing:
 | `access_duration_hours` | positive hour count, or null for indefinite access |
 | `billing_interval_hours` | positive interval between recurring payments, or null for a one-time purchase; independent of access duration |
 | `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together with a billing interval |
-| `key` | required stable application handle for the price version chain |
 | `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
@@ -88,14 +89,15 @@ engine-managed checkout refuses trials before charging.
 access; null `access_duration_hours` gives indefinite access:
 
 ```yaml
-      - key: course-101
-        display_name: Course 101 — Intro to CSS
-        entitlements: ["course:101"]
-        prices:
-          - key: purchase
-            amount: 4.99 USD
-            access_duration_hours: null
-            billing_interval_hours: null
+products:
+  course-101:
+    display_name: Course 101 — Intro to CSS
+    entitlements: ["course:101"]
+    prices:
+      purchase:
+        amount: 4.99 USD
+        access_duration_hours: null
+        billing_interval_hours: null
 ```
 
 Prepaid balance products use `credit_grant`; see the

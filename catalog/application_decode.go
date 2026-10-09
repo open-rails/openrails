@@ -64,6 +64,13 @@ func ParseApplicationJSON(raw []byte) (*Application, error) {
 	return &out, nil
 }
 
+// keyedCollections are the records a catalog declares in maps keyed by key.
+var keyedCollections = map[reflect.Type]string{
+	reflect.TypeFor[ApplyProduct](): "product",
+	reflect.TypeFor[ApplyPrice]():   "price",
+	reflect.TypeFor[ApplyMeter]():   "meter",
+}
+
 // encoding/json accepts case-insensitive aliases for struct fields. Catalog
 // declarations deliberately require exact schema names, while opaque map keys
 // (entitlement names, provider names, dimensions) retain their original case.
@@ -106,6 +113,9 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 		}
 		for name, value := range object {
 			field, ok := fields[name]
+			if noun, keyed := keyedCollections[shape]; !ok && keyed && name == "key" {
+				return fmt.Errorf("field \"key\" is not allowed: a %s's map key is its key", noun)
+			}
 			if !ok {
 				return fmt.Errorf("unknown field %q in catalog (schema names are case-sensitive)", name)
 			}
@@ -114,13 +124,16 @@ func applicationJSONNames(raw []byte, shape reflect.Type) error {
 			}
 		}
 	case reflect.Map:
+		if noun, keyed := keyedCollections[shape.Elem()]; keyed && bytes.HasPrefix(bytes.TrimSpace(raw), []byte("[")) {
+			return fmt.Errorf("must be a map keyed by %s key, not a list: catalog products, prices and meters are maps keyed by their key (write `<key>:`, not `- key: <key>`)", noun)
+		}
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &object); err != nil {
 			return err
 		}
-		for _, value := range object {
+		for key, value := range object {
 			if err := applicationJSONNames(value, shape.Elem()); err != nil {
-				return err
+				return fmt.Errorf("%s: %w", key, err)
 			}
 		}
 	case reflect.Slice, reflect.Array:

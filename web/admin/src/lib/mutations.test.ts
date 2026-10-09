@@ -36,7 +36,7 @@ const meter = { event_type: "token.used", value_property: "tokens", aggregation:
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
 const offChannel = { price_id: "price_1", transaction_id: "external-1" }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
-const application = { schema_version: 1, products: [] }
+const application = { schema_version: 1, products: {} }
 const effectiveAt = "2026-09-05T00:00:00.000Z"
 
 const cases: Case[] = [

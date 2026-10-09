@@ -58,9 +58,33 @@ Before the code:
 
 ## 2. YAML manifests
 
-The catalog document is unchanged. The merchant declaration
-(`merchant_config.yaml`, `merchants.<slug>` in a standalone manifest) changes
-in two places.
+In the catalog document, products, prices and meters are maps keyed by their
+key instead of lists of objects with a `key:` field. The list form is refused:
+
+```yaml
+# before
+products:
+  - key: course-101
+    display_name: Course 101
+    prices:
+      - key: purchase
+        amount: 4.99 USD
+
+# after
+products:
+  course-101:
+    display_name: Course 101
+    prices:
+      purchase:
+        amount: 4.99 USD
+```
+
+The JSON body of `POST /v1/merchant/catalog/applications` and the Go
+`catalog.Application` (`Products`, `Prices` and `Meters` are maps) change the
+same way. Plain lists such as `entitlements`, `psps` and `rate_cards` stay lists.
+
+The merchant declaration (`merchant_config.yaml`, `merchants.<slug>` in a
+standalone manifest) changes in two places.
 
 PSPs and custodians are no longer nested under their rail or kind, and neither
 are their secret overlays:

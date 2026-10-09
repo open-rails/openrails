@@ -4,53 +4,53 @@
 schema_version: 1
 
 products:
-  - key: novice
+  novice:
     display_name: Novice
     description: Monthly Host Three membership with membership access.
     tier_group: membership
     tier_rank: 1
     entitlements: ["tier:novice"]
     prices:
-      - key: novice-offer-1
+      novice-offer-1:
         amount: 12 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
 
-  - key: craftsman
+  craftsman:
     display_name: Craftsman
     description: Monthly Host Three membership with membership access.
     tier_group: membership
     tier_rank: 2
     entitlements: ["tier:craftsman"]
     prices:
-      - key: craftsman-offer-1
+      craftsman-offer-1:
         amount: 29 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
 
-  - key: expert
+  expert:
     display_name: Expert
     description: Monthly Host Three membership with membership access.
     tier_group: membership
     tier_rank: 3
     entitlements: ["tier:expert"]
     prices:
-      - key: expert-offer-1
+      expert-offer-1:
         amount: 59 USD
         access_duration_hours: 720
         billing_interval_hours: 720
         psps: [stripe]
 
-  - key: grandmaster
+  grandmaster:
     display_name: Grandmaster
     description: Monthly Host Three membership with membership access.
     tier_group: membership
     tier_rank: 4
     entitlements: ["tier:grandmaster"]
     prices:
-      - key: grandmaster-offer-1
+      grandmaster-offer-1:
         amount: 119 USD
         access_duration_hours: 720
         billing_interval_hours: 720

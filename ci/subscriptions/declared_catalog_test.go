@@ -27,26 +27,26 @@ func declaredFile(t *testing.T, key, title string, amount int64) *catalog.Applic
 	t.Helper()
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 meters:
-- key: %[1]s-events
-  event_type: %[1]s.event
-  aggregation: count
+  %[1]s-events:
+    event_type: %[1]s.event
+    aggregation: count
 products:
-- key: %[1]s
-  display_name: %[2]s
-  entitlements: ["%[1]s"]
-  prices:
-  - key: %[1]s-monthly
-    currency: usd
-    unit_amount: %[3]d
-    billing_interval_hours: 720
-    access_duration_hours: 720
-  rate_cards:
-  - meter: %[1]s-events
-    price:
-      model: per_unit
-      currency: usd
-      per_unit:
-        unit_amount: "1000"
+  %[1]s:
+    display_name: %[2]s
+    entitlements: ["%[1]s"]
+    prices:
+      %[1]s-monthly:
+        currency: usd
+        unit_amount: %[3]d
+        billing_interval_hours: 720
+        access_duration_hours: 720
+    rate_cards:
+    - meter: %[1]s-events
+      price:
+        model: per_unit
+        currency: usd
+        per_unit:
+          unit_amount: "1000"
 `, key, title, amount)))
 	require.NoError(t, err)
 	return params
@@ -140,18 +140,18 @@ func TestDeclaredCatalogAwaitsItsProvider(t *testing.T) {
 	key := "legacy-" + uuid.NewString()[:8]
 	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
 products:
-- key: %[1]s
-  display_name: Legacy
-  prices:
-  - key: %[1]s-monthly
-    currency: usd
-    unit_amount: 9990000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    psps: [stripe]
-    psp_links:
-      stripe:
-        price_id: price_legacy_%[1]s
+  %[1]s:
+    display_name: Legacy
+    prices:
+      %[1]s-monthly:
+        currency: usd
+        unit_amount: 9990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        psps: [stripe]
+        psp_links:
+          stripe:
+            price_id: price_legacy_%[1]s
 `, key)))
 	require.NoError(t, err)
 	revision := w.catalogRevision()

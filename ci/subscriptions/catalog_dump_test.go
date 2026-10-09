@@ -4,6 +4,8 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/open-rails/openrails/billing"
@@ -19,80 +21,80 @@ func TestCatalogYAMLDumpRoundTrip(t *testing.T) {
 	source := newWorld(t)
 	original, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 meters:
-- key: api-calls
-  event_type: api.call
-  aggregation: count
-  unit: calls
-  group_by: {model: model}
+  api-calls:
+    event_type: api.call
+    aggregation: count
+    unit: calls
+    group_by: {model: model}
 products:
-- key: premium
-  display_name: Premium
-  description: Feature access
-  entitlements: ["premium", "welcome"]
-  tier_group: membership
-  tier_rank: 2
-  prices:
-  - key: monthly
-    currency: USD
-    unit_amount: 9990000
-    billing_interval_hours: 720
-    access_duration_hours: 720
-    trial_unit_amount: 0
-    trial_duration_hours: 24
-  rate_cards:
-  - ordinal: 3
-    meter: api-calls
-    payment_term: in_arrears
-    filter: {model: [fast]}
-    allowance: {included: 10}
-    price:
-      model: per_unit
-      currency: USD
-      per_unit: {unit_amount: "1000", divide_by: 2, round: up, maximum_amount: "1000000"}
-  - ordinal: 4
-    payment_term: in_advance
-    price:
-      model: flat
-      currency: USD
-      flat: {amount: "1000"}
-- key: api-pack
-  display_name: $100 prepaid balance
-  credit_grant: {currency: USD, amount: 100000000, expires_after_days: 90}
-  prices:
-  - key: buy
-    currency: USD
-    unit_amount: 80000000
-- key: api-deposit
-  display_name: Prepaid deposit
-  credit_grant: {currency: USD, from_payment: true}
-  prices:
-  - key: deposit
-    currency: USD
-    unit_amount: 0
-    customer_amount: {min_amount: 1000000, max_amount: 1000000000}
-- key: video
-  display_name: Video
-  prices:
-  - key: buy-gift
-    currency: USD
-    unit_amount: 4990000
-  - key: buy
-    currency: USD
-    unit_amount: 4990000
-  - key: rent
-    currency: USD
-    unit_amount: 1990000
-    access_duration_hours: 72
-- key: retired
-  display_name: Retired product
-  archived: true
-- key: old-offer
-  display_name: No current offers
-  prices:
-  - key: retired
-    currency: USD
-    unit_amount: 1000000
+  premium:
+    display_name: Premium
+    description: Feature access
+    entitlements: ["premium", "welcome"]
+    tier_group: membership
+    tier_rank: 2
+    prices:
+      monthly:
+        currency: USD
+        unit_amount: 9990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        trial_unit_amount: 0
+        trial_duration_hours: 24
+    rate_cards:
+    - ordinal: 3
+      meter: api-calls
+      payment_term: in_arrears
+      filter: {model: [fast]}
+      allowance: {included: 10}
+      price:
+        model: per_unit
+        currency: USD
+        per_unit: {unit_amount: "1000", divide_by: 2, round: up, maximum_amount: "1000000"}
+    - ordinal: 4
+      payment_term: in_advance
+      price:
+        model: flat
+        currency: USD
+        flat: {amount: "1000"}
+  api-pack:
+    display_name: $100 prepaid balance
+    credit_grant: {currency: USD, amount: 100000000, expires_after_days: 90}
+    prices:
+      buy:
+        currency: USD
+        unit_amount: 80000000
+  api-deposit:
+    display_name: Prepaid deposit
+    credit_grant: {currency: USD, from_payment: true}
+    prices:
+      deposit:
+        currency: USD
+        unit_amount: 0
+        customer_amount: {min_amount: 1000000, max_amount: 1000000000}
+  video:
+    display_name: Video
+    prices:
+      buy-gift:
+        currency: USD
+        unit_amount: 4990000
+      buy:
+        currency: USD
+        unit_amount: 4990000
+      rent:
+        currency: USD
+        unit_amount: 1990000
+        access_duration_hours: 72
+  retired:
+    display_name: Retired product
     archived: true
+  old-offer:
+    display_name: No current offers
+    prices:
+      retired:
+        currency: USD
+        unit_amount: 1000000
+        archived: true
 `))
 	require.NoError(t, err)
 	_, err = source.client[embedded].ApplyCatalog(t.Context(), original)
@@ -117,9 +119,8 @@ products:
 	}
 	raw, exported := dump(source)
 	require.False(t, exported.Prune)
-	products := map[string]catalog.ApplyProduct{}
-	for _, product := range exported.Products {
-		products[product.Key] = product
+	products := exported.Products
+	for _, product := range products {
 		for _, price := range product.Prices {
 			require.Empty(t, price.ID, "local IDs cannot pin an empty destination")
 			require.False(t, price.Archived.Value)
@@ -132,17 +133,21 @@ products:
 	require.EqualValues(t, 100000000, *products["api-pack"].CreditGrant.Value.Amount)
 	require.Equal(t, 90, *products["api-pack"].CreditGrant.Value.ExpiresAfterDays)
 	require.Len(t, products["api-pack"].Prices, 1, "the archived revision is not a current offer")
-	require.EqualValues(t, 90000000, products["api-pack"].Prices[0].UnitAmount.Value)
+	require.EqualValues(t, 90000000, products["api-pack"].Prices["buy"].UnitAmount.Value)
 	require.True(t, products["api-deposit"].CreditGrant.Value.FromPayment)
 	require.Equal(t, 365, *products["api-deposit"].CreditGrant.Value.ExpiresAfterDays)
-	require.EqualValues(t, 1000000000, products["api-deposit"].Prices[0].CustomerAmount.Value.MaxAmount)
+	require.EqualValues(t, 1000000000, products["api-deposit"].Prices["deposit"].CustomerAmount.Value.MaxAmount)
 	require.True(t, products["video"].CreditGrant.Null)
 	require.Len(t, exported.Meters, 1)
 	require.Len(t, products["premium"].RateCards.Value, 2)
 	require.Empty(t, products["premium"].RateCards.Value[1].Filter, "an absent optional filter remains valid")
 	require.Nil(t, products["premium"].RateCards.Value[1].Allowance)
-	require.Equal(t, "buy", products["video"].Prices[1].Key)
-	require.Equal(t, "buy-gift", products["video"].Prices[2].Key, "equal amounts/currencies use key order")
+	require.ElementsMatch(t, []string{"buy", "buy-gift", "rent"}, slices.Collect(maps.Keys(products["video"].Prices)))
+	order := []int{}
+	for _, key := range []string{"api-deposit:", "api-pack:", "premium:", "video:"} {
+		order = append(order, bytes.Index(raw, []byte("\n  "+key)))
+	}
+	require.True(t, slices.IsSorted(order) && order[0] > 0, "the dump writes keys sorted: %s", raw)
 
 	target := newWorld(t)
 	receipt, err := target.client[remote].ApplyCatalog(t.Context(), exported)

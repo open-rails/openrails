@@ -41,29 +41,29 @@ func TestEntitlementsAreOpaqueLists(t *testing.T) {
 }
 
 func TestApplicationEntitlementListContract(t *testing.T) {
-	yaml, err := ParseApplicationYAML([]byte("schema_version: 1\nproducts:\n- key: p\n  entitlements: [post:101, premium]\n"))
+	yaml, err := ParseApplicationYAML([]byte("schema_version: 1\nproducts:\n  p:\n    entitlements: [post:101, premium]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonForm, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p","entitlements":["premium","post:101"]}]}`))
+	jsonForm, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"entitlements":["premium","post:101"]}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if digest(t, *yaml) != digest(t, *jsonForm) {
 		t.Fatal("entitlement order changed application identity")
 	}
-	if yaml.Products[0].Entitlements.Value[0] != "post:101" {
+	if yaml.Products["p"].Entitlements.Value[0] != "post:101" {
 		t.Fatal("hashing mutated entitlement order")
 	}
-	empty, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p","entitlements":[]}]}`))
+	empty, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{"entitlements":[]}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	omitted, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":[{"key":"p"}]}`))
+	omitted, err := ParseApplicationJSON([]byte(`{"schema_version":1,"products":{"p":{}}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !empty.Products[0].Entitlements.Set || empty.Products[0].Entitlements.Value == nil || omitted.Products[0].Entitlements.Set || digest(t, *empty) == digest(t, *omitted) {
+	if !empty.Products["p"].Entitlements.Set || empty.Products["p"].Entitlements.Value == nil || omitted.Products["p"].Entitlements.Set || digest(t, *empty) == digest(t, *omitted) {
 		t.Fatal("clearing entitlements collapsed into preserving them")
 	}
 	for _, fields := range []string{
@@ -75,7 +75,7 @@ func TestApplicationEntitlementListContract(t *testing.T) {
 		`"entitlements":[null]`,
 		`"entitlements":[72]`,
 	} {
-		raw := fmt.Sprintf(`{"schema_version":1,"products":[{"key":"p",%s}]}`, fields)
+		raw := fmt.Sprintf(`{"schema_version":1,"products":{"p":{%s}}}`, fields)
 		if _, err := ParseApplicationJSON([]byte(raw)); err == nil {
 			t.Errorf("accepted invalid entitlement declaration %s", fields)
 		}
@@ -88,7 +88,7 @@ func TestApplicationEntitlementListContract(t *testing.T) {
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		t.Fatal(err)
 	}
-	product := wire["products"].([]any)[0].(map[string]any)
+	product := wire["products"].(map[string]any)["p"].(map[string]any)
 	if _, ok := product["entitlements"].([]any); !ok {
 		t.Fatalf("entitlements are not a wire list: %s", encoded)
 	}

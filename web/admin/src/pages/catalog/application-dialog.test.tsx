@@ -74,7 +74,7 @@ describe("catalog batch retries", () => {
     )
     await click("New batch")
     const next = JSON.parse(editor().value)
-    expect(next).toEqual({ schema_version: 1, prune: false, products: [] })
+    expect(next).toEqual({ schema_version: 1, prune: false, products: {} })
     expect(next).toEqual(JSON.parse(original))
     expect(reads()).toHaveLength(2)
   })

@@ -13495,14 +13495,14 @@
             "type": "boolean"
           },
           "products": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/ApplyProduct"
             }
           },
           "meters": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/ApplyMeter"
             }
           }
@@ -13535,9 +13535,6 @@
       "ApplyMeter": {
         "type": "object",
         "properties": {
-          "key": {
-            "type": "string"
-          },
           "event_type": {
             "oneOf": [
               {
@@ -13604,9 +13601,6 @@
       "ApplyPrice": {
         "type": "object",
         "properties": {
-          "key": {
-            "type": "string"
-          },
           "id": {
             "type": "string"
           },
@@ -13815,9 +13809,6 @@
       "ApplyProduct": {
         "type": "object",
         "properties": {
-          "key": {
-            "type": "string"
-          },
           "display_name": {
             "oneOf": [
               {
@@ -13885,8 +13876,8 @@
             ]
           },
           "prices": {
-            "type": "array",
-            "items": {
+            "type": "object",
+            "additionalProperties": {
               "$ref": "#/components/schemas/ApplyPrice"
             }
           },
