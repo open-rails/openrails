@@ -26,9 +26,10 @@ import {
 import { Spinner } from "#orck/components/ui/spinner"
 import { useMessages } from "#orck/i18n/context"
 import type { Translator } from "#orck/i18n/messages"
+import { useConfig } from "#orck/react/config"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
-import { canSavePaymentMethod, checkoutPsps, type PspConfig } from "#orck/psp"
+import { canSavePaymentMethod, cardRetryAfter, checkoutPsps } from "#orck/psp"
 import { SavePaymentMethod } from "#orck/save-payment-method"
 import { cardText, RESET } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
@@ -36,11 +37,6 @@ import { useNotice } from "./notice"
 import { BillingStatusBadge } from "./status-badge"
 
 export interface PaymentMethodsPanelProps {
-  /**
-   * OpenRails's browser PSP configs (checkout config). "Add card" offers
-   * each one a card can be saved with in the page.
-   */
-  psps?: readonly PspConfig[]
   /** Return target after off-page card verification; see `SavePaymentMethod`. */
   cardSetupReturnURL?: (setupId: string) => string
   /** Offers to make a card the one that collects this currency's invoices. */
@@ -61,8 +57,11 @@ function removeMessage(error: BillingError, m: Translator): string {
   return m.error(error)
 }
 
+/**
+ * The customer's saved cards. "Add card" offers each PSP of the merchant's
+ * payment setup (`GET /config`) that saves a card in the page.
+ */
 export function PaymentMethodsPanel({
-  psps,
   cardSetupReturnURL,
   collectionCurrency,
   defaultCountry,
@@ -80,7 +79,16 @@ export function PaymentMethodsPanel({
     message: string
   } | null>(null)
   const [adding, setAdding] = React.useState(false)
-  const savable = checkoutPsps(psps ?? []).filter(canSavePaymentMethod)
+  const config = useConfig()
+  const psps = checkoutPsps(config.config?.payment?.psps ?? [])
+  const savable = psps.filter(canSavePaymentMethod)
+  const retryAfter = savable.length > 0 ? null : cardRetryAfter(psps)
+  const { refetch: refetchConfig } = config
+  React.useEffect(() => {
+    if (retryAfter === null) return
+    const timer = setTimeout(refetchConfig, retryAfter * 1000)
+    return () => clearTimeout(timer)
+  }, [retryAfter, refetchConfig, config.config])
   const [pspId, setPspId] = React.useState<string>()
   const psp = savable.find((item) => item.psp_id === pspId) ?? savable[0]
   const [notice, announce] = useNotice()
@@ -244,6 +252,19 @@ export function PaymentMethodsPanel({
         <div className="pt-3">
           <ErrorState error={state.error} onRetry={state.refetch} />
         </div>
+      ) : null}
+      {config.error ? (
+        <div className="pt-3">
+          <ErrorState
+            error={config.error}
+            message={t("paymentMethods.addUnavailable")}
+            onRetry={config.refetch}
+          />
+        </div>
+      ) : retryAfter !== null ? (
+        <p role="status" className="pt-3 text-sm text-muted-foreground">
+          {t("paymentMethods.addUnavailable")}
+        </p>
       ) : null}
       {notice}
 

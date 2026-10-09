@@ -8,7 +8,7 @@ import (
 
 // Routes selects the HTTP surface Client.Routes returns and the adapters
 // mount on the root router, and the Auth that guards it. Processor webhooks
-// and GET /v1/capabilities are always mounted.
+// and GET /v1/config are always mounted.
 type Routes struct {
 	// Auth is the host's auth middleware. OpenRails stacks it on its own
 	// routes by tier: Required on /v1/me (and to show a checkout session's
@@ -20,8 +20,7 @@ type Routes struct {
 	// Empty is the root.
 	Prefix string
 	// Storefront mounts what a buyer's browser needs without signing in:
-	// products, prices, currencies, checkout config, checkout sessions (read
-	// and pay), Solana Pay and the captcha.
+	// products, checkout sessions (read and pay), Solana Pay and the captcha.
 	Storefront bool
 	// Customers mounts signed-in customers' own billing at /v1/me/*, behind
 	// Auth.Required. CustomersNone, the zero value, mounts none.

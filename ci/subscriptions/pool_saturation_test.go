@@ -44,7 +44,7 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for range 2 {
-				if _, err := client.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceID: price.ID}); err != nil {
+				if _, err := client.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{PriceID: price.ID}); err != nil {
 					errs[i] = err
 					return
 				}

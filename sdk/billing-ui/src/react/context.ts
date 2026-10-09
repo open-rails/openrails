@@ -2,6 +2,7 @@ import { createContext, useContext } from "react"
 
 import type { BillingClient } from "../client/client"
 import type { TierChange } from "../client/types"
+import type { ConfigStore } from "./config"
 
 export type BillingChange =
   | {
@@ -34,6 +35,8 @@ export interface BillingContextValue {
   notify(change: BillingChange): void
   /** Refetch every hook after a host-side change such as a plan switch. */
   refresh(): void
+  /** The shared `GET /config`; read it with `useConfig()`. */
+  config: ConfigStore
 }
 
 export const BillingContext = createContext<BillingContextValue | null>(null)

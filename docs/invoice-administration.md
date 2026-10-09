@@ -34,7 +34,7 @@ Each period's statement totals its charges. When threshold invoices already bill
 
 ## Amount units
 
-Invoice and ledger amounts use the currency registry's native units; the scale of each currency is in `GET /v1/currencies`. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.
+Invoice and ledger amounts use the currency registry's native units; the scale of each currency is in `GET /v1/config`'s `currencies`. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.
 
 The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native manual payment leaves 100000; collection dispatches 10 whole-yen units to a fake charger and records 120000 total native units paid. This verifies internal arithmetic and the charger boundary, not live provider certification.
 

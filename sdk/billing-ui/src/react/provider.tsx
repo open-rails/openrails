@@ -8,6 +8,7 @@ import {
 } from "react"
 
 import type { BillingClient } from "../client/client"
+import { createConfigStore } from "./config"
 import { BillingContext, type BillingChange } from "./context"
 
 export interface BillingProviderProps {
@@ -32,9 +33,10 @@ export function BillingProvider({
     onChangeRef.current?.(change)
   }, [])
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
+  const config = useMemo(() => createConfigStore(client), [client])
   const value = useMemo(
-    () => ({ client, version, notify, refresh }),
-    [client, version, notify, refresh]
+    () => ({ client, version, notify, refresh, config }),
+    [client, version, notify, refresh, config]
   )
   return (
     <BillingContext.Provider value={value}>{children}</BillingContext.Provider>

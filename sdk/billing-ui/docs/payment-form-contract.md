@@ -32,7 +32,7 @@ currency and scale. A JSON number, a decimal point, a value outside int64, or
 a missing `unit_decimals` fails schema validation and the session is
 unavailable; the package never assumes a scale. Hosts take the scale from
 OpenRails' currency registry (`billing.LookupCurrency`, the same table as
-`GET /v1/currencies`); OpenRails serves the session at
+the `currencies` of `GET /v1/config`); OpenRails serves the session at
 `GET /v1/checkout-sessions/{id}`; its canonical fixture
 (`testdata/wire/checkout_session.json`) is decoded by this package's tests.
 

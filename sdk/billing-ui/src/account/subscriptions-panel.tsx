@@ -10,7 +10,7 @@ import { Button, buttonVariants } from "#orck/components/ui/button"
 import { Spinner } from "#orck/components/ui/spinner"
 import { useMessages } from "#orck/i18n/context"
 import { useSubscriptions, type SubscriptionsOptions } from "#orck/react/hooks"
-import { useBillingClient } from "#orck/react/context"
+import { useCurrencyScales } from "#orck/react/config"
 import { useUiSettings } from "#orck/scope-context"
 import { CancelSubscriptionDialog } from "./cancel-dialog"
 import { ChangeCardDialog } from "./change-card-dialog"
@@ -54,7 +54,7 @@ export function SubscriptionsPanel({
   const { t } = m
   const { locale, navigate } = useUiSettings()
   const state = useSubscriptions(options)
-  const scales = useBillingClient().currencies
+  const scales = useCurrencyScales()
   const [cancelling, setCancelling] = React.useState<Subscription | null>(null)
   const [changingCard, setChangingCard] = React.useState<Subscription | null>(
     null

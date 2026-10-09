@@ -41,9 +41,9 @@ func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
-// registerStandaloneMetaRoutes registers health, metrics and capability
-// discovery: the standalone server's process surface, which embedded hosts
-// supply themselves.
+// registerStandaloneMetaRoutes registers health and metrics, the standalone
+// server's process surface, and the public configuration, which is browser
+// tier.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +51,17 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 		}),
 		Ready:   http.HandlerFunc(s.readyHandler),
 		Metrics: http.HandlerFunc(s.metricsHandler),
-		Capabilities: embedhttp.CapabilitiesHandler(s.runtime, embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
-			// Team invitations mint register-and-join links when the control
-			// plane's posture allows them.
-			map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()}),
 	}})
+	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordBrowserRoute), httproutes.Options{Capabilities: s.capabilities()})
+}
+
+// capabilities is what the standalone server serves: every route group.
+func (s *Server) capabilities() *billing.Capabilities {
+	caps := embedhttp.CapabilitiesFor(s.runtime, embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
+		// Team invitations mint register-and-join links when the control
+		// plane's posture allows them.
+		map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()})
+	return &caps
 }
 
 // readyHandler serves /health/ready with the checks embedded Client.Ready

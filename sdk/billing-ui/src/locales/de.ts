@@ -113,6 +113,7 @@ export const de: BillingUiMessageBundle = {
       "Eingegebene Karten werden für künftige Zahlungen in Ihrem Konto gespeichert.",
     unavailable:
       "Sichere Karteneingabe ist für diesen Anbieter nicht verfügbar.",
+    addUnavailable: "Karten können vorübergehend nicht hinzugefügt werden.",
     verificationPending:
       "Die Kartenprüfung läuft noch. Prüfe deine gespeicherten Karten, bevor du es erneut versuchst.",
     cardLabel: "{brand} •••• {last4}",

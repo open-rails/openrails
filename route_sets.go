@@ -20,9 +20,7 @@ const (
 	BillingData RouteSet = "resource:billing_data"
 	// Catalog covers GetCatalogRevision, ApplyCatalog, ReplaceEntitlements, ListCatalogDrift, RefreshCatalogDrift, ListMeters, GetMeter, SetMeter, SetMeterRateCard, DeleteMeterRateCard, ListMeterRateOverrides, ListRateOverrides, SetRateOverride, DeleteRateOverride, ArchiveProduct, GetProductArchive, AskCatalog, CreateProduct, ListProducts, GetProduct, UpdateProduct, GetProductByKey, EnsureProduct, CreatePrice, ListPrices, GetPrice, UpdatePrice, GetPriceByKey, ListPriceKeyHistory, ListOffers.
 	Catalog RouteSet = "resource:catalog"
-	// Checkout covers GetCheckoutConfig.
-	Checkout RouteSet = "resource:checkout"
-	// CheckoutSessions covers CreateCheckoutSession.
+	// CheckoutSessions covers CreateCheckoutSession, ListCheckoutOptions.
 	CheckoutSessions RouteSet = "resource:checkout_sessions"
 	// Credits covers CreateCreditGrants, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, DeleteSpendDelegation.
 	Credits RouteSet = "resource:credits"
@@ -46,6 +44,8 @@ const (
 	PSPs RouteSet = "resource:psps"
 	// Payments covers GetProductArchive, GetPaymentSettlementStatus, CreateOffChannelPayment, ListPayments, GetPayment, ListPaymentAttempts, GetPaymentAttempt, ListRebillCycles, GetRebillCycle.
 	Payments RouteSet = "resource:payments"
+	// PublicConfig covers GetPublicConfig.
+	PublicConfig RouteSet = "resource:public_config"
 	// Refunds covers ArchiveProduct, RefundPayment.
 	Refunds RouteSet = "resource:refunds"
 	// Settings covers GetMerchantConfiguration, ApplyMerchantConfiguration, GetAPIHost, SetAPIHost, VerifyAPIHost, ListAlertWebhooks, CreateAlertWebhook, DeleteAlertWebhook, SetAlertWebhookURL.
@@ -144,8 +144,6 @@ const (
 	GetBalance RouteSet = "route:GetBalance"
 	// GetCatalogRevision is GET /v1/merchant/catalog/revision.
 	GetCatalogRevision RouteSet = "route:GetCatalogRevision"
-	// GetCheckoutConfig is GET /v1/merchant/checkout-config.
-	GetCheckoutConfig RouteSet = "route:GetCheckoutConfig"
 	// GetCreditGrant is GET /v1/merchant/customers/{customer_id}/credit-grants/{id}.
 	GetCreditGrant RouteSet = "route:GetCreditGrant"
 	// GetCustomerBillingProfile is GET /v1/merchant/customers/{customer_id}/billing-profile.
@@ -188,6 +186,8 @@ const (
 	GetProductByKey RouteSet = "route:GetProductByKey"
 	// GetProviderBillingQualification is GET /v1/merchant/provider-operations/{operation_id}/qualification.
 	GetProviderBillingQualification RouteSet = "route:GetProviderBillingQualification"
+	// GetPublicConfig is GET /v1/merchant/config.
+	GetPublicConfig RouteSet = "route:GetPublicConfig"
 	// GetRebillCycle is GET /v1/merchant/rebill-cycles/{id}.
 	GetRebillCycle RouteSet = "route:GetRebillCycle"
 	// GetReprice is GET /v1/merchant/reprices/{id}.
@@ -208,6 +208,8 @@ const (
 	ListAlertWebhooks RouteSet = "route:ListAlertWebhooks"
 	// ListCatalogDrift is GET /v1/merchant/catalog/drift.
 	ListCatalogDrift RouteSet = "route:ListCatalogDrift"
+	// ListCheckoutOptions is GET /v1/merchant/checkout-options.
+	ListCheckoutOptions RouteSet = "route:ListCheckoutOptions"
 	// ListCreditGrants is GET /v1/merchant/customers/{customer_id}/credit-grants.
 	ListCreditGrants RouteSet = "route:ListCreditGrants"
 	// ListCreditTransactions is GET /v1/merchant/customers/{customer_id}/transactions.

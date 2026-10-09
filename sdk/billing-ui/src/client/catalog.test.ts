@@ -101,18 +101,27 @@ describe("catalog", () => {
     })
   })
 
-  it("reads the currency registry", async () => {
+  it("reads the public configuration", async () => {
+    const capabilities = {
+      route_groups: { checkout: true, customer: true },
+      features: { team_invites: false },
+    }
     const { client, request } = served(
-      json(200, currenciesFixture),
-      json(200, { object: "currencies" })
+      json(200, { capabilities, currencies: currenciesFixture, payment: null }),
+      json(200, { currencies: currenciesFixture })
     )
-    expect(await client.listCurrencies()).toEqual([
-      { code: "EUR", decimals: 6, minor_decimals: 2 },
-      { code: "JPY", decimals: 4, minor_decimals: 0 },
-      { code: "USD", decimals: 6, minor_decimals: 2 },
-    ])
-    expect(request().url).toBe("/billing/v1/currencies")
-    await expect(client.listCurrencies()).rejects.toMatchObject({
+    expect(await client.getConfig()).toEqual({
+      capabilities,
+      currencies: [
+        { code: "EUR", decimals: 6, minor_decimals: 2 },
+        { code: "JPY", decimals: 4, minor_decimals: 0 },
+        { code: "USD", decimals: 6, minor_decimals: 2 },
+      ],
+      payment: null,
+    })
+    expect(request().url).toBe("/billing/v1/config")
+    expect(request().headers.get("Authorization")).toBeNull()
+    await expect(client.getConfig()).rejects.toMatchObject({
       code: "invalid_response",
     })
   })
@@ -275,28 +284,30 @@ describe("Solana", () => {
     recurring_eligible: true,
   }
 
-  it("reads the network and tokens from the checkout configuration", async () => {
+  it("reads the network and tokens from the payment setup", async () => {
     const { client, request } = served(
       json(200, {
-        object: "checkout_config",
-        psps: [],
-        solana: {
-          network: "devnet",
-          chain: "solana:devnet",
-          preferred_token: "USDC",
-          tokens: [token],
+        capabilities: { route_groups: {}, features: {} },
+        currencies: currenciesFixture,
+        payment: {
+          psps: [],
+          solana: {
+            network: "devnet",
+            chain: "solana:devnet",
+            preferred_token: "USDC",
+            tokens: [token],
+          },
         },
-        options: null,
       }),
       json(500, {
         error: {
           type: "api_error",
           code: "internal_error",
-          message: "failed to load checkout configuration",
+          message: "failed to load payment configuration",
         },
       })
     )
-    expect(await client.getCheckoutConfig()).toMatchObject({
+    expect((await client.getConfig()).payment).toMatchObject({
       psps: [],
       solana: {
         network: "devnet",
@@ -305,9 +316,8 @@ describe("Solana", () => {
         tokens: [{ symbol: "USDC", decimals: 6, recurring_eligible: true }],
       },
     })
-    expect(request().url).toBe("/billing/v1/checkout-config")
-    expect(request().headers.get("Authorization")).toBeNull()
-    await expect(client.getCheckoutConfig()).rejects.toMatchObject({
+    expect(request().url).toBe("/billing/v1/config")
+    await expect(client.getConfig()).rejects.toMatchObject({
       status: 500,
       code: "internal_error",
     })

@@ -32,6 +32,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.createCardSetup({ pspId: "psp_1", idempotencyKey: "k" }),
     () => client.getCardSetup("seti_1"),
     () => client.confirmCardSetup("seti_1"),
+    () => client.getConfig(),
     () => client.getPaymentAuthentication("op_1"),
     () => client.confirmPaymentAuthentication("op_1"),
     () => client.removePaymentMethod("pm_1"),
@@ -52,5 +53,5 @@ it("calls only routes OpenRails mounts for customers", async () => {
     return !routes.some((r) => r.method === method && r.pattern.test(path))
   })
   expect(missing).toEqual([])
-  expect(called.size).toBe(20)
+  expect(called.size).toBe(21)
 })

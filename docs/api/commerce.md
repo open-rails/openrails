@@ -16,7 +16,7 @@ remote clients, each behind the host's guard for it (`Routes.Guards`):
 | Client method | HTTP operation | Guards |
 | --- | --- | --- |
 | CreateCheckoutSession | POST /v1/merchant/checkout-sessions | `openrails.CreateCheckoutSession`, `CheckoutSessions`, `StaffWrites` |
-| GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|product_key=…&price_key=… | `openrails.GetCheckoutConfig`, `Checkout`, `StaffReads` |
+| ListCheckoutOptions | GET /v1/merchant/checkout-options?price_id=…\|product_key=…&price_key=… | `openrails.ListCheckoutOptions`, `CheckoutSessions`, `StaffReads` |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
 host assertions made with the merchant's credential.
@@ -27,7 +27,7 @@ Whoever mints it, the customer pays it: a saved method (`payment_method_id`) is
 refused with `403 customer_proof_required` unless the customer presents their
 own credential on the pay.
 
-`GetCheckoutConfig` with a price lists the `options` that can sell it, in
+`ListCheckoutOptions` lists the options that can sell one price, in
 routing order; options report local readiness and never probe a gateway.
 
 A pay answers `status` `succeeded`, `failed` (with `failure`), `processing`
@@ -109,7 +109,7 @@ database share it, so one of them can serve the payment page for all.
 Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
 `due_today` are int64 decimal strings of `plan.currency`'s native unit, and
 `plan.unit_decimals` is that currency's registered scale
-(`billing.LookupCurrency`, the same table as `GET /v1/currencies`). The
+(`billing.LookupCurrency`, the same table as `GET /v1/config`'s `currencies`). The
 canonical fixture is `testdata/wire/checkout_session.json`; billing-ui
 decodes the same file and rejects a numeric amount or a missing
 `unit_decimals` as an unavailable session.

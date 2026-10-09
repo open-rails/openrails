@@ -13,7 +13,7 @@ import (
 // One PSP whose credentials cannot be checked never takes checkout down: the
 // document still lists every other PSP with its public values, and that one as
 // temporarily unavailable, without them.
-func TestCheckoutConfigDegradesOnePSP(t *testing.T) {
+func TestPublicConfigDegradesOnePSP(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.psps
@@ -22,16 +22,16 @@ func TestCheckoutConfigDegradesOnePSP(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, tp := range []topology{embedded, remote} {
-		cfg, err := w.client[tp].GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
+		cfg, err := w.client[tp].GetPublicConfig(t.Context())
 		require.NoError(t, err, "%s: the document is served", tp)
-		byRail := map[string]billing.CheckoutPSPConfig{}
-		for _, psp := range cfg.PSPs {
+		byRail := map[string]billing.PSPPaymentConfig{}
+		for _, psp := range cfg.Payment.PSPs {
 			byRail[psp.Rail] = psp
 		}
 		require.Empty(t, byRail["stripe"].Status, "%s: the other PSPs stay available", tp)
 		nmi, ok := byRail["nmi"]
-		require.True(t, ok, "%s: the failing PSP is still listed: %+v", tp, cfg.PSPs)
-		require.Equal(t, billing.CheckoutPSPTemporarilyUnavailable, nmi.Status, tp)
+		require.True(t, ok, "%s: the failing PSP is still listed: %+v", tp, cfg.Payment.PSPs)
+		require.Equal(t, billing.PSPTemporarilyUnavailable, nmi.Status, tp)
 		require.Positive(t, nmi.RetryAfter, tp)
 		require.Empty(t, nmi.Config, "%s: no values to drive an unavailable PSP", tp)
 	}

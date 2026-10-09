@@ -11,9 +11,10 @@ function Probe() {
 const mounted = (groups: Record<string, boolean> | null) => {
   const queries = client()
   if (groups)
-    queries.setQueryData(adminQueries.capabilities().queryKey, {
-      route_groups: groups,
-      features: {},
+    queries.setQueryData(adminQueries.config().queryKey, {
+      capabilities: { route_groups: groups, features: {} },
+      currencies: [],
+      payment: null,
     })
   return render(<Probe />, queries)
 }

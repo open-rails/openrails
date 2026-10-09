@@ -48,7 +48,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 219)
+	require.Len(t, Catalog(), 218)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -157,8 +157,8 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Guard: levelGuard(t), External: External{
-		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Guard: levelGuard(t), Capabilities: &billing.Capabilities{}, External: External{
+		Live: raw, Ready: raw, Metrics: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
 		ListFederatedGrants: handler, CreateFederatedGrant: handler, RevokeFederatedGrant: handler, ListMyFederatedGrants: handler, AcceptFederatedGrant: handler,
@@ -224,8 +224,8 @@ func sorted(list []string) []string {
 // route only with its group.
 func TestMountHonorsConfiguration(t *testing.T) {
 	seen := map[string]int{}
-	RegisterMetaRoutes(recorder{seen: seen}, Options{External: External{Capabilities: http.NotFoundHandler()}})
-	require.Equal(t, map[string]int{"GET /v1/capabilities": 1}, seen, "an embedded host supplies no health routes")
+	RegisterMetaRoutes(recorder{seen: seen}, Options{Capabilities: &billing.Capabilities{}})
+	require.Equal(t, map[string]int{"GET /v1/config": 1}, seen, "an embedded host supplies no health routes")
 
 	seen = map[string]int{}
 	none := routesurface.ProviderRoutes{}

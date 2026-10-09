@@ -1,17 +1,12 @@
 package embedhttp
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
-// Capabilities is GET /v1/capabilities.
+// Capabilities is the capabilities section of GET /v1/config.
 type Capabilities = billing.Capabilities
 
 // buildCapabilities reports each known route group as on/off against the
@@ -38,34 +33,12 @@ func buildCapabilities(rt *app.Runtime, active []RouteSet, providerRoutes routes
 	}}
 }
 
-// CapabilitiesHandler returns the public GET handler for the capability document.
-// The active selection is fixed at mount, so the body + ETag are precomputed.
-// ETag + Cache-Control: public, max-age=300, and If-None-Match → 304.
-func CapabilitiesHandler(rt *app.Runtime, active []RouteSet, providerRoutes routesurface.ProviderRoutes, extra map[string]bool) http.Handler {
+// CapabilitiesFor is the capabilities of a mount serving active, plus the
+// assembly's extra features.
+func CapabilitiesFor(rt *app.Runtime, active []RouteSet, providerRoutes routesurface.ProviderRoutes, extra map[string]bool) Capabilities {
 	caps := buildCapabilities(rt, active, providerRoutes)
 	for name, on := range extra {
 		caps.Features[name] = on
 	}
-	return capabilitiesHandler(caps)
-}
-
-func capabilitiesHandler(capabilities Capabilities) http.Handler {
-	body, _ := json.Marshal(capabilities)
-	etag := `"` + hex.EncodeToString(sha256Sum(body)) + `"`
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		w.Header().Set("ETag", etag)
-		if r.Header.Get("If-None-Match") == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
-	})
-}
-
-func sha256Sum(b []byte) []byte {
-	sum := sha256.Sum256(b)
-	return sum[:]
+	return caps
 }

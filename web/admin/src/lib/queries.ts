@@ -38,7 +38,7 @@ import {
   listUsageMeters,
   listTeam,
   listTeamInvites,
-  getCapabilities,
+  getConfig,
   listWebhooks,
   listWorkerHealth,
   PAGE_MAX,
@@ -435,12 +435,12 @@ export const adminQueries = {
       queryFn: ({ signal }) => listTeamInvites(signal),
       meta: { errorAction: "Load invites" },
     }),
-  capabilities: () =>
+  config: () =>
     queryOptions({
-      queryKey: ["capabilities"],
-      queryFn: ({ signal }) => getCapabilities(signal),
+      queryKey: ["config"],
+      queryFn: ({ signal }) => getConfig(signal),
       staleTime: 5 * 60_000,
-      meta: { errorAction: "Load capabilities" },
+      meta: { errorAction: "Load configuration" },
     }),
   webhooks: () =>
     queryOptions({

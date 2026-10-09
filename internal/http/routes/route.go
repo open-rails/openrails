@@ -132,7 +132,6 @@ const (
 	ResAccess           Resource = "access"
 	ResBillingData      Resource = "billing_data"
 	ResCatalog          Resource = "catalog"
-	ResCheckout         Resource = "checkout"
 	ResCheckoutSessions Resource = "checkout_sessions"
 	ResCredits          Resource = "credits"
 	ResCustomers        Resource = "customers"
@@ -145,6 +144,7 @@ const (
 	ResOperations       Resource = "operations"
 	ResPayments         Resource = "payments"
 	ResPSPs             Resource = "psps"
+	ResPublicConfig     Resource = "public_config"
 	ResRefunds          Resource = "refunds"
 	ResSettings         Resource = "settings"
 	ResSubscriptions    Resource = "subscriptions"
@@ -153,10 +153,10 @@ const (
 
 // Resources is every resource group, with its Go name (openrails.<Name>).
 var Resources = map[Resource]string{
-	ResAccess: "Access", ResBillingData: "BillingData", ResCatalog: "Catalog", ResCheckout: "Checkout", ResCheckoutSessions: "CheckoutSessions",
+	ResAccess: "Access", ResBillingData: "BillingData", ResCatalog: "Catalog", ResCheckoutSessions: "CheckoutSessions",
 	ResCredits: "Credits", ResCustomers: "Customers", ResCustomerSettings: "CustomerSettings", ResDashboard: "Dashboard", ResFindings: "Findings",
 	ResHostEvents: "HostEvents", ResInvoices: "Invoices", ResMetrics: "Metrics", ResOperations: "Operations",
-	ResPayments: "Payments", ResPSPs: "PSPs", ResRefunds: "Refunds", ResSettings: "Settings",
+	ResPayments: "Payments", ResPSPs: "PSPs", ResPublicConfig: "PublicConfig", ResRefunds: "Refunds", ResSettings: "Settings",
 	ResSubscriptions: "Subscriptions", ResUsage: "Usage",
 }
 
@@ -354,7 +354,7 @@ func Lookup(method, path string) (Route, bool) {
 var allRoutes, index = func() ([]Route, map[string]Route) {
 	var all []Route
 	for _, resource := range [][]Route{
-		metaRoutes, checkoutRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
+		metaRoutes, configRoutes, checkoutRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
 		merchantRoutes, opsRoutes, platformRoutes,
 	} {

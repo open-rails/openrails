@@ -102,9 +102,12 @@ export function EmptyState({
 
 export function ErrorState({
   error,
+  message,
   onRetry,
 }: {
   error: BillingError
+  /** Replaces the error's own message. */
+  message?: string
   onRetry: () => void
 }) {
   const m = useMessages()
@@ -113,7 +116,7 @@ export function ErrorState({
       role="alert"
       className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-destructive/5 px-4 py-3"
     >
-      <p className="text-sm text-destructive">{m.error(error)}</p>
+      <p className="text-sm text-destructive">{message ?? m.error(error)}</p>
       <Button variant="outline" size="sm" onClick={onRetry}>
         {m.t("common.retry")}
       </Button>

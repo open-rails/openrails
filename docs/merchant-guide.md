@@ -8,7 +8,7 @@ Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); 
 **PSP** is *your account* on a rail (e.g. a `mobius` key on the nmi rail; `stripe`,
 `ccbill`, `solana` are their own PSP names). The API and database represent money
 as **integers in the currency's native units** (micros for USD:
-`20_000_000` = $20.00; scales are listed by `GET /v1/currencies`). Catalog prices
+`20_000_000` = $20.00; scales are listed by `GET /v1/config`). Catalog prices
 can be authored as `amount: 20 USD`; parsing produces those exact native units.
 
 ### The mental model

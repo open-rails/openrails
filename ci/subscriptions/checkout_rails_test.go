@@ -46,12 +46,12 @@ products:
 	return key, err
 }
 
-func (w *world) options(selection billing.GetCheckoutConfigParams) map[string]billing.CheckoutOption {
+func (w *world) options(selection billing.CheckoutOptionListParams) map[string]billing.CheckoutOption {
 	w.t.Helper()
-	config, err := w.client[remote].GetCheckoutConfig(w.t.Context(), selection)
+	options, err := w.client[remote].ListCheckoutOptions(w.t.Context(), selection)
 	require.NoError(w.t, err)
 	out := map[string]billing.CheckoutOption{}
-	for _, option := range config.Options {
+	for _, option := range options.Items {
 		out[string(option.Rail)] = option
 	}
 	return out
@@ -111,7 +111,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 `, plan))
 	require.NoError(t, err)
 
-	monthly := w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-monthly"})
+	monthly := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})
 	solana, ok := monthly["solana"]
 	require.True(t, ok, "Solana recurring is offered: %+v", monthly)
 	require.Equal(t, "subscription", solana.Mode)
@@ -123,7 +123,7 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	require.Empty(t, monthly["stripe"].Driver, "no publishable key: the browser cannot enroll a Stripe subscription")
 	require.NotContains(t, monthly, "ccbill", "CCBill never enrolls a new subscription")
 
-	once := w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-once"})
+	once := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-once"})
 	require.Equal(t, "one_off", once["solana"].Mode)
 	require.Equal(t, "solana_pay", once["solana"].Driver)
 	require.Equal(t, "DUSD", once["solana"].PublicConfig["token_symbol"], "first accepted stablecoin")
@@ -163,7 +163,7 @@ func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
 `)
 	require.NoError(t, err)
 	for _, price := range []string{key + "-monthly", key + "-once"} {
-		options := w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: price})
+		options := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: price})
 		require.NotContains(t, options, "solana", price)
 		require.Contains(t, options, "nmi", price)
 		require.Contains(t, options, "stripe", price)
@@ -185,7 +185,7 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
         recurring_billing_option_id: "%s"
 `, ccbillFormName, ccbillFlexID, ccbillRBO))
 	require.NoError(t, err, "armed engine rails sell the price on local terms")
-	options := w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-monthly"})
+	options := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})
 	require.NotContains(t, options, "ccbill")
 	require.Contains(t, options, "nmi")
 

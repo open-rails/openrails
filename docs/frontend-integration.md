@@ -78,13 +78,20 @@ GET  /v1/me/notifications[.../unread-count]   billing notifications
 The public catalog needs no auth: `GET /v1/products` returns each product on sale with
 its current prices, which is everything your pricing page needs.
 
-### Discovering payment options: `GET /v1/checkout-config`
+### Public configuration: `GET /v1/config`
 
-Public, unauthenticated, cacheable (`Cache-Control: public, max-age=60`). It answers
-"what can this merchant take money with, and what do I need in the browser to do it?"
-so you never hard-code a rail or duplicate a tokenization key in your own config. The
-merchant is resolved from the request `Host` (its `api_host`), exactly like the public
-catalog.
+Public, unauthenticated, always mounted, cacheable (`Cache-Control: public,
+max-age=300` with an `ETag`). It holds the mount's `capabilities`, the currency
+registry (`currencies`) and `payment`, which answers "what can this merchant take
+money with, and what do I need in the browser to do it?" so you never hard-code a
+rail or duplicate a tokenization key in your own config. The merchant is resolved
+from the request `Host` (its `api_host`), exactly like the public catalog;
+`payment` is null when none resolves. A checkout session carries its own payment
+options; `payment` is for saving a card outside one. `@openrails/billing-ui`
+reads the document once and shares it: `AccountBilling` and `PaymentMethodsPanel`
+take their PSPs from it.
+
+`payment` looks like this:
 
 ```json
 {
@@ -119,9 +126,12 @@ catalog.
   - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
     network and accepted tokens, and `GET /v1/solana/tokens?wallet=` adds a
     wallet's balances.
+- `status: "temporarily_unavailable"` marks a PSP whose credentials could not be
+  checked just now: it is listed without `config`, the document is not cached, and
+  `retry_after` says how many seconds to wait before asking again.
 - Which of these can sell a given price is answered by the checkout session's
-  `options`, or for the merchant by `GetCheckoutConfig` with a price
-  (`GET /v1/merchant/checkout-config?price_id=`), see below.
+  `options`, or for the merchant by `ListCheckoutOptions`
+  (`GET /v1/merchant/checkout-options?price_id=`), see below.
 - `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
   it). `psp` means the gateway itself; anything else is a third party whose SDK your page
   tokenizes against — same rail, different script and different public key. Read `flow` and

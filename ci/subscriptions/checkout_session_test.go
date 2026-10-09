@@ -628,7 +628,7 @@ func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
 	}
 	w.start()
 	price := w.membership("content:members", 9_990_000)
-	option := w.options(billing.GetCheckoutConfigParams{PriceID: price.ID})["stripe"]
+	option := w.options(billing.CheckoutOptionListParams{PriceID: price.ID})["stripe"]
 	require.Equal(t, "stripe_elements", option.Driver)
 	require.Equal(t, "pk_test_e2e", option.PublicConfig["publishable_key"])
 

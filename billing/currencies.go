@@ -30,8 +30,3 @@ func LookupCurrency(code string) (CurrencyUnits, bool) {
 	units, ok := currency.Lookup(code)
 	return CurrencyUnits{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals}, ok
 }
-
-// CurrencyRegistry is the GET /v1/currencies document.
-type CurrencyRegistry struct {
-	Currencies []CurrencyUnits `json:"currencies"`
-}

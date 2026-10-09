@@ -7,8 +7,8 @@ import { adminQueries } from "@/lib/queries"
 // billing import and export, the dashboard layout. The console shows those
 // pages only then.
 export function useMerchantConfig(): boolean {
-  const { data } = useQuery(adminQueries.capabilities())
-  return data?.route_groups?.merchant_config ?? false
+  const { data } = useQuery(adminQueries.config())
+  return data?.capabilities.route_groups?.merchant_config ?? false
 }
 
 // configTabs are the settings tabs that are the merchant's configuration.

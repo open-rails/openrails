@@ -112,6 +112,7 @@ export const es: BillingUiMessageBundle = {
       "Las tarjetas que introduzcas se guardan en tu cuenta para pagos futuros.",
     unavailable:
       "La introducción segura de tarjetas no está disponible para este proveedor.",
+    addUnavailable: "Por el momento no se pueden añadir tarjetas.",
     verificationPending:
       "La verificación de la tarjeta está pendiente. Revisa tus tarjetas guardadas antes de volver a intentarlo.",
     cardLabel: "{brand} •••• {last4}",

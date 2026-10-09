@@ -43,7 +43,7 @@ const embeddedMount = "/billing"
 // handler. A zero RouteSets slice uses AllRouteSets.
 type Options struct {
 	RouteSets []RouteSet
-	// AdvertiseRouteSets is the full selection reported by GET /v1/capabilities,
+	// AdvertiseRouteSets is the full selection GET /v1/config reports,
 	// independent of which subset THIS handler actually mounts. The embedded
 	// combined mount strips `customer` from RouteSets (it is served by the
 	// separate self handler) but still advertises it here so discovery is honest.
@@ -113,9 +113,10 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	}
 	mux := &router.Table{}
 
-	// Capability discovery (#623): always-on, public, independent of selection so
-	// even a minimal deployment is discoverable. Reports the full advertised set
-	// (incl. `customer`, which the combined mount serves via the self handler).
+	// The public configuration (GET /v1/config) is always on, independent of
+	// selection, so even a minimal deployment is discoverable. Its
+	// capabilities report the full advertised set (incl. `customer`, which the
+	// combined mount serves via the self handler).
 	advertise := opts.AdvertiseRouteSets
 	if len(advertise) == 0 {
 		advertise = ResolveRouteSets(opts.RouteSets)
@@ -127,17 +128,13 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
-	httproutes.RegisterMetaRoutes(router.NewMux(mux, embeddedMount, s.Runtime), httproutes.Options{External: httproutes.External{
-		Capabilities: capabilitiesHandler(capabilities),
-	}})
-
-	// browserTier tracks the checkout patterns mounted below (#765): the ONLY
-	// route set on this combined handler that belongs to the permissive-CORS
-	// browser tier. Empty (matches nothing) when RouteSetCheckout isn't
-	// selected, so PermissiveCORSHTTP is a pure no-op for a merchant-admin/
-	// catalog/PSP/merchant-API/webhooks-only mount.
+	// browserTier tracks the configuration and checkout patterns mounted
+	// below (#765): the ONLY routes on this combined handler that belong to
+	// the permissive-CORS browser tier.
 	browserRoutes := make(map[string]bool)
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
+	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, embeddedMount, s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
+
 	if routeSets[RouteSetCheckout] {
 		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 			Auth:           s.Auth,
@@ -153,6 +150,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			Auth:         s.Auth,
 			AdminLimiter: s.AdminLimiter,
 			Guard:        opts.Guard,
+			Capabilities: &capabilities,
 		}, groups...)
 	}
 	if routeSets[RouteSetWebhooks] {

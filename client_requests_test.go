@@ -72,10 +72,14 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, "pro-monthly", b["price_key"])
 			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
 		}},
-		{"checkout config for a price", func() error {
-			_, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "pro-monthly"})
+		{"checkout options for a price", func() error {
+			_, err := client.ListCheckoutOptions(t.Context(), billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodGet, "/v1/merchant/checkout-config", "price_key=pro-monthly&product_key=pro", nil},
+		}, http.MethodGet, "/v1/merchant/checkout-options", "price_key=pro-monthly&product_key=pro", nil},
+		{"public config", func() error {
+			_, err := client.GetPublicConfig(t.Context())
+			return err
+		}, http.MethodGet, "/v1/merchant/config", "", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			revision := "r1"
 			_, err := client.ApplyMerchantConfiguration(t.Context(), billing.ApplyMerchantConfigurationParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
@@ -345,7 +349,11 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"checkout options": func() error {
-			_, err := c.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
+			_, err := c.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
+			return err
+		},
+		"checkout options without a price": func() error {
+			_, err := c.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{})
 			return err
 		},
 		"checkout customer": func() error {

@@ -49,6 +49,10 @@ type Options struct {
 	// route (ResolveGuards); a staff route it names none for refuses to mount.
 	Guard func(Route) string
 
+	// Capabilities is what the assembly mounts, as GET /v1/config reports
+	// it; without it the public read is not mounted.
+	Capabilities *billing.Capabilities
+
 	// External are the handlers the assembly owns.
 	External External
 }
@@ -58,7 +62,7 @@ type Options struct {
 // route bound to one is mounted where the assembly supplies it.
 type External struct {
 	// Meta: the process surface.
-	Live, Ready, Metrics, Capabilities http.Handler
+	Live, Ready, Metrics http.Handler
 	// Captcha discovery, beside the checkout routes.
 	CaptchaStatus, CaptchaScript http.Handler
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## One public configuration
+
+- `getConfig()` reads `GET /config`: the mount's `capabilities`, the currency
+  registry (`currencies`) and the merchant's `payment` setup (its PSPs and
+  Solana network and tokens; null without a merchant). It replaces
+  `getCheckoutConfig()` and `listCurrencies()`: `checkoutConfigSchema` and
+  `CheckoutConfig` are `publicConfigSchema` and `PublicConfig` (its `payment`
+  is a `PaymentConfig`), and `currencyRegistrySchema` is removed.
+  `client.currencies` stays the pinned registry.
+- `BillingProvider` fetches it once and shares it: `useConfig()` reads it,
+  `useCurrencyScales()` layers the pinned registry and host overrides over its
+  currencies, and the account panels use both.
+- `AccountBilling` and `PaymentMethodsPanel` take their PSPs from it; their
+  `psps` prop is removed. "Add card" waits for it, says so when it fails (with
+  a retry) or every card PSP is temporarily unavailable, and asks again after
+  the PSP's `retry_after`.
+- `PspConfig` has `status` and `retry_after`; a temporarily unavailable PSP
+  saves no card (`cardSetupDriver` is null).
+
 ## Prices come with their products
 
 - `listPrices` is removed with `GET /prices`: `listProducts()` returns every

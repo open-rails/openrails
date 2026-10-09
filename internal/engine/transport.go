@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -38,7 +39,10 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 // methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
-	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, httproutes.HostOptions(), httproutes.Merchant, httproutes.MerchantConfig)
+	opts := httproutes.HostOptions()
+	caps := embedhttp.CapabilitiesFor(rt, []embedhttp.RouteSet{embedhttp.RouteSetMerchant, embedhttp.RouteSetMerchantConfig}, embedhttp.ProviderRoutesForRuntime(rt, nil), nil)
+	opts.Capabilities = &caps
+	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, opts, httproutes.Merchant, httproutes.MerchantConfig)
 	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})

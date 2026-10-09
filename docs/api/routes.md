@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (218), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -19,7 +19,7 @@ Health, metrics and capability discovery. Only the standalone server serves the 
 | GET | `/health/live` | public | — | — | 200 `Health` |  |
 | GET | `/health/ready` | public | — | — | 200 `Health` |  |
 | GET | `/metrics` | public | — | — | 200 `text/plain` |  |
-| GET | `/v1/capabilities` | public | — | — | 200 `Capabilities` |  |
+| GET | `/v1/config` | public | — | — | 200 `PublicConfig` |  |
 
 ## Checkout (public)
 
@@ -27,8 +27,6 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 
 | Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/currencies` | public | — | — | 200 `CurrencyRegistry` |  |
-| GET | `/v1/checkout-config` | public | — | — | 200 `CheckoutConfig` |  |
 | GET | `/v1/solana/tokens` | public | — | — | 200 `SupportedTokensResponse` | when `solana` |
 | GET | `/v1/checkout-sessions/{id}` | checkout_session | — | — | 200 `CheckoutSession` |  |
 | POST | `/v1/checkout-sessions/{id}/pay` | checkout_session | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
@@ -86,8 +84,9 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 
 | Method | Path | Tier | Guard | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| GET | `/v1/merchant/config` | merchant | `GetPublicConfig` · `PublicConfig` · `StaffReads` | — | 200 `PublicConfig` |  |
 | POST | `/v1/merchant/checkout-sessions` | merchant | `CreateCheckoutSession` · `CheckoutSessions` · `StaffWrites` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
-| GET | `/v1/merchant/checkout-config` | merchant | `GetCheckoutConfig` · `Checkout` · `StaffReads` | — | 200 `CheckoutConfig` |  |
+| GET | `/v1/merchant/checkout-options` | merchant | `ListCheckoutOptions` · `CheckoutSessions` · `StaffReads` | — | 200 `ListPage<CheckoutOption>` |  |
 | GET | `/v1/merchant/catalog/revision` | merchant | `GetCatalogRevision` · `Catalog` · `StaffReads` | — | 200 `CatalogRevision` |  |
 | GET | `/v1/merchant/catalog/drift` | merchant | `ListCatalogDrift` · `Catalog` · `StaffReads` | — | 200 `ListPage<CatalogDrift>` |  |
 | GET | `/v1/merchant/catalog/meters` | merchant | `ListMeters` · `Catalog` · `StaffReads` | — | 200 `ListPage<Meter>` |  |

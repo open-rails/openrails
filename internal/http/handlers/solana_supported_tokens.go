@@ -269,21 +269,21 @@ func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailC
 	return tokens
 }
 
-// solanaCheckoutConfig projects the armed Solana rail onto the shared
-// checkout-config document; nil when Solana is not armed for the merchant.
-func solanaCheckoutConfig(r *httprequest.Request) (*billing.SolanaCheckoutConfig, error) {
+// solanaPaymentConfig projects the armed Solana rail onto the shared
+// public configuration; nil when Solana is not armed for the merchant.
+func solanaPaymentConfig(r *httprequest.Request) (*billing.SolanaPaymentConfig, error) {
 	solanaConf, err := effectiveSolanaRailConfig(r)
 	if err != nil || solanaConf == nil {
 		return nil, err
 	}
 	network := normalizeSolanaNetwork(solanaConf.Network)
 	accepted := acceptedSolanaTokens(r, solanaConf)
-	tokens := make([]billing.SolanaCheckoutToken, 0, len(accepted))
+	tokens := make([]billing.SolanaPaymentToken, 0, len(accepted))
 	for _, t := range accepted {
-		tokens = append(tokens, billing.SolanaCheckoutToken{Symbol: t.Symbol, Name: t.Name, Mint: t.Mint,
+		tokens = append(tokens, billing.SolanaPaymentToken{Symbol: t.Symbol, Name: t.Name, Mint: t.Mint,
 			Decimals: t.Decimals, Preferred: t.Preferred, RecurringEligible: t.RecurringEligible})
 	}
-	return &billing.SolanaCheckoutConfig{Network: network, Chain: "solana:" + network,
+	return &billing.SolanaPaymentConfig{Network: network, Chain: "solana:" + network,
 		PreferredToken: solanatokens.PreferredStablecoin, Tokens: tokens}, nil
 }
 

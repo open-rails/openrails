@@ -40,9 +40,9 @@ var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSess
 // openRoutes is every route no Auth gates. A route that joins it is a
 // reviewed change.
 var openRoutes = []string{
-	"GET /health/live", "GET /health/ready", "GET /metrics", "GET /v1/capabilities",
+	"GET /health/live", "GET /health/ready", "GET /metrics", "GET /v1/config",
 	"GET /v1/captcha/client.js", "GET /v1/captcha/status",
-	"GET /v1/checkout-config", "GET /v1/currencies", "GET /v1/products", "GET /v1/solana/tokens",
+	"GET /v1/products", "GET /v1/solana/tokens",
 	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
 	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
 	"POST /v1/webhooks/{rail}/{account_id}",

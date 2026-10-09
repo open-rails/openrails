@@ -59,7 +59,7 @@ Before the code:
 |---|---|
 | `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `checkout`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
 | `GET /`, `/healthz`, `/readyz`, `/health/ready?verbose=1`, 503 `not_ready` | `/health/live` and `/health/ready`; a failed readiness check is 503 `service_unavailable` and the failing dependency is logged, not answered |
-| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/capabilities` lists the groups `checkout`, `customer`, `merchant`, `merchant_config`, `webhooks` |
+| Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/config`'s `capabilities` list the groups `checkout`, `customer`, `merchant`, `merchant_config`, `webhooks` |
 | Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are `Routes.MerchantConfig`'s, behind your guard (`openrails.PSPs` or `openrails.MerchantConfig`) |
 | CLI flag `--provider-account` | `--psp` |
 
@@ -178,7 +178,8 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `ProductKey` + `PriceKey`, `AutoRenew`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
 | `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | Removed: the customer pays a checkout session (`POST /v1/checkout-sessions/{id}/pay`) they minted themselves or `client.CreateCheckoutSession(` minted for them |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
-| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey`; `GetCheckoutConfig(ctx)` | `client.GetCheckoutConfig(` with `billing.GetCheckoutConfigParams`; a price in the query fills `options` |
+| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.ListCheckoutOptions(` with `billing.CheckoutOptionListParams` |
+| `GetCheckoutConfig(ctx)` | `client.GetPublicConfig(ctx)`: the PSPs are its `Payment` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
 | `CheckoutPaymentOptions.Card` | Removed: a Client never carries a card |
@@ -342,7 +343,7 @@ fields (`400 unknown_field`), and every error code is in
   `Subscription` in the request (200). A merchant tier change on CCBill or
   Solana is 403 `customer_action_required`. A `TierChange` has no `mode`, `url`
   or `payment`: a redirect is `next_action.url`.
-- **`object`.** The `object` member is gone from the checkout config, checkout
+- **`object`.** The `object` member is gone from the public configuration, checkout
   attempts, the currency registry and tier changes.
 - **Invokers and metrics.** `invoker_type` is `customer` or `delegated`. The
   metrics dimension `payer` is `customer`; `active_payers` and
@@ -415,7 +416,8 @@ calendar ([data retention](operations.md#data-retention)):
 |---|---|
 | `createHttpSource`, `CheckoutSourceError` | `client.checkoutSource(id)` is the source of `<Checkout>`, `<CheckoutModal>` and `<CheckoutPage>` |
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The session's `options`; `PaymentOption` |
-| `getSolanaConfig()` | `getCheckoutConfig()`; the network is `solana.network` |
+| `getSolanaConfig()` | `getConfig()`; the network is `payment.solana.network` |
+| `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
 | Offset pages from `listPaymentMethods`, `listPayments`, `listInvoices`, `listSubscriptions` | Cursor pages: pass `cursor`, read `next_cursor` |
 | `setDefaultPaymentMethod`, `usePaymentMethods().setDefault`, `defaultCurrency` | `setCollectionPaymentMethod`, `setCollection`, `collectionCurrency` |

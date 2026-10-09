@@ -92,7 +92,7 @@
         ]
       }
     },
-    "/v1/capabilities": {
+    "/v1/config": {
       "get": {
         "tags": [
           "meta"
@@ -103,7 +103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Capabilities"
+                  "$ref": "#/components/schemas/PublicConfig"
                 }
               }
             }
@@ -120,10 +120,10 @@
         ]
       }
     },
-    "/v1/currencies": {
+    "/v1/merchant/config": {
       "get": {
         "tags": [
-          "checkout"
+          "merchant"
         ],
         "responses": {
           "200": {
@@ -131,7 +131,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CurrencyRegistry"
+                  "$ref": "#/components/schemas/PublicConfig"
                 }
               }
             }
@@ -140,42 +140,22 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
-        ]
-      }
-    },
-    "/v1/checkout-config": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutConfig"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
+        "security": [
+          {
+            "bearer": []
           }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-guards": [
+          "GetPublicConfig",
+          "PublicConfig",
+          "StaffReads"
+        ],
         "x-openrails-errors": [
-          "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:public"
+          "tier:merchant"
         ]
       }
     },
@@ -724,7 +704,7 @@
         ]
       }
     },
-    "/v1/merchant/checkout-config": {
+    "/v1/merchant/checkout-options": {
       "get": {
         "tags": [
           "merchant"
@@ -758,7 +738,25 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutConfig"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CheckoutOption"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -774,8 +772,8 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-guards": [
-          "GetCheckoutConfig",
-          "Checkout",
+          "ListCheckoutOptions",
+          "CheckoutSessions",
           "StaffReads"
         ],
         "x-openrails-errors": [
@@ -15842,30 +15840,6 @@
           }
         }
       },
-      "CheckoutConfig": {
-        "type": "object",
-        "properties": {
-          "psps": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CheckoutPSPConfig"
-            }
-          },
-          "solana": {
-            "$ref": "#/components/schemas/SolanaCheckoutConfig"
-          },
-          "options": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CheckoutOption"
-            }
-          }
-        },
-        "required": [
-          "psps",
-          "options"
-        ]
-      },
       "CheckoutCustomerIdentity": {
         "type": "object",
         "properties": {
@@ -15925,53 +15899,6 @@
           "psp_id",
           "rail",
           "mode"
-        ]
-      },
-      "CheckoutPSPConfig": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "custodian": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "flow": {
-            "type": "string"
-          },
-          "checkout": {
-            "type": "boolean"
-          },
-          "config": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "status": {
-            "type": "string"
-          },
-          "retry_after": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "psp_id",
-          "key",
-          "rail",
-          "custodian",
-          "display_name",
-          "flow",
-          "checkout"
         ]
       },
       "CheckoutRoutingMatch": {
@@ -17302,20 +17229,6 @@
           "source",
           "source_id",
           "created_at"
-        ]
-      },
-      "CurrencyRegistry": {
-        "type": "object",
-        "properties": {
-          "currencies": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CurrencyUnits"
-            }
-          }
-        },
-        "required": [
-          "currencies"
         ]
       },
       "CurrencyUnits": {
@@ -21042,6 +20955,53 @@
           "message"
         ]
       },
+      "PSPPaymentConfig": {
+        "type": "object",
+        "properties": {
+          "psp_id": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "custodian": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "checkout": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "retry_after": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "psp_id",
+          "key",
+          "rail",
+          "custodian",
+          "display_name",
+          "flow",
+          "checkout"
+        ]
+      },
       "PSPRef": {
         "type": "object",
         "properties": {
@@ -21609,6 +21569,31 @@
           "payment_method_id",
           "payment_id",
           "enriched_at"
+        ]
+      },
+      "PaymentConfig": {
+        "type": "object",
+        "properties": {
+          "psps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PSPPaymentConfig"
+            }
+          },
+          "solana": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SolanaPaymentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "psps",
+          "solana"
         ]
       },
       "PaymentFailure": {
@@ -23071,6 +23056,35 @@
           "resolved_at"
         ]
       },
+      "PublicConfig": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurrencyUnits"
+            }
+          },
+          "payment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capabilities",
+          "currencies",
+          "payment"
+        ]
+      },
       "RailDefinition": {
         "type": "object",
         "properties": {
@@ -24119,63 +24133,6 @@
           }
         }
       },
-      "SolanaCheckoutConfig": {
-        "type": "object",
-        "properties": {
-          "network": {
-            "type": "string"
-          },
-          "chain": {
-            "type": "string"
-          },
-          "preferred_token": {
-            "type": "string"
-          },
-          "tokens": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SolanaCheckoutToken"
-            }
-          }
-        },
-        "required": [
-          "network",
-          "chain",
-          "preferred_token",
-          "tokens"
-        ]
-      },
-      "SolanaCheckoutToken": {
-        "type": "object",
-        "properties": {
-          "symbol": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "mint": {
-            "type": "string"
-          },
-          "decimals": {
-            "type": "integer"
-          },
-          "preferred": {
-            "type": "boolean"
-          },
-          "recurring_eligible": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "symbol",
-          "name",
-          "mint",
-          "decimals",
-          "preferred",
-          "recurring_eligible"
-        ]
-      },
       "SolanaPayGetResponse": {
         "type": "object",
         "properties": {
@@ -24211,6 +24168,63 @@
         },
         "required": [
           "transaction"
+        ]
+      },
+      "SolanaPaymentConfig": {
+        "type": "object",
+        "properties": {
+          "network": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "preferred_token": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SolanaPaymentToken"
+            }
+          }
+        },
+        "required": [
+          "network",
+          "chain",
+          "preferred_token",
+          "tokens"
+        ]
+      },
+      "SolanaPaymentToken": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mint": {
+            "type": "string"
+          },
+          "decimals": {
+            "type": "integer"
+          },
+          "preferred": {
+            "type": "boolean"
+          },
+          "recurring_eligible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "symbol",
+          "name",
+          "mint",
+          "decimals",
+          "preferred",
+          "recurring_eligible"
         ]
       },
       "SpendDelegation": {

@@ -47,8 +47,9 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   with the same terms answers the original result, and with other terms
   `409 idempotency_key_reused`. There is no generic response cache; every
   request authenticates and authorizes again.
-- **Discovery.** `GET /v1/capabilities` (public, cacheable) lists the route
-  groups a deployment mounts and its features (`stripe_billing_portal`,
+- **Discovery.** `GET /v1/config` (public, cacheable) is the deployment's
+  configuration (see [below](#public-configuration)). Its `capabilities` list
+  the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
   `provider_credential_writes`, `api_host`, `catalog_copilot`, `metrics_ask`,
   `dashboard_generation`, `team_invites`). Its route groups include `merchant`
@@ -62,7 +63,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 
 | Routes | Credential |
 |---|---|
-| Public: `/v1/products`, `/v1/currencies`, `/v1/checkout-config`, `/v1/capabilities` | none |
+| Public: `/v1/config`, `/v1/products` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
 | Merchant and merchant configuration: `/v1/merchant/*` | embedded: the host's credential its guard admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
@@ -93,15 +94,28 @@ sends no CORS headers.
 A browser buys through a checkout session: the customer mints it with their own
 credential, or the merchant with its own. See [checkout](commerce.md).
 
-`GET /v1/checkout-config` is public and cacheable for a minute. It lists the
-merchant's armed PSPs as `{psp_id, key, rail, custodian, display_name, flow,
-checkout, config}`: `flow` is `tokenize`, `elements`, `redirect` or `wallet`,
-`checkout` marks the PSPs that take new purchases, and `config` holds only
-values that are public by nature (an NMI `tokenization_key`, a Stripe
-`publishable_key`, a Basis Theory `public_api_key`). With a Solana PSP armed,
-`solana` carries the network and accepted tokens. The merchant's
-`GET /v1/merchant/checkout-config` adds, for a `price_id` or a `product_key` and `price_key`, the
-`options` that can sell that price.
+## Public configuration
+
+`GET /v1/config` is public, always mounted and cacheable for five minutes (with
+an `ETag`). It holds what a browser needs before anything else:
+
+- `capabilities`: the route groups the mount serves and its features.
+- `currencies`: every currency's `decimals` (the native scale) and
+  `minor_decimals`.
+- `payment`: the merchant's browser payment setup, null when the request
+  resolves no merchant. `psps` lists the armed PSPs as `{psp_id, key, rail,
+  custodian, display_name, flow, checkout, config}`: `flow` is `tokenize`,
+  `card`, `elements`, `redirect` or `wallet`, `checkout` marks the PSPs that
+  take new purchases, and `config` holds only values that are public by nature
+  (an NMI `tokenization_key`, a Stripe `publishable_key`, a Basis Theory
+  `public_api_key`). A PSP whose credentials could not be checked just now has
+  `status: "temporarily_unavailable"` and `retry_after` (seconds) instead of
+  `config`, and then the document is not cached. With a Solana PSP armed,
+  `solana` carries the network and accepted tokens.
+
+The merchant reads the same document at `GET /v1/merchant/config`.
+`GET /v1/merchant/checkout-options` lists, for a `price_id` or a `product_key`
+and `price_key`, the options that can sell that price.
 
 ## Subscriptions
 

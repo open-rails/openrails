@@ -24,6 +24,7 @@ import type {
   Price,
   PriceKeyMovement,
   Product,
+  PublicConfig,
   RateOverride,
   RatePrice,
   RebillCycle,
@@ -732,13 +733,11 @@ export const listTeam = (signal?: AbortSignal) =>
 export const listTeamInvites = (signal?: AbortSignal) =>
   api<ListPage<TeamInvite>>("/merchant/team/invites", { signal })
 
-// What the deployment serves; features.team_invites says whether an invite
-// can mint a register-and-join link.
-export const getCapabilities = (signal?: AbortSignal) =>
-  api<{ route_groups: Record<string, boolean>; features: Record<string, boolean> }>(
-    "/capabilities",
-    { signal }
-  )
+// The public configuration: what the deployment serves (its
+// capabilities.features.team_invites says whether an invite can mint a
+// register-and-join link), the currency registry and the payment setup.
+export const getConfig = (signal?: AbortSignal) =>
+  api<PublicConfig>("/config", { signal })
 
 export const inviteTeamMember = (email: string, role: string) =>
   api<TeamInviteResult>("/merchant/team/invites", {

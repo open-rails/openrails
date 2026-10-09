@@ -60,7 +60,7 @@ charges that exact amount, and its payment form cannot change it:
 ```tsx
 import { decimalToAmount } from "@openrails/billing-ui/client"
 
-// `depositPrice` is in a product from listProducts; `currency` from listCurrencies.
+// `depositPrice` is in a product from listProducts; `currency` from getConfig().currencies.
 // `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
 const amount = decimalToAmount(enteredAmount, currency.decimals)
 const bounds = depositPrice.customer_amount
@@ -125,7 +125,6 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
     <AccountBilling
       plansHref="/plans"
-      psps={checkoutConfig.psps} // OpenRails checkout config; enables "Add card"
       collectionCurrency="USD" // offers "Use for invoices"
       sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
     />
@@ -133,20 +132,27 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingUiProvider>
 ```
 
+The panels read OpenRails' public configuration (`GET /config`) themselves,
+once per `BillingProvider`: "Add card" offers each PSP of its `payment` that
+saves a card in the page, and says so while the configuration fails or its
+card PSPs are temporarily unavailable; amounts use its currency registry over
+the pinned copy. `useConfig()` and `useCurrencyScales()` read the same copy
+for host components.
+
 ## Catalog and plan changes
 
 The client also reads the public catalog and changes a subscription's plan.
-No UI ships for these; hosts render their own. The catalog, currency and
-Solana reads are public routes, served only when the host mounts OpenRails'
-checkout routes.
+No UI ships for these; hosts render their own. The catalog and Solana reads
+are public routes, served only when the host mounts OpenRails' checkout
+routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `listProducts()` (each product embeds its prices on sale)                                           | `GET /products`                                                 |
-| `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
+| `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |
-| `getCheckoutConfig()` (PSPs; `solana.network` and tokens), `listSolanaTokens({ priceId, wallet })`  | `GET /checkout-config`, `GET /solana/tokens`                    |
+| `listSolanaTokens({ priceId, wallet })`                                                             | `GET /solana/tokens`                                            |
 
 ```ts
 const preview = await billing.previewTierChange(sub.id, price.id) // amount_due_now, effective
@@ -173,8 +179,8 @@ const change = await billing.changeTier(sub.id, {
 
 ## Provider-neutral flows
 
-Hosts pass OpenRails's browser PSP configs (`GET /checkout-config`, `psps`)
-through unchanged; the PSP's `flow` and public `config` pick the browser flow
+OpenRails's browser PSP configs (`GET /config`'s `payment.psps`) pick the
+browser flow from each PSP's `flow` and public `config`
 (Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:
 

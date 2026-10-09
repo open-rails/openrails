@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -28,6 +29,7 @@ import {
 } from "../test/billing-server"
 import { AccountBilling } from "./account-billing"
 import { PaymentHistory } from "./payment-history"
+import { PaymentMethodsPanel } from "./payment-methods-panel"
 import { BillingStatusBadge } from "./status-badge"
 import { SubscriptionsPanel } from "./subscriptions-panel"
 
@@ -356,6 +358,91 @@ describe("PaymentHistory", () => {
 })
 
 describe("PaymentMethodsPanel", () => {
+  // An NMI PSP whose card_entry is server: the page posts the card itself.
+  const cardPsp = {
+    psp_id: "psp_55555555-5555-5555-5555-555555555555",
+    key: "mobius",
+    rail: "nmi",
+    custodian: "psp",
+    display_name: "Card",
+    flow: "card",
+    checkout: true,
+  }
+
+  it("reads the payment configuration itself and saves a card", async () => {
+    const server = fakeBilling({ methods: [], psps: [cardPsp] })
+    mount(<AccountBilling defaultCountry="US" />, server)
+    fireEvent.click(await screen.findByRole("button", { name: "Add card" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.change(within(dialog).getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("ZIP code"), {
+      target: { value: "94107" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("Card number"), {
+      target: { value: "4111111111111111" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("Expiry"), {
+      target: { value: "1027" },
+    })
+    fireEvent.change(within(dialog).getByLabelText("CVC"), {
+      target: { value: "999" },
+    })
+    const save = within(dialog).getByRole("button", { name: "Save card" })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+    expect(await screen.findByText("Card saved.")).toBeInTheDocument()
+    expect(await screen.findByTestId("payment-method-row")).toHaveTextContent(
+      "Mastercard •••• 5454"
+    )
+    expect(server.calls.filter((call) => call === "GET /config")).toHaveLength(
+      1
+    )
+    expect(server.calls).toContain("POST /me/payment-methods")
+  })
+
+  it("offers no card entry while the configuration fails, and retries", async () => {
+    const server = fakeBilling({ psps: [cardPsp] })
+    server.fail["GET /config"] = apiError(500, "internal_error")
+    mount(<PaymentMethodsPanel />, server)
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Adding a card is temporarily unavailable."
+    )
+    expect(screen.queryByRole("button", { name: "Add card" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    expect(
+      await screen.findByRole("button", { name: "Add card" })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("asks again after a temporarily unavailable PSP's retry_after", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const server = fakeBilling({
+        psps: [
+          { ...cardPsp, status: "temporarily_unavailable", retry_after: 30 },
+        ],
+      })
+      mount(<PaymentMethodsPanel />, server)
+      const note = "Adding a card is temporarily unavailable."
+      expect(await screen.findByText(note)).toHaveAttribute("role", "status")
+      expect(screen.queryByRole("button", { name: "Add card" })).toBeNull()
+      server.psps = [cardPsp]
+      await act(() => vi.advanceTimersByTimeAsync(30_000))
+      expect(
+        await screen.findByRole("button", { name: "Add card" })
+      ).toBeInTheDocument()
+      expect(screen.queryByText(note)).toBeNull()
+      expect(
+        server.calls.filter((call) => call === "GET /config")
+      ).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("explains an in-use card and removes a free one", async () => {
     const server = fakeBilling({
       methods: [paymentMethod(), paymentMethod({ id: "pm_2" })],

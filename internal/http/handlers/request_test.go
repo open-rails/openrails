@@ -282,8 +282,8 @@ func TestSolanaConfigIsBrowserSafe(t *testing.T) {
 			Network: "devnet", Tokens: map[string]config.TokenConfig{"USDC": {Name: "Dev USDC", Mint: mint}},
 		}}},
 	}
-	r, _ := newTestRequest(http.MethodGet, "/v1/checkout-config", nil, rt)
-	got, err := solanaCheckoutConfig(r)
+	r, _ := newTestRequest(http.MethodGet, "/v1/config", nil, rt)
+	got, err := solanaPaymentConfig(r)
 	require.NoError(t, err)
 	require.Equal(t, []any{"devnet", "solana:devnet", solanatokens.PreferredStablecoin}, []any{got.Network, got.Chain, got.PreferredToken})
 	require.Len(t, got.Tokens, 1)

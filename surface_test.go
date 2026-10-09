@@ -63,7 +63,7 @@ var routeArguments = map[string][]any{
 	"CheckProductAccess":     {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
 	"CreateCheckoutSession":  {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":            {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
-	"GetCheckoutConfig":      {billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "monthly"}},
+	"ListCheckoutOptions":    {billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"ListOffers":             {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
 	"RefundPayment":          {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"ArchiveProduct":         {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},

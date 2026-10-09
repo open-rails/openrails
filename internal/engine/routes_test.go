@@ -151,17 +151,16 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 	}
 }
 
-// The capability document reports what this mount serves.
+// The configuration's capabilities report what this mount serves.
 func TestCapabilitiesReportTheMount(t *testing.T) {
 	fake := &authtest.Fake{}
 	read := func(sel config.Routes) map[string]bool {
-		rec := serve(mountAt(t, httpRuntime(), sel, ""), http.MethodGet, "/v1/capabilities", "")
+		rec := serve(mountAt(t, httpRuntime(), sel, ""), http.MethodGet, "/v1/config", "")
 		require.Equal(t, http.StatusOK, rec.Code)
-		var capabilities struct {
-			RouteGroups map[string]bool `json:"route_groups"`
-		}
-		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &capabilities))
-		return capabilities.RouteGroups
+		var doc billing.PublicConfig
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+		require.NotEmpty(t, doc.Currencies)
+		return doc.Capabilities.RouteGroups
 	}
 	require.Equal(t, map[string]bool{"checkout": true, "customer": false, "merchant": false, "merchant_config": false, "webhooks": true}, read(config.Routes{Storefront: true}))
 	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": true, "merchant_config": false, "webhooks": true}, read(config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}))
@@ -366,13 +365,11 @@ func TestCustomerBillingManagementScope(t *testing.T) {
 	for _, path := range []string{"/checkout-sessions", "/subscriptions/x/change-tier", "/billing-portal"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay/v1/me"+path, "").Code, path)
 	}
-	rec := serve(mux, http.MethodGet, "/api/pay/v1/capabilities", "")
+	rec := serve(mux, http.MethodGet, "/api/pay/v1/config", "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	var capabilities struct {
-		RouteGroups map[string]bool `json:"route_groups"`
-		Features    map[string]bool `json:"features"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &capabilities))
+	var doc billing.PublicConfig
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
+	capabilities := doc.Capabilities
 	require.True(t, capabilities.RouteGroups["customer"])
 	require.False(t, capabilities.RouteGroups["checkout"])
 	for _, feature := range []string{"stripe_billing_portal", "solana_one_time_payments", "provider_credential_writes"} {
@@ -467,7 +464,7 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
 	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
 	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
-	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/capabilities", "").Code)
+	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/config", "").Code)
 
 	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}, "")
 	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/admin/", "").Code, "no console unless selected")

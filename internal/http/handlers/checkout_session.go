@@ -67,7 +67,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 
 func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessionParams) {
 	r.SetHeader("Cache-Control", "no-store")
-	config, ok := checkoutConfig(r)
+	config, ok := merchantPaymentConfig(r)
 	if !ok {
 		return
 	}

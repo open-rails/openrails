@@ -19,6 +19,7 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 		Auth:              s.staffAuth(),
 		AuthBindsMerchant: true,
 		AdminLimiter:      s.adminLimiter,
+		Capabilities:      s.capabilities(),
 	}
 	guard, err := httproutes.ResolveGuards(httproutes.PlanStaffRoutes(s.runtime, opts, httproutes.Merchant, httproutes.MerchantConfig), staffGuards)
 	if err != nil {

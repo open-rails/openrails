@@ -31,7 +31,7 @@ func requireFixture(t *testing.T, name string, value any) []byte {
 }
 
 func TestCurrencyRegistry(t *testing.T) {
-	requireFixture(t, "currencies.json", billing.CurrencyRegistry{Currencies: billing.Currencies()})
+	requireFixture(t, "currencies.json", billing.Currencies())
 	usd, ok := billing.LookupCurrency(" usd ")
 	require.True(t, ok)
 	require.Equal(t, billing.CurrencyUnits{Code: "USD", Decimals: 6, MinorDecimals: 2}, usd)

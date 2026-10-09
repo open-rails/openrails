@@ -1,4 +1,4 @@
-// OpenRails's browser-safe PSP projection (GET /checkout-config). Which
+// OpenRails's browser-safe PSP projection (GET /config's payment). Which
 // browser flow a PSP needs is decided here, never by the host.
 import { z } from "zod"
 
@@ -21,6 +21,12 @@ export const pspConfigSchema = z.object({
    * Other PSPs stay listed so existing cards and subscriptions keep working.
    */
   checkout: z.boolean().nullish(),
+  /**
+   * `temporarily_unavailable`: the PSP could not be checked just now and is
+   * listed without `config`; ask again after `retry_after` seconds.
+   */
+  status: z.string().nullish(),
+  retry_after: z.number().int().nullish(),
 })
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
@@ -37,6 +43,22 @@ export const isCardRail = (rail: PaymentOption): boolean =>
 /** PSPs that take new purchases and new cards. */
 export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
   psps.filter((psp) => psp.checkout !== false)
+
+const cardFlows = new Set(["tokenize", "card", "elements"])
+
+/**
+ * Seconds until a card PSP listed as temporarily unavailable is worth asking
+ * for again; null when none is.
+ */
+export function cardRetryAfter(psps: readonly PspConfig[]): number | null {
+  const waits = psps
+    .filter(
+      (psp) =>
+        !!psp.status && psp.custodian === "psp" && cardFlows.has(psp.flow)
+    )
+    .map((psp) => psp.retry_after ?? 30)
+  return waits.length > 0 ? Math.min(...waits) : null
+}
 
 /** Saved cards the checkout can charge in place, for the given rails, newest first. */
 export function savedMethodsFor(
@@ -71,7 +93,7 @@ const stripeKey = (psp: PspConfig) =>
 
 /** How a card is saved with this PSP in the page, or null when it cannot be. */
 export function cardSetupDriver(psp: PspConfig): CardSetupDriver | null {
-  if (psp.custodian !== "psp") return null
+  if (psp.custodian !== "psp" || psp.status) return null
   // The PSP takes cards on OpenRails itself (card_entry: server).
   if (psp.flow === "card" && psp.rail === "nmi") return "card"
   if (

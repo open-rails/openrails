@@ -21,7 +21,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Native units | Amounts are integer units at the currency's registered scale (`billing.Currencies()` / `GET /v1/currencies`): micros for USD/EUR, 10^4 per yen for JPY; decimal strings on the wire. |
+| Native units | Amounts are integer units at the currency's registered scale (`billing.Currencies()` / `GET /v1/config`'s `currencies`): micros for USD/EUR, 10^4 per yen for JPY; decimal strings on the wire. |
 | Money ledger | Double-entry ledger, the source of truth for money. FX inside the ledger is forbidden — no cross-currency transfers. |
 | Grant | An immutable event in the append-only grant ledger (`billing.grants`), kind `access` (a window of one product) or `credit`. Revoke/expire/supersede are new events referencing the original; a credit grant IS the FIFO lot. |
 | Entitlement | A plain string key (e.g. `premium`) a product grants (`billing.product_entitlements`). A customer holds the keys of the products they hold (`billing.product_access`), derived at check time. See `docs/entitlements_timeline.md`. |

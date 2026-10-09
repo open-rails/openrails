@@ -20,83 +20,19 @@ type CheckoutOption struct {
 	// PublicConfig holds browser-safe values: the PSP's public keys, and for
 	// Solana token_symbol, token_name and network.
 	PublicConfig map[string]string `json:"public_config,omitempty"`
-	// Status is CheckoutPSPTemporarilyUnavailable when the option's PSP could
+	// Status is PSPTemporarilyUnavailable when the option's PSP could
 	// not be checked just now; it has no driver. RetryAfter is in seconds.
 	Status     string `json:"status,omitempty"`
 	RetryAfter int    `json:"retry_after,omitempty"`
 }
 
-// GetCheckoutConfigParams selects the price whose options GetCheckoutConfig
-// lists: at most one of PriceID or the pair ProductKey + PriceKey.
-type GetCheckoutConfigParams struct {
+// CheckoutOptionListParams names the price ListCheckoutOptions lists the
+// options of: PriceID, or the pair ProductKey + PriceKey.
+type CheckoutOptionListParams struct {
 	PriceID    PriceID
 	PriceKey   string
-	ProductKey string `json:"product_key,omitempty"`
+	ProductKey string
 }
-
-// CheckoutConfig lists the merchant's armed PSPs and the public values a
-// browser needs to drive each one. It never contains merchant secrets.
-type CheckoutConfig struct {
-	PSPs []CheckoutPSPConfig `json:"psps"`
-	// Solana is present when a Solana PSP is armed: the network and the
-	// tokens the merchant accepts, so a host renders wallet options from the
-	// same document it renders card options from.
-	Solana *SolanaCheckoutConfig `json:"solana,omitempty"`
-	// Options are the ways checkout can sell the price the request named, in
-	// routing order; null when it named none.
-	Options []CheckoutOption `json:"options"`
-}
-
-// SolanaCheckoutConfig is the merchant's public Solana acceptance policy.
-type SolanaCheckoutConfig struct {
-	Network        string                `json:"network"`
-	Chain          string                `json:"chain"`
-	PreferredToken string                `json:"preferred_token"`
-	Tokens         []SolanaCheckoutToken `json:"tokens"`
-}
-
-// SolanaCheckoutToken is one accepted SPL token.
-type SolanaCheckoutToken struct {
-	Symbol            string `json:"symbol"`
-	Name              string `json:"name"`
-	Mint              string `json:"mint"`
-	Decimals          int    `json:"decimals"`
-	Preferred         bool   `json:"preferred"`
-	RecurringEligible bool   `json:"recurring_eligible"`
-}
-
-// CheckoutPSPConfig describes one armed PSP for browser checkout.
-type CheckoutPSPConfig struct {
-	// PSPID is the public stable account selector used by saved-method setup.
-	PSPID PSPID `json:"psp_id"`
-	// Key is the checkout payment.rail selector.
-	Key string `json:"key"`
-	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
-	Rail string `json:"rail"`
-	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
-	Custodian   string `json:"custodian"`
-	DisplayName string `json:"display_name"`
-	// Flow is how a browser drives this PSP: tokenize, card, elements, redirect
-	// or wallet. card: the page posts the card to OpenRails, which vaults it.
-	// elements: the page saves the card with the PSP's own fields and checkout
-	// charges the saved card, with authentication in the page.
-	Flow string `json:"flow"`
-	// Checkout is true when new purchases and newly entered cards use this PSP
-	// under the merchant's checkout routing. Other armed PSPs stay listed so
-	// their existing cards and agreements keep working.
-	Checkout bool `json:"checkout"`
-	// Config holds whitelisted public values, such as a tokenization key.
-	Config map[string]string `json:"config,omitempty"`
-	// Status is CheckoutPSPTemporarilyUnavailable when the PSP's credentials
-	// could not be checked just now: it is listed without Config, and the
-	// document is not cacheable. Empty is available. RetryAfter is in seconds.
-	Status     string `json:"status,omitempty"`
-	RetryAfter int    `json:"retry_after,omitempty"`
-}
-
-// CheckoutPSPTemporarilyUnavailable marks a PSP (or option) whose
-// credentials could not be checked just now; retry after RetryAfter seconds.
-const CheckoutPSPTemporarilyUnavailable = "temporarily_unavailable"
 
 // CheckoutCustomerIdentity is the buyer as the host knows it.
 type CheckoutCustomerIdentity struct {

@@ -61,7 +61,7 @@ func openSolanaShop(t *testing.T) *solanaShop {
 	require.NoError(t, err)
 	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)
 	fake.Fund(merchant.PublicKey(), mint, 0)
-	return &solanaShop{w: w, fake: fake, merchant: merchant, mint: mint, option: w.options(billing.GetCheckoutConfigParams{ProductKey: key, PriceKey: key + "-monthly"})["solana"], price: priceID(t, w, key, key+"-monthly"), key: key}
+	return &solanaShop{w: w, fake: fake, merchant: merchant, mint: mint, option: w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})["solana"], price: priceID(t, w, key, key+"-monthly"), key: key}
 }
 
 type solanaBuyer struct {

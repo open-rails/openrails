@@ -1,9 +1,7 @@
 package embedhttp
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -18,13 +16,7 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	h := CapabilitiesHandler(nil, []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true}, nil)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil))
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "public, max-age=300", rec.Header().Get("Cache-Control"))
-	var caps Capabilities
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &caps))
+	caps := CapabilitiesFor(nil, []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"team_invites": true})
 	require.Len(t, caps.RouteGroups, len(AllRouteSets), "every known group is reported")
 	for _, rs := range AllRouteSets {
 		require.Equal(t, rs == RouteSetCheckout || rs == RouteSetCustomer || rs == RouteSetWebhooks, caps.RouteGroups[string(rs)], rs)
@@ -33,13 +25,8 @@ func TestCapabilities(t *testing.T) {
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "provider_credential_writes": false,
 		"api_host": false, "catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
+		"team_invites": true,
 	}, caps.Features)
-
-	req := httptest.NewRequest(http.MethodGet, "/billing/v1/capabilities", nil)
-	req.Header.Set("If-None-Match", rec.Header().Get("ETag"))
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	require.Equal(t, http.StatusNotModified, rec.Code)
 
 	// Customer features follow the mounted customer scope, not provider support.
 	for _, tc := range []struct {
@@ -99,7 +86,8 @@ func TestRoutesValidation(t *testing.T) {
 }
 
 // The combined handler refuses to mount the merchant API without its Auth,
-// and only checkout routes join the permissive-CORS browser tier.
+// and only the configuration and checkout routes join the permissive-CORS
+// browser tier.
 func TestNewRoutes(t *testing.T) {
 	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}}) })
 
@@ -113,10 +101,11 @@ func TestNewRoutes(t *testing.T) {
 		key := e.Method + " " + e.Path
 		keys = append(keys, key)
 		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/checkout") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
-			slices.Contains([]string{"/billing/v1/products", "/billing/v1/checkout-config", "/billing/v1/currencies"}, e.Path), e.Browser, key)
+			slices.Contains([]string{"/billing/v1/products", "/billing/v1/config"}, e.Path), e.Browser, key)
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
-	require.Contains(t, keys, "GET /billing/v1/capabilities")
+	require.Contains(t, keys, "GET /billing/v1/config")
+	require.Contains(t, keys, "GET /billing/v1/merchant/config")
 	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
 	require.Contains(t, keys, "GET /billing/v1/merchant/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/merchant/payments")

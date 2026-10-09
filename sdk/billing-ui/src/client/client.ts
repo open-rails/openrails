@@ -17,9 +17,8 @@ import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
 import {
   cardSetupSchema,
-  currencyRegistrySchema,
   checkoutSessionLinkSchema,
-  checkoutConfigSchema,
+  publicConfigSchema,
   paymentAuthenticationSchema,
   invoiceSchema,
   listPageSchema,
@@ -32,9 +31,8 @@ import {
   tierChangePreviewSchema,
   tierChangeSchema,
   type CardSetup,
-  type Currency,
   type CheckoutSessionLink,
-  type CheckoutConfig,
+  type PublicConfig,
   type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
@@ -542,13 +540,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** The server's currency registry; `currencies` is the pinned copy. */
-    async listCurrencies(signal?: AbortSignal): Promise<Currency[]> {
-      const registry = await json(currencyRegistrySchema, "/currencies", {
-        signal,
-      })
-      return registry.currencies
-    },
 
     /**
      * Mints a hosted checkout session for the signed-in customer and one
@@ -634,14 +625,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * The merchant's public checkout configuration: its PSPs and, with a
-     * Solana PSP, the network and accepted tokens a wallet adapter needs.
+     * The deployment's public configuration: what the mount serves, the
+     * currency registry and the merchant's payment setup. React components
+     * share one copy through `useConfig()`.
      */
-    getCheckoutConfig(signal?: AbortSignal): Promise<CheckoutConfig> {
-      return json(checkoutConfigSchema, "/checkout-config", {
-        signal,
-        anonymous: true,
-      })
+    getConfig(signal?: AbortSignal): Promise<PublicConfig> {
+      return json(publicConfigSchema, "/config", { signal, anonymous: true })
     },
 
     /**

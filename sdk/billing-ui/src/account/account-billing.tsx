@@ -14,7 +14,6 @@ import {
 } from "./subscriptions-panel"
 
 export interface AccountBillingProps {
-  psps?: PaymentMethodsPanelProps["psps"]
   cardSetupReturnURL?: PaymentMethodsPanelProps["cardSetupReturnURL"]
   /** Offers to make a card the one that collects this currency's invoices. */
   collectionCurrency?: string
@@ -30,7 +29,6 @@ export interface AccountBillingProps {
 
 /** Subscriptions, payment methods and history in one column. */
 export function AccountBilling({
-  psps,
   cardSetupReturnURL,
   collectionCurrency,
   defaultCountry,
@@ -54,7 +52,6 @@ export function AccountBilling({
         appearance={appearance}
       />
       <PaymentMethodsPanel
-        psps={psps}
         cardSetupReturnURL={cardSetupReturnURL}
         collectionCurrency={collectionCurrency}
         defaultCountry={defaultCountry}

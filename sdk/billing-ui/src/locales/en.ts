@@ -111,6 +111,7 @@ export const en = {
     saveNotice:
       "Cards you enter are saved to your account for future payments.",
     unavailable: "Secure card entry is unavailable for this provider.",
+    addUnavailable: "Adding a card is temporarily unavailable.",
     verificationPending:
       "Card verification is pending. Check your saved cards before trying again.",
     cardLabel: "{brand} •••• {last4}",

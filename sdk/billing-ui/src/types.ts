@@ -23,7 +23,7 @@ export const amountSchema = z
   .refine(isAmount, "amount must be an int64 decimal string")
 
 // The currency's registered scale from OpenRails' currency registry
-// (openrails.LookupCurrency / GET /v1/currencies), stamped by the host.
+// (openrails.LookupCurrency / GET /v1/config), stamped by the host.
 export const unitDecimalsSchema = z
   .number()
   .refine(

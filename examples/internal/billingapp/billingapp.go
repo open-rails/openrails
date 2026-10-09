@@ -155,11 +155,11 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	checkoutConfig, err := client.GetCheckoutConfig(ctx, billing.GetCheckoutConfigParams{ProductKey: in.CheckoutProductKey, PriceKey: in.CheckoutPriceKey})
+	options, err := client.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{ProductKey: in.CheckoutProductKey, PriceKey: in.CheckoutPriceKey})
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
-	r.CheckoutRails = len(checkoutConfig.Options)
+	r.CheckoutRails = len(options.Items)
 	// The buyer pays the session on the payment page; a saved card needs the
 	// buyer's own proof there.
 	link, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{

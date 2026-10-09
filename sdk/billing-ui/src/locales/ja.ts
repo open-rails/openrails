@@ -111,6 +111,7 @@ export const ja: BillingUiMessageBundle = {
     saveNotice:
       "入力したカードは今後のお支払いのためにアカウントに保存されます。",
     unavailable: "このプロバイダーでは安全なカード入力を利用できません。",
+    addUnavailable: "現在、カードを追加できません。",
     verificationPending:
       "カードの確認が保留中です。もう一度試す前に保存済みのカードを確認してください。",
     cardLabel: "{brand} •••• {last4}",

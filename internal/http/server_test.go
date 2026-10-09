@@ -93,7 +93,10 @@ func TestCaptchaDiscoveryRoutes(t *testing.T) {
 
 func TestStandaloneMetaRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	(&Server{}).registerStandaloneMetaRoutes(mux)
+	srv := &Server{}
+	srv.registerStandaloneMetaRoutes(mux)
+	require.True(t, srv.nativeBrowser["GET /v1/config"], "a browser reads the configuration from any origin")
+	require.False(t, srv.nativeBrowser["GET /health/live"])
 	get := func(path string) *httptest.ResponseRecorder {
 		return serve(t, mux, httptest.NewRequest(http.MethodGet, path, nil))
 	}
@@ -107,16 +110,21 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Contains(t, ready.Body.String(), `"service_unavailable"`)
 	require.NotContains(t, ready.Body.String(), "postgres")
 
-	// #623: the standalone server publishes every route group.
-	caps := get("/v1/capabilities")
-	require.Equal(t, http.StatusOK, caps.Code)
-	var groups struct {
-		RouteGroups map[string]bool `json:"route_groups"`
-	}
-	require.NoError(t, json.Unmarshal(caps.Body.Bytes(), &groups), caps.Body.String())
+	// #623: the standalone server publishes every route group; a request
+	// that resolves no merchant has no payment setup.
+	doc := get("/v1/config")
+	require.Equal(t, http.StatusOK, doc.Code)
+	var served billing.PublicConfig
+	require.NoError(t, json.Unmarshal(doc.Body.Bytes(), &served), doc.Body.String())
 	for _, rs := range embedhttp.AllRouteSets {
-		require.True(t, groups.RouteGroups[string(rs)], rs)
+		require.True(t, served.Capabilities.RouteGroups[string(rs)], rs)
 	}
+	require.Nil(t, served.Payment)
+	require.Contains(t, doc.Body.String(), `"payment":null`)
+	require.Equal(t, "public, max-age=300", doc.Header().Get("Cache-Control"))
+	revalidate := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
+	revalidate.Header.Set("If-None-Match", doc.Header().Get("ETag"))
+	require.Equal(t, http.StatusNotModified, serve(t, mux, revalidate).Code)
 
 	// Provider credential writes are advertised only for a writable DB backend.
 	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
@@ -126,10 +134,10 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 				Config:            &config.Config{SecretBackend: source},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}}).registerStandaloneMetaRoutes(mux)
-			w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil))
-			var caps embedhttp.Capabilities
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps))
-			require.Equal(t, source == config.SecretBackendDB && writable, caps.Features["provider_credential_writes"], "%s writable=%v", source, writable)
+			w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/config", nil))
+			var doc billing.PublicConfig
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &doc))
+			require.Equal(t, source == config.SecretBackendDB && writable, doc.Capabilities.Features["provider_credential_writes"], "%s writable=%v", source, writable)
 		}
 	}
 }

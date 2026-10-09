@@ -38,7 +38,7 @@ import (
 var errHostedOfferUnavailable = apperr.New(http.StatusUnprocessableEntity, "checkout_offer_unavailable", "This purchase is not available.")
 
 // CheckoutSessionMint is a mint request. Advertise attaches the browser driver
-// and public values to the price's options (the HTTP layer's checkout-config
+// and public values to the price's options (the HTTP layer's payment
 // projection); an option the page cannot drive is not offered.
 type CheckoutSessionMint struct {
 	billing.CreateCheckoutSessionParams

@@ -1,7 +1,7 @@
 // Wire types of the OpenRails customer surface (`/billing/v1/me/*`) and public
 // catalog, validated at the boundary. Money is an int64 string in the
-// currency's native unit; its scale comes from GET /currencies. Fixtures:
-// src/test/fixtures/wire.
+// currency's native unit; its scale comes from GET /config's currencies.
+// Fixtures: src/test/fixtures/wire.
 import { z } from "zod"
 
 import { pspConfigSchema } from "../psp"
@@ -323,10 +323,6 @@ export const currencySchema = z.object({
 })
 export type Currency = z.infer<typeof currencySchema>
 
-export const currencyRegistrySchema = z.object({
-  currencies: z.array(currencySchema),
-})
-
 export const tierChangePreviewSchema = z.object({
   /** `upgrade | downgrade` */
   action: z.string(),
@@ -417,11 +413,11 @@ export const solanaTokensSchema = z.object({
 })
 
 /**
- * The merchant's public checkout configuration (`GET /checkout-config`): its
- * armed PSPs with their public values and, with a Solana PSP, the network and
- * accepted tokens a wallet adapter is configured with.
+ * The merchant's browser payment setup: its armed PSPs with their public
+ * values and, with a Solana PSP, the network and accepted tokens a wallet
+ * adapter is configured with.
  */
-export const checkoutConfigSchema = z.object({
+export const paymentConfigSchema = z.object({
   psps: z
     .array(pspConfigSchema)
     .nullish()
@@ -449,7 +445,25 @@ export const checkoutConfigSchema = z.object({
     })
     .nullish(),
 })
-export type CheckoutConfig = z.infer<typeof checkoutConfigSchema>
+export type PaymentConfig = z.infer<typeof paymentConfigSchema>
+
+/**
+ * What a browser needs to know about the deployment and its merchant
+ * (`GET /config`): the mount's capabilities, the currency registry and the
+ * merchant's payment setup (null when the request resolves no merchant).
+ */
+export const publicConfigSchema = z.object({
+  capabilities: z.object({
+    route_groups: z.record(z.string(), z.boolean()),
+    features: z.record(z.string(), z.boolean()),
+  }),
+  currencies: z
+    .array(currencySchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  payment: paymentConfigSchema.nullish(),
+})
+export type PublicConfig = z.infer<typeof publicConfigSchema>
 
 /** An in-page card setup; `payment_method_id` is set once the card is saved. */
 export const cardSetupSchema = z.object({

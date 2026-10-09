@@ -13,6 +13,7 @@ import {
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
+import { useConfig, useCurrencyScales } from "./config"
 import { useBillingRefresh } from "./context"
 import {
   usePaymentMethods,
@@ -35,6 +36,32 @@ function setup<T>(
   )
   return renderHook(hook, { wrapper })
 }
+
+describe("useConfig", () => {
+  it("fetches GET /config once for every reader", async () => {
+    const server = fakeBilling({
+      currencies: [{ code: "XTS", decimals: 3, minor_decimals: 3 }],
+    })
+    const { result } = setup(
+      () => ({ a: useConfig(), b: useConfig(), scales: useCurrencyScales() }),
+      server
+    )
+    expect(result.current.a.loading).toBe(true)
+    expect(result.current.scales.USD).toBe(6)
+    await waitFor(() => expect(result.current.a.config).not.toBeNull())
+    expect(result.current.b.config).toBe(result.current.a.config)
+    expect(result.current.scales.XTS).toBe(3)
+    expect(result.current.scales.USD).toBe(6)
+    expect(server.calls.filter((call) => call === "GET /config")).toHaveLength(
+      1
+    )
+
+    server.fail["GET /config"] = apiError(404, "resource_not_found")
+    act(() => result.current.a.refetch())
+    await waitFor(() => expect(result.current.b.error?.status).toBe(404))
+    expect(result.current.b.config).not.toBeNull()
+  })
+})
 
 describe("useSubscriptions", () => {
   it("cancels, patches the row and notifies the host", async () => {

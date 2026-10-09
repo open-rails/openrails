@@ -629,14 +629,12 @@ Mounting gives your users these routes under `/billing`:
 | Route | What it does |
 |---|---|
 | `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
-| `GET /billing/v1/currencies` | each currency's decimal places, for formatting amounts |
-| `GET /billing/v1/checkout-config` | the payment methods a buyer can use, with their browser config |
 | `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
 | `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
 | `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
 | `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
 | `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
-| `GET /billing/v1/capabilities` | which route groups and features are mounted, for your UI (always mounted) |
+| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, and the payment methods a buyer can use with their browser config (always mounted) |
 
 **Your customers' own billing** (`Routes.Customers`, signed in, always as the caller)
 
@@ -1131,7 +1129,7 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `CheckEntitlements` / `ListCustomerEntitlements` | Keys derived from the products a customer holds; `CheckEntitlements` checks up to 100 keys and 10 prefixes of one customer, `ListCustomerEntitlements` pages their keys |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `GetCheckoutConfig` | `GetCheckoutConfigParams`: `PriceID` or `ProductKey` + `PriceKey` lists the options that can sell it |
+| `ListCheckoutOptions` | `CheckoutOptionListParams`: `PriceID` or `ProductKey` + `PriceKey` names the price whose options it lists |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
 | Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |

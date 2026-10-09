@@ -29,30 +29,39 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 	return &out, nil
 }
 
-// GetCheckoutConfig returns the merchant's checkout configuration: its armed
-// PSPs and their public values, and with a price, the ways checkout can sell
-// it.
-func (c *Client) GetCheckoutConfig(ctx context.Context, query billing.GetCheckoutConfigParams, requestOptions ...RequestOption) (*billing.CheckoutConfig, error) {
-	if !query.PriceID.IsZero() && strings.TrimSpace(query.PriceKey) != "" {
-		return nil, invalidErr("price_id and price_key are exclusive")
+// GetPublicConfig returns what GET /v1/config serves a browser: the
+// capabilities of the mount serving the request, the currency registry and
+// the merchant's payment setup.
+func (c *Client) GetPublicConfig(ctx context.Context, requestOptions ...RequestOption) (*billing.PublicConfig, error) {
+	var out billing.PublicConfig
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/config", nil, &out, requestOptions...); err != nil {
+		return nil, err
 	}
-	if (strings.TrimSpace(query.PriceKey) != "") != (strings.TrimSpace(query.ProductKey) != "") {
+	return &out, nil
+}
+
+// ListCheckoutOptions lists the ways checkout can sell one price now, in
+// routing order, each with the browser driver and public values that render
+// it.
+func (c *Client) ListCheckoutOptions(ctx context.Context, query billing.CheckoutOptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CheckoutOption], error) {
+	hasKey := strings.TrimSpace(query.PriceKey) != ""
+	switch {
+	case !query.PriceID.IsZero() && hasKey:
+		return nil, invalidErr("price_id and price_key are exclusive")
+	case hasKey != (strings.TrimSpace(query.ProductKey) != ""):
 		return nil, invalidErr("product_key and price_key must be supplied together")
+	case query.PriceID.IsZero() && !hasKey:
+		return nil, invalidErr("price_id or product_key and price_key is required")
 	}
 	values := url.Values{}
 	if !query.PriceID.IsZero() {
 		values.Set("price_id", query.PriceID.String())
-	}
-	if strings.TrimSpace(query.PriceKey) != "" {
+	} else {
 		values.Set("price_key", query.PriceKey)
 		values.Set("product_key", query.ProductKey)
 	}
-	path := "/v1/merchant/checkout-config"
-	if len(values) > 0 {
-		path += "?" + values.Encode()
-	}
-	var out billing.CheckoutConfig
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	var out billing.ListPage[billing.CheckoutOption]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+values.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

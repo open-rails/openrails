@@ -79,7 +79,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 
 	b := &solanaBuyer{customer: w.newCustomer(), wallet: solanago.NewWallet().PrivateKey}
 	fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
-	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options(billing.GetCheckoutConfigParams{ProductKey: "basic-" + sfx, PriceKey: "basic-" + sfx + "-monthly"})["solana"], price: price("basic"), key: "basic-" + sfx}
+	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options(billing.CheckoutOptionListParams{ProductKey: "basic-" + sfx, PriceKey: "basic-" + sfx + "-monthly"})["solana"], price: price("basic"), key: "basic-" + sfx}
 	c := shop.checkout(t, b, b.wallet.PublicKey())
 	done, err := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
 	require.NoError(t, err)

@@ -114,7 +114,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		"GET /billing/v1/merchant/payments", "GET /billing/v1/catalog", "POST /billing/v1/merchant/billing-import",
 		"GET /billing/v1/me/invoices/{id}", "GET /billing/account/invoices",
 		"OPTIONS /billing/v1/me/invoices/{id}",
-		"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/capabilities",
+		"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/config",
 	}
 	build := func(resolve func(context.Context, *http.Request) (billingauth.Target, error)) *Table {
 		table := &Table{}
@@ -163,7 +163,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 	require.Equal(t, 8, calls)
 
 	// Routes that act on no credential's merchant never resolve a selector.
-	for _, route := range []string{"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/capabilities", "OPTIONS /billing/v1/me/invoices/inv_1"} {
+	for _, route := range []string{"GET /billing/v1/merchants", "GET /billing/v1/products", "GET /billing/v1/config", "OPTIONS /billing/v1/me/invoices/inv_1"} {
 		method, path, _ := strings.Cut(route, " ")
 		rec := call(method, path, slug)
 		require.Equal(t, http.StatusOK, rec.Code, route)

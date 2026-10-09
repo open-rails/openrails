@@ -124,9 +124,9 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 			t.Parallel()
 			w := tc.world(t)
 			price := w.membership("content:members", 9_990_000)
-			config, err := w.client[remote].GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
+			config, err := w.client[remote].GetPublicConfig(t.Context())
 			require.NoError(t, err)
-			for _, psp := range config.PSPs {
+			for _, psp := range config.Payment.PSPs {
 				if psp.Rail != "nmi" {
 					continue
 				}
@@ -134,7 +134,7 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_key"] != "")
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_url"] != "", "a server PSP's page loads no gateway script")
 			}
-			option := w.options(billing.GetCheckoutConfigParams{PriceID: price.ID})["nmi"]
+			option := w.options(billing.CheckoutOptionListParams{PriceID: price.ID})["nmi"]
 			require.Equal(t, tc.driver, option.Driver)
 			require.Equal(t, tc.tokenizerKeyed, len(option.PublicConfig) > 0)
 		})

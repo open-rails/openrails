@@ -122,16 +122,16 @@ func probe(t *testing.T, rt *openrails.Client, name string) error {
 	return nil
 }
 
-func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.CheckoutPSPConfig, bool) {
+func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.PSPPaymentConfig, bool) {
 	t.Helper()
-	cfg, err := client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
+	cfg, err := client.GetPublicConfig(t.Context())
 	require.NoError(t, err)
-	for _, psp := range cfg.PSPs {
+	for _, psp := range cfg.Payment.PSPs {
 		if psp.Rail == rail {
 			return psp, true
 		}
 	}
-	return billing.CheckoutPSPConfig{}, false
+	return billing.PSPPaymentConfig{}, false
 }
 
 func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
@@ -365,7 +365,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
 	psp, ok := checkoutPSP(t, client, "solana")
 	require.True(t, ok)
-	require.Equal(t, billing.CheckoutPSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
+	require.Equal(t, billing.PSPTemporarilyUnavailable, psp.Status, "checkout lists the unapproved rail as temporarily unavailable")
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
 

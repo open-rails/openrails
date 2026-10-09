@@ -311,10 +311,10 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
-		cfg, err := r.client.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
+		cfg, err := r.client.GetPublicConfig(t.Context())
 		require.NoError(t, err)
 		found := false
-		for _, psp := range cfg.PSPs {
+		for _, psp := range cfg.Payment.PSPs {
 			if psp.Rail == "nmi" {
 				found = true
 				require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", psp.Config["tokenization_url"])

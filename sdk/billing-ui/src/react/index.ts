@@ -8,6 +8,12 @@ export {
   type BillingContextValue,
 } from "./context"
 export {
+  useConfig,
+  useCurrencyScales,
+  type ConfigState,
+  type ConfigStore,
+} from "./config"
+export {
   usePaymentMethods,
   usePayments,
   useProducts,

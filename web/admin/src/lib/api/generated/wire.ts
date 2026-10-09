@@ -399,12 +399,6 @@ export type CheckProductAccessParams = {
   product_keys?: string[]
 }
 
-export type CheckoutConfig = {
-  psps: CheckoutPSPConfig[]
-  solana?: SolanaCheckoutConfig
-  options: CheckoutOption[]
-}
-
 export type CheckoutCustomerIdentity = {
   id?: string
   verified_email?: string
@@ -419,19 +413,6 @@ export type CheckoutOption = {
   mode: string
   driver?: string
   public_config?: Record<string, string>
-  status?: string
-  retry_after?: number
-}
-
-export type CheckoutPSPConfig = {
-  psp_id: string
-  key: string
-  rail: string
-  custodian: string
-  display_name: string
-  flow: string
-  checkout: boolean
-  config?: Record<string, string>
   status?: string
   retry_after?: number
 }
@@ -746,10 +727,6 @@ export type CreditTransaction = {
   source: string
   source_id: string
   created_at: string
-}
-
-export type CurrencyRegistry = {
-  currencies: CurrencyUnits[]
 }
 
 export type CurrencyUnits = {
@@ -1591,6 +1568,19 @@ export type PSPLinkState = {
   message: string
 }
 
+export type PSPPaymentConfig = {
+  psp_id: string
+  key: string
+  rail: string
+  custodian: string
+  display_name: string
+  flow: string
+  checkout: boolean
+  config?: Record<string, string>
+  status?: string
+  retry_after?: number
+}
+
 export type PSPRef = {
   id?: string
   key?: string
@@ -1692,6 +1682,11 @@ export type PaymentAttempt = {
   payment_method_id: string | null
   payment_id: string | null
   enriched_at: string | null
+}
+
+export type PaymentConfig = {
+  psps: PSPPaymentConfig[]
+  solana: SolanaPaymentConfig | null
 }
 
 export type PaymentFailure = {
@@ -2007,6 +2002,12 @@ export type ProviderBillingResolution = {
   resolved_at: string
 }
 
+export type PublicConfig = {
+  capabilities: Capabilities
+  currencies: CurrencyUnits[]
+  payment: PaymentConfig | null
+}
+
 export type RailDefinition = {
   rail: "ccbill" | "nmi" | "solana" | "stripe"
   display_name: string
@@ -2285,22 +2286,6 @@ export type SetTeamRoleParams = {
   role?: string
 }
 
-export type SolanaCheckoutConfig = {
-  network: string
-  chain: string
-  preferred_token: string
-  tokens: SolanaCheckoutToken[]
-}
-
-export type SolanaCheckoutToken = {
-  symbol: string
-  name: string
-  mint: string
-  decimals: number
-  preferred: boolean
-  recurring_eligible: boolean
-}
-
 export type SolanaPayGetResponse = {
   label: string
   icon: string
@@ -2313,6 +2298,22 @@ export type SolanaPayPostRequest = {
 export type SolanaPayPostResponse = {
   transaction: string
   message?: string
+}
+
+export type SolanaPaymentConfig = {
+  network: string
+  chain: string
+  preferred_token: string
+  tokens: SolanaPaymentToken[]
+}
+
+export type SolanaPaymentToken = {
+  symbol: string
+  name: string
+  mint: string
+  decimals: number
+  preferred: boolean
+  recurring_eligible: boolean
 }
 
 export type SpendDelegation = {

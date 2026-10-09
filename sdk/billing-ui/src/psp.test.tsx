@@ -5,6 +5,7 @@ import { createBillingClient } from "./client/client"
 import { BillingUiProvider } from "./provider"
 import {
   canAuthenticatePayment,
+  cardRetryAfter,
   cardSetupDriver,
   checkoutPsps,
   railPsp,
@@ -84,6 +85,19 @@ describe("PSP flows", () => {
     expect(cardSetupDriver({ ...nmi, custodian: "basis_theory" })).toBeNull()
     expect(canAuthenticatePayment(stripe)).toBe(true)
     expect(canAuthenticatePayment(nmi)).toBe(false)
+  })
+
+  it("saves no card with a temporarily unavailable PSP and says when to ask again", () => {
+    const down = {
+      ...nmi,
+      flow: "card",
+      config: null,
+      status: "temporarily_unavailable",
+      retry_after: 30,
+    }
+    expect(cardSetupDriver(down)).toBeNull()
+    expect(cardRetryAfter([down, { ...down, retry_after: 10 }])).toBe(10)
+    expect(cardRetryAfter([nmi, { ...ccbill, status: down.status }])).toBeNull()
   })
 
   it("offers Stripe Elements as an in-page card rail and hides non-checkout PSPs", () => {

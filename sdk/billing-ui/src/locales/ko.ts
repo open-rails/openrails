@@ -109,6 +109,7 @@ export const ko: BillingUiMessageBundle = {
     provider: "결제 제공업체",
     saveNotice: "입력한 카드는 향후 결제를 위해 계정에 저장됩니다.",
     unavailable: "이 제공업체에서는 안전한 카드 입력을 사용할 수 없습니다.",
+    addUnavailable: "지금은 카드를 추가할 수 없습니다.",
     verificationPending:
       "카드 확인이 대기 중입니다. 다시 시도하기 전에 저장된 카드를 확인하세요.",
     cardLabel: "{brand} •••• {last4}",

@@ -405,10 +405,10 @@ func (w *world) start() {
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config, err := local.GetCheckoutConfig(t.Context(), billing.GetCheckoutConfigParams{})
+	config, err := local.GetPublicConfig(t.Context())
 	require.NoError(t, err)
 	w.psp = map[string]billing.PSPID{}
-	for _, psp := range config.PSPs {
+	for _, psp := range config.Payment.PSPs {
 		w.psp[psp.Rail] = psp.PSPID
 	}
 	for _, rail := range []string{"stripe", "nmi"} {

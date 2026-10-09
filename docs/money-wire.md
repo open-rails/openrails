@@ -11,8 +11,8 @@ beside a `currency`. No field name carries a currency.
 ```
 
 - **Native units** are the currency's registered scale: micros for USD and EUR
-  (`"1234567"` is 1.234567 USD), 10^4 per yen for JPY. `GET /v1/currencies`
-  lists each currency's `decimals` (the native scale) and `minor_decimals`
+  (`"1234567"` is 1.234567 USD), 10^4 per yen for JPY. `GET /v1/config`'s
+  `currencies` list each currency's `decimals` (the native scale) and `minor_decimals`
   (what providers settle in); `billing.Currencies()` is the same table in Go.
 - **Every monetary value is a string**: prices, payments and refunds, balances,
   holds and captures, credit grants and transactions, usage, invoices, limits
@@ -72,7 +72,7 @@ accept any fractional precision. A timestamp with no value is `null`.
 
 The registry has one owner. Go consumers read it with `billing.Currencies()`
 / `billing.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
-table from the public `GET /v1/currencies` route. The admin UI's
+table from the `currencies` of the public `GET /v1/config`. The admin UI's
 `web/admin/src/lib/currency-units.json` is generated from it by
 `go run ./scripts/currency-units` and pinned by a Go test. It formats exact decimal strings with BigInt/Intl, including
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown

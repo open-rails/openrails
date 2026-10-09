@@ -1,6 +1,6 @@
 // Exact money. Every amount the host serves is a signed int64 decimal string
 // of the plan currency's native unit; plan.unit_decimals is that currency's
-// registered scale (OpenRails' currency registry, GET /v1/currencies). Nothing
+// registered scale (OpenRails' currency registry, GET /v1/config). Nothing
 // here converts an amount to a JS number: values are scaled with BigInt and
 // only the exact major-unit decimal is handed to Intl.
 

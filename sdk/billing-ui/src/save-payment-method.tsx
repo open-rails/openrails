@@ -30,7 +30,7 @@ import {
 import { cn } from "cn"
 
 export interface SavePaymentMethodProps {
-  /** The PSP to save the card with, from OpenRails's checkout config. */
+  /** The PSP to save the card with, from OpenRails's payment config. */
   psp: PspConfig
   onSaved: (paymentMethodId: string) => void
   /**

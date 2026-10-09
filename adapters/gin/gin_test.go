@@ -87,12 +87,12 @@ func TestInventoryMountsNatively(t *testing.T) {
 		method, path string
 		code         int
 	}{
-		{http.MethodGet, "/api/pay/v1/capabilities", http.StatusOK},
-		{http.MethodHead, "/api/pay/v1/capabilities", http.StatusOK},
+		{http.MethodGet, "/api/pay/v1/config", http.StatusOK},
+		{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
 		{http.MethodPost, "/api/pay/v1/merchant/product-access", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/merchant/customers/entitlementsXYZ/billing-profile", http.StatusMethodNotAllowed},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
-		{http.MethodGet, "/api/payment/v1/capabilities", http.StatusTeapot},
+		{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},
 	} {
 		w := serve(engine, tc.method, tc.path, nil)
 		require.Equal(t, tc.code, w.Code, "%s %s: %s", tc.method, tc.path, w.Body.String())

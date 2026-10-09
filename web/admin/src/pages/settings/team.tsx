@@ -84,7 +84,7 @@ function roleLabel(role: string): string {
 export function TeamTab() {
   const members = useQuery(adminQueries.team())
   const invites = useQuery(adminQueries.teamInvites())
-  const capabilities = useQuery(adminQueries.capabilities())
+  const config = useQuery(adminQueries.config())
 
   if (members.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
@@ -106,7 +106,9 @@ export function TeamTab() {
             </p>
           </div>
           <InviteDialog
-            invitesEnabled={capabilities.data?.features.team_invites ?? false}
+            invitesEnabled={
+              config.data?.capabilities.features?.team_invites ?? false
+            }
           />
         </div>
         {team.length === 0 ? (

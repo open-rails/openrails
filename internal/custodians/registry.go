@@ -52,10 +52,10 @@ type SettingKey struct {
 	Kind     ValueKind
 	Required bool
 	// Public: safe to serve to an unauthenticated browser. This is the
-	// whitelist the public checkout-config projection reads — a setting not
-	// marked here never leaves the server.
+	// whitelist GET /v1/config's payment section reads — a setting not marked
+	// here never leaves the server.
 	Public bool
-	// PublicField is the wire name in the public checkout config (Public only).
+	// PublicField is the wire name in the payment section (Public only).
 	PublicField string
 }
 

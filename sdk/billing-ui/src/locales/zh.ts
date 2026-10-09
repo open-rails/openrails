@@ -108,6 +108,7 @@ export const zh: BillingUiMessageBundle = {
     provider: "支付服务商",
     saveNotice: "您输入的卡将保存到您的账户，用于以后的付款。",
     unavailable: "此服务商不支持安全的银行卡输入。",
+    addUnavailable: "暂时无法添加银行卡。",
     verificationPending: "银行卡验证待处理。请先查看已保存的银行卡，再重试。",
     cardLabel: "{brand} •••• {last4}",
     fallbackBrand: "银行卡",

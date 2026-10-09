@@ -109,11 +109,8 @@ var publicRailProfiles = map[string]railPublicProfile{
 // (internal/custodians), not a second whitelist here — the Public flag on a
 // setting slot is the whitelist.
 
-// PublicPSPConfig and PublicCheckoutConfig are the shared client wire types.
-type (
-	PublicPSPConfig      = billing.CheckoutPSPConfig
-	PublicCheckoutConfig = billing.CheckoutConfig
-)
+// PublicPSPConfig is the shared client wire type.
+type PublicPSPConfig = billing.PSPPaymentConfig
 
 // PublicPSPConfigFor projects an armed PSP onto its public browser config.
 // ok=false means the PSP must not be advertised: an unknown rail, or a
@@ -224,13 +221,13 @@ func publicSettingValue(settings map[string]any, key string) string {
 	}
 }
 
-// PublicCheckoutPSPs lists the merchant's ARMED PSPs for environment with each
+// PublicPSPs lists the merchant's ARMED PSPs for environment with each
 // one's public browser config. Armed means exactly what checkout means by it:
 // a non-archived billing.psps row for this merchant, rail and environment
 // whose full credential shape resolves — armed reports that, with the same
 // resolver checkout routes through. A PSP declared without credentials (an
 // import attribution) is an identity, never advertised as available.
-func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
+func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
 	scopes, err := s.activePSPScopes(ctx, id, environment)
 	if err != nil {
 		return nil, err
@@ -267,13 +264,13 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID,
 					"merchant_id": id.String(),
 					"rail":        scope.Rail,
 					"psp":         scope.Key,
-				}).Warn("public checkout config: PSP credentials could not be checked; listed as temporarily unavailable")
+				}).Warn("payment config: PSP credentials could not be checked; listed as temporarily unavailable")
 				cfg, _, _ := PublicPSPConfigFor(scope, custodian)
 				if cfg.PSPID.IsZero() {
 					cfg.PSPID, cfg.Rail, cfg.Key = billing.PSPID(scope.ID), strings.ToLower(scope.Rail), strings.ToLower(scope.Key)
 				}
 				cfg.Config = nil
-				cfg.Status, cfg.RetryAfter = billing.CheckoutPSPTemporarilyUnavailable, checkoutRetryAfterSeconds
+				cfg.Status, cfg.RetryAfter = billing.PSPTemporarilyUnavailable, pspRetryAfterSeconds
 				out = append(out, cfg)
 				continue
 			}
@@ -282,7 +279,7 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID,
 					"merchant_id": id.String(),
 					"rail":        scope.Rail,
 					"psp":         scope.Key,
-				}).Info("public checkout config: declared PSP is not armed")
+				}).Info("payment config: declared PSP is not armed")
 				continue
 			}
 		}
@@ -293,7 +290,7 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id billing.MerchantID,
 				"rail":        scope.Rail,
 				"psp":         scope.Key,
 				"reason":      reason,
-			}).Warn("public checkout config: armed PSP withheld from browsers")
+			}).Warn("payment config: armed PSP withheld from browsers")
 			continue
 		}
 		out = append(out, cfg)
@@ -371,9 +368,9 @@ func CheckoutDriver(psp PublicPSPConfig, mode string) string {
 	return driver
 }
 
-// checkoutRetryAfterSeconds is when a browser should ask again for a PSP
+// pspRetryAfterSeconds is when a browser should ask again for a PSP
 // whose credentials could not be checked.
-const checkoutRetryAfterSeconds = 30
+const pspRetryAfterSeconds = 30
 
 // storeFailure is an error of OpenRails' own database or of the request
 // itself: the document cannot be built at all, so it stays a 5xx.

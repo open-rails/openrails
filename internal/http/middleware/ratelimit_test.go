@@ -107,7 +107,7 @@ func TestClassifyBucket(t *testing.T) {
 		{"GET", "/v1/me/checkout-sessions/ocs_1", ""},
 		{"POST", "/v1/checkout-attempts/chk_1/solana-pay", "checkout"},
 		{"GET", "/v1/checkout-sessions/ocs_1", ""},
-		{"POST", "/v1/checkout-config", ""},
+		{"POST", "/v1/config", ""},
 		{"POST", "/v1/merchant/checkout-sessions", ""},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
 		{"POST", "/v1/customers/customer_123/checkout", ""},

@@ -7,7 +7,7 @@ the doc map. Follow it top to bottom.
 ## Non-negotiable facts
 
 - **Money is an integer in the currency's native units** — micros for USD, per the
-  `GET /v1/currencies` registry — sent as a decimal string on the wire
+  registry in `GET /v1/config` — sent as a decimal string on the wire
   ([money-wire.md](money-wire.md)). Never pass cents or dollars to an API that
   takes an amount.
 - **Entitlements are the access truth.** The host app gates features on active

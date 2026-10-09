@@ -2,6 +2,7 @@
 // fixtures. Real-server coverage lives in the Playwright e2e suite.
 import { vi, type Mock } from "vitest"
 
+import currenciesFixture from "./fixtures/wire/currencies.json"
 import subscriptionFixture from "./fixtures/wire/subscription.json"
 
 export const json = (status: number, body?: unknown) =>
@@ -155,6 +156,10 @@ export interface FakeBilling {
   methods: Row[]
   payments: Row[]
   products: Row[]
+  /** The payment setup's PSPs in `GET /config`. */
+  psps: Record<string, unknown>[]
+  /** The registry in `GET /config`. */
+  currencies: Record<string, unknown>[]
   /** Next response override per "METHOD /path". */
   fail: Record<string, Response>
   calls: string[]
@@ -163,7 +168,15 @@ export interface FakeBilling {
 
 export function fakeBilling(
   seed: Partial<
-    Pick<FakeBilling, "subscriptions" | "methods" | "payments" | "products">
+    Pick<
+      FakeBilling,
+      | "subscriptions"
+      | "methods"
+      | "payments"
+      | "products"
+      | "psps"
+      | "currencies"
+    >
   > = {}
 ): FakeBilling {
   const state: FakeBilling = {
@@ -171,6 +184,8 @@ export function fakeBilling(
     methods: seed.methods ?? [paymentMethod()],
     payments: seed.payments ?? [payment()],
     products: seed.products ?? [product()],
+    psps: seed.psps ?? [],
+    currencies: seed.currencies ?? currenciesFixture,
     fail: {},
     calls: [],
     fetch: vi.fn<typeof fetch>(),
@@ -315,6 +330,12 @@ export function fakeBilling(
           payment_method_id: body.payment_method_id,
         })
       }
+      if (key === "GET /config")
+        return json(200, {
+          capabilities: { route_groups: {}, features: {} },
+          currencies: state.currencies,
+          payment: { psps: state.psps, solana: null },
+        })
       if (key === "GET /products")
         return json(200, { data: state.products, next_cursor: null })
       if (key === "GET /me/payments")

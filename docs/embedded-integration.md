@@ -2,7 +2,7 @@
 
 The full guide to running the OpenRails billing engine in-process;
 `examples/embedded` is the runnable quickstart. Money is an integer in the
-currency's native units (`GET /v1/currencies`; micros for USD), a decimal string
+currency's native units (`GET /v1/config`'s `currencies`; micros for USD), a decimal string
 on the wire ([money-wire.md](money-wire.md)). Vocabulary: a
 **rail** is a gateway kind (`nmi` / `ccbill` / `stripe` / `solana`); a **PSP** is your
 concrete account on a rail (e.g. `mobius` on nmi).
@@ -359,8 +359,8 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Routes` | Exposed surface |
 |---|---|
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
-| (always) | Capability discovery (what this mount serves) and signature-checked provider callbacks |
-| `Storefront` | Products, prices, currencies, checkout config, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay and the captcha. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`). The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
+| (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup) and signature-checked provider callbacks |
+| `Storefront` | Products, prices, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay and the captcha. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`). The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
 | `Customers` | `/v1/me/*` for `Config.Merchant`: `CustomerSelfService`, `CustomerSubscriptionManagement` or `CustomerBillingManagement`; the zero value `CustomersNone` mounts none |
 | `Auth` | Your auth (above); required by `Customers`, `CustomerProfiles`, `Merchant` and `MerchantConfig`. A checkout session shows saved cards only to its own customer, admitted by it |
 | `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or their own `Auth` |
@@ -408,7 +408,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `ListCustomerSettings`, `UpdateCustomerSettings` (credit limits, trust levels, billing policy, invoice profile), `ListCustomerDelinquency`, `ListDelinquency`, `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
-| Checkout | `CreateCheckoutSession`, `GetCheckoutConfig` |
+| Checkout | `CreateCheckoutSession`, `ListCheckoutOptions`, `GetPublicConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
 | Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice` |
