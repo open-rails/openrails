@@ -48,17 +48,14 @@ func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 	cfg := authkit.Config{
 		Roles:        rbac,
 		Merchant:     authkit.MerchantConfig{Root: true}, // staff hold merchant permissions on the root group
-		Schema:       "profiles",
+		Database:     authkit.DatabaseConfig{Schema: "profiles"},
 		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 	}
-	if err := authkit.Migrate(ctx, db, cfg, authkit.MigrateOptions{}); err != nil {
-		return nil, err
-	}
-	return authkit.New(ctx, cfg, authkit.Deps{Postgres: db})
+	return authkit.New(ctx, cfg, authkit.Deps{Postgres: db}) // creates or upgrades its own tables
 }
 
 func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error) {

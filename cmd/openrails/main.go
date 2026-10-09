@@ -120,7 +120,7 @@ func newRootCmd() *cobra.Command {
 
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
-		Short: "Apply all database migrations",
+		Short: "Apply OpenRails and River migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
@@ -130,7 +130,7 @@ func newRootCmd() *cobra.Command {
 
 	migratePgCmd := &cobra.Command{
 		Use:   "pg",
-		Short: "Apply standalone Postgres migrations (OpenRails, River, and AuthKit)",
+		Short: "Apply OpenRails and River migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
@@ -345,8 +345,8 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// applyStandaloneMigrations does what New does first: billing, River and,
-// with the control plane, AuthKit.
+// applyStandaloneMigrations does what New does first: billing and River.
+// AuthKit migrates itself when the control plane is built.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 	if err != nil {

@@ -456,8 +456,8 @@ if err := bill.Start(ctx, openrails.WithRiverClient(fleet)); err != nil { // enq
 }
 ```
 
-AuthKit joins the same fleet when its config says
-`River: authkit.RiverConfig{HostOwned: true, Schema: "billing_river"}`.
+AuthKit joins the same fleet when its `Database.RiverSchema` is
+`"billing_river"` and you start it with `auth.Start(ctx, authkit.WithRiverClient(fleet))`.
 
 #### Add a storefront
 

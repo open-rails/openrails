@@ -21,7 +21,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // SEC: adding a teammate by email never grants a merchant role to an account
@@ -31,7 +30,6 @@ import (
 // where registration mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeClosed, iam.RegistrationModeOpen} {
 		registers := mode != iam.RegistrationModeClosed
 		t.Run(string(mode), func(t *testing.T) {

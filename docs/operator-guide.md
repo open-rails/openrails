@@ -36,7 +36,7 @@ Postgres specifics worth knowing:
 - Migrations: the server and worker apply AuthKit, River, and OpenRails
   migrations at boot, before anything else touches the database; replicas
   booting together take turns, and a failed migration fails the boot.
-  `openrails migrate up` applies them ahead of a rollout, and
+  `openrails migrate up` applies OpenRails' and River's ahead of a rollout, and
   `openrails migrate status` reports the ledger against the embedded chain.
   An older release boots against a database a newer one migrated.
   Every v1.x release upgrades a database of any earlier v1 release in place

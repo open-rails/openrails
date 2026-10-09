@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // Exercise the operator's real CLI over separate databases, then resume through
@@ -223,7 +222,6 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	mid := source.client[embedded].MerchantID()
 	source.stop()
 	target := handoffTarget(t, source)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), target.pool, target.schema))
 	client, err := openrails.New(t.Context(), openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,

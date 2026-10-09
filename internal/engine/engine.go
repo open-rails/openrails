@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/standalonedb"
 	admin "github.com/open-rails/openrails/web/admin"
 )
 
@@ -66,12 +65,12 @@ func Graph(client any) *app.App {
 }
 
 // New builds the engine. It first creates or upgrades OpenRails' tables, this
-// month's partitions and River's tables (Migrate's work, with the control
-// plane's AuthKit schema before the control plane attaches). ctx bounds the
-// wait for the database; nothing else does. Only Postgres and a refused
-// Config.Catalog fail construction: Vault login, PSP posture, Redis and a
-// declared catalog's unconfirmed provider references recover in the
-// background (see Ready and Probes).
+// month's partitions and River's tables (Migrate's work); the control plane's
+// AuthKit migrates itself as it is built. ctx bounds the wait for the
+// database; nothing else does. Only Postgres and a refused Config.Catalog fail
+// construction: Vault login, PSP posture, Redis and a declared catalog's
+// unconfirmed provider references recover in the background (see Ready and
+// Probes).
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -136,9 +135,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		}
 	}
 	if cfg.ControlPlane != nil {
-		if err := standalonedb.ApplyAuthKit(ctx, application.Runtime.DB.Pool()); err != nil {
-			return fail(err)
-		}
 		if err := attachControlPlane(ctx, application, *cfg.ControlPlane, deps); err != nil {
 			return fail(err)
 		}

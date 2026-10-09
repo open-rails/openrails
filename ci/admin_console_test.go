@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // consoleBuild stands in for web/admin's build (not built for go test): the
@@ -62,7 +61,6 @@ func requireConsoleAt(t *testing.T, handler http.Handler, mount, marker string) 
 // /v1, the version AuthKit appends.
 func TestAdminConsoleFindsAuthKit(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	for issuer, want := range map[string]string{
 		"http://127.0.0.1":             "/auth/v1",
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",
@@ -101,7 +99,6 @@ func controlPlane(t *testing.T, issuer string) *openrails.ControlPlaneConfig {
 // console selected no console route exists.
 func TestStandaloneAdminConsolePath(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	cfg := f.config()
 	cfg.ControlPlane = controlPlane(t, "http://127.0.0.1")
 	cp, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, ConsoleAssets: consoleBuild("standalone")})

@@ -77,7 +77,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | Command | Purpose |
 |---|---|
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
-| `migrate up` / `migrate pg` | apply ahead of a rollout the migrations the server applies at boot: all / Postgres-only (River + OpenRails) |
+| `migrate up` / `migrate pg` | apply OpenRails' and River's migrations ahead of a rollout; the server applies them, and AuthKit's, at boot |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so `migrate up` applies exactly that list — see "Cutover to product access" |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |

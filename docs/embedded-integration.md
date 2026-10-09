@@ -59,13 +59,12 @@ connections `SET ROLE` to it.
 
 `New` creates or upgrades OpenRails' tables in `cfg.Database.Schema`, River's
 in `cfg.Database.RiverSchema` (`billing_river` for the default schema),
-whichever fleet `Start` will run there, and this month's partitions. With
-`cfg.ControlPlane` it also migrates the control plane's AuthKit schema. A
-host's own AuthKit migrates through AuthKit's API. Replicas booting together
-take turns on an advisory lock, and a migration that fails fails `New`, so new
-pods crash-loop while the old ones keep serving. An older build boots against
-a schema a newer one already migrated: migrations it does not know are left
-as they are.
+whichever fleet `Start` will run there, and this month's partitions. AuthKit,
+the control plane's or the host's own, migrates itself in `authkit.New`.
+Replicas booting together take turns on an advisory lock, and a migration that
+fails fails `New`, so new pods crash-loop while the old ones keep serving. An
+older build boots against a schema a newer one already migrated: migrations it
+does not know are left as they are.
 
 Billing, AuthKit, application tables and River may share `public` or another
 namespace. OpenRails archives contain only billing-owned tables and never include

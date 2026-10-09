@@ -22,14 +22,12 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 // attachControlPlane builds a client with the control plane, minting real
 // user tokens over the shared AuthKit schema. edit adjusts the configuration.
 func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, *openrails.Deps)) *openrails.Client {
 	t.Helper()
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	cfg := f.config()
 	cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,

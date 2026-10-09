@@ -52,21 +52,13 @@ type Runtime struct {
 	BaseURL string
 }
 
-// Open connects to dsn and applies AuthKit's migrations; openrails.New
-// applies its own.
+// Open connects to dsn; authkit.New and openrails.New create their own
+// tables.
 func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if dsn == "" {
 		return nil, errors.New("harness: Postgres DSN is required")
 	}
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := authkit.Migrate(ctx, pool, authConfig(""), authkit.MigrateOptions{}); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("authkit migrations: %w", err)
-	}
-	return pool, nil
+	return pgxpool.New(ctx, dsn)
 }
 
 // New builds both runtimes and seeds the catalog. The server runs River
@@ -168,13 +160,12 @@ var billingRoutes = openrails.Routes{
 // OpenRails at /billing, open registration and no second factor.
 func authConfig(issuer string) authkit.Config {
 	return authkit.Config{
-		Schema:       AuthSchema,
+		Database:     authkit.DatabaseConfig{Schema: AuthSchema, RiverSchema: AuthSchema},
 		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, APIPath: "/auth"},
 		Token:        authkit.TokenConfig{Issuer: issuer, IssuedAudiences: []string{Audience}},
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-		RiverSchema:  AuthSchema,
 	}
 }
 

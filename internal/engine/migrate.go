@@ -8,14 +8,13 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/migrate"
-	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
-// Migrate creates or upgrades through pool what New does: OpenRails' tables in
-// Config.Database.Schema, this month's partitions, River's tables in
-// Config.Database.RiverSchema and, with Config.ControlPlane, the control
-// plane's AuthKit schema. It is for operator tooling and fixtures that
-// prepare a schema without running the engine.
+// Migrate creates or upgrades through pool what New does first: OpenRails'
+// tables in Config.Database.Schema, this month's partitions and River's tables
+// in Config.Database.RiverSchema. It is for operator tooling and fixtures that
+// prepare a schema without running the engine. The control plane's AuthKit
+// migrates itself when New builds it.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 	if pool == nil {
 		return fmt.Errorf("openrails: Migrate requires a Postgres pool")
@@ -28,11 +27,5 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 	if err := validRiverSchema(riverSchema); err != nil {
 		return err
 	}
-	if err := migrate.Apply(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema}); err != nil {
-		return err
-	}
-	if cfg.ControlPlane != nil {
-		return standalonedb.ApplyAuthKit(ctx, pool, riverSchema)
-	}
-	return nil
+	return migrate.Apply(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema})
 }
