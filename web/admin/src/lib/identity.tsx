@@ -20,9 +20,15 @@ export interface ConsoleIdentity {
   // Set when staff sign in at a trusted issuer.
   issuer?: {
     name: string
-    signIn: (returnTo?: string) => Promise<void>
+    // silent: prompt=none, answered without UI while the issuer session
+    // lasts.
+    signIn: (returnTo?: string, silent?: boolean) => Promise<void>
   }
 }
+
+// Marks a tab that has re-authorized at the issuer on its own; cleared by a
+// completed sign-in, so the next expiry re-authorizes again.
+export const ISSUER_REDIRECT_KEY = "openrails.admin.issuer-redirected"
 
 const IdentityContext = React.createContext<ConsoleIdentity | null>(null)
 
@@ -86,7 +92,11 @@ export function IssuerIdentity({
             }
           : null,
       signOut: () => signOut(),
-      issuer: { name, signIn: (returnTo) => signIn({ returnTo }) },
+      issuer: {
+        name,
+        signIn: (returnTo, silent) =>
+          signIn({ returnTo, prompt: silent ? "none" : undefined }),
+      },
     }),
     [status, user, signIn, signOut, name]
   )

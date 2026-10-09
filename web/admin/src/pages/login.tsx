@@ -5,14 +5,13 @@ import { Navigate, useNavigate } from "react-router-dom"
 import { LogoLockup } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
-import { useIdentity } from "@/lib/identity"
-
-// A tab redirects to the issuer on its own once; after that (a failed or
-// abandoned sign-in) the button does.
-const AUTO_REDIRECT_KEY = "openrails.admin.issuer-redirected"
+import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
 
 // Sign-in is AuthKit's own form (password, provider sign-in, second factors,
 // recovery) or, when staff sign in at a trusted issuer, a redirect there.
+// A tab re-authorizes at the issuer on its own once, silently (prompt=none:
+// the issuer's session answers without UI); after that, or when the issuer
+// needs the user, the button does.
 export function LoginPage() {
   const { ready, signedIn } = useAuth()
   const { issuer } = useIdentity()
@@ -20,9 +19,9 @@ export function LoginPage() {
   const signInAtIssuer = issuer?.signIn
   React.useEffect(() => {
     if (!ready || signedIn || !signInAtIssuer) return
-    if (sessionStorage.getItem(AUTO_REDIRECT_KEY)) return
-    sessionStorage.setItem(AUTO_REDIRECT_KEY, "1")
-    void signInAtIssuer("/")
+    if (sessionStorage.getItem(ISSUER_REDIRECT_KEY)) return
+    sessionStorage.setItem(ISSUER_REDIRECT_KEY, "1")
+    void signInAtIssuer("/", true)
   }, [ready, signedIn, signInAtIssuer])
   if (!ready) {
     return (
@@ -32,7 +31,7 @@ export function LoginPage() {
     )
   }
   if (signedIn) {
-    sessionStorage.removeItem(AUTO_REDIRECT_KEY)
+    sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
     return <Navigate to="/" replace />
   }
   return (

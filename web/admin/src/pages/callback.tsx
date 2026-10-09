@@ -1,9 +1,11 @@
 import * as React from "react"
+import { isOAuthError } from "@openrails/auth-ui/client"
 import { useIssuerClient } from "@openrails/auth-ui/react"
 import { useNavigate } from "react-router-dom"
 
 import { LogoLockup } from "@/components/logo"
 import { Button } from "@/components/ui/button"
+import { ISSUER_REDIRECT_KEY } from "@/lib/identity"
 
 // The trusted issuer returns here with the authorization code; the client
 // redeems it and the console continues where sign-in started.
@@ -15,12 +17,27 @@ export function CallbackPage() {
     let active = true
     client.completeSignIn().then(
       (result) => {
-        if (active && result?.kind === "signed_in")
+        if (active && result?.kind === "signed_in") {
+          sessionStorage.removeItem(ISSUER_REDIRECT_KEY)
           navigate(result.returnTo ?? "/", { replace: true })
+        }
       },
       (reason: unknown) => {
-        if (active)
-          setError(reason instanceof Error ? reason.message : String(reason))
+        if (!active) return
+        // A silent re-authorization the issuer cannot answer without the
+        // user: sign in with the button.
+        if (
+          isOAuthError(reason) &&
+          [
+            "login_required",
+            "interaction_required",
+            "consent_required",
+          ].includes(reason.error)
+        ) {
+          navigate("/login", { replace: true })
+          return
+        }
+        setError(reason instanceof Error ? reason.message : String(reason))
       }
     )
     return () => {
