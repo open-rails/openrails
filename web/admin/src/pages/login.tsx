@@ -46,7 +46,10 @@ export function LoginPage() {
           The merchant console for your OpenRails deployment.
         </p>
         {issuer ? (
-          <Button className="mt-8 w-full" onClick={() => void issuer.signIn("/")}>
+          <Button
+            className="mt-8 w-full"
+            onClick={() => void issuer.signIn("/")}
+          >
             Sign in with {issuer.name}
           </Button>
         ) : (

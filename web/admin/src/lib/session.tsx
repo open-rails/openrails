@@ -12,7 +12,11 @@ import {
   type IssuerClient,
 } from "@openrails/auth-ui/client"
 import { AuthUiProvider } from "@openrails/auth-ui/provider"
-import { AuthProvider, IssuerAuthProvider } from "@openrails/auth-ui/react"
+import {
+  AuthProvider,
+  IssuerAuthProvider,
+  type Guard,
+} from "@openrails/auth-ui/react"
 
 import {
   bindSession,
@@ -109,20 +113,24 @@ export function ConsoleSession({
   )
 }
 
-// IssuerStepUp answers step_up_required with a fresh sign-in at the issuer
+// issuerStepUp answers step_up_required with a fresh sign-in at the issuer
 // (max_age=0) in a popup, then runs the write again.
+export function issuerStepUp(client: Pick<IssuerClient, "stepUp">): Guard {
+  return async (action) => {
+    try {
+      return await action()
+    } catch (error) {
+      if (!isAuthKitError(error) || error.code !== "step_up_required")
+        throw error
+      await client.stepUp({ popup: true })
+      return action()
+    }
+  }
+}
+
 function IssuerStepUp({ client }: { client: IssuerClient }) {
   React.useEffect(() => {
-    bindStepUp(async (action) => {
-      try {
-        return await action()
-      } catch (error) {
-        if (!isAuthKitError(error) || error.code !== "step_up_required")
-          throw error
-        await client.stepUp({ popup: true })
-        return action()
-      }
-    })
+    bindStepUp(issuerStepUp(client))
     return () => bindStepUp(null)
   }, [client])
   return null

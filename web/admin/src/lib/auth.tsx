@@ -24,6 +24,9 @@ export interface ConsoleAuth {
   // The merchant list could not be loaded: not the same as having none.
   merchantsFailed: boolean
   me: ConsoleUser | null
+  // Staff sign in at a trusted issuer: its own permissions, plus roles
+  // granted by email invitation.
+  federated: boolean
   merchants: MerchantMembership[]
   activeMerchant?: MerchantMembership
   selectMerchant: (slug: string) => void
@@ -94,6 +97,7 @@ export function useAuth(): ConsoleAuth {
     signedIn,
     merchantsFailed: membership.isError,
     me: session.user,
+    federated: Boolean(session.issuer),
     merchants,
     activeMerchant: merchants.find((merchant) => merchant.slug === active),
     selectMerchant,
