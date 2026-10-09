@@ -21,8 +21,11 @@ error classes; the embedded Client dispatches to the same handlers.
 | `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `openrails.StaffReads` |
 | `ListProviderBillingQualifications` | `GET /v1/merchant/provider-qualifications` | `openrails.StaffReads` |
 | `ResolveProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/resolution` | `openrails.StaffWrites` |
+| `ListOperationAuthorizations` | `GET /v1/merchant/provider-operations` | `openrails.StaffReads` |
+| `RefuseProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/refusal` | `openrails.StaffWrites` |
+| `CloseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/close` | `openrails.StaffWrites` |
 
-All eight are in the `openrails.Usage` resource group, which a guard may cover
+All eleven are in the `openrails.Usage` resource group, which a guard may cover
 instead.
 
 An authorization binds an immutable operation id, customer, record owner, claim
@@ -31,8 +34,10 @@ An identical retry replays; a changed field is 409
 `operation_authorization_conflict` with the field as `param`. An ambiguous
 provider creation leaves the authorization open. Release requires proven
 non-creation and is refused once billing evidence exists
-(`operation_authorization_has_billing_evidence`). Its state is `open`,
-`released` or `settled`; there are no partial captures.
+(`operation_authorization_has_billing_evidence`) or the hold is refused
+(`provider_billing_qualification_refused`). Its state is `open`, `released` or
+`settled`; there are no partial captures. Every authorization carries its
+`refusal` and `resolution`, null until it has them.
 
 ## Growing a hold
 
@@ -81,34 +86,57 @@ not yet cover the lifetime stays pending. Eligible evidence settles at
 pass-through: rated cost equals provider cost, and cost above the hold posts as
 owed instead of being clamped.
 
-## When qualification is refused
+## Stuck holds
 
-A refused qualification (`provider_evidence_refused`,
-`negative_or_corrective_record`, `decreasing_provider_cost`) accepts no further
-observations (`provider_billing_qualification_refused`) and its hold cannot be
-released, so automatic settlement never closes it. An operator closes it.
+A hold is stuck when its provider cost will not qualify automatically. Its
+`refusal` records why, and an operator's close is its only way out. Two sources
+refuse:
 
-`ListProviderBillingQualifications` pages qualifications newest first, each with
-its authorization; `state=refused&authorization_state=open` lists exactly the
-holds waiting for an operator. Both filters take a comma-separated list.
+- **The qualifier.** A refused qualification (`provider_evidence_refused`,
+  `negative_or_corrective_record`, `decreasing_provider_cost`) refuses the hold
+  in the same commit, with that reason and the refusing observation as `detail`.
+- **The host**, when it cannot produce evidence at all:
+  `RefuseProviderBillingQualification` with `reason` `lifecycle_unprovable` (it
+  cannot prove the resource's lifetime, absence and closed windows),
+  `provider_billing_unavailable` (the provider reports no billing it can read)
+  or `observation_rejected` (OpenRails rejects its evidence as invalid or
+  conflicting), and an optional `detail`. Only an open hold is refused; it may
+  have no qualification or a pending one. Repeating the same refusal replays; a
+  changed term is 409 `provider_billing_refusal_conflict` with the term as
+  `param`.
 
-`ResolveProviderBillingQualification` records the operator's attestation, once
-per operation, and closes the hold in the same commit:
+A refused hold accepts no observation, extension or release
+(`provider_billing_qualification_refused`), so nothing but an operator moves it.
+
+`ListOperationAuthorizations` pages holds newest first, each with its refusal
+and resolution. `refused=true&state=open` lists exactly the holds waiting for an
+operator, with their reasons; `state` takes a comma-separated list.
+
+`CloseOperationAuthorization` records the operator's attestation, once per
+operation, and closes the hold in the same commit:
 
 - `kind: settled` with `cost_amount`, the provider cost the operator attests
   (from the provider's invoice, say): settled at pass-through like qualified
   evidence, above the hold as owed. The settlement body is the
-  `openrails/operator-attested-provider-cost` manifest: the refused
-  observation's digests, the hold and the attestation.
+  `openrails/operator-attested-provider-cost` manifest: the hold, its refusal,
+  the qualification's lifecycle and refused observation's digests when it has
+  them (null otherwise), and the attestation.
 - `kind: written_off` with no `cost_amount`: the hold is released and the
   customer is not charged; the merchant absorbs what the provider billed.
   `terminal_reference` is the attestation `reference`.
 
 `attested_by` names the operator and `reference` the evidence; `note` is
-optional. The qualification stays `refused` and carries the attestation as
-`resolution`. Repeating the same resolution replays; a changed term is 409
-`provider_billing_resolution_conflict` with the term as `param`. A pending or
-eligible qualification is 409 `provider_billing_qualification_not_refused`.
+optional. The hold carries the attestation as `resolution`. Repeating the same
+close replays; a changed term is 409 `provider_billing_resolution_conflict` with
+the term as `param`. A hold that is not refused is 409
+`provider_billing_qualification_not_refused`.
+
+`ResolveProviderBillingQualification` is the same close answered as the hold's
+qualification (which carries the attestation as `resolution` too), so it needs
+one: a hold without a qualification is 404
+`provider_billing_qualification_not_found`. `ListProviderBillingQualifications`
+pages qualifications; a host refusal leaves a pending qualification pending, so
+the hold's `refusal` is what marks it stuck.
 
 ## Owed and the next funding
 
@@ -139,7 +167,7 @@ repaid part owed again (a won dispute repays it).
 
 Observations are kept 90 days after their operation is settled or released
 ([data retention](../operations.md#data-retention)); authorizations,
-qualifications and resolutions are permanent.
+qualifications, refusals and resolutions are permanent.
 
 ## Host transaction extension
 
@@ -147,6 +175,7 @@ The embedded Client's `Tx` operations (`OpenOperationAuthorizationTx`,
 `GetOperationAuthorizationTx`, `ExtendOperationAuthorizationTx`,
 `ReleaseOperationAuthorizationTx`,
 `RecordProviderBillingObservationTx`, `GetProviderBillingQualificationTx`,
+`RefuseProviderBillingQualificationTx`, `CloseOperationAuthorizationTx`,
 `ResolveProviderBillingQualificationTx`) are
 for a host that must commit its own provider obligation, absence fact or
 billing fact atomically with OpenRails. They take a `pgx.Tx` from the host's

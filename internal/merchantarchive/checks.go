@@ -44,6 +44,7 @@ var excludedTables = map[string]string{
 	"operation_authorizations":      "unsupported opaque byte-exact operation evidence; any rows refused",
 	"cost_qualifications":           "unsupported opaque byte-exact provider evidence; any rows refused",
 	"cost_resolutions":              "operator attestations closing unsupported operation authorizations; any rows refused",
+	"cost_refusals":                 "refusals of unsupported operation authorizations; any rows refused",
 	"cost_observations":             "unsupported opaque byte-exact provider bodies; any rows refused",
 	"subscription_verifications":    "derived: re-detected from unverified subscriptions",
 	"nmi_bulk_checkpoints":          "transient read progress",
@@ -100,6 +101,7 @@ var excludedColumns = map[string]string{
 	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
 	"cost_observations":             "merchant_id operation_id observation_id normalized_query query_starts_at query_ends_at raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
 	"cost_resolutions":              "merchant_id operation_id qualification_state kind cost_amount attested_by reference note resolved_at",
+	"cost_refusals":                 "merchant_id operation_id reason qualification_state detail refused_at",
 
 	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
 	"customer_entitlement_cache":         "id merchant_id customer_id entitlement",
@@ -260,6 +262,7 @@ var preflightChecks = []rowCheck{
 	{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 	{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
 	{"cost_resolutions", "true"},
+	{"cost_refusals", "true"},
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {

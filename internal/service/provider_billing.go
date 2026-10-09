@@ -89,8 +89,8 @@ func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-// ResolveProviderBillingQualification closes a refused qualification's hold on
-// an operator's attestation in an OpenRails-owned transaction.
+// ResolveProviderBillingQualification is CloseOperationAuthorization answered as
+// the hold's qualification, in an OpenRails-owned transaction.
 func (s *Service) ResolveProviderBillingQualification(ctx context.Context, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -144,12 +144,7 @@ func (s *Service) ListProviderBillingQualifications(ctx context.Context, filter 
 }
 
 func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *billing.ProviderBillingQualification {
-	var resolution *billing.ProviderBillingResolution
-	if r := result.Resolution; r != nil {
-		resolution = &billing.ProviderBillingResolution{
-			Kind: r.Kind, CostAmount: r.CostAmount, AttestedBy: r.AttestedBy, Reference: r.Reference, Note: r.Note, ResolvedAt: r.ResolvedAt,
-		}
-	}
+	resolution := providerBillingResolutionFromMoney(result.Resolution)
 	return &billing.ProviderBillingQualification{
 		OperationID: result.OperationID,
 		MerchantID:  billing.MerchantID(result.MerchantID),

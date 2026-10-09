@@ -157,12 +157,6 @@ FROM billing.cost_resolutions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text;
 
--- name: ListProviderBillingResolutions :many
-SELECT *
-FROM billing.cost_resolutions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND operation_id = ANY(sqlc.arg(operation_ids)::text[]);
-
 -- Newest first; an empty filter admits every state.
 -- name: ListProviderBillingQualifications :many
 SELECT sqlc.embed(q), sqlc.embed(a)
@@ -177,3 +171,38 @@ WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
        OR (q.created_at, q.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
 ORDER BY q.created_at DESC, q.operation_id DESC
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: InsertProviderBillingRefusal :one
+INSERT INTO billing.cost_refusals (
+    merchant_id,
+    operation_id,
+    reason,
+    detail,
+    refused_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid,
+    sqlc.arg(operation_id)::text,
+    sqlc.arg(reason)::text,
+    sqlc.narg(detail)::text,
+    sqlc.arg(refused_at)::timestamptz
+)
+RETURNING *;
+
+-- name: GetProviderBillingRefusal :one
+SELECT *
+FROM billing.cost_refusals
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = sqlc.arg(operation_id)::text;
+
+-- Each hold's refusal and the resolution that closed it, if any.
+-- name: ListProviderBillingRefusals :many
+SELECT r.operation_id, r.reason, r.detail, r.refused_at,
+       s.kind AS resolution_kind, s.cost_amount AS resolution_cost_amount,
+       s.attested_by AS resolution_attested_by, s.reference AS resolution_reference,
+       s.note AS resolution_note, s.resolved_at
+FROM billing.cost_refusals r
+LEFT JOIN billing.cost_resolutions s
+  ON s.merchant_id = r.merchant_id
+ AND s.operation_id = r.operation_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND r.operation_id = ANY(sqlc.arg(operation_ids)::text[]);

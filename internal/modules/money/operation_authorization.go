@@ -85,10 +85,14 @@ type OperationAuthorization struct {
 	SettlementAmount        *int64
 	SettlementBody          []byte
 	SettlementBodySHA256    [sha256.Size]byte
-	CreatedAt               time.Time
-	ReleasedAt              *time.Time
-	SettledAt               *time.Time
-	Replayed                bool
+	// Refusal and Resolution are loaded by the reads that answer a hold
+	// (attachHoldOutcomes); a fresh or released-as-never-created hold has neither.
+	Refusal    *ProviderBillingRefusal
+	Resolution *ProviderBillingResolution
+	CreatedAt  time.Time
+	ReleasedAt *time.Time
+	SettledAt  *time.Time
+	Replayed   bool
 }
 
 type passThroughProviderCostSettlementInput struct {
@@ -128,7 +132,7 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 	if existing, getErr := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
 	}); getErr == nil {
-		return replayOperationAuthorization(existing, in)
+		return replayOperationAuthorizationWithOutcome(ctx, q, existing, in)
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
@@ -180,7 +184,17 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 	if err != nil {
 		return nil, err
 	}
-	return replayOperationAuthorization(existing, in)
+	return replayOperationAuthorizationWithOutcome(ctx, q, existing, in)
+}
+
+// replayOperationAuthorizationWithOutcome answers a repeated open with the
+// hold as it stands, refusal and resolution included.
+func replayOperationAuthorizationWithOutcome(ctx context.Context, q *gen.Queries, row gen.BillingOperationAuthorization, in OperationAuthorizationInput) (*OperationAuthorization, error) {
+	auth, err := replayOperationAuthorization(row, in)
+	if err != nil {
+		return nil, err
+	}
+	return auth, attachHoldOutcomes(ctx, q, row.MerchantID, auth)
 }
 
 // operationCapacity is what a new or grown hold may take, read under the payer
@@ -321,7 +335,7 @@ func replayOperationAuthorization(row gen.BillingOperationAuthorization, in Oper
 // existing double-entry ledger in a caller-owned transaction. It never calls
 // request admission and never commits or rolls back the transaction. It is
 // unexported: only the provider-billing qualifier, or an operator's recorded
-// attestation of a refused qualification, may supply its cost.
+// attestation closing a refused hold, may supply its cost.
 //
 // The payer row is the money mutex. Terminally settling before the ledger helper
 // excludes this authorization's full hold while every other open authorization
@@ -488,7 +502,8 @@ func (s *MoneyService) GetOperationAuthorizationInTx(ctx context.Context, txDB *
 	if err != nil {
 		return nil, err
 	}
-	row, err := txDB.Gen(ctx).GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
+	q := txDB.Gen(ctx)
+	row, err := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
 		MerchantID: merchantID.UUID(), OperationID: operationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -497,7 +512,8 @@ func (s *MoneyService) GetOperationAuthorizationInTx(ctx context.Context, txDB *
 	if err != nil {
 		return nil, err
 	}
-	return operationAuthorizationFromRow(row, false), nil
+	auth := operationAuthorizationFromRow(row, false)
+	return auth, attachHoldOutcomes(ctx, q, row.MerchantID, auth)
 }
 
 func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operationID, releaseReference string) (*OperationAuthorization, error) {
@@ -514,7 +530,7 @@ func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operat
 // a caller-owned transaction, so the host's proven provider non-creation and
 // the monetary release commit or roll back together. OpenRails binds the opaque
 // proof reference but owns no provider ambiguity logic. Any durable billing
-// qualification refuses release; repeating the same release replays.
+// qualification or refusal refuses release; repeating the same release replays.
 func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, operationID, releaseReference string) (*OperationAuthorization, error) {
 	if txDB == nil {
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
@@ -556,6 +572,12 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
+	}
+	// A refused hold claims a provider cost: only an operator's close ends it.
+	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), operationID); err != nil {
+		return nil, err
+	} else if refused {
+		return nil, ErrProviderBillingQualificationRefused
 	}
 	switch OperationAuthorizationState(row.State) {
 	case OperationAuthorizationReleased:

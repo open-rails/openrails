@@ -245,6 +245,32 @@ func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.C
 	return i, err
 }
 
+const getProviderBillingRefusal = `-- name: GetProviderBillingRefusal :one
+SELECT merchant_id, operation_id, reason, qualification_state, detail, refused_at
+FROM billing.cost_refusals
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+`
+
+type GetProviderBillingRefusalParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+func (q *Queries) GetProviderBillingRefusal(ctx context.Context, arg GetProviderBillingRefusalParams) (BillingCostRefusal, error) {
+	row := q.db.QueryRow(ctx, getProviderBillingRefusal, arg.MerchantID, arg.OperationID)
+	var i BillingCostRefusal
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.Reason,
+		&i.QualificationState,
+		&i.Detail,
+		&i.RefusedAt,
+	)
+	return i, err
+}
+
 const getProviderBillingResolution = `-- name: GetProviderBillingResolution :one
 SELECT merchant_id, operation_id, qualification_state, kind, cost_amount, attested_by, reference, note, resolved_at
 FROM billing.cost_resolutions
@@ -479,6 +505,51 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 	return i, err
 }
 
+const insertProviderBillingRefusal = `-- name: InsertProviderBillingRefusal :one
+INSERT INTO billing.cost_refusals (
+    merchant_id,
+    operation_id,
+    reason,
+    detail,
+    refused_at
+) VALUES (
+    $1::uuid,
+    $2::text,
+    $3::text,
+    $4::text,
+    $5::timestamptz
+)
+RETURNING merchant_id, operation_id, reason, qualification_state, detail, refused_at
+`
+
+type InsertProviderBillingRefusalParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+	Reason      string
+	Detail      *string
+	RefusedAt   time.Time
+}
+
+func (q *Queries) InsertProviderBillingRefusal(ctx context.Context, arg InsertProviderBillingRefusalParams) (BillingCostRefusal, error) {
+	row := q.db.QueryRow(ctx, insertProviderBillingRefusal,
+		arg.MerchantID,
+		arg.OperationID,
+		arg.Reason,
+		arg.Detail,
+		arg.RefusedAt,
+	)
+	var i BillingCostRefusal
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.Reason,
+		&i.QualificationState,
+		&i.Detail,
+		&i.RefusedAt,
+	)
+	return i, err
+}
+
 const insertProviderBillingResolution = `-- name: InsertProviderBillingResolution :one
 INSERT INTO billing.cost_resolutions (
     merchant_id,
@@ -640,36 +711,57 @@ func (q *Queries) ListProviderBillingQualifications(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const listProviderBillingResolutions = `-- name: ListProviderBillingResolutions :many
-SELECT merchant_id, operation_id, qualification_state, kind, cost_amount, attested_by, reference, note, resolved_at
-FROM billing.cost_resolutions
-WHERE merchant_id = $1::uuid
-  AND operation_id = ANY($2::text[])
+const listProviderBillingRefusals = `-- name: ListProviderBillingRefusals :many
+SELECT r.operation_id, r.reason, r.detail, r.refused_at,
+       s.kind AS resolution_kind, s.cost_amount AS resolution_cost_amount,
+       s.attested_by AS resolution_attested_by, s.reference AS resolution_reference,
+       s.note AS resolution_note, s.resolved_at
+FROM billing.cost_refusals r
+LEFT JOIN billing.cost_resolutions s
+  ON s.merchant_id = r.merchant_id
+ AND s.operation_id = r.operation_id
+WHERE r.merchant_id = $1::uuid
+  AND r.operation_id = ANY($2::text[])
 `
 
-type ListProviderBillingResolutionsParams struct {
+type ListProviderBillingRefusalsParams struct {
 	MerchantID   uuid.UUID
 	OperationIds []string
 }
 
-func (q *Queries) ListProviderBillingResolutions(ctx context.Context, arg ListProviderBillingResolutionsParams) ([]BillingCostResolution, error) {
-	rows, err := q.db.Query(ctx, listProviderBillingResolutions, arg.MerchantID, arg.OperationIds)
+type ListProviderBillingRefusalsRow struct {
+	OperationID          string
+	Reason               string
+	Detail               *string
+	RefusedAt            time.Time
+	ResolutionKind       *string
+	ResolutionCostAmount *int64
+	ResolutionAttestedBy *string
+	ResolutionReference  *string
+	ResolutionNote       *string
+	ResolvedAt           *time.Time
+}
+
+// Each hold's refusal and the resolution that closed it, if any.
+func (q *Queries) ListProviderBillingRefusals(ctx context.Context, arg ListProviderBillingRefusalsParams) ([]ListProviderBillingRefusalsRow, error) {
+	rows, err := q.db.Query(ctx, listProviderBillingRefusals, arg.MerchantID, arg.OperationIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingCostResolution
+	var items []ListProviderBillingRefusalsRow
 	for rows.Next() {
-		var i BillingCostResolution
+		var i ListProviderBillingRefusalsRow
 		if err := rows.Scan(
-			&i.MerchantID,
 			&i.OperationID,
-			&i.QualificationState,
-			&i.Kind,
-			&i.CostAmount,
-			&i.AttestedBy,
-			&i.Reference,
-			&i.Note,
+			&i.Reason,
+			&i.Detail,
+			&i.RefusedAt,
+			&i.ResolutionKind,
+			&i.ResolutionCostAmount,
+			&i.ResolutionAttestedBy,
+			&i.ResolutionReference,
+			&i.ResolutionNote,
 			&i.ResolvedAt,
 		); err != nil {
 			return nil, err

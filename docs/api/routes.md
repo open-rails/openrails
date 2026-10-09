@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (217), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (220), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -155,12 +155,15 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | POST | `/v1/merchant/usage-events` | merchant | `RecordUsage` · `Usage` · `StaffWrites` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | sensitive |
 | GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `GetUsage` · `Usage` · `StaffReads` | — | 200 `Usage` |  |
 | POST | `/v1/merchant/provider-operations` | merchant | `OpenOperationAuthorization` · `Usage` · `StaffWrites` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
+| GET | `/v1/merchant/provider-operations` | merchant | `ListOperationAuthorizations` · `Usage` · `StaffReads` | — | 200 `ListPage<OperationAuthorization>` |  |
 | GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `GetOperationAuthorization` · `Usage` · `StaffReads` | — | 200 `OperationAuthorization` |  |
 | POST | `/v1/merchant/provider-operations/{operation_id}/extend` | merchant | `ExtendOperationAuthorization` · `Usage` · `StaffWrites` | `ExtendOperationAuthorizationParams` | 200 `OperationAuthorizationExtension` | sensitive |
 | POST | `/v1/merchant/provider-operations/{operation_id}/release` | merchant | `ReleaseOperationAuthorization` · `Usage` · `StaffWrites` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
 | POST | `/v1/merchant/provider-operations/{operation_id}/observations` | merchant | `RecordProviderBillingObservation` · `Usage` · `StaffWrites` | `RecordProviderBillingObservationParams` | 200 `ProviderBillingQualification` | sensitive |
 | GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | merchant | `GetProviderBillingQualification` · `Usage` · `StaffReads` | — | 200 `ProviderBillingQualification` |  |
 | POST | `/v1/merchant/provider-operations/{operation_id}/resolution` | merchant | `ResolveProviderBillingQualification` · `Usage` · `StaffWrites` | `ResolveProviderBillingQualificationParams` | 200 `ProviderBillingQualification` | sensitive |
+| POST | `/v1/merchant/provider-operations/{operation_id}/refusal` | merchant | `RefuseProviderBillingQualification` · `Usage` · `StaffWrites` | `RefuseProviderBillingQualificationParams` | 200 `OperationAuthorization` | sensitive |
+| POST | `/v1/merchant/provider-operations/{operation_id}/close` | merchant | `CloseOperationAuthorization` · `Usage` · `StaffWrites` | `CloseOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
 | GET | `/v1/merchant/provider-qualifications` | merchant | `ListProviderBillingQualifications` · `Usage` · `StaffReads` | — | 200 `ListPage<ProviderBillingQualification>` |  |
 | GET | `/v1/merchant/invoices` | merchant | `ListInvoices` · `Invoices` · `StaffReads` | — | 200 `ListPage<Invoice>` |  |
 | GET | `/v1/merchant/invoices/{id}` | merchant | `GetInvoice` · `Invoices` · `StaffReads` | — | 200 `Invoice` |  |

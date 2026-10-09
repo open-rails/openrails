@@ -361,6 +361,27 @@ func (c *Client) ResolveProviderBillingQualificationTx(ctx context.Context, tx p
 	return e.ResolveProviderBillingQualificationTx(ctx, tx, req)
 }
 
+// RefuseProviderBillingQualificationTx is RefuseProviderBillingQualification
+// inside tx (see OpenOperationAuthorizationTx), so the host's refusal commits
+// with its own due-work row. Embedded only.
+func (c *Client) RefuseProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.RefuseProviderBillingQualificationTx(ctx, tx, req)
+}
+
+// CloseOperationAuthorizationTx is CloseOperationAuthorization inside tx (see
+// OpenOperationAuthorizationTx). Embedded only.
+func (c *Client) CloseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.CloseOperationAuthorizationTx(ctx, tx, req)
+}
+
 // GetProviderBillingQualificationTx is GetProviderBillingQualification inside
 // tx (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {

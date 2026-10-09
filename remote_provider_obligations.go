@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -119,10 +120,9 @@ func (c *Client) GetProviderBillingQualification(ctx context.Context, operationI
 	return &out, nil
 }
 
-// ResolveProviderBillingQualification closes the open hold of a refused
-// qualification on an operator's attestation: settled charges the attested
-// provider cost (above the hold as owed), written_off releases it uncharged.
-// Repeating the same resolution replays; a changed term is refused.
+// ResolveProviderBillingQualification is CloseOperationAuthorization answered as
+// the hold's qualification; a hold without one answers
+// provider_billing_qualification_not_found.
 func (c *Client) ResolveProviderBillingQualification(ctx context.Context, req billing.ResolveProviderBillingQualificationParams, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
@@ -143,6 +143,56 @@ func (c *Client) ListProviderBillingQualifications(ctx context.Context, params b
 	setQuery(q, map[string]string{"state": commaList(params.State), "authorization_state": commaList(params.AuthorizationState)})
 	var out billing.ListPage[billing.ProviderBillingQualification]
 	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/provider-qualifications", q), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RefuseProviderBillingQualification records that the host cannot qualify an
+// open hold's provider cost (it cannot prove the lifecycle, the provider reports
+// no billing, or OpenRails rejects its evidence). The hold then accepts no
+// observation, extension or release and waits for CloseOperationAuthorization.
+// Repeating the same refusal replays; a changed term is refused.
+func (c *Client) RefuseProviderBillingQualification(ctx context.Context, req billing.RefuseProviderBillingQualificationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
+	path, err := providerOperationPath(req.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.OperationAuthorization
+	if err := c.do(ctx, http.MethodPost, path+"/refusal", req, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CloseOperationAuthorization closes a refused hold on an operator's
+// attestation: settled charges the attested provider cost (above the hold as
+// owed), written_off releases it uncharged. Repeating the same close replays; a
+// changed term is refused.
+func (c *Client) CloseOperationAuthorization(ctx context.Context, req billing.CloseOperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
+	path, err := providerOperationPath(req.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.OperationAuthorization
+	if err := c.do(ctx, http.MethodPost, path+"/close", req, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListOperationAuthorizations is one page of the merchant's holds, newest
+// first, each with its refusal and resolution. Refused true with State open
+// lists the holds waiting for an operator.
+func (c *Client) ListOperationAuthorizations(ctx context.Context, params billing.OperationAuthorizationListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.OperationAuthorization], error) {
+	q := pageValues(nil, params.PageRequest)
+	values := map[string]string{"state": commaList(params.State)}
+	if params.Refused != nil {
+		values["refused"] = strconv.FormatBool(*params.Refused)
+	}
+	setQuery(q, values)
+	var out billing.ListPage[billing.OperationAuthorization]
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/provider-operations", q), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

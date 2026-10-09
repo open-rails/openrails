@@ -159,6 +159,7 @@ export type OpenRailsErrorCode =
   | "provider_billing_qualification_not_found"
   | "provider_billing_qualification_not_refused"
   | "provider_billing_qualification_refused"
+  | "provider_billing_refusal_conflict"
   | "provider_billing_resolution_conflict"
   | "provider_cancel_held"
   | "provider_outcome_unknown"
@@ -396,8 +397,9 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
   provider_billing_observation_conflict: { status: 409, type: "invalid_request_error", meaning: "The provider billing evidence conflicts with a recorded observation; param names it." },
   provider_billing_qualification_not_found: { status: 404, type: "invalid_request_error", meaning: "The operation has no provider billing qualification." },
-  provider_billing_qualification_not_refused: { status: 409, type: "invalid_request_error", meaning: "Only a refused provider billing qualification can be resolved by an operator." },
-  provider_billing_qualification_refused: { status: 409, type: "invalid_request_error", meaning: "The provider billing evidence was refused." },
+  provider_billing_qualification_not_refused: { status: 409, type: "invalid_request_error", meaning: "Only a refused hold can be closed by an operator." },
+  provider_billing_qualification_refused: { status: 409, type: "invalid_request_error", meaning: "The operation's provider cost was refused automatic qualification; only an operator's close ends its hold." },
+  provider_billing_refusal_conflict: { status: 409, type: "invalid_request_error", meaning: "The operation was already refused with a different term; param names it." },
   provider_billing_resolution_conflict: { status: 409, type: "invalid_request_error", meaning: "The operation was already resolved with a different term; param names it." },
   provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },

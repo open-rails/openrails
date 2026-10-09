@@ -412,7 +412,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
 | Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice` |
-| Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification`, `ListProviderBillingQualifications`, `ResolveProviderBillingQualification` |
+| Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ListOperationAuthorizations`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification`, `ListProviderBillingQualifications`, `RefuseProviderBillingQualification`, `CloseOperationAuthorization`, `ResolveProviderBillingQualification` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 
 ```go

@@ -132,10 +132,26 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &resolutionsGot))
 	require.True(t, reflect.DeepEqual(resolutions, resolutionsGot), "resolution lost precision or null semantics: %#v", resolutionsGot)
 
+	releasedAt := when.Add(time.Hour)
+	closed := billing.OperationAuthorization{
+		OperationID: "rental/create", MerchantID: merchantID,
+		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), RecordOwner: "user:1",
+		Currency: "USD", Amount: 100, AuthorizedAmount: 100, ClaimReference: "claim:1", AuthorizationBody: []byte(`{"op":1}`),
+		AuthorizationBodySHA256: billing.SHA256(sha256.Sum256([]byte(`{"op":1}`))), State: billing.OperationAuthorizationReleased,
+		TerminalReference: "ticket:2",
+		Refusal:           &billing.ProviderBillingRefusal{Reason: billing.ProviderBillingLifecycleUnprovable, Detail: "window 7 of an absent resource is open", RefusedAt: when},
+		Resolution:        &resolutions[1],
+		CreatedAt:         when, ReleasedAt: &releasedAt,
+	}
+	raw = requireFixture(t, "operation_authorization_closed.json", closed)
+	var closedGot billing.OperationAuthorization
+	require.NoError(t, json.Unmarshal(raw, &closedGot))
+	require.True(t, reflect.DeepEqual(closed, closedGot), "closed authorization lost precision or null semantics: %#v", closedGot)
+
 	open := billing.OperationAuthorization{State: billing.OperationAuthorizationOpen, CreatedAt: when}
 	raw, err := json.Marshal(open)
 	require.NoError(t, err)
-	for _, field := range []string{`"settlement_amount":null`, `"settlement_body":null`, `"settlement_body_sha256":null`} {
+	for _, field := range []string{`"settlement_amount":null`, `"settlement_body":null`, `"settlement_body_sha256":null`, `"refusal":null`, `"resolution":null`} {
 		require.Contains(t, string(raw), field, "unsettled authorization must encode explicit nulls")
 	}
 	var openGot billing.OperationAuthorization

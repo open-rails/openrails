@@ -52,7 +52,7 @@ const (
 	Settings RouteSet = "resource:settings"
 	// Subscriptions covers ListSubscriptions, GetSubscription, CancelSubscription, ResumeSubscription, ChangeTier, PreviewTierChange, SetSubscriptionPaymentMethod, CreateRepriceBatch, PreviewRepriceBatch, ListRepriceBatches, GetRepriceBatch, CancelRepriceBatch, CreatePlanMigration, PreviewPlanMigration, ListReprices, GetReprice, CancelReprice.
 	Subscriptions RouteSet = "resource:subscriptions"
-	// Usage covers Admit, GetAdmission, CaptureAdmission, ReleaseAdmissions, ExtendAdmissions, ReportWastedSpend, RecordUsage, GetUsage, OpenOperationAuthorization, GetOperationAuthorization, ExtendOperationAuthorization, ReleaseOperationAuthorization, RecordProviderBillingObservation, GetProviderBillingQualification, ResolveProviderBillingQualification, ListProviderBillingQualifications.
+	// Usage covers Admit, GetAdmission, CaptureAdmission, ReleaseAdmissions, ExtendAdmissions, ReportWastedSpend, RecordUsage, GetUsage, OpenOperationAuthorization, ListOperationAuthorizations, GetOperationAuthorization, ExtendOperationAuthorization, ReleaseOperationAuthorization, RecordProviderBillingObservation, GetProviderBillingQualification, ResolveProviderBillingQualification, RefuseProviderBillingQualification, CloseOperationAuthorization, ListProviderBillingQualifications.
 	Usage RouteSet = "resource:usage"
 )
 
@@ -88,6 +88,8 @@ const (
 	CheckEntitlements RouteSet = "route:CheckEntitlements"
 	// CheckProductAccess is POST /v1/merchant/customers/{customer_id}/product-access/check.
 	CheckProductAccess RouteSet = "route:CheckProductAccess"
+	// CloseOperationAuthorization is POST /v1/merchant/provider-operations/{operation_id}/close.
+	CloseOperationAuthorization RouteSet = "route:CloseOperationAuthorization"
 	// CreateAlertWebhook is POST /v1/merchant/alert-webhooks.
 	CreateAlertWebhook RouteSet = "route:CreateAlertWebhook"
 	// CreateCheckoutSession is POST /v1/merchant/checkout-sessions.
@@ -238,6 +240,8 @@ const (
 	ListMeters RouteSet = "route:ListMeters"
 	// ListOffers is POST /v1/merchant/catalog/offers/lookup.
 	ListOffers RouteSet = "route:ListOffers"
+	// ListOperationAuthorizations is GET /v1/merchant/provider-operations.
+	ListOperationAuthorizations RouteSet = "route:ListOperationAuthorizations"
 	// ListPSPs is GET /v1/merchant/psps.
 	ListPSPs RouteSet = "route:ListPSPs"
 	// ListPaymentAttempts is GET /v1/merchant/payment-attempts.
@@ -298,6 +302,8 @@ const (
 	RefreshPSPs RouteSet = "route:RefreshPSPs"
 	// RefundPayment is POST /v1/merchant/payments/{id}/refunds.
 	RefundPayment RouteSet = "route:RefundPayment"
+	// RefuseProviderBillingQualification is POST /v1/merchant/provider-operations/{operation_id}/refusal.
+	RefuseProviderBillingQualification RouteSet = "route:RefuseProviderBillingQualification"
 	// ReleaseAdmissions is POST /v1/merchant/admissions/release.
 	ReleaseAdmissions RouteSet = "route:ReleaseAdmissions"
 	// ReleaseOperationAuthorization is POST /v1/merchant/provider-operations/{operation_id}/release.

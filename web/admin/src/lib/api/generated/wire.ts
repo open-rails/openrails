@@ -522,6 +522,14 @@ export type CheckoutSessionSavedMethod = {
   card: CardDetails | null
 }
 
+export type CloseOperationAuthorizationParams = {
+  kind?: "settled" | "written_off"
+  cost_amount?: string | null
+  attested_by?: string
+  reference?: string
+  note?: string
+}
+
 export type CollectionPaymentMethod = {
   currency: string
   payment_method_id: string
@@ -1536,6 +1544,8 @@ export type OperationAuthorization = {
   settlement_amount: string | null
   settlement_body: string | null
   settlement_body_sha256: string | null
+  refusal: ProviderBillingRefusal | null
+  resolution: ProviderBillingResolution | null
   created_at: string
   released_at: string | null
   settled_at: string | null
@@ -1963,7 +1973,7 @@ export type ProviderBillingQualification = {
   lifecycle_evidence_sha256: string
   quiescence_seconds: number
   state: "eligible" | "pending" | "refused"
-  reason: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "negative_or_corrective_record" | "observation_changed" | "provider_evidence_refused"
+  reason: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
   baseline_observation_id: string
   qualified_observation_id: string
   qualified_cost_amount: string | null
@@ -1980,6 +1990,12 @@ export type ProviderBillingRecord = {
   bucket_start?: string
   amount?: string
   time_billed_ms?: string
+}
+
+export type ProviderBillingRefusal = {
+  reason: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
+  detail: string
+  refused_at: string
 }
 
 export type ProviderBillingResolution = {
@@ -2090,6 +2106,11 @@ export type RefundPaymentParams = {
   full?: boolean
   reason?: string
   revoke_access?: boolean
+}
+
+export type RefuseProviderBillingQualificationParams = {
+  reason?: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
+  detail?: string
 }
 
 export type ReleaseAdmissionBatchParams = {

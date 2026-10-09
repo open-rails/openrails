@@ -7451,6 +7451,93 @@
           "tier:merchant",
           "request"
         ]
+      },
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "refused",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OperationAuthorization"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-guards": [
+          "ListOperationAuthorizations",
+          "Usage",
+          "StaffReads"
+        ],
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
       }
     },
     "/v1/merchant/provider-operations/{operation_id}": {
@@ -7559,7 +7646,8 @@
           "invalid_param",
           "operation_authorization_conflict",
           "operation_authorization_not_found",
-          "operation_authorization_not_open"
+          "operation_authorization_not_open",
+          "provider_billing_qualification_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7623,7 +7711,8 @@
           "operation_authorization_conflict",
           "operation_authorization_has_billing_evidence",
           "operation_authorization_not_found",
-          "operation_authorization_not_open"
+          "operation_authorization_not_open",
+          "provider_billing_qualification_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7802,6 +7891,133 @@
           "operation_authorization_not_found",
           "operation_authorization_not_open",
           "provider_billing_qualification_not_found",
+          "provider_billing_qualification_not_refused",
+          "provider_billing_resolution_conflict"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}/refusal": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefuseProviderBillingQualificationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorization"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-guards": [
+          "RefuseProviderBillingQualification",
+          "Usage",
+          "StaffWrites"
+        ],
+        "x-openrails-sensitive": true,
+        "x-openrails-errors": [
+          "invalid_param",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open",
+          "provider_billing_refusal_conflict"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-operations/{operation_id}/close": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseOperationAuthorizationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationAuthorization"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-guards": [
+          "CloseOperationAuthorization",
+          "Usage",
+          "StaffWrites"
+        ],
+        "x-openrails-sensitive": true,
+        "x-openrails-errors": [
+          "invalid_param",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open",
           "provider_billing_qualification_not_refused",
           "provider_billing_resolution_conflict"
         ],
@@ -16293,6 +16509,38 @@
           "card"
         ]
       },
+      "CloseOperationAuthorizationParams": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "written_off"
+            ]
+          },
+          "cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attested_by": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
       "CollectionPaymentMethod": {
         "type": "object",
         "properties": {
@@ -20586,6 +20834,26 @@
               }
             ]
           },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -20633,6 +20901,8 @@
           "settlement_amount",
           "settlement_body",
           "settlement_body_sha256",
+          "refusal",
+          "resolution",
           "created_at",
           "released_at",
           "settled_at",
@@ -22698,8 +22968,11 @@
               "coverage_incomplete",
               "decreasing_provider_cost",
               "eligible",
+              "lifecycle_unprovable",
               "negative_or_corrective_record",
               "observation_changed",
+              "observation_rejected",
+              "provider_billing_unavailable",
               "provider_evidence_refused"
             ]
           },
@@ -22794,6 +23067,39 @@
             "description": "A number as a decimal string."
           }
         }
+      },
+      "ProviderBillingRefusal": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "awaiting_equal_observation",
+              "awaiting_quiescence",
+              "coverage_incomplete",
+              "decreasing_provider_cost",
+              "eligible",
+              "lifecycle_unprovable",
+              "negative_or_corrective_record",
+              "observation_changed",
+              "observation_rejected",
+              "provider_billing_unavailable",
+              "provider_evidence_refused"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "refused_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "detail",
+          "refused_at"
+        ]
       },
       "ProviderBillingResolution": {
         "type": "object",
@@ -23245,6 +23551,30 @@
           },
           "revoke_access": {
             "type": "boolean"
+          }
+        }
+      },
+      "RefuseProviderBillingQualificationParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": [
+              "awaiting_equal_observation",
+              "awaiting_quiescence",
+              "coverage_incomplete",
+              "decreasing_provider_cost",
+              "eligible",
+              "lifecycle_unprovable",
+              "negative_or_corrective_record",
+              "observation_changed",
+              "observation_rejected",
+              "provider_billing_unavailable",
+              "provider_evidence_refused"
+            ]
+          },
+          "detail": {
+            "type": "string"
           }
         }
       },
@@ -26473,12 +26803,17 @@
     "provider_billing_qualification_not_refused": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "Only a refused provider billing qualification can be resolved by an operator."
+      "meaning": "Only a refused hold can be closed by an operator."
     },
     "provider_billing_qualification_refused": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The provider billing evidence was refused."
+      "meaning": "The operation's provider cost was refused automatic qualification; only an operator's close ends its hold."
+    },
+    "provider_billing_refusal_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The operation was already refused with a different term; param names it."
     },
     "provider_billing_resolution_conflict": {
       "status": 409,

@@ -190,5 +190,108 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billin
 		out.SettlementBody = auth.SettlementBody
 		out.SettlementBodySHA256 = &digest
 	}
+	if r := auth.Refusal; r != nil {
+		out.Refusal = &billing.ProviderBillingRefusal{Reason: billing.ProviderBillingQualificationReason(r.Reason), Detail: r.Detail, RefusedAt: r.RefusedAt}
+	}
+	out.Resolution = providerBillingResolutionFromMoney(auth.Resolution)
 	return out
+}
+
+func providerBillingResolutionFromMoney(r *money.ProviderBillingResolution) *billing.ProviderBillingResolution {
+	if r == nil {
+		return nil
+	}
+	return &billing.ProviderBillingResolution{
+		Kind: r.Kind, CostAmount: r.CostAmount, AttestedBy: r.AttestedBy, Reference: r.Reference, Note: r.Note, ResolvedAt: r.ResolvedAt,
+	}
+}
+
+// RefuseProviderBillingQualification records, in an OpenRails-owned
+// transaction, that the host cannot qualify a hold's provider cost.
+func (s *Service) RefuseProviderBillingQualification(ctx context.Context, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *billing.OperationAuthorization
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.RefuseProviderBillingQualificationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
+}
+
+// RefuseProviderBillingQualificationTx is the host-transaction form.
+func (s *Service) RefuseProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := s.moneyService().RefuseProviderBillingQualificationInTx(ctx, txDB, req)
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromMoney(auth), nil
+}
+
+// CloseOperationAuthorization closes a refused hold on an operator's
+// attestation in an OpenRails-owned transaction.
+func (s *Service) CloseOperationAuthorization(ctx context.Context, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *billing.OperationAuthorization
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.CloseOperationAuthorizationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
+}
+
+// CloseOperationAuthorizationTx is the host-transaction form.
+func (s *Service) CloseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := s.moneyService().CloseOperationAuthorizationInTx(ctx, txDB, billing.ResolveProviderBillingQualificationParams(req))
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromMoney(auth), nil
+}
+
+// ListOperationAuthorizations pages holds, newest first.
+func (s *Service) ListOperationAuthorizations(ctx context.Context, filter billing.OperationAuthorizationListParams) (*billing.ListPage[billing.OperationAuthorization], error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	page, err := s.moneyService().ListOperationAuthorizations(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := billing.ListPage[billing.OperationAuthorization]{Items: make([]billing.OperationAuthorization, len(page.Items)), Next: page.Next}
+	for i, item := range page.Items {
+		out.Items[i] = *operationAuthorizationFromMoney(item)
+	}
+	return &out, nil
 }

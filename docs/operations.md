@@ -780,7 +780,7 @@ comment states it, and a table added without one fails the build.
 
 | Class | What it means |
 |---|---|
-| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog and configuration applications, credential publications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, metered rating watermarks, destructive runs and their before-images. |
+| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog and configuration applications, credential publications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, metered rating watermarks, destructive runs and their before-images. |
 | Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
 | Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
 | State | Configuration and entities (merchants, PSPs, catalog, customers, subscriptions, payment methods, cursors): one row per thing that exists. |

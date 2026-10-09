@@ -250,10 +250,21 @@ type BillingCostQualification struct {
 	UpdatedAt                time.Time
 }
 
-// An operator's attested close of an operation authorization whose provider billing qualification was refused: settled at the attested provider cost (pass-through, so the customer is charged it) or written off (released, the customer is not charged). Immutable. Retention: permanent, never pruned.
-type BillingCostResolution struct {
+// An operation authorization whose provider cost will not qualify automatically: refused by the qualifier (its qualification is refused) or by the host (it cannot produce evidence). The hold waits for an operator's resolution, its only exit. Immutable. Retention: permanent, never pruned.
+type BillingCostRefusal struct {
 	MerchantID         uuid.UUID
 	OperationID        string
+	Reason             string
+	QualificationState *string
+	Detail             *string
+	RefusedAt          time.Time
+}
+
+// An operator's attested close of a refused operation authorization (see cost_refusals): settled at the attested provider cost (pass-through, so the customer is charged it) or written off (released, the customer is not charged). Immutable. Retention: permanent, never pruned.
+type BillingCostResolution struct {
+	MerchantID  uuid.UUID
+	OperationID string
+	// Always refused: a resolution closes a refused hold.
 	QualificationState string
 	Kind               string
 	CostAmount         *int64

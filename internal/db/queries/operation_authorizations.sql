@@ -63,6 +63,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
         AND qualification.operation_id = billing.operation_authorizations.operation_id
   )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM billing.cost_refusals refusal
+      WHERE refusal.merchant_id = billing.operation_authorizations.merchant_id
+        AND refusal.operation_id = billing.operation_authorizations.operation_id
+  )
 RETURNING *;
 
 -- name: GetOperationAuthorizationExtension :one
@@ -110,7 +116,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND extended_amount = sqlc.arg(extended_amount)::bigint
 RETURNING *;
 
--- A refused qualification's hold is released only through a recorded write-off.
+-- A refused hold is released only through a recorded write-off.
 -- name: WriteOffOperationAuthorization :one
 UPDATE billing.operation_authorizations
 SET state = 'released',
@@ -127,3 +133,34 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND resolution.kind = 'written_off'
   )
 RETURNING *;
+
+-- Newest first; an empty state filter admits every state, a null refused
+-- admits both.
+-- name: ListOperationAuthorizations :many
+SELECT a.*
+FROM billing.operation_authorizations a
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (cardinality(sqlc.arg(states)::text[]) = 0 OR a.state = ANY(sqlc.arg(states)::text[]))
+  AND (sqlc.narg(refused)::boolean IS NULL
+       OR sqlc.narg(refused)::boolean = EXISTS (
+           SELECT 1 FROM billing.cost_refusals r
+           WHERE r.merchant_id = a.merchant_id AND r.operation_id = a.operation_id))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (a.created_at, a.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
+ORDER BY a.created_at DESC, a.operation_id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- The refused holds, newest first: driven by the refusals, so a page costs
+-- what the refusals do, not every hold the merchant ever opened.
+-- name: ListRefusedOperationAuthorizations :many
+SELECT sqlc.embed(a)
+FROM billing.cost_refusals r
+JOIN billing.operation_authorizations a
+  ON a.merchant_id = r.merchant_id
+ AND a.operation_id = r.operation_id
+WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (cardinality(sqlc.arg(states)::text[]) = 0 OR a.state = ANY(sqlc.arg(states)::text[]))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (a.created_at, a.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
+ORDER BY a.created_at DESC, a.operation_id DESC
+LIMIT sqlc.arg(row_limit)::int;

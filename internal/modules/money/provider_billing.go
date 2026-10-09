@@ -201,6 +201,11 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
 			return nil, ErrOperationAuthorizationNotOpen
 		}
+		if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
+			return nil, err
+		} else if refused {
+			return nil, ErrProviderBillingQualificationRefused
+		}
 		qual, err = q.InsertProviderBillingQualification(ctx, gen.InsertProviderBillingQualificationParams{
 			MerchantID:               merchantID.UUID(),
 			OperationID:              in.OperationID,
@@ -231,7 +236,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		if err := replayProviderBillingObservation(existing, in, prepared); err != nil {
 			return nil, err
 		}
-		return withProviderBillingResolution(ctx, q, providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true))
+		return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true))
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
@@ -240,6 +245,12 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		return nil, ErrOperationAuthorizationNotOpen
 	}
 	if ProviderBillingQualificationState(qual.State) == ProviderBillingQualificationRefused {
+		return nil, ErrProviderBillingQualificationRefused
+	}
+	// The host may have refused a pending qualification it can no longer advance.
+	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
+		return nil, err
+	} else if refused {
 		return nil, ErrProviderBillingQualificationRefused
 	}
 	if ProviderBillingQualificationState(qual.State) == ProviderBillingQualificationEligible {
@@ -288,6 +299,11 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	if err != nil {
 		return nil, err
 	}
+	if state == ProviderBillingQualificationRefused {
+		if err := refuseProviderBillingQualification(ctx, q, qual, in.ObservationID, prepared.refusalKind, now); err != nil {
+			return nil, err
+		}
+	}
 
 	auth := operationAuthorizationFromRow(authRow, false)
 	if state == ProviderBillingQualificationEligible {
@@ -304,7 +320,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 			return nil, err
 		}
 	}
-	return providerBillingQualificationFromRow(qual, auth, false), nil
+	return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(qual, auth, false))
 }
 
 func evaluateProviderBillingObservation(
@@ -780,5 +796,5 @@ func (s *MoneyService) GetProviderBillingQualificationInTx(ctx context.Context, 
 		return nil, err
 	}
 	auth := operationAuthorizationFromRow(row.BillingOperationAuthorization, false)
-	return withProviderBillingResolution(ctx, q, providerBillingQualificationFromRow(row.BillingCostQualification, auth, false))
+	return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(row.BillingCostQualification, auth, false))
 }

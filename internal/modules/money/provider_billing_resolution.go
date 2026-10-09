@@ -40,17 +40,59 @@ type ProviderBillingResolution struct {
 	ResolvedAt time.Time
 }
 
-// ResolveProviderBillingQualificationInTx closes the open authorization of a
-// refused qualification on an operator's attestation, in a caller-owned
-// transaction: settled posts the attested cost through the pass-through
-// settlement, written_off releases the hold. The attestation is recorded once;
-// repeating it replays and any changed term conflicts.
+// ResolveProviderBillingQualificationInTx is CloseOperationAuthorizationInTx
+// answered as the hold's qualification, which it therefore needs.
 func (s *MoneyService) ResolveProviderBillingQualificationInTx(ctx context.Context, txDB *db.DB, in ProviderBillingResolutionInput) (*ProviderBillingQualification, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if txDB == nil {
 		return nil, fmt.Errorf("provider billing resolution requires a bound transaction")
+	}
+	if err := validateProviderBillingResolution(in); err != nil {
+		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := txDB.Gen(ctx)
+	if _, err := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}); errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOperationAuthorizationNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	// Unlocked: the close takes the payer lock before any qualification row.
+	key := gen.GetProviderBillingQualificationWithAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
+	if _, err := q.GetProviderBillingQualificationWithAuthorization(ctx, key); errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrProviderBillingQualificationNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	auth, err := s.CloseOperationAuthorizationInTx(ctx, txDB, in)
+	if err != nil {
+		return nil, err
+	}
+	qual, err := q.GetProviderBillingQualificationWithAuthorization(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	result := providerBillingQualificationFromRow(qual.BillingCostQualification, auth, auth.Replayed)
+	result.Resolution = auth.Resolution
+	return result, nil
+}
+
+// CloseOperationAuthorizationInTx closes a refused hold on an operator's
+// attestation, in a caller-owned transaction: settled posts the attested cost
+// through the pass-through settlement (above the hold as owed), written_off
+// releases the hold uncharged. The attestation is recorded once; repeating it
+// replays and any changed term conflicts.
+func (s *MoneyService) CloseOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in ProviderBillingResolutionInput) (*OperationAuthorization, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if txDB == nil {
+		return nil, fmt.Errorf("operation authorization close requires a bound transaction")
 	}
 	if err := validateProviderBillingResolution(in); err != nil {
 		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
@@ -76,28 +118,22 @@ func (s *MoneyService) ResolveProviderBillingQualificationInTx(ctx context.Conte
 	if authRow, err = q.GetOperationAuthorization(ctx, params); err != nil {
 		return nil, err
 	}
-	qual, err := q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
-		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProviderBillingQualificationNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
 	resolutionKey := gen.GetProviderBillingResolutionParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
 	if existing, getErr := q.GetProviderBillingResolution(ctx, resolutionKey); getErr == nil {
 		if err := replayProviderBillingResolution(existing, in); err != nil {
 			return nil, err
 		}
-		result := providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true)
-		result.Resolution = providerBillingResolutionFromRow(existing)
-		return result, nil
+		auth := operationAuthorizationFromRow(authRow, true)
+		return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
-	if ProviderBillingQualificationState(qual.State) != ProviderBillingQualificationRefused {
+	refusal, err := q.GetProviderBillingRefusal(ctx, gen.GetProviderBillingRefusalParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrProviderBillingQualificationNotRefused
+	}
+	if err != nil {
+		return nil, err
 	}
 	if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
 		return nil, ErrOperationAuthorizationNotOpen
@@ -120,7 +156,7 @@ func (s *MoneyService) ResolveProviderBillingQualificationInTx(ctx context.Conte
 	var auth *OperationAuthorization
 	switch in.Kind {
 	case billing.ProviderBillingResolutionSettled:
-		body, err := providerBillingResolutionBody(ctx, q, qual, authRow, resolution)
+		body, err := providerBillingResolutionBody(ctx, q, refusal, authRow, resolution)
 		if err != nil {
 			return nil, err
 		}
@@ -143,9 +179,7 @@ func (s *MoneyService) ResolveProviderBillingQualificationInTx(ctx context.Conte
 		}
 		auth = operationAuthorizationFromRow(released, false)
 	}
-	result := providerBillingQualificationFromRow(qual, auth, false)
-	result.Resolution = providerBillingResolutionFromRow(resolution)
-	return result, nil
+	return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
 }
 
 func validateProviderBillingResolution(in ProviderBillingResolutionInput) error {
@@ -204,38 +238,35 @@ func optionalText(value string) *string {
 	return &value
 }
 
-func providerBillingResolutionFromRow(row gen.BillingCostResolution) *ProviderBillingResolution {
-	return &ProviderBillingResolution{
-		Kind:       ProviderBillingResolutionKind(row.Kind),
-		CostAmount: row.CostAmount,
-		AttestedBy: row.AttestedBy,
-		Reference:  row.Reference,
-		Note:       providerBillingOptionalString(row.Note),
-		ResolvedAt: row.ResolvedAt,
-	}
-}
-
 // providerBillingResolutionManifest is the settlement body of an
-// operator-attested settlement: the refused evidence, the hold, and the
-// attestation that replaced qualification.
+// operator-attested settlement: the hold, why it was refused, any provider
+// evidence it carried, and the attestation that replaced qualification. The
+// qualification facts are null for a hold the host refused before any evidence.
 type providerBillingResolutionManifest struct {
 	Contract                 string                                 `json:"contract"`
 	OperationID              string                                 `json:"operation_id"`
-	Provider                 string                                 `json:"provider"`
-	ProviderResourceID       string                                 `json:"provider_resource_id"`
-	ProviderLifetimeStartsAt string                                 `json:"provider_lifetime_starts_at"`
-	ProviderLifetimeEndsAt   string                                 `json:"provider_lifetime_ends_at"`
-	ProviderAbsentAt         string                                 `json:"provider_absent_at"`
-	LifecycleEvidenceSHA256  string                                 `json:"lifecycle_evidence_sha256"`
+	Provider                 *string                                `json:"provider"`
+	ProviderResourceID       *string                                `json:"provider_resource_id"`
+	ProviderLifetimeStartsAt *string                                `json:"provider_lifetime_starts_at"`
+	ProviderLifetimeEndsAt   *string                                `json:"provider_lifetime_ends_at"`
+	ProviderAbsentAt         *string                                `json:"provider_absent_at"`
+	LifecycleEvidenceSHA256  *string                                `json:"lifecycle_evidence_sha256"`
 	Authorization            providerBillingSettlementAuthorization `json:"authorization"`
-	QualificationReason      string                                 `json:"qualification_reason"`
+	Refusal                  providerBillingManifestRefusal         `json:"refusal"`
+	QualificationReason      *string                                `json:"qualification_reason"`
 	BaselineObservationID    *string                                `json:"baseline_observation_id"`
-	RefusedObservation       providerBillingRefusedObservation      `json:"refused_observation"`
+	RefusedObservation       *providerBillingRefusedObservation     `json:"refused_observation"`
 	CostAmount               int64                                  `json:"cost_amount,string"`
 	AttestedBy               string                                 `json:"attested_by"`
 	Reference                string                                 `json:"reference"`
 	Note                     *string                                `json:"note"`
 	ResolvedAt               string                                 `json:"resolved_at"`
+}
+
+type providerBillingManifestRefusal struct {
+	Reason    string  `json:"reason"`
+	Detail    *string `json:"detail"`
+	RefusedAt string  `json:"refused_at"`
 }
 
 type providerBillingRefusedObservation struct {
@@ -244,43 +275,56 @@ type providerBillingRefusedObservation struct {
 	CostAmount  *int64  `json:"cost_amount,string"`
 }
 
-func providerBillingResolutionBody(ctx context.Context, q *gen.Queries, row gen.BillingCostQualification, auth gen.BillingOperationAuthorization, resolution gen.BillingCostResolution) ([]byte, error) {
-	refused, err := q.GetLatestProviderBillingObservation(ctx, gen.GetLatestProviderBillingObservationParams{
-		MerchantID: row.MerchantID, OperationID: row.OperationID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("load refusing provider billing observation: %w", err)
-	}
-	if refused.QualificationReason != row.Reason {
-		return nil, fmt.Errorf("latest provider billing observation %q did not refuse the qualification", refused.ObservationID)
-	}
+func providerBillingResolutionBody(ctx context.Context, q *gen.Queries, refusal gen.BillingCostRefusal, auth gen.BillingOperationAuthorization, resolution gen.BillingCostResolution) ([]byte, error) {
 	authorization, err := providerBillingAuthorizationManifest(ctx, q, auth)
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(providerBillingResolutionManifest{
-		Contract:                 "openrails/operator-attested-provider-cost",
-		OperationID:              row.OperationID,
-		Provider:                 row.Provider,
-		ProviderResourceID:       row.ProviderResourceID,
-		ProviderLifetimeStartsAt: row.ProviderLifetimeStartsAt.UTC().Format(time.RFC3339Nano),
-		ProviderLifetimeEndsAt:   row.ProviderLifetimeEndsAt.UTC().Format(time.RFC3339Nano),
-		ProviderAbsentAt:         row.ProviderAbsentAt.UTC().Format(time.RFC3339Nano),
-		LifecycleEvidenceSHA256:  hex.EncodeToString(row.LifecycleEvidenceDigest),
-		Authorization:            authorization,
-		QualificationReason:      row.Reason,
-		BaselineObservationID:    row.BaselineObservationID,
-		RefusedObservation: providerBillingRefusedObservation{
-			providerBillingSettlementObservation: providerBillingSettlementObservationFromRow(gen.GetProviderBillingObservationRow(refused)),
-			RefusalKind:                          refused.RefusalKind,
-			CostAmount:                           refused.CostAmount,
+	manifest := providerBillingResolutionManifest{
+		Contract:      "openrails/operator-attested-provider-cost",
+		OperationID:   auth.OperationID,
+		Authorization: authorization,
+		Refusal: providerBillingManifestRefusal{
+			Reason: refusal.Reason, Detail: refusal.Detail, RefusedAt: refusal.RefusedAt.UTC().Format(time.RFC3339Nano),
 		},
 		CostAmount: *resolution.CostAmount,
 		AttestedBy: resolution.AttestedBy,
 		Reference:  resolution.Reference,
 		Note:       resolution.Note,
 		ResolvedAt: resolution.ResolvedAt.UTC().Format(time.RFC3339Nano),
+	}
+	row, err := q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
+		MerchantID: auth.MerchantID, OperationID: auth.OperationID,
 	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		return nil, err
+	default:
+		stamp := func(t time.Time) *string { v := t.UTC().Format(time.RFC3339Nano); return &v }
+		lifecycle := hex.EncodeToString(row.LifecycleEvidenceDigest)
+		manifest.Provider, manifest.ProviderResourceID = &row.Provider, &row.ProviderResourceID
+		manifest.ProviderLifetimeStartsAt, manifest.ProviderLifetimeEndsAt = stamp(row.ProviderLifetimeStartsAt), stamp(row.ProviderLifetimeEndsAt)
+		manifest.ProviderAbsentAt, manifest.LifecycleEvidenceSHA256 = stamp(row.ProviderAbsentAt), &lifecycle
+		manifest.QualificationReason, manifest.BaselineObservationID = &row.Reason, row.BaselineObservationID
+		if ProviderBillingQualificationState(row.State) == ProviderBillingQualificationRefused {
+			refused, err := q.GetLatestProviderBillingObservation(ctx, gen.GetLatestProviderBillingObservationParams{
+				MerchantID: row.MerchantID, OperationID: row.OperationID,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("load refusing provider billing observation: %w", err)
+			}
+			if refused.QualificationReason != row.Reason {
+				return nil, fmt.Errorf("latest provider billing observation %q did not refuse the qualification", refused.ObservationID)
+			}
+			manifest.RefusedObservation = &providerBillingRefusedObservation{
+				providerBillingSettlementObservation: providerBillingSettlementObservationFromRow(gen.GetProviderBillingObservationRow(refused)),
+				RefusalKind:                          refused.RefusalKind,
+				CostAmount:                           refused.CostAmount,
+			}
+		}
+	}
+	body, err := json.Marshal(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("author provider billing resolution body: %w", err)
 	}
@@ -329,38 +373,30 @@ func (s *MoneyService) ListProviderBillingQualifications(ctx context.Context, fi
 	if present {
 		params.AfterAt, params.AfterOperationID = &after.At, &after.OperationID
 	}
-	var rows []gen.ListProviderBillingQualificationsRow
-	var resolutions []gen.BillingCostResolution
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
-		var err error
-		if rows, err = q.ListProviderBillingQualifications(ctx, params); err != nil || len(rows) == 0 {
+		rows, err := q.ListProviderBillingQualifications(ctx, params)
+		if err != nil {
 			return err
 		}
-		ids := make([]string, len(rows))
-		for i, row := range rows {
-			ids[i] = row.BillingCostQualification.OperationID
+		page = pagination.Map(pagination.Cut(rows, limit, func(row gen.ListProviderBillingQualificationsRow) any {
+			return providerBillingQualificationCursor{At: row.BillingCostQualification.CreatedAt, OperationID: row.BillingCostQualification.OperationID}
+		}), func(row gen.ListProviderBillingQualificationsRow) *ProviderBillingQualification {
+			return providerBillingQualificationFromRow(row.BillingCostQualification, operationAuthorizationFromRow(row.BillingOperationAuthorization, false), false)
+		})
+		auths := make([]*OperationAuthorization, len(page.Items))
+		for i, item := range page.Items {
+			auths[i] = item.Authorization
 		}
-		resolutions, err = q.ListProviderBillingResolutions(ctx, gen.ListProviderBillingResolutionsParams{MerchantID: merchantID.UUID(), OperationIds: ids})
-		return err
-	})
-	if err != nil {
-		return page, err
-	}
-	resolved := make(map[string]gen.BillingCostResolution, len(resolutions))
-	for _, r := range resolutions {
-		resolved[r.OperationID] = r
-	}
-	cut := pagination.Cut(rows, limit, func(row gen.ListProviderBillingQualificationsRow) any {
-		return providerBillingQualificationCursor{At: row.BillingCostQualification.CreatedAt, OperationID: row.BillingCostQualification.OperationID}
-	})
-	return pagination.Map(cut, func(row gen.ListProviderBillingQualificationsRow) *ProviderBillingQualification {
-		out := providerBillingQualificationFromRow(row.BillingCostQualification, operationAuthorizationFromRow(row.BillingOperationAuthorization, false), false)
-		if r, ok := resolved[out.OperationID]; ok {
-			out.Resolution = providerBillingResolutionFromRow(r)
+		if err := attachHoldOutcomes(ctx, q, merchantID.UUID(), auths...); err != nil {
+			return err
 		}
-		return out
-	}), nil
+		for _, item := range page.Items {
+			item.Resolution = item.Authorization.Resolution
+		}
+		return nil
+	})
+	return page, err
 }
 
 type providerBillingQualificationCursor struct {
@@ -368,15 +404,11 @@ type providerBillingQualificationCursor struct {
 	OperationID string    `json:"o"`
 }
 
-// withProviderBillingResolution attaches the operation's resolution, if any.
-func withProviderBillingResolution(ctx context.Context, q *gen.Queries, out *ProviderBillingQualification) (*ProviderBillingQualification, error) {
-	row, err := q.GetProviderBillingResolution(ctx, gen.GetProviderBillingResolutionParams{MerchantID: out.MerchantID, OperationID: out.OperationID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
+// withHoldOutcome attaches the hold's refusal and resolution to a qualification.
+func withHoldOutcome(ctx context.Context, q *gen.Queries, out *ProviderBillingQualification) (*ProviderBillingQualification, error) {
+	if err := attachHoldOutcomes(ctx, q, out.MerchantID, out.Authorization); err != nil {
 		return nil, err
 	}
-	out.Resolution = providerBillingResolutionFromRow(row)
+	out.Resolution = out.Authorization.Resolution
 	return out, nil
 }

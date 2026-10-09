@@ -135,12 +135,27 @@ func TestProviderBillingResolution(t *testing.T) {
 
 	t.Run("the list finds the stuck holds", func(t *testing.T) {
 		require.Equal(t, []string{"falling", "negative", "too-large"}, list(stuck))
+		yes := true
+		page, err := client.ListOperationAuthorizations(ctx, billing.OperationAuthorizationListParams{
+			State: []billing.OperationAuthorizationState{billing.OperationAuthorizationOpen}, Refused: &yes,
+		})
+		require.NoError(t, err)
+		reasons := map[string]string{}
+		for _, auth := range page.Items {
+			require.NotNil(t, auth.Refusal, auth.OperationID)
+			reasons[auth.OperationID] = string(auth.Refusal.Reason) + " / " + auth.Refusal.Detail
+		}
+		require.Equal(t, map[string]string{
+			"falling":   "decreasing_provider_cost / observation falling:2",
+			"negative":  "negative_or_corrective_record / observation negative:1",
+			"too-large": "provider_evidence_refused / observation too-large:1: response_too_large",
+		}, reasons, "the qualifier refuses the hold with its reason")
 		paged := stuck
 		paged.Limit = 1
 		require.Equal(t, []string{"falling", "negative", "too-large"}, list(paged))
 		require.Equal(t, []string{"pending", "falling", "negative", "too-large"}, list(billing.ProviderBillingQualificationListParams{}))
 		require.Equal(t, []string{"pending"}, list(billing.ProviderBillingQualificationListParams{State: []billing.ProviderBillingQualificationState{billing.ProviderBillingQualificationPending}}))
-		_, err := client.ListProviderBillingQualifications(ctx, billing.ProviderBillingQualificationListParams{State: []billing.ProviderBillingQualificationState{"stuck"}})
+		_, err = client.ListProviderBillingQualifications(ctx, billing.ProviderBillingQualificationListParams{State: []billing.ProviderBillingQualificationState{"stuck"}})
 		refused(err, 400, "invalid_query", "state")
 		_, err = client.ListProviderBillingQualifications(ctx, billing.ProviderBillingQualificationListParams{AuthorizationState: []billing.OperationAuthorizationState{"closed"}})
 		refused(err, 400, "invalid_query", "authorization_state")
@@ -338,14 +353,14 @@ func TestProviderBillingResolution(t *testing.T) {
 		require.EqualValues(t, 0, balance(customer).HeldAmount)
 	})
 
-	t.Run("the database admits a resolution only for a refused qualification", func(t *testing.T) {
+	t.Run("the database admits a resolution only for a refused hold", func(t *testing.T) {
 		merchantID := client.MerchantID().UUID()
 		_, err := f.pool.Exec(ctx, `INSERT INTO `+table("cost_resolutions")+` (merchant_id, operation_id, kind, attested_by, reference)
 			VALUES ($1, 'pending', 'written_off', 'operator:sql', 'ticket:sql')`, merchantID)
-		require.ErrorContains(t, err, "cost_resolutions_qualification_fkey")
+		require.ErrorContains(t, err, "cost_resolutions_refusal_fkey")
 		_, err = f.pool.Exec(ctx, `UPDATE `+table("cost_qualifications")+` SET state = 'pending', reason = 'awaiting_equal_observation'
 			WHERE merchant_id = $1 AND operation_id = 'negative'`, merchantID)
-		require.ErrorContains(t, err, "cost_resolutions_qualification_fkey")
+		require.ErrorContains(t, err, "cost_refusals_qualification_fkey")
 		_, err = f.pool.Exec(ctx, `UPDATE `+table("cost_resolutions")+` SET reference = 'ticket:43' WHERE merchant_id = $1 AND operation_id = 'negative'`, merchantID)
 		require.Error(t, err)
 		_, err = f.pool.Exec(ctx, `DELETE FROM `+table("cost_resolutions")+` WHERE merchant_id = $1 AND operation_id = 'negative'`, merchantID)

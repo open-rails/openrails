@@ -331,6 +331,157 @@ func (q *Queries) ListOperationAuthorizationExtensions(ctx context.Context, arg 
 	return items, nil
 }
 
+const listOperationAuthorizations = `-- name: ListOperationAuthorizations :many
+SELECT a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
+FROM billing.operation_authorizations a
+WHERE a.merchant_id = $1::uuid
+  AND (cardinality($2::text[]) = 0 OR a.state = ANY($2::text[]))
+  AND ($3::boolean IS NULL
+       OR $3::boolean = EXISTS (
+           SELECT 1 FROM billing.cost_refusals r
+           WHERE r.merchant_id = a.merchant_id AND r.operation_id = a.operation_id))
+  AND ($4::timestamptz IS NULL
+       OR (a.created_at, a.operation_id) < ($4::timestamptz, $5::text))
+ORDER BY a.created_at DESC, a.operation_id DESC
+LIMIT $6::int
+`
+
+type ListOperationAuthorizationsParams struct {
+	MerchantID       uuid.UUID
+	States           []string
+	Refused          *bool
+	AfterAt          *time.Time
+	AfterOperationID *string
+	RowLimit         int32
+}
+
+// Newest first; an empty state filter admits every state, a null refused
+// admits both.
+func (q *Queries) ListOperationAuthorizations(ctx context.Context, arg ListOperationAuthorizationsParams) ([]BillingOperationAuthorization, error) {
+	rows, err := q.db.Query(ctx, listOperationAuthorizations,
+		arg.MerchantID,
+		arg.States,
+		arg.Refused,
+		arg.AfterAt,
+		arg.AfterOperationID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingOperationAuthorization
+	for rows.Next() {
+		var i BillingOperationAuthorization
+		if err := rows.Scan(
+			&i.OperationID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.RecordOwner,
+			&i.LedgerAccountID,
+			&i.Currency,
+			&i.Amount,
+			&i.ClaimReference,
+			&i.AuthorizationBodyBytes,
+			&i.AuthorizationBodyDigest,
+			&i.State,
+			&i.TerminalReference,
+			&i.CreatedAt,
+			&i.ReleasedAt,
+			&i.SettledAt,
+			&i.SettlementCostAmount,
+			&i.SettlementAmount,
+			&i.SettlementBodyBytes,
+			&i.SettlementBodyDigest,
+			&i.ExtendedAmount,
+			&i.AuthorizedAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRefusedOperationAuthorizations = `-- name: ListRefusedOperationAuthorizations :many
+SELECT a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
+FROM billing.cost_refusals r
+JOIN billing.operation_authorizations a
+  ON a.merchant_id = r.merchant_id
+ AND a.operation_id = r.operation_id
+WHERE r.merchant_id = $1::uuid
+  AND (cardinality($2::text[]) = 0 OR a.state = ANY($2::text[]))
+  AND ($3::timestamptz IS NULL
+       OR (a.created_at, a.operation_id) < ($3::timestamptz, $4::text))
+ORDER BY a.created_at DESC, a.operation_id DESC
+LIMIT $5::int
+`
+
+type ListRefusedOperationAuthorizationsParams struct {
+	MerchantID       uuid.UUID
+	States           []string
+	AfterAt          *time.Time
+	AfterOperationID *string
+	RowLimit         int32
+}
+
+type ListRefusedOperationAuthorizationsRow struct {
+	BillingOperationAuthorization BillingOperationAuthorization
+}
+
+// The refused holds, newest first: driven by the refusals, so a page costs
+// what the refusals do, not every hold the merchant ever opened.
+func (q *Queries) ListRefusedOperationAuthorizations(ctx context.Context, arg ListRefusedOperationAuthorizationsParams) ([]ListRefusedOperationAuthorizationsRow, error) {
+	rows, err := q.db.Query(ctx, listRefusedOperationAuthorizations,
+		arg.MerchantID,
+		arg.States,
+		arg.AfterAt,
+		arg.AfterOperationID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRefusedOperationAuthorizationsRow
+	for rows.Next() {
+		var i ListRefusedOperationAuthorizationsRow
+		if err := rows.Scan(
+			&i.BillingOperationAuthorization.OperationID,
+			&i.BillingOperationAuthorization.MerchantID,
+			&i.BillingOperationAuthorization.CustomerID,
+			&i.BillingOperationAuthorization.RecordOwner,
+			&i.BillingOperationAuthorization.LedgerAccountID,
+			&i.BillingOperationAuthorization.Currency,
+			&i.BillingOperationAuthorization.Amount,
+			&i.BillingOperationAuthorization.ClaimReference,
+			&i.BillingOperationAuthorization.AuthorizationBodyBytes,
+			&i.BillingOperationAuthorization.AuthorizationBodyDigest,
+			&i.BillingOperationAuthorization.State,
+			&i.BillingOperationAuthorization.TerminalReference,
+			&i.BillingOperationAuthorization.CreatedAt,
+			&i.BillingOperationAuthorization.ReleasedAt,
+			&i.BillingOperationAuthorization.SettledAt,
+			&i.BillingOperationAuthorization.SettlementCostAmount,
+			&i.BillingOperationAuthorization.SettlementAmount,
+			&i.BillingOperationAuthorization.SettlementBodyBytes,
+			&i.BillingOperationAuthorization.SettlementBodyDigest,
+			&i.BillingOperationAuthorization.ExtendedAmount,
+			&i.BillingOperationAuthorization.AuthorizedAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const releaseOperationAuthorization = `-- name: ReleaseOperationAuthorization :one
 UPDATE billing.operation_authorizations
 SET state = 'released',
@@ -344,6 +495,12 @@ WHERE merchant_id = $3::uuid
       FROM billing.cost_qualifications qualification
       WHERE qualification.merchant_id = billing.operation_authorizations.merchant_id
         AND qualification.operation_id = billing.operation_authorizations.operation_id
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM billing.cost_refusals refusal
+      WHERE refusal.merchant_id = billing.operation_authorizations.merchant_id
+        AND refusal.operation_id = billing.operation_authorizations.operation_id
   )
 RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
 `
@@ -478,7 +635,7 @@ type WriteOffOperationAuthorizationParams struct {
 	OperationID       string
 }
 
-// A refused qualification's hold is released only through a recorded write-off.
+// A refused hold is released only through a recorded write-off.
 func (q *Queries) WriteOffOperationAuthorization(ctx context.Context, arg WriteOffOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, writeOffOperationAuthorization,
 		arg.TerminalReference,

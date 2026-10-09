@@ -81,6 +81,12 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 	if OperationAuthorizationState(row.State) != OperationAuthorizationOpen {
 		return nil, ErrOperationAuthorizationNotOpen
 	}
+	// A refused hold waits for an operator's close; nothing grows it meanwhile.
+	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
+		return nil, err
+	} else if refused {
+		return nil, ErrProviderBillingQualificationRefused
+	}
 	last, err := q.GetLastOperationAuthorizationExtensionOrdinal(ctx, gen.GetLastOperationAuthorizationExtensionOrdinalParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
 	})

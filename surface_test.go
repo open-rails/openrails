@@ -52,6 +52,8 @@ var embeddedMethods = map[string]string{
 	"RecordProviderBillingObservationTx":    "host-four: RecordProviderBillingObservation inside the host's transaction",
 	"GetProviderBillingQualificationTx":     "host-four: GetProviderBillingQualification inside the host's transaction",
 	"ResolveProviderBillingQualificationTx": "host-four: ResolveProviderBillingQualification inside the host's transaction",
+	"RefuseProviderBillingQualificationTx":  "host-four: RefuseProviderBillingQualification inside the host's transaction",
+	"CloseOperationAuthorizationTx":         "host-four: CloseOperationAuthorization inside the host's transaction",
 }
 
 // routeArguments are the arguments of the methods that refuse a request with

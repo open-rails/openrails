@@ -25,6 +25,7 @@ migration 0021_entitlement_cache.up.sql sha256:9c4b60cee1998e589501b2142c4e2fdf0
 migration 0022_partition_race.up.sql sha256:6532f6a6254907507a3050ae4b42f05b79103b541be27cb9ff8d07707db8e097
 migration 0023_statement_coverage.up.sql sha256:b23f0cefea13ef00bdfd6057af36e113aafea7bbda12e4ba04ff1e0a0601db02
 migration 0024_cost_resolutions.up.sql sha256:650fb1db36328c11d3171febc2f82f88e6bf4ff538612532653eb477bd69ae7a
+migration 0025_cost_refusals.up.sql sha256:49d6fba4a1ca3f5ed5a5f752d2483a74b8f334563e657a7cb4bdd9390a46ac5a
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -389,6 +390,21 @@ table billing.cost_qualifications
   index CREATE UNIQUE INDEX cost_qualifications_state_key ON billing.cost_qualifications USING btree (merchant_id, operation_id, state)
   trigger CREATE TRIGGER immutable_cost_qualification_facts BEFORE DELETE OR UPDATE ON billing.cost_qualifications FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'reason', 'baseline_observation_id', 'qualified_observation_id', 'qualified_cost_amount', 'qualified_at', 'updated_at')
 
+table billing.cost_refusals
+  column merchant_id uuid NOT NULL
+  column operation_id text NOT NULL
+  column reason text NOT NULL
+  column qualification_state text GENERATED ALWAYS AS ( CASE WHEN (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) THEN 'refused'::text ELSE NULL::text END) STORED
+  column detail text
+  column refused_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint cost_refusals_authorization_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT
+  constraint cost_refusals_detail_check CHECK (((detail IS NULL) OR ((detail <> ''::text) AND (detail = btrim(detail)) AND (octet_length(detail) <= 4096))))
+  constraint cost_refusals_pkey PRIMARY KEY (merchant_id, operation_id)
+  constraint cost_refusals_qualification_fkey FOREIGN KEY (merchant_id, operation_id, qualification_state) REFERENCES billing.cost_qualifications(merchant_id, operation_id, state) ON UPDATE RESTRICT ON DELETE RESTRICT
+  constraint cost_refusals_reason_check CHECK ((reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'lifecycle_unprovable'::text, 'provider_billing_unavailable'::text, 'observation_rejected'::text])))
+  index CREATE UNIQUE INDEX cost_refusals_pkey ON billing.cost_refusals USING btree (merchant_id, operation_id)
+  trigger CREATE TRIGGER immutable_cost_refusals BEFORE DELETE OR UPDATE ON billing.cost_refusals FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+
 table billing.cost_resolutions
   column merchant_id uuid NOT NULL
   column operation_id text NOT NULL
@@ -402,7 +418,7 @@ table billing.cost_resolutions
   constraint cost_resolutions_attestation_check CHECK (((attested_by <> ''::text) AND (attested_by = btrim(attested_by)) AND (octet_length(attested_by) <= 255) AND (reference <> ''::text) AND (reference = btrim(reference)) AND (octet_length(reference) <= 1024) AND ((note IS NULL) OR ((note <> ''::text) AND (note = btrim(note)) AND (octet_length(note) <= 4096)))))
   constraint cost_resolutions_kind_check CHECK ((((kind = 'settled'::text) AND (cost_amount IS NOT NULL) AND (cost_amount >= 0)) OR ((kind = 'written_off'::text) AND (cost_amount IS NULL))))
   constraint cost_resolutions_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint cost_resolutions_qualification_fkey FOREIGN KEY (merchant_id, operation_id, qualification_state) REFERENCES billing.cost_qualifications(merchant_id, operation_id, state) ON UPDATE RESTRICT ON DELETE RESTRICT
+  constraint cost_resolutions_refusal_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.cost_refusals(merchant_id, operation_id) ON DELETE RESTRICT
   index CREATE UNIQUE INDEX cost_resolutions_pkey ON billing.cost_resolutions USING btree (merchant_id, operation_id)
   trigger CREATE TRIGGER immutable_cost_resolutions BEFORE DELETE OR UPDATE ON billing.cost_resolutions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
@@ -1297,6 +1313,7 @@ table billing.operation_authorizations
   index CREATE INDEX operation_authorizations_customer_id_created_at_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, created_at DESC)
   index CREATE INDEX operation_authorizations_customer_id_currency_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX operation_authorizations_pkey ON billing.operation_authorizations USING btree (merchant_id, operation_id)
+  index CREATE INDEX operation_authorizations_state_created_at_idx ON billing.operation_authorizations USING btree (merchant_id, state, created_at DESC, operation_id DESC)
   trigger CREATE TRIGGER immutable_operation_authorization_facts BEFORE DELETE OR UPDATE ON billing.operation_authorizations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'terminal_reference', 'released_at', 'settled_at', 'settlement_cost_amount', 'settlement_amount', 'settlement_body_bytes', 'settlement_body_digest', 'extended_amount', 'authorized_amount')
 
 table billing.payment_attempts
@@ -2840,6 +2857,7 @@ function billing.guard_billing_restore_receipt()
                     'checkout_sessions',
                     'cost_observations',
                     'cost_qualifications',
+                    'cost_refusals',
                     'cost_resolutions',
                     'credential_publications',
                     'custodians',
