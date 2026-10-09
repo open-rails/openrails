@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -327,10 +328,14 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.OriginReason != "" {
 		originReason = &p.OriginReason
 	}
-	// Resolve the actor (explicit override, else the ambient authenticated
-	// principal) up front: it is both stamped on the row and the #732 per-actor
-	// ceiling key.
+	// Resolve the actor (explicit override, else the admitted invoker) up
+	// front: it is both stamped on the row and the #732 per-invoker ceiling
+	// key. The subject and credential it acted with are audit only.
 	actor := ResolveActor(ctx, p.Actor)
+	var subject, credential *string
+	if who, ok := admitted(ctx); ok {
+		subject, credential = textOrNil(who.Subject), textOrNil(billingauth.CredentialName(who))
+	}
 
 	// #732 anti-credential-compromise rate ceiling: destructive user/admin ops
 	// pass through the gate BEFORE the write-ahead intent is created. A trip
@@ -371,6 +376,8 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			Origin:         string(p.Origin),
 			OriginReason:   originReason,
 			Actor:          actorPtr,
+			Subject:        subject,
+			Credential:     credential,
 			ExpiresAt:      p.ExpiresAt,
 			PspID:          uuidPtrOrNil(p.PspID),
 			CustodianID:    uuidPtrOrNil(p.CustodianID),
@@ -923,4 +930,12 @@ func (s *Store) CheckRecovery(ctx context.Context, in gen.BillingProviderIntent,
 		return providerrecovery.CheckMerchant(ctx, s.db, in.MerchantID, now)
 	}
 	return providerrecovery.CheckPSP(ctx, s.db, in.MerchantID, *in.PspID, now)
+}
+
+// textOrNil is v, or nil when it is blank.
+func textOrNil(v string) *string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	return &v
 }

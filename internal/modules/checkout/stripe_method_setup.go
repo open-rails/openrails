@@ -33,18 +33,18 @@ type PaymentMethodSetup struct {
 	PaymentMethodID *billing.PaymentMethodID  `json:"payment_method_id,omitempty"`
 }
 
-func stripeSetupPrincipal(ctx context.Context, p billingauth.DelegatedPrincipal) (billing.MerchantID, uuid.UUID, error) {
+func stripeSetupPrincipal(ctx context.Context, p billingauth.Payer) (billing.MerchantID, uuid.UUID, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return mid, uuid.Nil, err
 	}
 	customer, err := uuid.Parse(p.SubjectID)
-	if err != nil || customer == uuid.Nil || billingauth.ValidateDelegatedPrincipal(&p) != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid {
+	if err != nil || customer == uuid.Nil || billingauth.ValidatePayer(&p) != nil || p.CredentialClass != billingauth.CredentialClassUserSession || p.Invoker != "" || p.MerchantID != mid {
 		return mid, uuid.Nil, apperr.New(403, "customer_session_required", "saved card setup requires its interactive customer session")
 	}
 	return mid, customer, nil
 }
-func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.UUID, key string, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
+func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.UUID, key string, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	mid, customer, err := stripeSetupPrincipal(ctx, principal)
 	if err != nil {
 		return PaymentMethodSetup{}, err
@@ -103,7 +103,7 @@ func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.
 	}
 	return s.submitStripeMethodSetup(ctx, session, principal, resolver)
 }
-func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
+func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	_, p, err := s.stripeSetupSession(ctx, session.ID, principal)
 	if err != nil {
 		return PaymentMethodSetup{}, err
@@ -132,7 +132,7 @@ func (s *CheckoutService) submitStripeMethodSetup(ctx context.Context, session *
 	return s.StripeMethodSetup(ctx, p.SessionID, principal, resolver)
 }
 
-func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (*models.CheckoutAttempt, subscriptions.StripeEngineSetupParams, error) {
+func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (*models.CheckoutAttempt, subscriptions.StripeEngineSetupParams, error) {
 	var params subscriptions.StripeEngineSetupParams
 	mid, customer, err := stripeSetupPrincipal(ctx, principal)
 	if err != nil {
@@ -152,7 +152,7 @@ func (s *CheckoutService) stripeSetupSession(ctx context.Context, id uuid.UUID, 
 	params = subscriptions.StripeEngineSetupParams{MerchantID: mid.UUID(), PSPID: session.PspID, CustomerID: customer, SessionID: id, CustomerRef: ref}
 	return session, params, nil
 }
-func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
+func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	session, p, err := s.stripeSetupSession(ctx, id, principal)
 	if err != nil {
 		return PaymentMethodSetup{}, err
@@ -205,7 +205,7 @@ func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, p
 	out.Status = result.Status
 	return out, nil
 }
-func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
+func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (PaymentMethodSetup, error) {
 	session, p, err := s.stripeSetupSession(ctx, id, principal)
 	if err != nil {
 		return PaymentMethodSetup{}, err

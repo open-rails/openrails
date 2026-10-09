@@ -869,7 +869,7 @@ func readInitialMembershipQuote(session *models.CheckoutAttempt) (subscriptions.
 	return terms, nil
 }
 
-func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal) error {
+func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.Payer) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != session.CustomerID.String() {
 		return ErrCheckoutAttemptForbidden
@@ -881,7 +881,7 @@ func validateInitialMembershipPrincipal(ctx context.Context, session *models.Che
 // real integration resolves an existing canonical operation before calling it,
 // so a repeated/uncertain confirmation cannot shift accepted period bounds.
 // It does not enqueue, charge, create membership, or return a checkout success.
-func acceptedInitialMembershipQuote(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.DelegatedPrincipal, now time.Time) (subscriptions.InitialMembershipTerms, error) {
+func acceptedInitialMembershipQuote(ctx context.Context, session *models.CheckoutAttempt, principal billingauth.Payer, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	if err := validateInitialMembershipPrincipal(ctx, session, principal); err != nil {
 		return subscriptions.InitialMembershipTerms{}, err
 	}
@@ -980,7 +980,7 @@ func (s *CheckoutAttemptService) Owner(ctx context.Context, id uuid.UUID) (Attem
 
 // acceptQuote accepts a quoted membership for the present payer, or
 // confirms an attempt that carries no quote.
-func (s *CheckoutAttemptService) acceptQuote(ctx context.Context, sessionID uuid.UUID, req *CheckoutAttemptConfirmRequest, user *UserIdentity, principal billingauth.DelegatedPrincipal) (*CheckoutAttemptResponse, error) {
+func (s *CheckoutAttemptService) acceptQuote(ctx context.Context, sessionID uuid.UUID, req *CheckoutAttemptConfirmRequest, user *UserIdentity, principal billingauth.Payer) (*CheckoutAttemptResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		if db.IsNotFound(err) {
@@ -1014,7 +1014,7 @@ func (s *CheckoutAttemptService) acceptQuote(ctx context.Context, sessionID uuid
 		return nil, err
 	}
 	confirmer, ok := s.checkoutService.(interface {
-		ConfirmInitialMembership(context.Context, subscriptions.InitialMembershipTerms, string, billingauth.DelegatedPrincipal, *uuid.UUID) (*CheckoutResponse, error)
+		ConfirmInitialMembership(context.Context, subscriptions.InitialMembershipTerms, string, billingauth.Payer, *uuid.UUID) (*CheckoutResponse, error)
 	})
 	if !ok {
 		return nil, errors.New("initial membership service unavailable")

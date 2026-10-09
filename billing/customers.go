@@ -8,16 +8,25 @@ import (
 // subject UUID; the same UUID under another merchant is a different customer.
 // Email is the billing contact the merchant declared, null when none.
 type Customer struct {
-	ID         CustomerID `json:"id"`
-	Email      *string    `json:"email"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastSeenAt time.Time  `json:"last_seen_at"`
+	ID       CustomerID `json:"id"`
+	Email    *string    `json:"email"`
+	Username *string    `json:"username"`
+	// Blocked customers may not buy: checkout sessions refuse them.
+	Blocked    bool      `json:"blocked"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
-// EnsureCustomerParams declares a customer. EnsureCustomer creates the customer or
-// replaces these fields; a nil Email clears it.
+// EnsureCustomerParams declares a customer: the facts OpenRails keeps about
+// it instead of asking the host's auth. EnsureCustomer creates the customer
+// or replaces these fields; a nil Email or Username clears it. Receipts and
+// notices go to Email, the CCBill username bridge matches Username, and
+// checkout sessions refuse a Blocked customer (one banned or deleted at the
+// host). Call it whenever they change.
 type EnsureCustomerParams struct {
-	Email *string `json:"email"`
+	Email    *string `json:"email"`
+	Username *string `json:"username"`
+	Blocked  bool    `json:"blocked"`
 }
 
 // CustomerListParams lists customers, newest first. Query matches an id

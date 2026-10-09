@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
@@ -29,6 +28,19 @@ func (l *featureLimitLLM) Complete(context.Context, string, []dashboard.LLMMessa
 func (l *featureLimitLLM) CompleteTools(context.Context, string, []dashboard.ToolDef, []dashboard.ToolMessage, int) (*dashboard.ToolTurn, error) {
 	l.asks++
 	return &dashboard.ToolTurn{Text: "No further lookups needed."}, nil
+}
+
+// hostKey admits every request as the host backend's API key.
+type hostKey struct{}
+
+func pass(next http.Handler) http.Handler { return next }
+
+func (hostKey) Required() func(http.Handler) http.Handler                { return pass }
+func (hostKey) RequirePermission(string) func(http.Handler) http.Handler { return pass }
+func (hostKey) Sensitive() func(http.Handler) http.Handler               { return pass }
+func (hostKey) Identity(context.Context) (openrails.Identity, bool) {
+	return openrails.Identity{Issuer: "test", Subject: "test-host", SubjectKind: openrails.SubjectApplication,
+		Invoker: openrails.Invoker{Issuer: "test", ID: "test-host"}, Credential: openrails.Credential{Kind: openrails.CredentialAPIKey, ID: "k_test"}}, true
 }
 
 // Real feature handlers accept two requests in total across host mounts,
@@ -46,13 +58,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "test-site", SecretKey: "test-secret"}
 	cfg.LLM = &openrails.LLMConfig{APIKey: "test", AskEnabled: true, CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{
-		Postgres: f.pool,
-		Authenticate: func(*http.Request) (openrails.Identity, error) {
-			return openrails.Identity{Kind: billingauth.Machine, SubjectID: "test-host", Issuer: "test"}, nil
-		},
-		Authorize: func(*http.Request, openrails.Identity, openrails.Requirement) error { return nil },
-	})
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 	dashboardLLM, catalogLLM := &featureLimitLLM{}, &featureLimitLLM{}
@@ -61,7 +67,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes(openrails.Routes{Merchant: true})
+		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Merchant: true})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {

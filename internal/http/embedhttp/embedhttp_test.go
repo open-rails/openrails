@@ -1,37 +1,21 @@
 package embedhttp
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/requestauth"
 )
-
-func identityAuth(id billingauth.Identity, calls *int) *billingauth.Integration {
-	return &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
-		if calls != nil {
-			*calls++
-		}
-		return id, nil
-	})}
-}
 
 func TestCapabilities(t *testing.T) {
 	h := CapabilitiesHandler(nil, []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true}, nil)
@@ -77,66 +61,49 @@ func TestCapabilities(t *testing.T) {
 	require.Equal(t, []RouteSet{RouteSetCheckout, RouteSetWebhooks}, ResolveRouteSets([]RouteSet{RouteSetCheckout, "", RouteSetCheckout, RouteSetWebhooks}))
 }
 
-// Route selection is refused unless each surface has the authority it needs.
+// Route selection is refused unless each surface has the Auth it needs:
+// nothing mounts open.
 func TestRoutesValidation(t *testing.T) {
-	authn := identityAuth(billingauth.Identity{}, nil)
-	full := &billingauth.Integration{Authentication: authn.Authentication, Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error { return nil })}
-	delegate := func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
-		return nil, billingauth.ErrUnauthenticated
-	}
-	runtime := func(auth *billingauth.Integration) *app.Runtime {
-		return &app.Runtime{Auth: auth, AuthenticateCustomer: delegate}
-	}
+	auth := &authtest.Fake{}
 	customer := func(c config.CustomerRoutes) config.Routes {
 		return config.Routes{CustomerProfiles: []config.CustomerRoutes{c}}
 	}
 	for _, tc := range []struct {
 		name string
 		sel  config.Routes
-		auth *billingauth.Integration
 		ok   bool
 	}{
-		{"nothing selected", config.Routes{}, nil, true},
-		{"storefront needs no authenticator: a session id is its credential", config.Routes{Storefront: true}, nil, true},
-		{"storefront", config.Routes{Storefront: true}, authn, true},
-		{"merchant without authorization", config.Routes{Merchant: true}, authn, false},
-		{"merchant", config.Routes{Merchant: true}, full, true},
-		{"catalog edits without merchant", config.Routes{CatalogEdits: true}, full, false},
-		{"catalog edits", config.Routes{Merchant: true, CatalogEdits: true}, full, true},
-		{"customer without any authenticator", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), nil, false},
-		{"native customer without merchant", customer(config.CustomerRoutes{Scope: config.CustomerSelfService}), authn, false},
-		{"native customer", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), authn, true},
-		{"customers shorthand", config.Routes{Customers: config.CustomerBillingManagement}, authn, true},
-		{"no scope", customer(config.CustomerRoutes{Delegated: true}), nil, false},
-		{"unknown scope", customer(config.CustomerRoutes{Scope: 9, Delegated: true}), nil, false},
-		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me", Scope: config.CustomerSelfService, Delegated: true}), nil, true},
+		{"nothing selected", config.Routes{}, true},
+		{"storefront needs no Auth: a session id is its credential", config.Routes{Storefront: true}, true},
+		{"storefront", config.Routes{Storefront: true, Auth: auth}, true},
+		{"merchant without Auth", config.Routes{Merchant: true}, false},
+		{"merchant with a typed nil Auth", config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil)}, false},
+		{"merchant", config.Routes{Merchant: true, Auth: auth}, true},
+		{"catalog edits without merchant", config.Routes{CatalogEdits: true, Auth: auth}, false},
+		{"catalog edits", config.Routes{Merchant: true, CatalogEdits: true, Auth: auth}, true},
+		{"customer without Auth", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), false},
+		{"customer with the mount's Auth", config.Routes{Auth: auth, CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}, true},
+		{"customer with its own Auth", customer(config.CustomerRoutes{Scope: config.CustomerSelfService, Auth: auth}), true},
+		{"customers shorthand without Auth", config.Routes{Customers: config.CustomerBillingManagement}, false},
+		{"customers shorthand", config.Routes{Customers: config.CustomerBillingManagement, Auth: auth}, true},
+		{"no scope", customer(config.CustomerRoutes{Auth: auth}), false},
+		{"unknown scope", customer(config.CustomerRoutes{Scope: 9, Auth: auth}), false},
+		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me", Scope: config.CustomerSelfService, Auth: auth}), true},
 	} {
-		profiles := CustomerProfiles(tc.sel, "store")
-		if tc.name == "native customer without merchant" {
-			profiles = CustomerProfiles(tc.sel, "")
-		}
-		require.Equal(t, tc.ok, ValidateRoutes(tc.sel, profiles, runtime(tc.auth)) == nil, tc.name)
+		require.Equal(t, tc.ok, ValidateRoutes(tc.sel, CustomerProfiles(tc.sel), &app.Runtime{}) == nil, tc.name)
 	}
-	delegated := customer(config.CustomerRoutes{Prefix: "/portal", Scope: config.CustomerSelfService, Delegated: true})
-	require.ErrorContains(t, ValidateRoutes(delegated, CustomerProfiles(delegated, ""), &app.Runtime{}), "Deps.AuthenticateCustomer")
 	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		sel := customer(config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSelfService, Delegated: true})
-		require.Error(t, ValidateRoutes(sel, CustomerProfiles(sel, ""), runtime(nil)), prefix)
+		sel := customer(config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSelfService, Auth: auth})
+		require.Error(t, ValidateRoutes(sel, CustomerProfiles(sel), &app.Runtime{}), prefix)
 	}
 }
 
-// The combined handler refuses to mount a surface without its auth boundary,
+// The combined handler refuses to mount the merchant API without its Auth,
 // and only checkout routes join the permissive-CORS browser tier.
 func TestNewRoutes(t *testing.T) {
-	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetCustomer}}) })
-	require.Panics(t, func() {
-		(&Assembler{Authenticator: billingauth.AuthenticatorFunc(nil)}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}})
-	})
+	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}}) })
 
-	gate := billingauth.Gate(IntegrationGate(&app.Runtime{}))
-	asm := &Assembler{Runtime: &app.Runtime{Config: &config.Config{}}, Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-	}), Gate: gate}
+	asm := &Assembler{Runtime: &app.Runtime{Config: &config.Config{}}, Auth: &authtest.Fake{}}
 	noWebhooks := routesurface.ProviderRoutes{}
 	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchant, RouteSetWebhooks}, ProviderRoutes: &noWebhooks})
 	var keys []string
@@ -151,137 +118,6 @@ func TestNewRoutes(t *testing.T) {
 	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
 	require.Contains(t, keys, "GET /billing/v1/merchant/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/merchant/payments")
-}
-
-// Native customer identity is the host's explicit canonical customer UUID for
-// a user session; other kinds, classes and opaque subjects never become payers.
-func TestNativeCustomerIdentity(t *testing.T) {
-	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}
-	customer := uuid.NewString()
-	session := billingauth.CredentialClassUserSession
-	for _, tc := range []struct {
-		name string
-		id   billingauth.Identity
-		ok   bool
-	}{
-		{"canonical customer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, true},
-		{"no customer mapping", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CredentialClass: session}, false},
-		{"no issuer", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
-		{"invoker scoped", billingauth.Identity{Kind: billingauth.User, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session, Invoker: "x"}, false},
-		{"machine", billingauth.Identity{Kind: billingauth.Machine, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
-		{"delegated", billingauth.Identity{Kind: billingauth.Delegated, SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
-		{"unknown kind", billingauth.Identity{Kind: "unknown", SubjectID: "opaque", Issuer: "issuer-a", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, false},
-	} {
-		calls := 0
-		auth := identityAuth(tc.id, &calls)
-		r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices", nil))
-		p, err := nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
-		_, userErr := integrationAuthenticator{auth: auth}.Authenticate(r.Context(), r)
-		if !tc.ok {
-			require.ErrorIs(t, err, billingauth.ErrUnauthenticated, tc.name)
-			require.ErrorIs(t, userErr, billingauth.ErrUnauthenticated, tc.name)
-			continue
-		}
-		require.NoError(t, err)
-		require.NoError(t, userErr)
-		require.Equal(t, 1, calls, "checkout and customer gates share one verified request")
-		require.Equal(t, customer, p.SubjectID)
-		require.Equal(t, "issuer-a", p.Issuer)
-		require.Equal(t, target.MerchantID, p.MerchantID)
-	}
-
-	auth := identityAuth(billingauth.Identity{Kind: billingauth.User, SubjectID: "s", Issuer: "i", CustomerID: billing.CustomerID(uuid.MustParse(customer)), CredentialClass: session}, nil)
-	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices/x", nil))
-	r = r.WithContext(merchanttarget.WithResolved(r.Context(), billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}))
-	_, err := nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
-	requireGate(t, err, http.StatusConflict)
-	r = requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices", nil))
-	r.Header.Set(merchant.SelectorHeader, "elsewhere")
-	_, err = nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
-	requireGate(t, err, http.StatusConflict)
-	r = requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/me/invoices", nil))
-	r.Header[http.CanonicalHeaderKey(merchant.SelectorHeader)] = []string{"store", "store"}
-	_, err = nativeCustomer(auth, target).AuthenticateDelegated(r.Context(), r)
-	requireGate(t, err, http.StatusBadRequest)
-}
-
-func requireGate(t *testing.T, err error, status int) {
-	t.Helper()
-	var gate billingauth.GateError
-	require.ErrorAs(t, err, &gate)
-	require.Equal(t, status, gate.Status, gate.Message)
-}
-
-func TestIntegrationGate(t *testing.T) {
-	target := billingauth.Target{MerchantID: billing.MerchantID(uuid.New()), MerchantSlug: "store"}
-	resolved := func(path string) *http.Request {
-		r := requestauth.Begin(httptest.NewRequest(http.MethodGet, path, nil))
-		return r.WithContext(merchanttarget.WithResolved(r.Context(), target))
-	}
-	staff := billingauth.Identity{Kind: billingauth.User, SubjectID: "staff", Issuer: "i", CredentialClass: billingauth.CredentialClassUserSession}
-	allow := billingauth.AuthorizationFunc(func(_ context.Context, _ *http.Request, _ billingauth.Identity, q billingauth.Requirement) error {
-		require.Equal(t, target, q.Target)
-		return nil
-	})
-	authorize := func(id billingauth.Identity, authz billingauth.Authorization, r *http.Request, perm string) (billingauth.Principal, error) {
-		auth := identityAuth(id, nil)
-		auth.Authorization = authz
-		return integrationGate{auth: auth, runtime: &app.Runtime{}}.Authorize(r.Context(), r, perm)
-	}
-
-	p, err := authorize(staff, allow, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
-	require.NoError(t, err)
-	require.Equal(t, billingauth.Principal{MerchantID: target.MerchantID, Kind: billingauth.User, Subject: "staff", UserContext: billingauth.UserContext{Merchant: "store"}}, p)
-
-	machine := billingauth.Identity{Kind: billingauth.Machine, Issuer: "i", Permissions: []string{billing.MerchantCatalogRead}}
-	p, err = authorize(machine, allow, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
-	require.NoError(t, err)
-	require.Equal(t, machine.Permissions, p.Permissions)
-	require.Empty(t, p.UserContext.UserID)
-
-	for _, tc := range []struct {
-		authz  error
-		status int
-	}{
-		{billingauth.GateError{Status: 403, Message: "denied"}, 403},
-		{billingauth.GateError{Status: 503, Message: "unavailable"}, 503},
-		{context.DeadlineExceeded, 503},
-	} {
-		_, err = authorize(staff, billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
-			return tc.authz
-		}), resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
-		requireGate(t, err, tc.status)
-	}
-	_, err = authorize(staff, nil, resolved("/v1/merchant/products"), billing.MerchantCatalogRead)
-	requireGate(t, err, http.StatusServiceUnavailable)
-	failing := &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
-		return billingauth.Identity{}, errors.New("bad token")
-	}), Authorization: allow}
-	r := resolved("/v1/merchant/products")
-	_, err = integrationGate{auth: failing, runtime: &app.Runtime{}}.Authorize(r.Context(), r, billing.MerchantCatalogRead)
-	requireGate(t, err, http.StatusUnauthorized)
-
-	// The in-process host principal is bounded by its grants and its merchant.
-	for _, tc := range []struct {
-		host   requestauth.HostPrincipal
-		status int
-	}{
-		{requestauth.HostPrincipal{MerchantID: target.MerchantID, Subject: "host", Permissions: []string{"merchant:*"}}, 0},
-		{requestauth.HostPrincipal{MerchantID: target.MerchantID, Permissions: []string{billing.MerchantSettingsRead}}, 403},
-		{requestauth.HostPrincipal{Permissions: []string{"merchant:*"}}, 403},
-		{requestauth.HostPrincipal{MerchantID: billing.MerchantID(uuid.New()), Permissions: []string{"merchant:*"}}, 409},
-	} {
-		host := tc.host
-		r := resolved("/v1/merchant/products")
-		p, err := integrationGate{}.Authorize(requestauth.WithHostPrincipal(r.Context(), &host), r, billing.MerchantCatalogRead)
-		if tc.status == 0 {
-			require.NoError(t, err)
-			require.Equal(t, target.MerchantID, p.MerchantID)
-			require.Equal(t, "host", p.Subject)
-		} else {
-			requireGate(t, err, tc.status)
-		}
-	}
 }
 
 // Provider credential writes need a DB secret backend that can write; an

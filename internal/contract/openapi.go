@@ -224,9 +224,11 @@ func (m *model) operation(r routes.Route) *obj {
 	responses.set("default", newObj("$ref", "#/components/responses/Error"))
 	op.set("responses", responses)
 	switch r.Auth {
-	case routes.AuthPublic, routes.AuthCheckoutSession, routes.AuthSessionID, routes.AuthProvider:
+	case routes.AuthPublic, routes.AuthSessionID, routes.AuthProvider:
 		op.set("security", []any{})
-	case routes.AuthOptional:
+	case routes.AuthCheckoutSession:
+		// The capability alone pays with a new card; the session's own
+		// customer, authenticated, also sees and pays with saved cards.
 		op.set("security", []any{newObj(), newObj("bearer", []string{})})
 	default:
 		op.set("security", []any{newObj("bearer", []string{})})

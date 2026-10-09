@@ -1,44 +1,16 @@
 package billingauth
 
 import (
-	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 )
-
-// Gate protects merchant-scoped routes.
-type Gate interface {
-	Authorize(ctx context.Context, r *http.Request, permission string) (Principal, error)
-	// RequireRecentSignIn is nil when principal, which Authorize returned for
-	// r, may perform an operation that moves money or grants access
-	// (billing.RequiresRecentSignIn): a machine or delegated credential,
-	// or a native user whose sign-in is recent. Otherwise it is the GateError
-	// to answer.
-	RequireRecentSignIn(ctx context.Context, r *http.Request, principal Principal) error
-}
-
-// Principal is the caller identity resolved by a Gate.
-type Principal struct {
-	MerchantID billing.MerchantID
-	// Kind is the credential's provenance. Only a NativeUser carries a sign-in
-	// of its own; an empty Kind is treated as one.
-	Kind PrincipalKind
-	// Subject is the opaque host identity verified by the Gate. Catalog owner
-	// routes require it; request fields and headers never supply this authority.
-	Subject     string
-	UserContext UserContext
-	// Permissions is the credential's resolved grant set for NON-USER principals
-	// (API keys, service JWTs, host/delegated principals) — consumers that need
-	// no-escalation checks (#757 api-key minting) read it. Empty for user
-	// sessions: those carry UserContext.UserID and are checked against live
-	// AuthKit group state instead.
-	Permissions []string
-}
 
 // GateError maps authorization failures to stable HTTP responses. Code is the
 // error's wire code (a host hook that names none answers its status's generic
@@ -84,27 +56,37 @@ func RefusalError(e GateError) *api.APIError {
 	return api.NewAPIError(e.Status, api.TypeForCode(e.Status, e.Code), e.Code, e.Message).WithMetadata(e.Metadata)
 }
 
-// ErrRecentSignInUnavailable is a native user's credential whose auth provider
-// cannot say how recently the user signed in.
+// ErrRecentSignInUnavailable is a credential whose provider cannot say how
+// recently its user signed in.
 var ErrRecentSignInUnavailable = errors.New("recent sign-in cannot be checked")
 
-// RequireRecentSignIn is the shared Gate.RequireRecentSignIn verdict. check
-// is the auth provider's helpers/auth RecentSignInChecker for the request; a
-// native user without one is refused. A stale sign-in is 403
-// step_up_required carrying the provider's challenge.
-func RequireRecentSignIn(ctx context.Context, p Principal, check func(context.Context) error) error {
-	if p.Kind == Machine || p.Kind == Delegated {
-		return nil
+// WriteRefusal answers a refusal from net/http middleware: its headers (a
+// DPoP challenge) and the error envelope.
+func WriteRefusal(w http.ResponseWriter, r *http.Request, e GateError) {
+	if e.Code == billing.CodeSenderProofRequired && e.Headers["WWW-Authenticate"] == "" {
+		w.Header().Set("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
 	}
-	var err error = ErrRecentSignInUnavailable
-	if check != nil {
-		err = check(ctx)
+	for name, value := range e.Headers {
+		w.Header().Set(name, value)
 	}
+	body := RefusalError(e)
+	if id := strings.TrimSpace(w.Header().Get("X-Request-ID")); id != "" {
+		body.WithRequestID(id)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(e.Status)
+	_ = json.NewEncoder(w).Encode(body.ToResponse())
+}
+
+// AsRefusal is err as the refusal it answers: a coded refusal keeps its
+// code, a credential failure its own, anything else is an outage.
+func AsRefusal(err error) GateError {
+	var gate GateError
 	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, ErrRecentSignInUnavailable):
-		return Refusal(billing.CodeStepUpUnavailable)
+	case errors.As(err, &gate) && gate.Status >= 400:
+		return gate
+	case errors.Is(err, auth.ErrExpired), errors.Is(err, auth.ErrRevoked), errors.Is(err, auth.ErrSenderProofRequired), errors.Is(err, auth.ErrUnauthenticated):
+		return Unauthenticated(err)
 	case errors.Is(err, auth.ErrStepUpRequired):
 		refusal := Refusal(billing.CodeStepUpRequired)
 		var challenge interface{ Metadata() map[string]any }
@@ -112,11 +94,12 @@ func RequireRecentSignIn(ctx context.Context, p Principal, check func(context.Co
 			refusal.Metadata = challenge.Metadata()
 		}
 		return refusal
-	case errors.Is(err, auth.ErrRevoked), errors.Is(err, auth.ErrExpired):
-		return authenticationFailure(err)
+	case errors.Is(err, ErrRecentSignInUnavailable):
+		return Refusal(billing.CodeStepUpUnavailable)
 	case errors.Is(err, auth.ErrForbidden):
 		return Refusal(billing.CodePermissionRequired)
-	default:
-		return Refusal(billing.CodeAuthorizationUnavailable)
+	case errors.Is(err, auth.ErrUnavailable):
+		return Refusal(billing.CodeAuthenticationUnavailable)
 	}
+	return Refusal(billing.CodeAuthorizationUnavailable)
 }

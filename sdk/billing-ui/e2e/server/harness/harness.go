@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
@@ -120,7 +121,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		},
 		Checkout: checkoutConfig(baseURL, pageURL),
 	}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
+	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}
@@ -187,12 +188,47 @@ var checkoutRouting = []billing.CheckoutRoutingRule{
 	{Prefer: []string{SolanaPSPKey}},
 }
 
-// Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux.
+// Mount registers AuthKit at /auth/v1 and OpenRails at /billing on mux,
+// guarded by AuthKit.
 func (r *Runtime) Mount(mux *http.ServeMux) error {
 	if err := r.Auth.Mount(mux); err != nil {
 		return err
 	}
-	return openrailshttp.Mount(mux, r.Client, billingRoutes)
+	routes := billingRoutes
+	routes.Auth = customerAuth{r.Auth}
+	return openrailshttp.Mount(mux, r.Client, routes)
+}
+
+// customerAuth is AuthKit's verify middleware as OpenRails' Auth: each
+// user is their own customer. Its users hold tokens minted outside a sign-in
+// (CreateUser), so Required verifies the token without a session. The
+// harness mounts no merchant API.
+type customerAuth struct{ ak *authkit.Client }
+
+func (a customerAuth) Required() func(http.Handler) http.Handler { return verify.Required(a.ak) }
+
+func (customerAuth) RequirePermission(string) func(http.Handler) http.Handler { return refuse }
+
+func (customerAuth) Sensitive() func(http.Handler) http.Handler { return refuse }
+
+func refuse(http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) })
+}
+
+func (customerAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
+	cl, ok := verify.ClaimsFromContext(ctx)
+	if !ok || cl.Kind != iam.ActorUser || cl.UserID == "" {
+		return openrails.Identity{}, false
+	}
+	credential := openrails.Credential{Kind: openrails.CredentialSession, ID: cl.SessionID}
+	if cl.DeviceKeyID != "" {
+		credential = openrails.Credential{Kind: openrails.CredentialDeviceKey, ID: cl.DeviceKeyID}
+	}
+	return openrails.Identity{
+		Issuer: cl.Issuer, Subject: cl.UserID, SubjectKind: openrails.SubjectUser,
+		Invoker: openrails.Invoker{Issuer: cl.Issuer, ID: cl.UserID}, Credential: credential,
+		Email: cl.Email, Username: cl.Username, EmailVerified: cl.EmailVerified,
+	}, true
 }
 
 // PaymentPage wraps the handler serving the hosted checkout page.

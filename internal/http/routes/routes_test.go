@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -25,16 +26,25 @@ import (
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
-// deny records every permission asked of it and refuses.
-type deny struct{ asked []string }
-
-func (g *deny) Authorize(_ context.Context, _ *http.Request, perm string) (billingauth.Principal, error) {
-	g.asked = append(g.asked, perm)
-	return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
+// deny admits everyone and refuses every permission but the allowed ones,
+// recording each one asked.
+type deny struct {
+	recordingAuth
+	allowed map[string]bool
+	asked   []string
 }
 
-func (*deny) RequireRecentSignIn(context.Context, *http.Request, billingauth.Principal) error {
-	return nil
+func (g *deny) RequirePermission(perm string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			g.asked = append(g.asked, perm)
+			if !g.allowed[perm] {
+				billingauth.WriteRefusal(w, r, billingauth.Refusal(billing.CodePermissionRequired))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 var wildcard = regexp.MustCompile(`\{[^}]+\}`)
@@ -73,13 +83,9 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 // Every merchant route asks the gate before its handler, and asks for the
 // permission that matches its blast radius.
 func TestMerchantRouteAuthorization(t *testing.T) {
-	gate := &deny{}
-	open := &catalogpolicy.Exposure{}
-	if err := open.Decide(true); err != nil {
-		t.Fatal(err)
-	}
-	rt := &app.Runtime{Config: &config.Config{}, CatalogEdits: open}
-	table := merchantSurface(rt, Options{Gate: gate, CatalogWrites: true})
+	gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}}
+	rt := gatedRuntime(t)
+	table := merchantSurface(rt, Options{Auth: gate, CatalogWrites: true})
 	h := table.Handler()
 	asked := map[string]string{}
 	for _, key := range routeKeys(table) {
@@ -167,16 +173,10 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 	}
 
 	// Money-moving catalog archives need both catalog and refund authority.
-	gate.asked = nil
-	allowCatalog := gateFunc(func(ctx context.Context, r *http.Request, perm string) (billingauth.Principal, error) {
-		if perm == billing.MerchantCatalogUpdate {
-			return billingauth.Principal{MerchantID: merchantA}, nil
-		}
-		return gate.Authorize(ctx, r, perm)
-	})
-	rec := do(merchantSurface(rt, Options{Gate: allowCatalog, CatalogWrites: true}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
+	allowCatalog := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}, allowed: map[string]bool{billing.MerchantCatalogUpdate: true}}
+	rec := do(merchantSurface(rt, Options{Auth: allowCatalog, CatalogWrites: true}).Handler(), http.MethodPost, "/v1/merchant/catalog/product-archives", nil)
 	require.Equal(t, http.StatusForbidden, rec.Code)
-	require.Equal(t, []string{billing.MerchantPaymentsRefund}, gate.asked)
+	require.Equal(t, []string{billing.MerchantCatalogUpdate, billing.MerchantPaymentsRefund}, allowCatalog.asked)
 
 	// Retired and control-plane-only management routes are not mounted.
 	for _, key := range routeKeys(table) {
@@ -193,7 +193,7 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 		for _, writable := range []bool{false, true} {
 			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
 			table := &router.Table{}
-			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{})
+			RegisterMerchantRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}})
 			keys := routeKeys(table)
 			for _, key := range []string{
 				"GET /merchant/configuration", "POST /merchant/configuration/applications",
@@ -213,7 +213,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	for _, allow := range []bool{false, true} {
 		rt := &app.Runtime{Config: &config.Config{}}
 		merchant := &router.Table{}
-		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{CatalogWrites: allow})
+		RegisterMerchantRoutes(router.NewMux(merchant, "", rt), rt, Options{Auth: authtest.Deny{}, CatalogWrites: allow})
 		all := routeKeys(merchant)
 		var keys []string
 		for _, key := range all {
@@ -259,7 +259,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	// publishing them, and the guard admits only its host principal: the
 	// process owner.
 	inProcess := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(inProcess, "", closed), closed, Options{CatalogWrites: true})
+	RegisterMerchantRoutes(router.NewMux(inProcess, "", closed), closed, HostOptions())
 	require.Contains(t, routeKeys(inProcess), "POST /merchant/catalog/applications")
 	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
 	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
@@ -278,11 +278,9 @@ func TestCatalogWritePolicy(t *testing.T) {
 // Administrative velocity limits apply per operation class after
 // authorization; previews never consume the mutation allowance.
 func TestAdminOperationLimits(t *testing.T) {
-	allow := gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-		return billingauth.Principal{MerchantID: merchantA, Subject: userB, UserContext: billingauth.UserContext{UserID: userB}}, nil
-	})
+	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterMerchantRoutes(router.NewMux(table, "/m", nil), nil, Options{Gate: allow, AdminLimiter: middleware.NewAdminOperationLimiter(nil)})
+	RegisterMerchantRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil)})
 	h := table.Handler()
 	preview := "/m/merchant/subscriptions/" + userA + "/change-tier/preview"
 	// A malformed body answers from the handler without a runtime.

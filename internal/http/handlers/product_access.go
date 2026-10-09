@@ -11,7 +11,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -181,11 +180,11 @@ func CheckProductAccess(r *httprequest.Request) {
 // CreateProductAccess grants a customer access to a product (support comps,
 // migrations, manual purchases), idempotent per customer and product. One with
 // no end also needs merchant:access:grant-permanent.
-func CreateProductAccess(gate billingauth.Gate) func(*httprequest.Request) {
+func CreateProductAccess(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) { createProductAccess(r, gate) }
 }
 
-func createProductAccess(r *httprequest.Request, gate billingauth.Gate) {
+func createProductAccess(r *httprequest.Request, gate StaffCan) {
 	customer, ok := productAccessCustomer(r)
 	if !ok {
 		return
@@ -207,8 +206,8 @@ func createProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 	if endsAt == nil && !permitPermanentGrant(r, gate) {
 		return
 	}
-	admin := r.GetUser()
-	if admin == nil || admin.ID == "" {
+	admin, ok := r.Staff()
+	if !ok {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "missing admin identity")
 		return
 	}
@@ -221,7 +220,7 @@ func createProductAccess(r *httprequest.Request, gate billingauth.Gate) {
 		UserID:     customer.String(),
 		ProductID:  productID,
 		SourceType: models.ProductAccessSourceAdmin,
-		SourceID:   "admin:" + admin.ID + ":" + productID.String(),
+		SourceID:   "admin:" + admin.Subject + ":" + productID.String(),
 		EndsAt:     endsAt,
 	})
 	if err != nil {

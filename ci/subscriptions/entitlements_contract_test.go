@@ -102,6 +102,9 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 	for _, topology := range []topology{embedded, remote} {
 		t.Run(string(topology), func(t *testing.T) {
 			client := w.client[topology]
+			// A saved card is charged in process; over HTTP only on a session
+			// its customer pays.
+			charge := w.client[embedded]
 			product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{
 				Key: "product-without-implicit-access-" + string(topology), DisplayName: "Mixed opaque benefits",
 				Entitlements: []string{"post:101", "premium", " private key "},
@@ -116,7 +119,7 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 				IdempotencyKey: "opaque-purchase-" + uuid.NewString(),
 				PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
 			}
-			initial, err := client.CreateCheckoutAttempt(t.Context(), request)
+			initial, err := charge.CreateCheckoutAttempt(t.Context(), request)
 			require.NoError(t, err)
 			require.Equal(t, billing.CheckoutAttemptSucceeded, initial.Status)
 			w.settle()
@@ -142,7 +145,7 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			require.False(t, customer.entitled(product.Key), "the product key is not an implicit entitlement")
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{"post:202"})})
 			require.NoError(t, err)
-			replayed, err := client.CreateCheckoutAttempt(t.Context(), request)
+			replayed, err := charge.CreateCheckoutAttempt(t.Context(), request)
 			require.NoError(t, err, "an accepted purchase must replay after its live product changes")
 			require.Equal(t, initial.ID, replayed.ID)
 			require.True(t, customer.entitled("post:101"))
@@ -154,7 +157,7 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			request.Customer, request.Entitlement = next.identity(), "post:202"
 			request.IdempotencyKey = "next-opaque-purchase-" + uuid.NewString()
 			request.PaymentOptions.PaymentMethodID = pmid(nextMethod)
-			purchased, err := client.CreateCheckoutAttempt(t.Context(), request)
+			purchased, err := charge.CreateCheckoutAttempt(t.Context(), request)
 			require.NoError(t, err)
 			require.Equal(t, billing.CheckoutAttemptSucceeded, purchased.Status)
 			w.settle()
@@ -171,7 +174,7 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			request.Customer, request.Entitlement = empty.identity(), ""
 			request.IdempotencyKey = "empty-opaque-purchase-" + uuid.NewString()
 			request.PaymentOptions.PaymentMethodID = pmid(emptyMethod)
-			emptyPurchase, err := client.CreateCheckoutAttempt(t.Context(), request)
+			emptyPurchase, err := charge.CreateCheckoutAttempt(t.Context(), request)
 			require.NoError(t, err)
 			require.Equal(t, billing.CheckoutAttemptSucceeded, emptyPurchase.Status)
 			require.NotNil(t, emptyPurchase.PaymentID)

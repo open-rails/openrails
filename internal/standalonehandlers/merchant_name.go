@@ -32,8 +32,8 @@ func MerchantRename(svc MerchantRenamer) func(*httprequest.Request) {
 			return
 		}
 		actor := ""
-		if uc, ok := r.UserContext(); ok {
-			actor = uc.UserID
+		if staff, ok := r.Staff(); ok {
+			actor = staff.Subject
 		}
 		m, err := svc.RenameMerchant(r.Request.Context(), mid, req.Name, actor, false)
 		var tooSoon *merchants.RenameTooSoonError

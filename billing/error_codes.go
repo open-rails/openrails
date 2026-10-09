@@ -206,6 +206,8 @@ var errorCodes = []ErrorCode{
 	{"checkout_session_not_found", 404, invalid, "The checkout session does not exist."},
 	{"checkout_session_expired", 410, invalid, "The checkout session expired."},
 	{"checkout_session_unavailable", 403, authz, "The checkout session is not available to this caller."},
+	{"customer_blocked", 403, authz, "The merchant declared this customer blocked: it may not buy."},
+	{"customer_proof_required", 403, authz, "A saved card is charged only on a checkout session its customer pays, signed in; mint one instead."},
 	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
 	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},
 	{"checkout_payment_in_progress", 409, invalid, "A payment on this checkout session is already being processed."},

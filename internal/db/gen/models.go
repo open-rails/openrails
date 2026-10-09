@@ -313,6 +313,10 @@ type BillingCustomer struct {
 	Email      *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
+	// The customer's username, as the merchant last declared it: billing email and the CCBill username bridge read it. NULL when none was declared.
+	Username *string
+	// The merchant declared the customer may not buy (banned or deleted at the host): checkout session actions refuse it. Declared with EnsureCustomer.
+	Blocked bool
 }
 
 // Per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
@@ -1147,7 +1151,7 @@ type BillingProviderIntent struct {
 	// Who wanted this mutation: user/admin-origin intents execute under mode=limited (reactive completion), system-origin intents require mode=full. Nothing executes under mode=readonly.
 	Origin       string
 	OriginReason *string
-	// Authenticated principal id (admin user id or self-service customer id) that produced a user/admin-origin intent. NULL for system-origin. Powers the anti-credential-compromise rate ceiling (per-actor + per-merchant rolling-hour count of destructive ops).
+	// The invoker that produced a user/admin-origin intent: the party that acted, the subject itself when it acted itself. NULL for system-origin. Keys the anti-credential-compromise rate ceiling (per-invoker + per-merchant rolling-hour count of destructive ops).
 	Actor *string
 	// Why the most recent attempt did not succeed (mode parked, kill switch, provider down, declined...). Recorded on the intent, never surfaced as an error.
 	LastFailureReason *string
@@ -1165,6 +1169,10 @@ type BillingProviderIntent struct {
 	DestructiveRunClass *string
 	// The custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant's custodian.
 	CustodianID *uuid.UUID
+	// The subject whose authority produced a user/admin-origin intent: the staff member, application or customer. NULL for system-origin.
+	Subject *string
+	// How the subject proved itself for a user/admin-origin intent, as kind:id (session:…, api_key:…). NULL for system-origin.
+	Credential *string
 }
 
 // Append-only operator history for external provider mutations executed from provider intents/convergence: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back. Retention: rows are deleted 25 months (761 days) after created_at.

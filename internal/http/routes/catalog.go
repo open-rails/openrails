@@ -26,9 +26,9 @@ var (
 // administer the catalog. A write is mounted only where the deployment allows
 // catalog updates.
 var catalogRoutes = []Route{
-	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthOptional,
+	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthPublic,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
-	{Method: GET, Path: "/v1/prices", Group: Checkout, Auth: AuthOptional,
+	{Method: GET, Path: "/v1/prices", Group: Checkout, Auth: AuthPublic,
 		Query: params(page, queryOf(handlers.PublicPriceListQuery{})), Responses: []Reply{{200, billing.ListPage[billing.Price]{}}}, Handler: h(handlers.ListPublicPrices)},
 
 	{Method: GET, Path: "/v1/merchant/catalog/revision", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantCatalogRead,

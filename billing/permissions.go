@@ -22,8 +22,10 @@ const (
 	MerchantInvoicesRead           = "merchant:invoices:read"
 	MerchantInvoicesUpdate         = "merchant:invoices:update"
 	MerchantInvoicesCollect        = "merchant:invoices:collect"
-	// MerchantCheckoutCreate permits merchant automation to purchase for a customer.
-	// It is owner-only by default and separate from customer-profile editing.
+	// MerchantCheckoutCreate permits merchant automation to start a purchase
+	// for a customer. It is machine-only (MachineOnly): no person holds it,
+	// an owner's merchant:* included, and a saved card is charged only on a
+	// checkout session its customer pays, signed in.
 	MerchantCheckoutCreate      = "merchant:checkout:create"
 	MerchantPaymentsRead        = "merchant:payments:read"
 	MerchantPaymentsRefund      = "merchant:payments:refund"
@@ -90,6 +92,11 @@ const (
 	// gives it to nobody.
 	MerchantAccessGrantPermanent = "merchant:access:grant-permanent"
 )
+
+// MachineOnly reports a merchant permission only a machine credential (an API
+// key, a service token) may exercise: OpenRails refuses it to a person
+// whatever the host's roles say. Never grant it to a human role.
+func MachineOnly(perm string) bool { return perm == MerchantCheckoutCreate }
 
 // The OAuth scopes of a trusted issuer's access tokens: ScopeMerchant reaches
 // the merchant API, ScopeSelf a customer's own billing (/v1/me).

@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,6 +71,13 @@ var hostedAddress atomic.Int64
 // call comes from its own address, so only the per-session limits apply.
 func (w *world) guest(method, path string, body any) (int, map[string]any) {
 	w.t.Helper()
+	return w.page(method, path, "", body)
+}
+
+// page calls a billing route from the payment page, with token when the
+// customer is signed in there.
+func (w *world) page(method, path, token string, body any) (int, map[string]any) {
+	w.t.Helper()
 	var data io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -82,6 +88,9 @@ func (w *world) guest(method, path string, body any) (int, map[string]any) {
 	require.NoError(w.t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", hostedAddress.Add(1)%250+1))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()
@@ -138,6 +147,15 @@ func (s hostedSession) read() map[string]any {
 	return doc
 }
 
+// readAs is the session as c sees it signed in: with c's saved cards when c
+// is its customer.
+func (s hostedSession) readAs(c *customer) map[string]any {
+	s.w.t.Helper()
+	status, doc := s.w.page(http.MethodGet, "/v1/checkout-sessions/"+s.id, c.token, nil)
+	require.Equal(s.w.t, http.StatusOK, status, "%v", doc)
+	return doc
+}
+
 // option is the session's option handle for rail.
 func (s hostedSession) option(rail string) string {
 	s.w.t.Helper()
@@ -154,6 +172,25 @@ func (s hostedSession) option(rail string) string {
 func (s hostedSession) pay(body map[string]any) (int, map[string]any) {
 	s.w.t.Helper()
 	return s.w.guest(http.MethodPost, "/v1/checkout-sessions/"+s.id+"/pay", body)
+}
+
+// payAs is c paying the session signed in.
+func (s hostedSession) payAs(c *customer, body map[string]any) (int, map[string]any) {
+	s.w.t.Helper()
+	return s.w.page(http.MethodPost, "/v1/checkout-sessions/"+s.id+"/pay", c.token, body)
+}
+
+// payWithSaved is the customer paying s, signed in, with a card they saved
+// on rail, and the membership it bought.
+func (c *customer) payWithSaved(s hostedSession, rail, method string) billing.SubscriptionID {
+	c.w.t.Helper()
+	status, out := s.payAs(c, map[string]any{"option_id": s.option(rail), "payment_method_id": method})
+	require.Equal(c.w.t, http.StatusOK, status, "%v", out)
+	require.Equal(c.w.t, "succeeded", out["status"], "%v", out)
+	c.w.settle()
+	id, err := billing.ParseSubscriptionID(fmt.Sprint(out["subscription_id"]))
+	require.NoError(c.w.t, err, "the payment names the membership: %v", out)
+	return id
 }
 
 // payCard pays with a card the page just tokenized.
@@ -396,34 +433,43 @@ func TestHostedCheckoutEmbedOrigins(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 }
 
-// Read and pay ask the host about the buyer on every action.
+// Read and pay check the customer's standing, as the host last pushed it, on
+// every action: a blocked customer neither reads, pays (a new card or a
+// saved one) nor mints.
 func TestHostedCheckoutAccountState(t *testing.T) {
 	t.Parallel()
-	var banned sync.Map
-	app, pay := hostedHosts(t, func(d *openrails.Deps) {
-		d.CheckoutCustomer = func(_ context.Context, id billing.CustomerID) (billing.CheckoutCustomerIdentity, error) {
-			if _, gone := banned.Load(id.String()); gone {
-				return billing.CheckoutCustomerIdentity{}, openrails.ErrForbidden
-			}
-			return billing.CheckoutCustomerIdentity{ID: id, VerifiedEmail: "buyer@example.test", Username: "buyer"}, nil
-		}
-	})
+	app, pay := hostedHosts(t, nil)
 	buyer := app.newCustomer()
+	method := buyer.saveCard("nmi", visa)
 	price := app.membership("content:members", 9_990_000)
 	session := hostedSession{w: pay, id: buyer.mint(map[string]any{"price_id": price.ID})["id"].(string)}
-	option := session.option("nmi")
+	minted := app.handOver(buyer, price.ID)
+	option, mintedOption := session.option("nmi"), minted.option("nmi")
+	block := func(blocked bool) {
+		_, err := app.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Blocked: blocked})
+		require.NoError(t, err)
+	}
 
-	banned.Store(buyer.id, struct{}{})
+	block(true)
 	status, out := pay.guest(http.MethodGet, "/v1/checkout-sessions/"+session.id, nil)
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	require.Equal(t, "checkout_session_unavailable", hostedErrorCode(out))
+	require.Equal(t, "customer_blocked", hostedErrorCode(out))
 	status, out = session.pay(map[string]any{"option_id": option, "payment_token": pay.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
+	require.Equal(t, "customer_blocked", hostedErrorCode(out))
+	status, out = minted.payAs(buyer, map[string]any{"option_id": mintedOption, "payment_method_id": method})
+	require.Equal(t, http.StatusForbidden, status, "a session minted before the block: %v", out)
+	require.Equal(t, "customer_blocked", hostedErrorCode(out))
 	status, out = buyer.call(http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": price.ID})
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
+	require.Equal(t, "customer_blocked", hostedErrorCode(out))
+	_, err := app.client[remote].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: buyer.identity(), PriceID: price.ID})
+	require.Error(t, err, "the host cannot mint for a blocked customer either")
+	pay.settle()
 	require.Empty(t, pay.nmi.ledger(""))
+	require.False(t, buyer.entitled("content:members"))
 
-	banned.Delete(buyer.id)
+	block(false)
 	status, out = session.payCard(visa)
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "succeeded", out["status"])
@@ -447,17 +493,21 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 		require.Equal(t, hostedPageURL+"#"+link.ID, *link.URL)
 		session := hostedSession{w: pay, id: link.ID}
 
-		saved := session.read()["saved_methods"].([]any)
+		require.Empty(t, session.read()["saved_methods"], "a guest sees no saved cards")
+		saved := session.readAs(buyer)["saved_methods"].([]any)
 		require.Len(t, saved, 1, "the buyer's saved cards, display data only")
 		card := saved[0].(map[string]any)
 		shown, _ := card["card"].(map[string]any)
 		require.Equal(t, []any{method, session.option("nmi"), "nmi", "4242"}, []any{card["id"], card["option_id"], card["rail"], shown["last4"]})
 
 		other := app.newCustomer().saveCard("nmi", mastercard)
-		status, out := session.pay(map[string]any{"option_id": session.option("nmi"), "payment_method_id": other})
+		status, out := session.payAs(buyer, map[string]any{"option_id": session.option("nmi"), "payment_method_id": other})
 		require.Equal(t, http.StatusUnprocessableEntity, status, "another customer's card: %v", out)
-
 		status, out = session.pay(map[string]any{"option_id": session.option("nmi"), "payment_method_id": method})
+		require.Equal(t, http.StatusForbidden, status, "a saved card needs its customer signed in: %v", out)
+		require.Equal(t, "customer_proof_required", hostedErrorCode(out))
+
+		status, out = session.payAs(buyer, map[string]any{"option_id": session.option("nmi"), "payment_method_id": method})
 		require.Equal(t, http.StatusOK, status, "%v", out)
 		require.Equal(t, "succeeded", out["status"])
 		pay.settle()
@@ -559,7 +609,7 @@ func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	require.Len(t, w.nmi.ledger(""), 1, "a replay charges nothing more")
 	require.Len(t, w.cardVaults("add_customer"), 1, "nor sends the card again")
 
-	saved := session.read()["saved_methods"].([]any)
+	saved := session.readAs(buyer)["saved_methods"].([]any)
 	require.Len(t, saved, 1, "the vaulted card is offered on the card option")
 	require.Equal(t, option, saved[0].(map[string]any)["option_id"])
 }
@@ -585,12 +635,12 @@ func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
 	c := w.newCustomer()
 	method := c.saveCard("stripe", visa)
 	session := w.handOver(c, price.ID)
-	saved := session.read()["saved_methods"].([]any)
+	saved := session.readAs(c)["saved_methods"].([]any)
 	require.Len(t, saved, 1, "%v", saved)
 	require.Equal(t, method, saved[0].(map[string]any)["id"])
 	status, out := session.pay(map[string]any{"option_id": session.option("stripe"), "payment_token": "tok_x"})
 	require.Equal(t, http.StatusUnprocessableEntity, status, "the page enters no Stripe card itself: %v", out)
-	status, out = session.pay(map[string]any{"option_id": session.option("stripe"), "payment_method_id": method})
+	status, out = session.payAs(c, map[string]any{"option_id": session.option("stripe"), "payment_method_id": method})
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "succeeded", out["status"], "%v", out)
 	w.settle()
@@ -599,7 +649,7 @@ func TestCheckoutSessionPaysWithAStripeElementsCard(t *testing.T) {
 	challenged := w.newCustomer()
 	challenge := challenged.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	pending := w.handOver(challenged, price.ID)
-	status, out = pending.pay(map[string]any{"option_id": pending.option("stripe"), "payment_method_id": challenge})
+	status, out = pending.payAs(challenged, map[string]any{"option_id": pending.option("stripe"), "payment_method_id": challenge})
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "requires_action", out["status"], "%v", out)
 	operation := out["operation"].(map[string]any)

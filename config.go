@@ -9,7 +9,7 @@ import (
 )
 
 // The Config and Deps family. These are the only aliases in this package: each
-// type is defined once, in internal/config (the auth hook types in
+// type is defined once, in internal/config (the auth contract in
 // internal/billingauth), and named here for hosts. The field docs are on those
 // definitions; gopls and pkg.go.dev show them through the alias.
 
@@ -118,29 +118,22 @@ type (
 	// text messages.
 	SMSSender = config.SMSSender
 
-	// RequestAuthenticator is what Deps.AuthKit accepts: the host's
-	// *authkit.Client, or an AuthKit verifier for the host's audiences.
-	RequestAuthenticator = billingauth.Verifier
-	// Identity is who Deps.Authenticate says is calling.
+	// Auth is Routes.Auth: the host's auth as net/http middleware in
+	// AuthKit's shape (Required, RequirePermission, Sensitive and Identity).
+	// OpenRails stacks it on its own routes by tier.
+	Auth = billingauth.Auth
+	// Identity is who Auth admitted: the Subject whose authority and money is
+	// used, the Invoker acting for it when that is someone else, and the
+	// Credential it was proven with.
 	Identity = billingauth.Identity
-	// PrincipalKind is Identity.Kind: User, Machine or Delegated.
-	PrincipalKind = billingauth.PrincipalKind
-	// CredentialClass says whether a credential is a customer's own session
-	// or automation acting for them.
-	CredentialClass = billingauth.CredentialClass
-	// Requirement is the permission, scope and target Deps.Authorize checks.
-	Requirement = billingauth.Requirement
-	// Authority is the AuthKit group and permission Deps.AuthorityFor names.
-	Authority = billingauth.Authority
-	// Target is Requirement.Target: the merchant an operation acts on.
-	Target = billingauth.Target
-	// Scope is Requirement.Scope: MerchantScope or PlatformScope.
-	Scope = billingauth.Scope
-	// DelegatedPrincipal is what Deps.AuthenticateCustomer returns: an
-	// explicit merchant and paying customer.
-	DelegatedPrincipal = billingauth.DelegatedPrincipal
-	// GateError lets an authentication hook answer with a specific HTTP status.
-	GateError = billingauth.GateError
+	// SubjectKind is Identity.SubjectKind: SubjectUser or SubjectApplication.
+	SubjectKind = billingauth.SubjectKind
+	// Invoker is Identity.Invoker: the party acting for the subject.
+	Invoker = billingauth.Invoker
+	// Credential is Identity.Credential: how Subject proved itself.
+	Credential = billingauth.Credential
+	// CredentialKind is Credential.Kind.
+	CredentialKind = billingauth.CredentialKind
 )
 
 const (
@@ -184,31 +177,27 @@ const (
 	// methods and payment recovery, without checkout or plan purchases.
 	CustomerBillingManagement = config.CustomerBillingManagement
 
-	// User is a person's own credential.
-	User = billingauth.User
-	// Machine is an API key or service credential.
-	Machine = billingauth.Machine
-	// Delegated is a credential another application issued for a customer.
-	Delegated = billingauth.Delegated
+	// SubjectUser is a user: a customer, or staff.
+	SubjectUser = billingauth.SubjectUser
+	// SubjectApplication is an application account.
+	SubjectApplication = billingauth.SubjectApplication
 
-	// CredentialUserSession is the customer's own interactive session.
-	CredentialUserSession = billingauth.CredentialClassUserSession
-	// CredentialAutomation acts for a customer who is not present.
-	CredentialAutomation = billingauth.CredentialClassAutomation
-
-	// MerchantScope is an operation on a merchant.
-	MerchantScope = billingauth.MerchantScope
-	// PlatformScope is an operation across merchants.
-	PlatformScope = billingauth.PlatformScope
+	// CredentialSession is a signed-in session's token.
+	CredentialSession = billingauth.CredentialSession
+	// CredentialDeviceKey is a user's enrolled device key.
+	CredentialDeviceKey = billingauth.CredentialDeviceKey
+	// CredentialAPIKey is an API key of the subject's.
+	CredentialAPIKey = billingauth.CredentialAPIKey
+	// CredentialSignedToken is a token an application signed with its own
+	// key.
+	CredentialSignedToken = billingauth.CredentialSignedToken
+	// CredentialAccessToken is an authorization server's access token.
+	CredentialAccessToken = billingauth.CredentialAccessToken
 )
 
-var (
-	// ErrUnauthenticated is what Deps.Authenticate returns for a request
-	// without a valid credential (401).
-	ErrUnauthenticated = billingauth.ErrUnauthenticated
-	// ErrForbidden is what Deps.Authorize returns to refuse a permission (403).
-	ErrForbidden = billingauth.ErrForbidden
-)
+// ErrUnauthenticated refuses a request without a valid credential: the
+// helpers/auth sentinel.
+var ErrUnauthenticated = billingauth.ErrUnauthenticated
 
 // ParseMerchantDeclaration reads Config.Merchant from one YAML document that
 // names its merchant with a required slug, refusing unknown fields.

@@ -130,13 +130,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authkitgin "github.com/open-rails/authkit/adapters/gin"
+	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
 
-func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*openrails.Client, error) {
+func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
@@ -163,12 +165,151 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 		return nil, err
 	}
 
-	// 2. Build the billing engine. OpenRails has no logins of its own: it asks your AuthKit
-	// who is calling, and each user is their own paying customer.
-	return openrails.New(ctx, cfg, openrails.Deps{
-		Postgres: db,   // required: the same pool your app uses
-		AuthKit:  auth, // who is calling, what staff may do, and how recently they signed in
-	})
+	// 2. Build the billing engine. It has no logins of its own: your auth guards its
+	// routes when you mount them.
+	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
+}
+```
+
+#### Guard its routes with your auth
+
+OpenRails has no logins of its own. When you mount its routes it stacks your
+auth's middleware, in AuthKit's own shape: `Required` (signed in) on your
+customers' routes; `RequirePermission` (one exact merchant permission, checked
+live) on the merchant API, then `Sensitive` (a recent sign-in) when a person
+moves money or removes access. `Identity` says who it admitted. Each user is
+their own customer. AuthKit will implement these itself, so you pass it as
+`Auth: ak`; until then this is the whole adapter:
+
+```go
+// billingAuth guards OpenRails' routes with AuthKit's own middleware: each
+// signed-in user is their own customer, and staff hold OpenRails' merchant
+// permissions on the site's root group.
+type billingAuth struct{ ak *authkit.Client }
+
+func (a billingAuth) Required() func(http.Handler) http.Handler {
+	return verify.RequireSession(a.ak) // a banned, deleted or signed-out user is refused at once
+}
+
+func (a billingAuth) RequirePermission(p string) func(http.Handler) http.Handler {
+	perm, err := a.ak.Permission(p)
+	if err != nil {
+		panic(err) // a merchant permission your Roles did not register
+	}
+	return verify.RequirePermissionOn(a.ak, iam.RootGroup(), perm)
+}
+
+func (a billingAuth) Sensitive() func(http.Handler) http.Handler {
+	return verify.Sensitive(a.ak) // signed in within 15 minutes, with the second factor
+}
+
+// Identity says who signed in: each user is their own subject and invoker,
+// whether in a browser session or on a device key.
+func (a billingAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
+	cl, ok := verify.ClaimsFromContext(ctx)
+	if !ok || cl.Kind != iam.ActorUser || cl.UserID == "" {
+		return openrails.Identity{}, false
+	}
+	credential := openrails.Credential{Kind: openrails.CredentialSession, ID: cl.SessionID}
+	if cl.DeviceKeyID != "" {
+		credential = openrails.Credential{Kind: openrails.CredentialDeviceKey, ID: cl.DeviceKeyID}
+	}
+	return openrails.Identity{
+		Issuer: cl.Issuer, Subject: cl.UserID, SubjectKind: openrails.SubjectUser,
+		Invoker: openrails.Invoker{Issuer: cl.Issuer, ID: cl.UserID}, Credential: credential,
+		Email: cl.Email, Username: cl.Username, EmailVerified: cl.EmailVerified,
+	}, true
+}
+```
+
+Your staff hold OpenRails' merchant permissions like any other permission in
+your RBAC. Register them under a `merchant` persona and grant them to roles:
+
+```go
+rbac := authkit.NewRoles()
+merchant := rbac.Persona("merchant")
+declare := func(p string) iam.Perm { // merchant:<resource>:<action>
+	parts := strings.SplitN(p, ":", 3)
+	return merchant.Permission(parts[1], parts[2])
+}
+var staff []iam.Grant
+for _, p := range openrails.Permissions() {
+	staff = append(staff, declare(p))
+}
+for _, p := range openrails.MachinePermissions() {
+	declare(p) // your automation's API keys, never a person's
+}
+rbac.Root.Role("billing-staff", staff...) // pass rbac as authkit.Config.Roles
+```
+
+`openrails.MachinePermissions()` are never a person's: OpenRails refuses them
+to anyone signed in, whatever their roles say, so staff cannot start a
+purchase for someone else. Grant them to your automation only.
+
+The identity `Identity` returns has three parts, kept apart:
+
+- **Subject**: the native account acted as, whose money and authority are
+  used. On `/billing/v1/me` it is the customer.
+- **Invoker**: the party actually acting. It is the subject itself, or someone
+  acting on its behalf, possibly from another issuer; spend limits and staff
+  rate limits key on it.
+- **Credential**: how it was proven (a session, a device key, an API key...).
+  A user is the same customer in a browser and on a device key.
+
+#### Using your own auth
+
+Without AuthKit, implement the same four methods over your own sessions,
+then run `openrailstest.CheckAuth` against them in your CI:
+
+```go
+type shopAuth struct{ sessions *Sessions }
+
+type sessionKey struct{}
+
+func (a shopAuth) Required() func(http.Handler) http.Handler {
+	return a.check(func(*Session) bool { return true })
+}
+
+func (a shopAuth) RequirePermission(permission string) func(http.Handler) http.Handler {
+	return a.check(func(s *Session) bool { return s.Can(permission) }) // exactly this permission
+}
+
+func (a shopAuth) Sensitive() func(http.Handler) http.Handler {
+	return a.check(func(s *Session) bool { return time.Since(s.SignedInAt) < 15*time.Minute })
+}
+
+// check signs the request in once (your session cookie, checked live, bans
+// included), then admits it when ok.
+func (a shopAuth) check(ok func(*Session) bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			s, found := r.Context().Value(sessionKey{}).(*Session)
+			if !found {
+				if s, found = a.sessions.Lookup(r); !found {
+					http.Error(w, "sign in", http.StatusUnauthorized)
+					return
+				}
+			}
+			if !ok(s) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, s)))
+		})
+	}
+}
+
+func (a shopAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
+	s, ok := ctx.Value(sessionKey{}).(*Session)
+	if !ok {
+		return openrails.Identity{}, false
+	}
+	return openrails.Identity{
+		Issuer: "https://shop.example", Subject: s.UserID, SubjectKind: openrails.SubjectUser, // a UUID
+		Invoker:    openrails.Invoker{Issuer: "https://shop.example", ID: s.UserID}, // acting itself
+		Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: s.ID},
+		Email:      s.Email, EmailVerified: s.EmailVerified,
+	}, true
 }
 ```
 
@@ -208,12 +349,12 @@ func run(ctx context.Context) error {
 	}
 	defer db.Close()
 
-	auth, err := newAuth(ctx, db) // see AuthKit's README
+	ak, err := newAuth(ctx, db) // see AuthKit's README
 	if err != nil {
 		return err
 	}
-	defer auth.Close()
-	bill, err := newBilling(ctx, db, auth)
+	defer ak.Close()
+	bill, err := newBilling(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -221,7 +362,7 @@ func run(ctx context.Context) error {
 
 	// Background work. OpenRails runs its own River workers: rebills, retries of
 	// failed payments, invoices.
-	if err := auth.Start(ctx); err != nil {
+	if err := ak.Start(ctx); err != nil {
 		return err
 	}
 	if err := bill.Start(ctx); err != nil {
@@ -229,15 +370,17 @@ func run(ctx context.Context) error {
 	}
 
 	r := gin.Default()
-	if err := authkitgin.Mount(r, auth); err != nil { // sign-up and sign-in under /api/v1
+	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1
 		return err
 	}
 	// Billing. Processor webhooks are always mounted; pick the rest.
+	auth := billingAuth{ak}
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
+		Auth:         auth,                          // who may call each route: OpenRails asks it, by route
 		Prefix:       "/billing",                    // the API is served at /billing/v1/*
 		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
 		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
-		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog); needs Deps.AuthorityFor
+		Merchant:     false,                         // your staff's API at /merchant (refunds, customers, catalog)
 		CatalogEdits: false,                         // with Merchant, also let that API change the catalog; your Go code always can
 	})
 	if err != nil {
@@ -251,14 +394,14 @@ func run(ctx context.Context) error {
 		"tailwind-102": "course:102",
 		"members-qa":   "channel:membership",
 	}
-	r.GET("/videos/:id", authkitgin.Required(auth), func(c *gin.Context) {
+	r.GET("/videos/:id", authkitgin.Required(ak), func(c *gin.Context) {
 		id := c.Param("id")
 		entitlement, exists := contentAccess[id]
 		if !exists {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		claims, _ := auth.VerifyRequest(c.Request)
+		claims, _ := ak.VerifyRequest(c.Request)
 		customer, err := billing.ParseCustomerID(claims.UserID) // each AuthKit user is their own customer
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
@@ -283,6 +426,8 @@ func run(ctx context.Context) error {
 `openrails.Routes` picks what OpenRails mounts on your router; each field adds
 routes:
 
+- `Auth`: your auth, applied to every route by its tier. A mount that selects
+  customer or merchant routes without it fails, so nothing is ever served open.
 - `Prefix`: where the API lives; `/billing` serves `/billing/v1/*`.
 - `Storefront`: what a shopper's browser needs before signing in: products,
   prices, checkout configuration, and reading and paying a checkout.
@@ -291,8 +436,8 @@ routes:
   `openrails.CustomerSelfService` is all of it; the zero value serves none.
 - `Merchant`: the API your staff and back office call at
   `/billing/v1/merchant`: customers, refunds, catalog, settings. Every route asks
-  your auth for its merchant permission, so it needs `Deps.AuthorityFor` (or
-  your own `Deps.Authorize`).
+  `Auth.RequirePermission` for its exact merchant permission, and one that moves
+  money or removes access also `Auth.Sensitive`. It serves `Config.Merchant`.
 - `CatalogEdits`: lets that merchant API create and change products and prices.
   Leave it off when the catalog lives in `catalog.yaml`; your Go code can edit
   the catalog either way.
@@ -315,19 +460,20 @@ the merchant API it drives; to turn it off, leave `AdminConsole` out:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
+	Auth:         auth,
 	Prefix:       "/billing",
 	Storefront:   true,
 	Customers:    openrails.CustomerSelfService,
-	Merchant:     true,                                           // the dashboard drives the merchant API
-	AdminConsole: &openrails.AdminConsole{Path: "/billing-admin"}, // omit it and no dashboard route exists
+	Merchant:     true, // the dashboard drives the merchant API
+	// Omit AdminConsole and no dashboard route exists. AuthBaseURL is your AuthKit's JSON API.
+	AdminConsole: &openrails.AdminConsole{Path: "/billing-admin", AuthBaseURL: "/api/v1"},
 })
 ```
 
-- **Who signs in**: your staff, with their AuthKit accounts (through
-  `Deps.AuthKit`'s `/api/v1`). Every page calls the merchant API, which checks
-  each staff member's merchant permission (`Deps.AuthorityFor` names the
-  AuthKit group they belong to), and a write after a stale sign-in asks them to
-  confirm it is them.
+- **Who signs in**: your staff, with their AuthKit accounts at
+  `AuthBaseURL` (your AuthKit's `/api/v1`). Every page calls the merchant API,
+  which asks your `Auth` for each staff member's merchant permission, and a
+  write after a stale sign-in asks them to confirm it is them.
 - **Requirements**: `Merchant: true`, and a console build passed as
   `Deps.ConsoleAssets` ([admin console](docs/admin-console.md)); `Mount` fails
   without either.
@@ -540,7 +686,8 @@ What you will set next:
 | To | Set |
 |---|---|
 | Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.Email`; without one OpenRails sends no email |
-| Publish the merchant API | `Routes.Merchant`, with `Deps.AuthorityFor` naming the AuthKit group that holds your staff |
+| Publish the merchant API | `Routes.Merchant` with `Routes.Auth`; grant your staff the `openrails.Permissions()` they need |
+| Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomer` whenever it changes |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
@@ -821,6 +968,7 @@ choose it when you mount:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
+	Auth:         auth,
 	Prefix:       "/billing",
 	Merchant:     true,  // the merchant API, for your staff
 	CatalogEdits: false, // without its catalog-write routes

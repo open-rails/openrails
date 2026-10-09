@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
@@ -221,7 +222,7 @@ func TestResponsesAreWrittenOnceAndCorrelated(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ name, supplied, want string }{
-		{"caller id preserved", "req-149", "req-149"},
+		{"who id preserved", "req-149", "req-149"},
 		{"missing id generated", "", ""},
 		{"oversized id replaced", strings.Repeat("x", 129), ""},
 	} {
@@ -274,32 +275,27 @@ func TestRefusalLogLevel(t *testing.T) {
 	}
 }
 
-// The principal pinned by auth middleware survives middleware replacing
-// r.Request, and an unverified email never reaches handlers.
-func TestPinnedUserContext(t *testing.T) {
+// The customer a handler sees is the route gate's scope, with the who's
+// verified email only; nothing else (a pinned user, a "user" value) is a
+// customer.
+func TestGetUserIsTheCustomerScope(t *testing.T) {
 	req, _ := newReq(http.MethodGet, "/x", "")
-	req.SetUserContext(billingauth.UserContext{UserID: "u-1", Username: "ada", Email: "ada@example.test", EmailVerified: true, Roles: []string{"admin"}})
-	req.Request = req.Request.WithContext(context.Background())
-	u := req.GetUser()
-	require.NotNil(t, u)
-	require.Equal(t, "u-1", u.ID)
-	require.Equal(t, "ada@example.test", *u.Email)
-	uc, ok := billingauth.FromContext(req.Request.Context())
-	require.False(t, ok, "context replaced by middleware: %+v", uc)
-	_, ok = req.UserContext()
-	require.True(t, ok)
-
-	r := httptest.NewRequest(http.MethodGet, "/x", nil)
-	r = r.WithContext(billingauth.SetUserContext(r.Context(), billingauth.UserContext{UserID: "u-2", Email: "x@example.test"}))
-	u = NewHTTP(httptest.NewRecorder(), r, nil).GetUser()
-	require.Equal(t, "u-2", u.ID)
-	require.Nil(t, u.Email)
-
-	req, _ = newReq(http.MethodGet, "/x", "")
 	require.Nil(t, req.GetUser())
-	fallback := &checkout.UserIdentity{ID: "u-3"}
-	req.Set("user", fallback)
-	require.Same(t, fallback, req.GetUser())
+	req.SetUserContext(billingauth.UserContext{UserID: "11111111-1111-4111-8111-111111111111"})
+	req.Set("user", &checkout.UserIdentity{ID: "u-3"})
+	require.Nil(t, req.GetUser(), "a control-plane user or a stray value is no customer")
+
+	customer := billing.CustomerID(uuid.MustParse("22222222-2222-4222-8222-222222222222"))
+	ctx := customerscope.Bind(context.Background(), billing.MerchantID(uuid.New()), customer, customer.String(), true)
+	for verified, want := range map[bool]*string{true: new("ada@example.test"), false: nil} {
+		who := billingauth.Identity{Subject: customer.String(), SubjectKind: billingauth.SubjectUser, Username: "ada", Email: "ada@example.test", EmailVerified: verified}
+		req.Request = req.Request.WithContext(billingauth.BindIdentity(ctx, who))
+		u := req.GetUser()
+		require.NotNil(t, u)
+		require.Equal(t, customer.String(), u.ID)
+		require.Equal(t, "ada", u.Username)
+		require.Equal(t, want, u.Email)
+	}
 }
 
 // Without configured trusted proxies a spoofed X-Forwarded-For never changes

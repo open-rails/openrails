@@ -6,26 +6,20 @@ identity, merchant, platform, customer, callback and enabled console
 registrations. Process health endpoints remain host-owned. Provider callbacks
 are addressed by account (`/v1/webhooks/{rail}/{account_id}`) in every posture.
 
-A host can additionally expose a customer audience with its own authenticator.
-`Routes.CustomerProfiles` marks the profile `Delegated`; the authenticator
-itself is `Deps.AuthenticateCustomer`, which receives the profile's `Prefix`:
+A host can additionally expose a customer audience with its own `Auth`, set on
+its `Routes.CustomerProfiles` entry; profiles without one use `Routes.Auth`:
 
 ```go
-deps.AuthenticateCustomer = func(r *http.Request, profile string) (*openrails.DelegatedPrincipal, error) {
-    if profile == "/billing/v1/me" {
-        return portalIdentity(r)
-    }
-    return platformCustomerIdentity(r)
-}
-client, err := openrails.New(ctx, cfg, deps)
+client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 if err != nil { return err }
 err = openrailsgin.Mount(router, client, openrails.Routes{ // on the host router
+    Auth: portalAuth,
     CustomerProfiles: []openrails.CustomerRoutes{
-        {Prefix: "/billing/v1/me", Scope: openrails.CustomerSelfService, Delegated: true},
+        {Prefix: "/billing/v1/me", Scope: openrails.CustomerSelfService},
         {
-            Prefix:    "/api/v1/merchants/{slug}/billing/me",
-            Scope:     openrails.CustomerSubscriptionManagement,
-            Delegated: true,
+            Prefix: "/api/v1/merchants/{slug}/billing/me",
+            Scope:  openrails.CustomerSubscriptionManagement,
+            Auth:   platformAuth,
         },
     },
 })
@@ -37,10 +31,10 @@ subscription payment-method changes and invoice collection-method selection.
 Both profiles reuse the same route registration and customer ownership checks.
 Neither exposes merchant administration, credentials or callbacks.
 
-An ordinary native audience uses `Deps.Authenticate` and the declared merchant. A `Delegated` audience is authenticated by `Deps.AuthenticateCustomer`. The authenticator verifies the
-actual credential and derives its merchant and customer from trusted host policy;
-a URL parameter or request-body merchant field is not authority. Route parameters
-are available through `Request.PathValue` before authentication. Original URL,
+Each audience serves `Config.Merchant`, or the merchant its `Merchant` slug
+names. Its `Auth` verifies the actual credential; the identity's subject is the
+customer, and a URL parameter or request-body field is never authority. Route
+parameters are available through `Request.PathValue` before authentication. Original URL,
 RawPath, RequestURI and body remain available for signature and sender-proof
 checks. Mounting copies the selection; conflicting method/path patterns fail before router mutation.
 Prefixes accept literal segments and whole-segment `{name}` parameters; native
@@ -57,8 +51,8 @@ own path, and standalone bundles, with their issuer-anchored AuthKit and
 console URLs, sit at the root.
 
 For the SaaS platform-billing audience, `{slug}` selects the hosted merchant
-customer, not the billing merchant. Its verifier/resolver must check current hosted
-merchant ownership, return that captured hosted merchant UUID as the canonical
-customer, and bind the principal to the PLATFORM billing merchant. A stale owner or
-an unrelated hosted merchant must fail before any of the four mutations.
+customer, not the billing merchant. Its `Auth` must check current hosted
+merchant ownership and return that hosted merchant's UUID as the subject, on a
+profile bound to the platform billing merchant. A stale owner or an unrelated
+hosted merchant must fail before any of the four mutations.
 

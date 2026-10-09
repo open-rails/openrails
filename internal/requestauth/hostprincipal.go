@@ -12,7 +12,7 @@ import (
 // values cannot arrive on a network request, so a gate that finds one can trust
 // it without any shared secret — unforgeable from the wire by construction.
 // Permissions are authoritative; the in-process host is trusted for its own
-// merchant (same trust stance as billingauth.DelegatedPrincipal, #339).
+// merchant (same trust stance as billingauth.Payer, #339).
 type HostPrincipal struct {
 	MerchantID   billing.MerchantID
 	MerchantSlug string

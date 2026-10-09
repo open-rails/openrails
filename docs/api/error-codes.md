@@ -64,9 +64,11 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `currency_unsupported` | 400 | `invalid_request_error` | The currency is not in OpenRails' registry. |
 | `custodian_capture_unavailable` | 503 | `api_error` | The card custodian cannot capture cards right now. |
 | `customer_action_required` | 403 | `authorization_error` | Only the customer may take this action, through their own step. |
+| `customer_blocked` | 403 | `authorization_error` | The merchant declared this customer blocked: it may not buy. |
 | `customer_email_required` | 400 | `invalid_request_error` | The rail needs the customer's verified email and username. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
+| `customer_proof_required` | 403 | `authorization_error` | A saved card is charged only on a checkout session its customer pays, signed in; mint one instead. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |

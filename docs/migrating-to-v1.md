@@ -33,9 +33,10 @@ Before the code:
 | `MerchantDeclaration` with `Profile`, `Invoice`, `BillingPolicies`, `CheckoutRouting` and their `*Config` types | `MerchantDeclaration.Settings` is the `billing.MerchantSettings` document the configuration API reads and applies |
 | `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail; `Deps.SMSSender` | One sender for both: `Deps.Email` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused. Text messages: `Deps.SMS` |
 | A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and the default River schema, to that existing role |
-| `CustomerRoutesConfig{Authenticate: fn}` per profile | `openrails.CustomerRoutes{Delegated: true}` in `Routes.CustomerProfiles` and one `Deps.AuthenticateCustomer`, which receives the profile's `Prefix` |
-| `Deps.CheckoutCustomer(ctx, string)` | `Deps.CheckoutCustomer` takes a `billing.CustomerID` |
-| `Identity.CustomerID`, the `Deps.CustomerFor` result and `DelegatedPrincipal.MerchantID` as strings | `billing.CustomerID` and `billing.MerchantID` |
+| `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
+| `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
+| `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `client.EnsureCustomer` with the customer's `Email`, `Username` and `Blocked`, called whenever they change |
+| `openrails.Identity` (`Kind`, `SubjectID`, `CustomerID`, `CredentialClass`, `Permissions`), `PrincipalKind`, `CredentialClass`, `Requirement`, `Authority`, `Target`, `Scope`, `DelegatedPrincipal`, `GateError`, `RequestAuthenticator`, `ErrForbidden` | `openrails.Identity`: `Subject` and `SubjectKind`, `Invoker`, `Credential`, from `Auth.Identity` |
 | `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |

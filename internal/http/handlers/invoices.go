@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -25,7 +24,7 @@ import (
 
 // ListInvoices (GET /merchant/invoices) is one page of the merchant's
 // invoices, newest period first.
-func ListInvoices(gate billingauth.Gate) func(*httprequest.Request) {
+func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		page, ok := r.Page()
 		if !ok {
@@ -83,7 +82,7 @@ func ListInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 
 // GetInvoice (GET /merchant/invoices/{id}) reads one of the merchant's
 // invoices.
-func GetInvoice(gate billingauth.Gate) func(*httprequest.Request) {
+func GetInvoice(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		_, invoice, ok := loadMerchantInvoice(r)
 		if !ok {
@@ -365,12 +364,8 @@ func loadMerchantInvoice(r *httprequest.Request) (*billingservice.Service, *bill
 	return svc, invoice, true
 }
 
-func invoicePermission(r *httprequest.Request, gate billingauth.Gate, permission string) bool {
-	if gate == nil {
-		return false
-	}
-	_, err := gate.Authorize(r.Request.Context(), r.Request, permission)
-	return err == nil
+func invoicePermission(r *httprequest.Request, gate StaffCan, permission string) bool {
+	return gate != nil && gate(r.Request, permission) == nil
 }
 
 // permittedInvoiceActions keeps the actions the caller holds the permission

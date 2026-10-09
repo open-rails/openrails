@@ -195,7 +195,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 
 	// The merchant API takes no card at all: cards are entered on a session.
-	status, out = w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
+	status, out = w.hostJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
 		"payment": map[string]any{"psp": "nmi", "card": entryCard(entryVisa)}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	code, _ := errorOf(out)

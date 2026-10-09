@@ -12,14 +12,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/open-rails/openrails/internal/http/handlers"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -97,15 +96,9 @@ func sessionRevoked(r *httprequest.Request, err error) bool {
 	return true
 }
 
-// merchantRoutePrincipal returns the gate-resolved principal the merchant
-// permission middleware pinned onto the request.
-func merchantRoutePrincipal(r *httprequest.Request) (billingauth.Principal, bool) {
-	v, ok := r.Get(handlers.MerchantRoutePrincipalContextKey)
-	if !ok {
-		return billingauth.Principal{}, false
-	}
-	p, ok := v.(billingauth.Principal)
-	return p, ok
+// merchantRoutePrincipal is the staff credential the route gate resolved.
+func merchantRoutePrincipal(r *httprequest.Request) (httproutes.StaffPrincipal, bool) {
+	return httproutes.StandalonePrincipal(r.Request)
 }
 
 func apiKeyMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {

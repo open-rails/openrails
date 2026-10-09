@@ -55,19 +55,18 @@ type Tier string
 const (
 	// AuthPublic: no credential.
 	AuthPublic Tier = "public"
-	// AuthOptional: a user credential is read when present.
-	AuthOptional Tier = "optional"
-	// AuthCheckoutSession: resolve the opaque ocs_ capability to its stored merchant.
+	// AuthCheckoutSession: the opaque ocs_ capability, resolved to its stored
+	// merchant; a presented customer credential only narrows what it shows.
 	AuthCheckoutSession Tier = "checkout_session"
 	// AuthSessionID: the id in the path is the credential.
 	AuthSessionID Tier = "session_id"
-	// AuthUser: any signed-in user.
+	// AuthUser: a signed-in user of the standalone control plane.
 	AuthUser Tier = "user"
-	// AuthCustomer: a customer principal, delegated or native.
+	// AuthCustomer: the mount's Auth.Required, then the customer gate.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: a credential holding Perm, a merchant: permission, on the
-	// request's merchant (API key, service JWT, delegated token or user
-	// session).
+	// AuthMerchant: the mount's Auth.RequirePermission for Perm, a merchant:
+	// permission, on the request's merchant; Auth.Sensitive too for a user
+	// in person when the permission moves money or removes access.
 	AuthMerchant Tier = "merchant"
 	// AuthOperator: a human session holding Perm, a root: grant.
 	AuthOperator Tier = "operator"
@@ -334,16 +333,15 @@ func TierErrors(tier Tier) []string {
 	case AuthCustomer:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
+			billing.CodePermissionRequired, billing.CodeStepUpRequired, billing.CodeAuthenticationUnavailable,
 			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired,
-			billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeAuthenticationUnavailable,
-			billing.CodeDelegatedPrincipalInvalid, billing.CodeInvokerScopedPrincipal,
+			billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeInvokerScopedPrincipal,
 		}, selectorErrors...)
 	case AuthMerchant:
 		own = append([]string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeCredentialIdentityMismatch,
+			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
 			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
-			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeDelegatedPrincipalInvalid,
-			billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
+			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
 			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch, billing.CodeStepUpRequired,
 			billing.CodeStepUpUnavailable, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
 			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,

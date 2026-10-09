@@ -16,42 +16,14 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
-	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
-// NewSelfHandler assembles the embedded browser-direct SELF-SERVICE surface
-// (#339/#467) as a gin-free net/http handler:
-//
-//	/billing/v1/me/*  (RegisterSelfServiceRoutes)
-//
-// authenticated by the host-supplied billingauth.DelegatedAuthenticator. The
-// same neutral base middleware stack wraps it (recovery, security headers,
-// CORS, body limit, merchant resolution, rate-limit + captcha), keeping it
-// behaviorally consistent with the base embedded handler. Host-supplied
-// delegated authenticators own their own browser-origin policy.
-//
-// hostResolve is the #734 Host->merchant mechanism (nil for hosts with no
-// control plane attached — HostMerchantResolverFrom derives it, and
-// mount.go's selfHandler is the sole caller). This handler's ENTIRE mounted
-// surface is browser tier, so it always gets the #765 static permissive CORS
-// policy unconditionally — no control-plane/source dependency, unlike
-// hostResolve.
-func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
-	return NewSelfRoutes(rt, authn, providerRouteOverride, hostResolve).Handler()
-}
-
-func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) *router.Table {
-	mux := &router.Table{}
-	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
-	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
-	httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.SelfRoutePrefix, rt), rt, delegatedMW, providerRoutes)
-
-	return wrapCustomerRoutes(rt, mux, hostResolve, "")
-}
-
+// wrapCustomerRoutes applies the browser-tier base chain to customer
+// routes: permissive CORS, body limits, credential admission, merchant
+// resolution and the rate limiter. Each route's own gate runs inside it.
 func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, selfPrefix string) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -135,12 +134,6 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	}
 }
 
-type hostAuthenticator struct{}
-
-func (hostAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
-	return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.New()), SubjectID: "11111111-1111-1111-1111-111111111111"}, nil
-}
-
 type proofRejectingResolver struct{ origin string }
 
 func (r *proofRejectingResolver) ResolveResourceCustomer(req *http.Request) (*credential.ResolvedDelegated, error) {
@@ -148,23 +141,12 @@ func (r *proofRejectingResolver) ResolveResourceCustomer(req *http.Request) (*cr
 	return nil, credential.ChallengeError{Code: billing.CodeSenderProofRequired}
 }
 
-// #339/#469: the self-service surface is always mounted; a host authenticator
-// admits its principal without a control plane, while the control-plane path
-// demands sender proof even from a CORS-allowed origin.
+// #469: the self-service surface is always mounted; its customer tokens must
+// carry sender proof even from a CORS-allowed origin.
 func TestSelfServiceAuthentication(t *testing.T) {
-	hosted := &Server{cfg: &config.Config{}, delegatedAuthenticator: hostAuthenticator{}}
-	mux := http.NewServeMux()
-	hosted.registerSelfServiceRoutes(mux)
-	w := httptest.NewRecorder()
-	func() {
-		defer func() { _ = recover() }() // the handler may panic past auth on the bare runtime
-		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/me/balance", nil))
-	}()
-	require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}, w.Code, w.Body.String())
-
 	resolver := &proofRejectingResolver{}
 	s := &Server{cfg: &config.Config{}, customerResolver: resolver}
-	mux = http.NewServeMux()
+	mux := http.NewServeMux()
 	s.registerSelfServiceRoutes(mux)
 	ts := httptest.NewServer(s.wrapPublicHandler(mux))
 	t.Cleanup(ts.Close)

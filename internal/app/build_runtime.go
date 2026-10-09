@@ -70,15 +70,13 @@ const (
 )
 
 type runtimeOverrides struct {
-	StripeTransport  http.RoundTripper
-	NMITransport     http.RoundTripper
-	DNSResolver      *net.Resolver
-	DB               *db.DB
-	Redis            *redis.Client
-	Clock            clockwork.Clock
-	UserDirectory    identity.UserDirectory
-	UsernameResolver identity.UsernameResolver
-	EmailSender      config.EmailSender
+	StripeTransport http.RoundTripper
+	NMITransport    http.RoundTripper
+	DNSResolver     *net.Resolver
+	DB              *db.DB
+	Redis           *redis.Client
+	Clock           clockwork.Clock
+	EmailSender     config.EmailSender
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -223,12 +221,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
 	}
 
-	var userDirectory identity.UserDirectory
-	var usernameResolver identity.UsernameResolver
-	if overrides != nil {
-		userDirectory = overrides.UserDirectory
-		usernameResolver = overrides.UsernameResolver
-	}
+	// Billing reads the customer facts hosts push (EnsureCustomer), never the
+	// host's auth.
+	customers := identity.Customers{DB: database}
 	// #1099: idempotency leases renew on their own connections, so a pool
 	// saturated by the requests holding them can never starve a renewal.
 	leaseDB, err := database.SeparatePool(ctx, idempotencyLeaseConns)
@@ -240,7 +235,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			_ = leaseDB.Close()
 		}
 	}()
-	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
+	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
 	}
@@ -259,10 +254,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	var emailService *subscriptions.EmailService
 	if sender != nil {
 		emailService = subscriptions.NewEmailService(sender, merchantconfig.NewStore(database), clock)
-		// OpenRails does not own the host identity schema. A host that wants
-		// subscription emails wires its UserDirectory; leaving it nil makes
-		// email lookup fail closed.
-		emailService.SetDomainServices(serviceInstances.SubscriptionService, serviceInstances.ProductService, serviceInstances.PriceService, userDirectory)
+		// Receipts and notices go to the email the merchant declared.
+		emailService.SetDomainServices(serviceInstances.SubscriptionService, serviceInstances.ProductService, serviceInstances.PriceService, customers)
 	}
 
 	// Set emailService on the NotificationService that was created in createServices

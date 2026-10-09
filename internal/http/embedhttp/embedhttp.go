@@ -12,7 +12,6 @@ package embedhttp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,7 +20,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
@@ -60,58 +58,32 @@ type Options struct {
 	CatalogWrites bool
 }
 
-// Assembler builds the gin-free embedded billing surface from the gin-free
-// application graph. Every field is gin-free, so importing this package pulls no
-// gin onto the embedded request path.
+// Assembler builds the embedded billing surface from the application graph.
 type Assembler struct {
-	Cfg     *config.Config
-	Runtime *app.Runtime
-	// AdminChecker is the live admin permission checker (#312), held as the neutral
-	// authpolicy.AdminPermissionChecker interface so this core package imports
-	// neither internal/controlplane nor AuthKit (#284). nil for embedded hosts
-	// without a control plane (admin routes then fail closed). The concrete
-	// *controlplane.ControlPlane satisfies it.
-	AdminChecker              authpolicy.AdminPermissionChecker
-	ServiceCredentialResolver httproutes.ServiceCredentialResolver
-	CaptchaStore              *captcha.ChallengeStore
+	Cfg          *config.Config
+	Runtime      *app.Runtime
+	CaptchaStore *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
-	RDB           *redis.Client
-	AdminLimiter  *middleware.AdminOperationLimiter
-	Authenticator billingauth.Authenticator
-	Gate          billingauth.Gate
-	// DelegatedAuthenticator is the in-process host identity seam (#565). When set
-	// (embedded hosts), the merchant routes accept the host's trusted principal and
-	// gate on its permissions — the gin-free counterpart of the self surface's
-	// DelegatedPrincipalRequired. nil for standalone (control-plane resolvers).
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	// HostResolve is the #734 Host->merchant mechanism, derived from the
-	// attached control plane (HostMerchantResolverFrom) exactly like
-	// AdminChecker/ServiceCredentialResolver above — nil for embedded hosts
-	// without a control plane, in which case Host-based merchant resolution
-	// behaves exactly as before this issue (no behavior change without opting
-	// in). Unrelated to CORS since #765: browser CORS is now a static
-	// per-route-tier policy (PermissiveCORSHTTP), not sourced from the control
-	// plane or any Host lookup.
+	RDB          *redis.Client
+	AdminLimiter *middleware.AdminOperationLimiter
+	// Auth is the mount's Routes.Auth: the merchant tier's staff gate, and
+	// who presents a checkout session.
+	Auth billingauth.Auth
+	// HostResolve is the #734 Host->merchant mechanism, derived from an
+	// attached control plane; nil without one.
 	HostResolve merchant.HostResolver
 }
 
 // hostMerchantResolver is the #734 neutral capability a *controlplane.ControlPlane
-// satisfies, asserted off App.ControlPlane so this package stays
-// free of AuthKit (#284) — matching the AdminChecker/ServiceCredentialResolver
-// pattern above.
+// satisfies, asserted off App.ControlPlane so this package stays free of
+// AuthKit.
 type hostMerchantResolver interface {
 	ResolveMerchantByHost(ctx context.Context, host string) (billing.MerchantID, error)
 }
 
 // HostMerchantResolverFrom derives the #734 Host->merchant resolver from an
-// app's ControlPlane field (an `any` on app.App). Returns nil when no control
-// plane is attached, or it doesn't implement the capability — callers treat
-// that identically to never having called this at all (single-merchant
-// self-hosters see no behavior change without opting in). Exported so
-// pkg/embedded/mount.go (a sibling package, composing the self-service
-// handler) can derive the SAME resolver this package's own FromApp uses,
-// without duplicating the type assertion.
+// app's ControlPlane field. Nil when no control plane is attached.
 func HostMerchantResolverFrom(controlPlane any) merchant.HostResolver {
 	c, ok := controlPlane.(hostMerchantResolver)
 	if !ok || c == nil {
@@ -120,41 +92,19 @@ func HostMerchantResolverFrom(controlPlane any) merchant.HostResolver {
 	return c.ResolveMerchantByHost
 }
 
-// FromApp builds an Assembler from the gin-free application graph (the same
-// inputs the gin Server derives its embedded surface from). The control plane,
-// when present, is read off app.App.ControlPlane via an interface
-// type assertion to the neutral AdminPermissionChecker — no controlplane import
-// on the embedded request path (#284).
+// FromApp builds an Assembler from the application graph.
 func FromApp(a *app.App) *Assembler {
 	if a == nil {
 		return nil
 	}
-	var checker authpolicy.AdminPermissionChecker
-	if c, ok := a.ControlPlane.(authpolicy.AdminPermissionChecker); ok {
-		checker = c
+	return &Assembler{
+		Cfg:          a.Config,
+		Runtime:      a.Runtime,
+		CaptchaStore: a.Runtime.CaptchaStore,
+		RDB:          a.RedisClient,
+		AdminLimiter: middleware.NewAdminOperationLimiter(a.RedisClient),
+		HostResolve:  HostMerchantResolverFrom(a.ControlPlane),
 	}
-	var resolver httproutes.ServiceCredentialResolver
-	if c, ok := a.ControlPlane.(httproutes.ServiceCredentialResolver); ok {
-		resolver = c
-	}
-	hostResolve := HostMerchantResolverFrom(a.ControlPlane)
-	asm := &Assembler{
-		Cfg:                       a.Config,
-		Runtime:                   a.Runtime,
-		AdminChecker:              checker,
-		ServiceCredentialResolver: resolver,
-		CaptchaStore:              a.Runtime.CaptchaStore,
-		RDB:                       a.RedisClient,
-		AdminLimiter:              middleware.NewAdminOperationLimiter(a.RedisClient),
-		HostResolve:               hostResolve,
-	}
-	if checker != nil || resolver != nil {
-		asm.Gate = httproutes.NewGate(httproutes.GateOptions{
-			AdminPermissionChecker:    checker,
-			ServiceCredentialResolver: resolver,
-		})
-	}
-	return asm
 }
 
 // NewHTTPHandler assembles the embedded billing surface as a gin-free
@@ -168,11 +118,8 @@ func FromApp(a *app.App) *Assembler {
 // (#742): embedded.New seeds config.Config.RateLimits/Captcha with the same
 // curated defaults config.Load applies whenever the host leaves them nil, so
 // an embedded host does not need to front billing with its own gateway unless
-// it explicitly opts out (config.Config.RateLimitsDisabled) — RateLimitHTTP
-// runs as a passthrough only then. billingauth.Optional runs ahead of the
-// limiter so an authenticated caller is keyed per-user, not only per-IP
-// (mirroring the standalone engine's authProvider.Optional() → RateLimit
-// order).
+// it explicitly opts out (config.Config.RateLimitsDisabled). It keys by
+// client IP: no route is authenticated before its own gate runs.
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	return s.NewRoutes(opts).Handler()
 }
@@ -216,7 +163,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	if routeSets[RouteSetCheckout] {
 		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
-			Authenticator:  s.Authenticator,
+			Auth:           s.Auth,
 			ProviderRoutes: &providerRoutes,
 			External: httproutes.External{
 				CaptchaStatus: http.HandlerFunc(s.captchaStatusHandler),
@@ -226,7 +173,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	}
 	if routeSets[RouteSetMerchant] {
 		httproutes.RegisterMerchantRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
-			Gate:          s.Gate,
+			Auth:          s.Auth,
 			AdminLimiter:  s.AdminLimiter,
 			CatalogWrites: opts.CatalogWrites,
 		})
@@ -268,8 +215,6 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
 			// nil), unrelated to CORS since #765.
 			middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
-			// Best-effort auth so the rate limiter can key by user, not only IP.
-			middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
 			// OpenRails-native rate-limiting + captcha for embedded hosts.
 			limiter,
 		)
@@ -298,11 +243,8 @@ func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
 }
 
 func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
-	if routeSets[RouteSetCustomer] && (s == nil || s.Authenticator == nil) {
-		return fmt.Errorf("embedded billing: the customer route group requires Options.Authenticator")
-	}
-	if routeSets[RouteSetMerchant] && (s == nil || s.Gate == nil) {
-		return fmt.Errorf("embedded billing: the merchant route group requires Options.Gate")
+	if routeSets[RouteSetMerchant] && (s == nil || httproutes.IsNilAuth(s.Auth)) {
+		return httproutes.MountError{Route: "merchant API", Reason: "needs Routes.Auth"}
 	}
 	return nil
 }

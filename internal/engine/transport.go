@@ -8,7 +8,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -32,22 +31,14 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 	})
 }
 
-// newServiceHandler mounts the merchant and verified customer routes HTTP
-// hosts publish. The transport's own credential carries merchant-owner
-// authority; explicit customer credentials go through the host's
-// authentication. Ambient host context is stripped before either path.
+// newServiceHandler mounts the merchant routes the Go client calls, gated by
+// the transport's own credential: the host's merchant-owner authority, a
+// context value no network request carries. Ambient host context is stripped
+// before it. It serves no customer routes: the Go client has no customer
+// methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
-	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{}), CatalogWrites: true}
-	var authn billingauth.DelegatedAuthenticator
-	if rt.Auth != nil {
-		opts.Gate = embedhttp.IntegrationGate(rt)
-		authn = embedhttp.RuntimeCustomerAuthentication(rt)
-	}
-	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
-	if authn != nil {
-		httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, "/v1/me", rt), rt, middleware.DelegatedPrincipalRequired(authn), embedhttp.ProviderRoutesForRuntime(rt, nil))
-	}
+	httproutes.RegisterMerchantRoutes(router.NewMux(mux, "/v1", rt), rt, httproutes.HostOptions())
 	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})

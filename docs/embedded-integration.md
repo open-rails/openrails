@@ -30,7 +30,7 @@ network hop, no second credential. Concretely:
 flowchart LR
     B[Browser] -- your session credential --> S[Your Go server]
     subgraph P[Your process]
-        S -- Deps.Authenticate --> OR[OpenRails engine]
+        S -- Routes.Auth --> OR[OpenRails engine]
         C[Your backend code] -- openrails.Client --> OR
     end
     OR --> PG[(Postgres, billing schema)]
@@ -103,13 +103,17 @@ explicit:
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis` | Optional shared rate limits, FX rates and abuse statistics. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
-| `AuthKit`, `CustomerFor`, `AuthorityFor` | Your AuthKit client; OpenRails derives authentication, authorization and the recent sign-in check from it (section 6). |
-| `Authenticate`, `Authorize`, `RecentSignIn` | The same three as hooks, for hosts with other auth. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
-| `UserExists`, `UserEmail`, `ResolveUsername` | Optional identity lookups for billing notices and the CCBill username bridge. |
 | `Email` | Your own sender for all of OpenRails' rendered email, billing and control plane; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
 | `SMS`, `HasVaultedPaymentMethod` | Control-plane hooks (section 8). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
+
+`Deps` holds no auth: the engine authenticates nobody. Your auth guards the
+routes you mount (section 6), and what OpenRails knows about a customer is what
+you tell it with `client.EnsureCustomer`: the email receipts and notices go to,
+the username the CCBill username bridge matches, and whether the customer is
+blocked (banned or deleted), which checkout sessions refuse. Call it whenever
+they change.
 
 Under `Sandbox` every rail routes to its test environment and live credentials
 refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
@@ -290,46 +294,54 @@ price never silently reprices existing subscriptions. For dynamic products with 
 
 ### 6. Authentication and HTTP
 
-OpenRails has no logins of its own: it asks your auth who is calling. The same
-authentication protects explicit credentials on headless Client calls and
-published routes.
+OpenRails has no logins of its own. You supply your auth only when you mount
+routes, as `Routes.Auth`: net/http middleware in AuthKit's own shape.
 
-**With AuthKit**, pass your client: `openrails.Deps{Postgres: pool, AuthKit: auth}`.
-OpenRails derives everything from it and the host writes no mapping:
+| Method | OpenRails stacks it on |
+|---|---|
+| `Required()` | every customer route: a signed-in request |
+| `RequirePermission(permission)` | every merchant route, with the route's exact merchant permission (never a glob), checked live on the mounted merchant; it authenticates the request itself |
+| `Sensitive()` | after `RequirePermission`, when a user in person calls a merchant route whose permission moves money, removes access or exports data (`billing.RequiresRecentSignIn`): a recent sign-in, by your policy. An API key or application has no sign-in to renew |
+| `Identity(ctx)` | read after them: who was admitted |
 
-- Authentication is AuthKit's verification of the request. A user pays for
-  themselves: the customer is the AuthKit user ID. `Deps.CustomerFor` overrides
-  who pays (for example the user's organization); it returns a canonical UUID.
-- Authorization is checked live through AuthKit, per operation.
-  `Deps.AuthorityFor` names the AuthKit group and permission that authorize a
-  staff operation; only the host knows which group holds its billing staff, so
-  the merchant route group requires it. Native JWT roles never confer
-  privileges.
-- The recent sign-in check (operations that move money, grant access or mint
-  credentials; `billing.RequiresRecentSignIn`) is AuthKit's: a stale
-  sign-in is 403 `step_up_required` with AuthKit's challenge.
+Refusals are your middleware's own responses. After them OpenRails reads
+`Identity` and refuses a request it finds none on, so a middleware that checks
+nothing admits no one. Each handler checks the identity again before it runs.
 
-**With other auth**, supply the same three as hooks (not together with `AuthKit`):
+`Identity` returns an `openrails.Identity` in three parts:
 
-- `Deps.Authenticate(r)` returns the caller's `openrails.Identity`: `Kind`
-  (`openrails.User`, `Machine` or `Delegated`), the original `Issuer` and
-  `SubjectID`, and for personal customer, checkout and own-catalog operations
-  the explicitly mapped canonical UUID `CustomerID` (who pays). Return
-  `openrails.ErrUnauthenticated` for a request without a valid credential.
-  OpenRails never guesses or hashes the customer mapping.
-- `Deps.Authorize(r, identity, requirement)` checks live that the identity
-  holds `requirement.Permission` on `requirement.Target`. Return
-  `openrails.ErrForbidden` to refuse. Required for the staff and machine route
-  groups.
-- `Deps.RecentSignIn(r)` answers whether a native user signed in recently;
-  without it native users are refused the operations that need it.
+- `Subject` (with `SubjectKind`, `openrails.SubjectUser` or
+  `openrails.SubjectApplication`) is the native account acted as. On a
+  customer route it is the customer: a canonical UUID, the same user whatever
+  credential they signed in with. A merchant permission is the subject's.
+- `Invoker` is the party actually acting: `{Issuer, Subject}` when the subject
+  acts itself, else whoever acts on its behalf, possibly another issuer's user
+  spending the subject's balance. Spend limits and staff rate limits key on
+  it (`issuer|id` when another issuer vouches for it). An invoker acting for
+  someone else, or an application subject, may only read its own
+  `/v1/me/spend-limits`.
+- `Credential` is how it was proven: `openrails.CredentialSession`,
+  `CredentialDeviceKey`, `CredentialAPIKey`, `CredentialSignedToken` or
+  `CredentialAccessToken`, with its id for audit. Only a user acting in person
+  (not with an API key or signed token) starts a payment for itself.
+
+Hosts register the merchant permissions (`openrails.Permissions()`) in their
+RBAC and grant them to staff roles. `openrails.MachinePermissions()`
+(`merchant:checkout:create`) are never a person's: OpenRails refuses them to a
+user acting in person whatever the roles say. AuthKit will implement `Auth` on
+its client; the README shows the adapter until then, and a host with its own
+sessions implements the four methods directly. `openrailstest.CheckAuth`
+checks an implementation in your CI: it fires anonymous, refused, wrong
+permission, other merchant, stale sign-in and machine requests through it and
+fails on any acceptance.
 
 An `openrails.Routes` selects the routes `client.Routes` returns; mount them
 on your root router with the adapter for it. Validation happens here: a group
-whose authority is missing fails the mount before anything is registered.
+that needs `Auth` without one fails the mount before anything is registered,
+so nothing is ever served open.
 
 ```go
-routes := openrails.Routes{Prefix: "/billing", Storefront: true, Customers: openrails.CustomerSelfService}
+routes := openrails.Routes{Auth: auth, Prefix: "/billing", Storefront: true, Customers: openrails.CustomerSelfService}
 // net/http or Chi: github.com/open-rails/openrails/adapters/http
 if err := openrailshttp.Mount(mux, client, routes); err != nil { return err }
 // Gin: github.com/open-rails/openrails/adapters/gin
@@ -344,19 +356,19 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | (always) | Capability discovery (what this mount serves) and signature-checked provider callbacks |
 | `Storefront` | Products, prices, currencies, checkout config, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay and the captcha. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`). The signed-in customer mints at `/v1/me/checkout-sessions` (a customer route) |
 | `Customers` | `/v1/me/*` for `Config.Merchant`: `CustomerSelfService`, `CustomerSubscriptionManagement` or `CustomerBillingManagement`; the zero value `CustomersNone` mounts none |
-| `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or `Delegated` |
-| `Merchant` | The merchant API (`/v1/merchant/*`), each route gated by its merchant permission; requires `Deps.AuthorityFor` with AuthKit, or `Deps.Authorize` |
+| `Auth` | Your auth (above); required by `Customers`, `CustomerProfiles` and `Merchant`. A checkout session shows saved cards only to its own customer, admitted by it |
+| `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or their own `Auth` |
+| `Merchant` | The merchant API (`/v1/merchant/*`) for `Config.Merchant`, each route gated by `Auth.RequirePermission` for its merchant permission |
 | `CatalogEdits` | The merchant API's catalog-write routes; requires `Merchant`. Every mount of the merchant API in one process must agree |
 | `CookieOrigin` | Admits cookie-authenticated requests from this exact origin |
 | `AdminConsole` | The staff dashboard at its own `Path` (`/admin` by default); requires `Merchant`. Nil mounts none |
 
-A native customer surface serves `Config.Merchant` (or its own `Merchant`
-slug). An advanced, delegated audience mounts a `CustomerProfiles` entry under
-its own `Prefix` with `Delegated: true`; `Deps.AuthenticateCustomer` then authenticates it,
-returning an explicit merchant and paying subject. It confers no permissions
-by default and keeps verified credential
-class and invoker restrictions. An invoker-scoped principal may read only its
-own `/v1/me/spend-limits`. See [hosted customer audiences](architecture/customer-http-exposures.md).
+A customer surface serves `Config.Merchant` (or its own `Merchant` slug). A
+further audience mounts a `CustomerProfiles` entry under its own `Prefix`,
+optionally with its own `Auth`. Every customer route acts only on the admitted
+subject: no path, query or body names a customer, and another customer's
+resource reads exactly like a missing one. See
+[hosted customer audiences](architecture/customer-http-exposures.md).
 
 Each adapter registers ordinary method and path routes, so route inspection
 sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
@@ -366,8 +378,8 @@ rate limits.
 
 **Admin console** (optional): `Routes.AdminConsole` mounts the staff
 dashboard at its `Path` beside the merchant API it drives; the console finds
-that API at `Routes.Prefix` and signs staff in through `Deps.AuthKit`'s JSON
-API (or `AdminConsole.AuthBaseURL`). It needs `Merchant` and a console build
+that API at `Routes.Prefix` and signs staff in through your AuthKit's JSON API
+at `AdminConsole.AuthBaseURL`. It needs `Merchant` and a console build
 (`Deps.ConsoleAssets`); `Mount` fails without either. See
 [admin-console.md](admin-console.md).
 

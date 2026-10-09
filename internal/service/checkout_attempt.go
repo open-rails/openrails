@@ -92,7 +92,7 @@ func (s *Service) createCheckoutAttempt(ctx context.Context, req billing.CreateC
 			return err
 		}
 		// The host relays its customer's pay action on the displayed price.
-		in.Acceptance = &billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: user.ID, Issuer: "openrails:merchant-checkout", Email: strings.TrimSpace(req.Customer.VerifiedEmail)}
+		in.Acceptance = &billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: user.ID, Issuer: "openrails:merchant-checkout", Email: strings.TrimSpace(req.Customer.VerifiedEmail)}
 		var createErr error
 		resp, createErr = engine.CreateSession(scoped, in, user)
 		return createErr

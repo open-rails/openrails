@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+
 	"github.com/open-rails/openrails/internal/http/router"
 
 	"github.com/redis/go-redis/v9"
@@ -36,12 +38,6 @@ type Dependencies struct {
 	// plane — there is no verifier-only mode. The server selectively mounts the
 	// intentional AuthKit route groups (never DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
-	// DelegatedAuthenticator is the OPTIONAL host-pluggable identity seam for
-	// the browser-direct self-service and merchant surfaces (issue #339). When
-	// set, the host verifies the incoming credential itself and supplies the
-	// explicitly mapped principal for /v1/me/* + /v1/merchant/*, OVERRIDING the
-	// control plane's default delegated-token verifier.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
 	// The console mounts only when this is present AND admin_console.enabled;
@@ -61,13 +57,12 @@ type Server struct {
 	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
 	// there is no gin auth provider any more; every surface uses this directly).
 	authenticator billingauth.Authenticator
-	// delegatedAuthenticator is the optional host-supplied identity seam for
-	// the self-service surface (#339); see Dependencies.DelegatedAuthenticator.
-	delegatedAuthenticator billingauth.DelegatedAuthenticator
-	controlPlane           *controlplane.ControlPlane
-	customerResolver       middleware.ResourceCustomerResolver
-	captchaStore           *captcha.ChallengeStore
-	adminLimiter           *middleware.AdminOperationLimiter
+	controlPlane  *controlplane.ControlPlane
+	// customerResolver replaces the control plane's openrails:self token
+	// verification (tests).
+	customerResolver httproutes.ResourceCustomerResolver
+	captchaStore     *captcha.ChallengeStore
+	adminLimiter     *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	// catalogEdits mounts the catalog-write routes (Dependencies.CatalogEdits).
@@ -241,19 +236,18 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:                    deps.Config,
-		runtime:                deps.Runtime,
-		rdb:                    deps.Redis,
-		authenticator:          deps.Authenticator,
-		delegatedAuthenticator: deps.DelegatedAuthenticator,
-		controlPlane:           deps.ControlPlane,
-		captchaStore:           deps.Runtime.CaptchaStore,
-		adminLimiter:           middleware.NewAdminOperationLimiter(deps.Redis),
-		consoleAssets:          deps.ConsoleAssets,
-		catalogEdits:           deps.CatalogEdits,
-		adminConsole:           deps.AdminConsole,
-		browserTierRoutes:      middleware.NewBrowserTierRoutes(),
-		merchantTierRoutes:     middleware.NewBrowserTierRoutes(),
+		cfg:                deps.Config,
+		runtime:            deps.Runtime,
+		rdb:                deps.Redis,
+		authenticator:      deps.Authenticator,
+		controlPlane:       deps.ControlPlane,
+		captchaStore:       deps.Runtime.CaptchaStore,
+		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis),
+		consoleAssets:      deps.ConsoleAssets,
+		catalogEdits:       deps.CatalogEdits,
+		adminConsole:       deps.AdminConsole,
+		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
+		merchantTierRoutes: middleware.NewBrowserTierRoutes(),
 	}
 	if err := deps.Runtime.CatalogEdits.Decide(deps.CatalogEdits); err != nil {
 		return nil, err
@@ -408,6 +402,32 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
 		limiter,
 	)
+}
+
+// staffAuth is the standalone server's Auth for the merchant API: its API
+// keys, trusted issuers' access tokens and control-plane user sessions.
+func (s *Server) staffAuth() *httproutes.StandaloneAuth {
+	issuer := ""
+	if s.cfg != nil && s.cfg.ControlPlane != nil {
+		issuer = s.cfg.ControlPlane.Auth.Issuer
+	}
+	auth := &httproutes.StandaloneAuth{Issuer: issuer, Authenticator: s.authenticator}
+	if s.controlPlane != nil {
+		auth.ResourceTokenResolver, auth.AdminPermissionChecker, auth.ServiceCredentialResolver = s.controlPlane, s.controlPlane, s.controlPlane
+	}
+	return auth
+}
+
+// customerAuth is the standalone server's Auth for /v1/me: trusted issuers'
+// openrails:self access tokens.
+func (s *Server) customerAuth() httproutes.StandaloneCustomers {
+	if s.customerResolver != nil {
+		return httproutes.StandaloneCustomers{Resolver: s.customerResolver}
+	}
+	if s.controlPlane == nil {
+		return httproutes.StandaloneCustomers{}
+	}
+	return httproutes.StandaloneCustomers{Resolver: s.controlPlane}
 }
 
 // hostMerchantResolver is the standalone #734 Host->merchant resolver —

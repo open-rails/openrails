@@ -109,7 +109,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		return nil, err
 	}
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
-		WithWastedSpend(abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient)), invokerWindows).
+		WithWastedSpend(s.wastedSpendGuard(), invokerWindows).
 		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
 		WithDelinquency(s.delinquencyService()).
 		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
@@ -888,8 +888,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	if err != nil {
 		return nil, err
 	}
-	lim := ratelimit.NewLimiter(s.rt.RedisClient)
-	guard := abuse.NewWastedSpendGuard(lim)
+	guard := s.wastedSpendGuard()
 	payerWindows, err := s.payerWastedWindows(ctx, in.CustomerID, cur, "")
 	if err != nil {
 		return nil, err
@@ -1283,4 +1282,12 @@ func nonEmptyString(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+// wastedSpendGuard meters wasted spend in Redis; without Redis it is off.
+func (s *Service) wastedSpendGuard() *abuse.WastedSpendGuard {
+	if s.rt.RedisClient == nil {
+		return abuse.NewWastedSpendGuard(nil)
+	}
+	return abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient))
 }

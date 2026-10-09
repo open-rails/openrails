@@ -84,7 +84,7 @@ func (s *CheckoutAttemptService) discardEnrollmentCard(ctx context.Context, meth
 
 // acceptQuoteOnCreate confirms a just-quoted membership for the present payer.
 // A definite decline removes a card this session vaulted from a token.
-func (s *CheckoutAttemptService) acceptQuoteOnCreate(ctx context.Context, quoted *CheckoutAttemptResponse, user *UserIdentity, payer billingauth.DelegatedPrincipal) (*CheckoutAttemptResponse, error) {
+func (s *CheckoutAttemptService) acceptQuoteOnCreate(ctx context.Context, quoted *CheckoutAttemptResponse, user *UserIdentity, payer billingauth.Payer) (*CheckoutAttemptResponse, error) {
 	id := quoted.ID.UUID()
 	resp, err := s.acceptQuote(ctx, id, &CheckoutAttemptConfirmRequest{Payment: CheckoutAttemptConfirmPayment{Rail: quoted.Payment.Rail}}, user, payer)
 	if err != nil || (resp != nil && resp.Status == string(models.CheckoutAttemptStatusFailed)) {

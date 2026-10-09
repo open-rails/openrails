@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 )
 
@@ -21,17 +20,12 @@ type MyNotificationsQuery struct {
 
 // customerScope is the merchant and customer a /me request acts for.
 func customerScope(r *httprequest.Request) (uuid.UUID, uuid.UUID, bool) {
-	merchantID, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		writeRefusal(r, err, "merchant scope required")
-		return uuid.Nil, uuid.Nil, false
-	}
-	customer, err := billing.ParseCustomerID(r.GetUser().ID)
-	if err != nil || customer.IsZero() {
+	scope, ok := r.CustomerScope()
+	if !ok {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return uuid.Nil, uuid.Nil, false
 	}
-	return merchantID.UUID(), customer.UUID(), true
+	return scope.Merchant().UUID(), scope.Customer().UUID(), true
 }
 
 // GetNotifications handles GET /v1/me/notifications: the customer's

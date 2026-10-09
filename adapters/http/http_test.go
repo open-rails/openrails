@@ -1,7 +1,6 @@
 package openrailshttp
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -9,12 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -42,20 +44,11 @@ func (b *Bundle) Mount(target any) error {
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
-	deny := func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
-		return nil, billingauth.ErrUnauthenticated
-	}
-	auth := &billingauth.Integration{
-		Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
-			return billingauth.Identity{}, billingauth.ErrUnauthenticated
-		}),
-		Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
-			return billingauth.ErrUnauthenticated
-		}),
-	}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: deny}}
-	selection := config.Routes{Storefront: true, Merchant: true, CatalogEdits: true,
-		CustomerProfiles: []config.CustomerRoutes{{Delegated: true, Scope: config.CustomerSelfService}}}
+	rt := &app.Runtime{Config: cfg}
+	rt.SetConfiguredMerchant(testMerchant)
+	graph := &app.App{Config: cfg, Runtime: rt}
+	selection := config.Routes{Auth: authtest.Deny{}, Storefront: true, Merchant: true, CatalogEdits: true,
+		CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -155,3 +148,5 @@ func TestMountRefusesInvalidTargets(t *testing.T) {
 	require.Error(t, (&Bundle{}).Mount(struct{}{}))
 	require.ErrorContains(t, Mount(http.NewServeMux(), nil, openrails.Routes{}), "requires a client")
 }
+
+var testMerchant = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))

@@ -55,11 +55,12 @@ milestone order, each verifiable before the next:
    the sandbox probe passes.
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
-5. **Mount routes.** Pass the host's AuthKit client as `Deps.AuthKit`, or implement
-   `Deps.Authenticate` (and `Authorize` for staff routes) over other auth; select
-   route groups with an `openrails.Routes`, and mount with
-   `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify: an authenticated request to
-   `GET <prefix>/v1/me/subscriptions` answers for the caller's own subject.
+5. **Mount routes.** Implement `openrails.Auth` over the host's auth (the README's
+   AuthKit adapter, or four plain middleware methods) and pass it as `Auth` in
+   an `openrails.Routes` with the route groups you want; mount with
+   `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify with
+   `openrailstest.CheckAuth` in a test, then that an authenticated request to
+   `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.
 6. **Backend calls.** Use the Client where the host needs admission/holds, usage,
    or entitlement reads. Verify: `Admit` + `CaptureAdmission` round-trip in a test.
 7. **Checkout end-to-end.** Frontend work per

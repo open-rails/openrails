@@ -20,10 +20,15 @@ embedded and remote clients:
 | GetCheckoutConfig | GET /v1/merchant/checkout-config?price_id=…\|product_key=…&price_key=… | merchant:customer-settings:read |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
-host assertions made under merchant checkout authority. The permission is
-owner-only by default; editing a customer profile does not grant it. Each
-operation enforces any customer restriction on the credential, and the attempt
-routes enforce ownership of the addressed attempt.
+host assertions made under merchant checkout authority.
+
+`merchant:checkout:create` is machine-only (`openrails.MachinePermissions()`):
+staff never start a purchase for someone else. Over HTTP OpenRails refuses it
+to a user acting in person (`403 permission_required`) whatever the host's
+roles grant, an owner's `merchant:*` included; an application, or a user's own
+API key automating the account, may hold it. Editing a customer profile does
+not grant it, and the attempt routes enforce ownership of the addressed
+attempt.
 
 `CreateCheckoutSession` hands a price to a customer's browser: the answer is the
 session id and, when `Config.Checkout.PageURL` is set, the payment page URL.
@@ -31,9 +36,13 @@ session id and, when `Config.Checkout.PageURL` is set, the payment page URL.
 `CreateCheckoutAttempt` charges now, on the customer's behalf: the host relays
 the customer's pay click, and creating the attempt accepts the price's terms.
 `IdempotencyKey` (sent as `Idempotency-Key`) is required; an identical retry
-returns the same attempt. Pay with a saved method (`payment_method_id`), an NMI
-`payment_token` (saved as the customer's card), or Solana (`token_symbol` and
-`flow`: `transfer_request` or `transaction_request`). A Client
+returns the same attempt. Pay with an NMI `payment_token` (saved as the
+customer's card) or Solana (`token_symbol` and `flow`: `transfer_request` or
+`transaction_request`). A saved method (`payment_method_id`) is the customer's
+to spend: over HTTP it is refused with `403 customer_proof_required`, and the
+merchant mints a checkout session the customer pays, signed in, instead. The
+embedding host's own Go client, acting while its customer is signed in to it,
+may still charge one. A Client
 never carries a card number; cards are entered on a checkout session. The
 answer's `status` is `succeeded`, `failed` (with `failure`), `processing` (read
 it again) or `requires_action` with a `next_action`:
@@ -58,15 +67,18 @@ and `int64` in Go. `created_at`/`expires_at` are RFC3339 instants
 ## Checkout sessions
 
 A signed-in customer mints a session for one price; the session id then reads
-and pays it with no other credential. OpenRails owns the session (id, expiry,
+and pays it with a new card and no other credential. Saved cards are the
+customer's own: a session shows them, and pays with one, only to its customer
+admitted by the mount's `Auth`. Anyone else presenting a credential reads the
+session as missing (`404 checkout_session_not_found`). OpenRails owns the session (id, expiry,
 attempts) in `billing.checkout_sessions`; apps sharing a merchant and
 database share it, so one of them can serve the payment page for all.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | POST | `/v1/me/checkout-sessions` | customer session | Mint: `{price_id \| product_key + price_key, auto_renew?, success_url?}` → `201 {id, url, expires_at}` |
-| GET | `/v1/checkout-sessions/{id}` | the id | The session document |
-| POST | `/v1/checkout-sessions/{id}/pay` | the id | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
+| GET | `/v1/checkout-sessions/{id}` | the id (saved cards: and its customer) | The session document |
+| POST | `/v1/checkout-sessions/{id}/pay` | the id (a saved card: and its customer) | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
 | GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind a merchant attempt's `solana_pay` link (`flow: transaction_request`) |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Mint for a customer server-side (`Client.CreateCheckoutSession`) |
 
@@ -91,8 +103,9 @@ database share it, so one of them can serve the payment page for all.
   member) answers `status: "blocked"`.
 - `success_url` must be on one of the minting app's `ReturnOrigins`. The
   payment host accepts its `EmbedOrigins` as return origins too.
-- The buyer is checked on every read and pay through `Deps.CheckoutCustomer`
-  (default with AuthKit: a banned or deleted user is refused with 403).
+- The buyer is checked on every read and pay: a customer the merchant declared
+  blocked (`client.EnsureCustomer` with `Blocked`) is refused with
+  `403 customer_blocked`, even on a session minted before the block.
 - The session records the minting app's origin from that app's configuration
   (the `success_url` origin, else `ReturnOrigins[0]`, else the origin of
   `PublicBillingBaseURL`) and the document carries it as `embed_origin` only

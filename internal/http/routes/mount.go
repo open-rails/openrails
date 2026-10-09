@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -15,22 +16,22 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // Options is what an assembly supplies to mount catalog routes.
 type Options struct {
-	// Authenticator is the framework-neutral auth boundary behind AuthUser and
-	// AuthOptional routes (issue #282/#285).
+	// Auth is the host's middleware for the merchant tier and, on checkout
+	// sessions, who presents one.
+	Auth billingauth.Auth
+	// AuthBindsMerchant: Auth's own middleware resolves the merchant a
+	// request acts on (the standalone server's, the in-process host's).
+	// Otherwise a merchant route acts on the configured merchant.
+	AuthBindsMerchant bool
+
+	// Authenticator and ResourceUsers authenticate the standalone control
+	// plane's own user routes (AuthUser).
 	Authenticator billingauth.Authenticator
-
-	// ResourceUsers authenticates AuthUser routes with a trusted issuer's
-	// access token (#1140); nil leaves them to Authenticator alone.
 	ResourceUsers ResourceUserResolver
-
-	// Gate protects AuthMerchant routes. AuthKit/control-plane and embedded
-	// host auth are adapters behind this one interface.
-	Gate billingauth.Gate
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
@@ -38,8 +39,8 @@ type Options struct {
 	ProviderRoutes *routesurface.ProviderRoutes
 
 	// AdminLimiter is the #111 per-human-admin operation limiter. It runs after
-	// Gate has resolved the effective principal, so counters key the authorized
-	// user rather than an untrusted token claim or source IP.
+	// the staff gate, so counters key the authorized actor rather than an
+	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
 	// CatalogWrites mounts the catalog-write routes. Their guard still admits
@@ -77,8 +78,14 @@ type External struct {
 type Env struct {
 	Options
 	Runtime *app.Runtime
-	// Customer authenticates AuthCustomer routes.
-	Customer router.Middleware
+	// Customers gates customer routes at CustomerMerchant (zero only when
+	// AuthBindsMerchant).
+	Customers        billingauth.Auth
+	CustomerMerchant billingauth.Target
+	// Viewers says who presents a checkout session.
+	Viewers billingauth.Auth
+	// permissions caches Auth.RequirePermission by permission for staffCan.
+	permissions *sync.Map
 	// Root and Unlocker serve the platform tier.
 	Root     RootPermissionChecker
 	Unlocker AdminRateLimitUnlocker
@@ -87,7 +94,7 @@ type Env struct {
 }
 
 func newEnv(rt *app.Runtime, opts Options) *Env {
-	env := &Env{Options: opts, Runtime: rt, providers: routesurface.AllProviderRoutes()}
+	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes(), permissions: &sync.Map{}}
 	if opts.ProviderRoutes != nil {
 		env.providers = *opts.ProviderRoutes
 	}
@@ -110,9 +117,10 @@ func controlPlane(pick func(*External) router.Handler) func(*Env) router.Handler
 	return func(e *Env) router.Handler { return pick(&e.External) }
 }
 
-// gated binds a handler that asks the assembly's Gate a further question.
-func gated(build func(billingauth.Gate) func(*httprequest.Request)) func(*Env) router.Handler {
-	return func(e *Env) router.Handler { return router.Handler(build(e.Gate)) }
+// gated binds a handler that asks the route's staff gate a further
+// permission.
+func gated(build func(httphandlers.StaffCan) func(*httprequest.Request)) func(*Env) router.Handler {
+	return func(e *Env) router.Handler { return router.Handler(build(e.staffCan)) }
 }
 
 // enabled reports whether the assembly's configuration mounts a feature.
@@ -152,10 +160,7 @@ func (e *Env) mount(rr router.Router, base string, selected func(Route) bool) {
 		if route.CatalogWrite && !e.CatalogWrites {
 			continue
 		}
-		handler := route.Handler
-		if route.Bind != nil {
-			handler = route.Bind(e)
-		}
+		handler := e.Guarded(route)
 		if handler == nil {
 			continue
 		}
@@ -181,28 +186,18 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthPublic, AuthSessionID, AuthProvider:
 		mw = conn
 	case AuthCheckoutSession:
-		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime)}, conn...)
-	case AuthOptional:
-		mw = append(conn, e.optionalMW())
+		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
 	case AuthUser:
 		mw = append(conn, e.requiredMW())
 	case AuthCustomer:
-		// or#930: an invoker-scoped principal spends the payer's money without
-		// being the payer; only a route that says so admits it.
-		mw = append([]router.Middleware{e.Customer}, conn...)
-		if !route.InvokerScoped {
-			mw = append(mw, middleware.PayerScopedRequired())
-		}
+		mw = append(e.customerGates(route), conn...)
 	case AuthMerchant:
 		if route.CatalogWrite {
 			mw = append(mw, catalogWriteGuardMW(e.Runtime))
 		}
-		mw = append(mw, e.merchantPermissionMW(route.Perm))
-		if route.Also != "" {
-			mw = append(mw, e.merchantPermissionMW(route.Also))
-		}
-		// The authorization gate stays outermost; the user-keyed operation
-		// limiter runs before any merchant DB connection is pinned.
+		mw = append(mw, e.staffGates(route)...)
+		// The staff gate stays outermost; the actor-keyed operation limiter
+		// runs before any merchant DB connection is pinned.
 		if e.AdminLimiter != nil && route.Limit != "" {
 			mw = append(mw, e.AdminLimiter.AdminRateLimitMW(route.Limit))
 		}
@@ -210,7 +205,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthOperator:
 		mw = []router.Middleware{e.platformPermissionMW(route.Perm)}
 	default:
-		panic("routes: " + route.Key() + " declares no auth tier")
+		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
 	}
 	switch route.Throttle {
 	case ThrottleSessionRead:
@@ -259,8 +254,8 @@ func strictQueryMW(names []string) router.Middleware {
 	}
 }
 
-// requiredMW authenticates via the assembly's Authenticator, aborts 401 on
-// failure, and pins the resulting UserContext on the request.
+// requiredMW authenticates a standalone control-plane user for its own
+// routes, aborts 401 on failure, and pins the resulting UserContext.
 func (opts Options) requiredMW() router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
@@ -292,71 +287,6 @@ func (opts Options) requiredMW() router.Middleware {
 			next(r)
 		}
 	}
-}
-
-// optionalMW attempts authentication and pins the UserContext when it
-// succeeds, but never aborts.
-func (opts Options) optionalMW() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if a := opts.Authenticator; a != nil {
-				if uc, err := a.Authenticate(r.Request.Context(), r.Request); err == nil && uc.ValidateSubject() == nil {
-					r.SetUserContext(uc)
-				}
-			}
-			next(r)
-		}
-	}
-}
-
-// merchantPermissionMW asks the Gate for perm on the request's merchant, then
-// pins the merchant and the principal.
-func (opts Options) merchantPermissionMW(perm string) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if opts.Gate == nil {
-				r.AbortCode(billing.CodeInternalError, "authorization unavailable")
-				return
-			}
-			principal, err := opts.Gate.Authorize(r.Request.Context(), r.Request, perm)
-			if err != nil {
-				r.AbortGate(err)
-				return
-			}
-			if !middleware.EnforceMerchantBinding(r, principal.MerchantID) {
-				return
-			}
-			// Per operation, so every route serving it asks for the same
-			// recent sign-in.
-			if billing.RequiresRecentSignIn(perm) {
-				if err := opts.Gate.RequireRecentSignIn(r.Request.Context(), r.Request, principal); err != nil {
-					r.AbortGate(err)
-					return
-				}
-			}
-			if r.Request != nil && !principal.MerchantID.IsZero() {
-				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), principal.MerchantID))
-			}
-			if !principal.MerchantID.IsZero() {
-				r.Set("openrails.merchant_id", principal.MerchantID)
-			}
-			if principal.UserContext.UserID != "" {
-				r.SetUserContext(principal.UserContext)
-			}
-			// The full gate-resolved principal (existing consumers only check
-			// presence; #757 api-key handlers read Permissions for no-escalation).
-			r.Set(httphandlers.MerchantRoutePrincipalContextKey, principal)
-			next(r)
-		}
-	}
-}
-
-// RequireUser requires an authenticated user session.
-func (opts Options) RequireUser() router.Middleware { return opts.requiredMW() }
-
-// RequireMerchantPermission applies the same billing merchant gate to host routes.
-func (opts Options) RequireMerchantPermission(permission string) router.Middleware {
-	return opts.merchantPermissionMW(permission)
 }
 
 func under(prefix string) func(Route) bool {
@@ -421,10 +351,8 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
 }
 
-// SelfRoutePrefix is the canonical browser self-service billing surface. The
-// credential profile may be a delegated JWT in standalone mode or a host/user
-// bearer in embedded mode; the URL is intentionally one stable `/me` surface
-// and the credential profile lives on the resolved Principal.
+// SelfRoutePrefix is the customer surface's path: one stable /me, whatever
+// credential the mount's Auth accepts.
 const SelfRoutePrefix = "/me"
 
 var scopeRank = map[CustomerScope]int{ScopeSelfService: 0, ScopeBillingManagement: 1, ScopeSubscriptionManagement: 2}
@@ -434,28 +362,39 @@ func serves(scope CustomerScope) func(Route) bool {
 	return func(r Route) bool { return scopeRank[scope] <= scopeRank[r.Scope] }
 }
 
-func customerEnv(rt *app.Runtime, customer router.Middleware, providers routesurface.ProviderRoutes) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &providers})
-	env.Customer = customer
+// CustomerMount is one customer surface: the Auth that admits its
+// customers and the merchant they buy from (zero only when the Auth binds
+// the merchant itself).
+type CustomerMount struct {
+	Auth              billingauth.Auth
+	AuthBindsMerchant bool
+	Merchant          billingauth.Target
+	Providers         routesurface.ProviderRoutes
+}
+
+func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, AuthBindsMerchant: m.AuthBindsMerchant})
+	env.Customers, env.CustomerMerchant = m.Auth, m.Merchant
 	return env
 }
 
-// RegisterSelfServiceRoutes mounts the whole customer surface, authenticated
-// by delegatedMW. Every operation is scoped to the authenticated end-user and
-// their merchant: no path names a user.
-func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
-	customerEnv(rt, delegatedMW, providerRoutes).mount(rr, "/v1/me", in(Customer, serves(ScopeSelfService)))
+// RegisterSelfServiceRoutes mounts the whole customer surface. Every
+// operation is scoped to the verified customer and their merchant: no path
+// names a customer.
+func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
+	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeSelfService)))
 }
 
 // RegisterCustomerBillingManagementRoutes exposes the customer's existing
 // billing history, access, payment methods and agreement management. Creating a
 // checkout or selecting a different product/price remains with the host.
-func RegisterCustomerBillingManagementRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
-	customerEnv(rt, delegatedMW, providerRoutes).mount(rr, "/v1/me", in(Customer, serves(ScopeBillingManagement)))
+func RegisterCustomerBillingManagementRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
+	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeBillingManagement)))
 }
 
 // RegisterCustomerSubscriptionManagementRoutes exposes only customer-owned
 // cancellation, resumption and payment-method selection.
-func RegisterCustomerSubscriptionManagementRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware) {
-	customerEnv(rt, delegatedMW, routesurface.ProviderRoutes{}).mount(rr, "/v1/me", in(Customer, serves(ScopeSubscriptionManagement)))
+func RegisterCustomerSubscriptionManagementRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
+	m.Providers = routesurface.ProviderRoutes{}
+	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeSubscriptionManagement)))
 }

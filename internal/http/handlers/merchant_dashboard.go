@@ -42,8 +42,12 @@ func PutMerchantDashboard(r *httprequest.Request) {
 		dashboardValidationError(r, verr)
 		return
 	}
-	uc, _ := r.UserContext()
-	d, err := svc.Put(r.Request.Context(), widgets, uc.UserID)
+	staff, ok := r.Staff()
+	if !ok {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
+		return
+	}
+	d, err := svc.Put(r.Request.Context(), widgets, staff.Subject)
 	if err != nil {
 		var ve *metrics.ValidationError
 		if errors.As(err, &ve) {

@@ -35,12 +35,12 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 // AdmitCustomerSubscriptionCollection uses the same locked obligation and
 // receipt custody as scheduled collection. A verified payer may bypass only
 // retry delay after a released attempt, never unresolved financial ownership.
-func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.BillingProviderIntent, bool, error) {
+func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return gen.BillingProviderIntent{}, false, err
 	}
-	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != payer.String() {
+	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != payer.String() {
 		return gen.BillingProviderIntent{}, false, ErrCustomerSessionRequired
 	}
 	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {

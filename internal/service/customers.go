@@ -20,7 +20,7 @@ import (
 var ErrCustomerNotFound = apperr.New(http.StatusNotFound, "customer_not_found", "customer not found")
 
 func customerFromRow(row gen.BillingCustomer) billing.Customer {
-	return billing.Customer{ID: billing.CustomerID(row.ID), Email: row.Email, CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}
+	return billing.Customer{ID: billing.CustomerID(row.ID), Email: row.Email, Username: row.Username, Blocked: row.Blocked, CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}
 }
 
 // EnsureCustomer creates the merchant's customer or replaces its declared
@@ -36,6 +36,13 @@ func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, pa
 		}
 		params.Email = &email
 	}
+	if params.Username != nil {
+		username := strings.TrimSpace(*params.Username)
+		if username == "" || len(username) > 256 {
+			return nil, apperr.Invalidf("username must be at most 256 bytes and not blank").WithParam("username")
+		}
+		params.Username = &username
+	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -45,7 +52,7 @@ func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, pa
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.rt.DB.Gen(ctx).PutCustomer(ctx, gen.PutCustomerParams{ID: id.UUID(), MerchantID: mid.UUID(), Email: params.Email})
+	row, err := s.rt.DB.Gen(ctx).PutCustomer(ctx, gen.PutCustomerParams{ID: id.UUID(), MerchantID: mid.UUID(), Email: params.Email, Username: params.Username, Blocked: params.Blocked})
 	if err != nil {
 		return nil, err
 	}

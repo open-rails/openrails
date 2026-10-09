@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -17,13 +20,14 @@ import (
 )
 
 // Routes materializes the HTTP surface sel selects for the host's root
-// router, and fails before anything mounts when the engine lacks what a group
-// needs. Without a control plane that is sel's groups under sel.Prefix (and
-// the admin console at its own path); with one it is the standalone surface at
-// the root, to which sel adds only CatalogEdits, AdminConsole, Delegated
-// CustomerProfiles and CookieOrigin. Every mount of the merchant API in one
-// process must agree on CatalogEdits.
-func (e *Engine) Routes(sel config.Routes) ([]routebundle.Route, error) {
+// router, and fails before anything mounts when a selected group lacks the
+// Auth it needs: nothing is ever mounted open. Without a control plane that
+// is sel's groups under sel.Prefix (and the admin console at its own path);
+// with one it is the standalone surface at the root, gated by the control
+// plane's own Auth, to which sel adds only CatalogEdits, AdminConsole,
+// CustomerProfiles with their own Auth and merchant, and CookieOrigin. Every
+// mount of the merchant API in one process must agree on CatalogEdits.
+func (e *Engine) Routes(sel config.Routes) (routes []routebundle.Route, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
@@ -43,7 +47,7 @@ func (e *Engine) Routes(sel config.Routes) ([]routebundle.Route, error) {
 			return nil, fmt.Errorf("openrails: Routes.CookieOrigin: %w", err)
 		}
 	}
-	routes, err := e.buildRoutes(sel)
+	routes, err = e.buildRoutes(sel)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +63,16 @@ func (e *Engine) Routes(sel config.Routes) ([]routebundle.Route, error) {
 	return append([]routebundle.Route(nil), routes...), nil
 }
 
-func (e *Engine) buildRoutes(sel config.Routes) ([]routebundle.Route, error) {
+func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err error) {
+	defer func() {
+		if v := recover(); v != nil {
+			mount, ok := v.(httproutes.MountError)
+			if !ok {
+				panic(v)
+			}
+			routes, err = nil, mount
+		}
+	}()
 	a := e.App
 	if sel.Prefix != "" {
 		if err := config.ValidateMountPath("Routes.Prefix", sel.Prefix); err != nil {
@@ -67,16 +80,11 @@ func (e *Engine) buildRoutes(sel config.Routes) ([]routebundle.Route, error) {
 		}
 	}
 	if operator.Get(a) != nil {
-		if sel.Prefix != "" || sel.Storefront || sel.Merchant || sel.Customers != config.CustomersNone {
-			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes is the standalone surface at the root; set only CatalogEdits, AdminConsole, Delegated CustomerProfiles and CookieOrigin")
+		if sel.Prefix != "" || sel.Storefront || sel.Merchant || sel.Customers != config.CustomersNone || !httproutes.IsNilAuth(sel.Auth) {
+			return nil, fmt.Errorf("openrails: with Config.ControlPlane, Routes is the standalone surface at the root, gated by the control plane; set only CatalogEdits, AdminConsole, CustomerProfiles (each with its own Auth and Merchant) and CookieOrigin")
 		}
-		for _, profile := range sel.CustomerProfiles {
-			if !profile.Delegated {
-				return nil, fmt.Errorf("openrails: with Config.ControlPlane, CustomerProfiles must be Delegated (Deps.AuthenticateCustomer)")
-			}
-		}
-		profiles := embedhttp.CustomerProfiles(sel, "")
-		extra, err := embedhttp.BuildCustomerRoutes(a, profiles, a.Runtime.Auth)
+		profiles := embedhttp.CustomerProfiles(sel)
+		extra, err := embedhttp.BuildCustomerRoutes(a, profiles)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +130,19 @@ func (e *Engine) buildRoutes(sel config.Routes) ([]routebundle.Route, error) {
 			return nil, err
 		}
 	}
+	logMount(sel, len(table.Entries))
 	return routebundle.FromTable(table), nil
+}
+
+// logMount names the Auth each mounted group answers to: the merchant API at
+// WARN, since it moves money.
+func logMount(sel config.Routes, routes int) {
+	fields := log.Fields{"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth), "storefront": sel.Storefront, "customers": sel.Customers != config.CustomersNone, "customer_profiles": len(sel.CustomerProfiles)}
+	if sel.Merchant {
+		log.WithFields(fields).Warn("openrails: merchant API mounted; Auth.RequirePermission gates each route")
+		return
+	}
+	log.WithFields(fields).Info("openrails: routes mounted")
 }
 
 // adminConsoleRoutes serves the console sel selects at its path, against the
@@ -152,11 +172,8 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		return nil, fmt.Errorf("openrails: Routes.AdminConsole: %w", err)
 	}
 	authBase := sel.AdminConsole.AuthBaseURL
-	if authBase == "" && (cfg.ControlPlane == nil || cfg.ControlPlane.LocalSignIn) {
-		authBase = e.authAPIBase
-	}
 	if authBase == "" && issuer == nil {
-		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.Issuer, ControlPlane.LocalSignIn or AdminConsole.AuthBaseURL")
+		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.Issuer or AdminConsole.AuthBaseURL")
 	}
 	handler, err := adminconsole.Handler(path, adminconsole.Config{
 		AuthBaseURL:            authBase,

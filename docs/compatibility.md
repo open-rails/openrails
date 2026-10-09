@@ -32,7 +32,8 @@ snapshot names, and fails when they are not.
 ## Go API
 
 Every exported identifier of `openrails`, `billing`, `catalog`,
-`adapters/http`, `adapters/gin`, `adapters/fiber` and `web/admin`.
+`adapters/http`, `adapters/gin`, `adapters/fiber`, `openrailstest` and
+`web/admin`.
 `api/go.txt` holds one line per constant, variable, function, type, struct
 field (with its tag) and method. `internal/…`, `cmd/…`, `examples/…` and `ci/…`
 are not covered. Some types are declared under `internal/` and named by an

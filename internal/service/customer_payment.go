@@ -24,7 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request billing.RetrySubscriptionNowParams, principal billingauth.DelegatedPrincipal) (*billing.SubscriptionRetryNowResult, error) {
+func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request billing.RetrySubscriptionNowParams, principal billingauth.Payer) (*billing.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

@@ -232,20 +232,20 @@ func TestReadAppliesBillingContractOverIntactWire(t *testing.T) {
 		tables = append(tables, p.Name)
 	}
 	mid, customer := testMerchant, "10000000-0000-0000-0000-000000000002"
-	issuer, email, ts, unsafe := "https://merchant.example", "buyer@example.test", "2026-09-17 12:00:00+00", "4111111111111111"
+	issuer, email, ts, unsafe, username, blocked := "https://merchant.example", "buyer@example.test", "2026-09-17 12:00:00+00", "4111111111111111", "buyer", "false"
 	for _, tc := range []struct {
 		name   string
 		tables []string
 		row    []*string
 		valid  bool
 	}{
-		{"supported", tables, []*string{&mid, &customer, &issuer, &email, &ts, &ts}, true},
+		{"supported", tables, []*string{&mid, &customer, &issuer, &email, &ts, &ts, &username, &blocked}, true},
 		{"unknown table", []string{"merchant_secrets"}, nil, false},
 		{"missing tables", tables[:len(tables)-1], nil, false},
 		{"wrong order", append([]string{tables[1], tables[0]}, tables[2:]...), nil, false},
 		{"extra table", append(append([]string{}, tables...), tables[0]), nil, false},
 		{"wrong row width", tables, []*string{&mid}, false},
-		{"unsafe value", tables, []*string{&mid, &customer, &unsafe, &email, &ts, &ts}, false},
+		{"unsafe value", tables, []*string{&mid, &customer, &unsafe, &email, &ts, &ts, &username, &blocked}, false},
 	} {
 		var artifact bytes.Buffer
 		w, err := archivewire.NewWriter(&artifact, mid)

@@ -202,7 +202,7 @@ func handoffTarget(t *testing.T, source *world) *world {
 	targetURL.Path = "/" + name
 	target := &world{t: t, pool: pool, dsn: targetURL.String(), schema: source.schema, slug: source.slug,
 		clock: source.clock, nmi: source.nmi, stripe: source.stripe,
-		auth: &verifier{secret: []byte("handoff-" + uuid.NewString()), slug: source.slug}}
+		auth: &verifier{secret: []byte("handoff-" + uuid.NewString())}}
 	t.Cleanup(func() {
 		target.stop()
 		pool.Close()

@@ -150,11 +150,23 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 // staffJSON posts a JSON body to a merchant route with the staff credential.
 func (w *world) staffJSON(method, path string, body any) (int, map[string]any) {
 	w.t.Helper()
+	return w.merchantJSON(w.auth.token(w.t, "staff"), method, path, body)
+}
+
+// hostJSON calls a merchant route as the host backend, with its API key.
+func (w *world) hostJSON(method, path string, body any) (int, map[string]any) {
+	w.t.Helper()
+	return w.merchantJSON(w.auth.hostToken(w.t), method, path, body)
+}
+
+// merchantJSON calls a merchant route with token.
+func (w *world) merchantJSON(token, method, path string, body any) (int, map[string]any) {
+	w.t.Helper()
 	raw, err := json.Marshal(body)
 	require.NoError(w.t, err)
 	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, bytes.NewReader(raw))
 	require.NoError(w.t, err)
-	req.Header.Set("Authorization", "Bearer "+w.auth.token(w.t, "staff"))
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("OpenRails-Merchant", w.slug)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)

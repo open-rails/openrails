@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +21,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	auth "github.com/open-rails/helpers/auth"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -59,61 +57,121 @@ const (
 	remote   topology = "remote"
 )
 
-// verifier is a neutral host identity provider: HS256 tokens, a staff subject
-// with merchant authority, a support subject with all of it but permanent
-// grants, and UUID subjects as native customers. Like AuthKit, its permission
-// check is live: a session revoked after its token was minted fails the check
-// as a revoked credential. A sign-in (auth_time) older than 15 minutes needs
-// a step-up for operations that move money or grant access.
+// verifier is a neutral host's Auth: HS256 tokens. "staff" is a user holding
+// every merchant permission (machine-only ones too, as a wildcard grant
+// would), "support" all but permanent grants, "host" the host's own backend
+// (an application with an API key) all of them; UUID subjects are native
+// customers. Like AuthKit, its checks are live: a session revoked after its
+// token was minted is refused as a revoked credential. A sign-in (auth_time)
+// older than 15 minutes needs a step-up for operations that move money.
 type verifier struct {
 	secret  []byte
-	slug    string
 	revoked sync.Map // session id -> struct{}
 }
 
-type principal struct {
-	id       auth.Identity
-	v        *verifier
+var _ openrails.Auth = (*verifier)(nil)
+
+// hostApp is the host backend's application subject.
+const hostApp = "host"
+
+type verifiedKey struct{}
+
+// verified is one token as the verifier read it.
+type verified struct {
+	id       openrails.Identity
 	signedIn time.Time
 }
 
-func (p principal) Identity() auth.Identity { return p.id }
-func (p principal) Can(_ context.Context, _ auth.Scope, permission string) (bool, error) {
-	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
-		return false, errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
-	}
-	return p.id.Subject == "staff" || p.id.Subject == "support" && permission != billing.MerchantAccessGrantPermanent, nil
+// grant is a token's identity: its subject's kind, credential and invoker
+// default to a user acting itself in a session.
+type grant struct {
+	subject, kind, credential, sid string
+	invokerIssuer, invoker         string
+	signedIn                       time.Time
 }
 
-// stepUpChallenge is the provider's step-up refusal: how to sign in again.
-type stepUpChallenge map[string]any
-
-func (stepUpChallenge) Error() string              { return "step_up_required" }
-func (c stepUpChallenge) Metadata() map[string]any { return c }
-
-func (p principal) CheckRecentSignIn(context.Context) error {
-	if _, gone := p.v.revoked.Load(p.id.SessionID); gone {
-		return errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
+func (v *verifier) verify(r *http.Request) (verified, error) {
+	if got, ok := r.Context().Value(verifiedKey{}).(verified); ok {
+		return got, nil
 	}
-	if time.Since(p.signedIn) > 15*time.Minute {
-		return errors.Join(auth.ErrStepUpRequired, stepUpChallenge{"step_up_methods": []string{"password"}})
-	}
-	return nil
-}
-
-func (v *verifier) AuthenticateRequest(_ context.Context, r *http.Request) (auth.Principal, error) {
 	token, err := jwt.Parse(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), func(*jwt.Token) (any, error) { return v.secret, nil },
 		jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(issuer), jwt.WithAudience("billing"), jwt.WithExpirationRequired())
 	if err != nil || !token.Valid {
-		return nil, auth.ErrUnauthenticated
+		return verified{}, billingauth.Refusal(billing.CodeAuthenticationRequired)
 	}
-	subject, err := token.Claims.GetSubject()
-	if err != nil || subject == "" {
-		return nil, auth.ErrUnauthenticated
+	claims := token.Claims.(jwt.MapClaims)
+	subject, _ := claims["sub"].(string)
+	if subject == "" {
+		return verified{}, billingauth.Refusal(billing.CodeAuthenticationRequired)
 	}
-	sid, _ := token.Claims.(jwt.MapClaims)["sid"].(string)
-	authTime, _ := token.Claims.(jwt.MapClaims)["auth_time"].(float64)
-	return principal{auth.Identity{Kind: auth.KindUser, Issuer: issuer, Subject: subject, SessionID: sid}, v, time.Unix(int64(authTime), 0)}, nil
+	text := func(name, fallback string) string {
+		if value, _ := claims[name].(string); value != "" {
+			return value
+		}
+		return fallback
+	}
+	sid := text("sid", "")
+	if _, gone := v.revoked.Load(sid); gone && sid != "" {
+		return verified{}, billingauth.Refusal(billing.CodeCredentialRevoked)
+	}
+	authTime, _ := claims["auth_time"].(float64)
+	id := openrails.Identity{
+		Issuer: issuer, Subject: subject, SubjectKind: openrails.SubjectKind(text("kind", string(openrails.SubjectUser))),
+		Invoker:    openrails.Invoker{Issuer: text("inv_iss", issuer), ID: text("inv", subject)},
+		Credential: openrails.Credential{Kind: openrails.CredentialKind(text("cred", string(openrails.CredentialSession))), ID: text("sid", text("jti", ""))},
+	}
+	return verified{id: id, signedIn: time.Unix(int64(authTime), 0)}, nil
+}
+
+// gate is middleware that verifies the token, then admits it by check.
+func (v *verifier) gate(check func(verified) error) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got, err := v.verify(r)
+			if err == nil {
+				err = check(got)
+			}
+			if err != nil {
+				billingauth.WriteRefusal(w, r, billingauth.AsRefusal(err))
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), verifiedKey{}, got)))
+		})
+	}
+}
+
+func (v *verifier) Required() func(http.Handler) http.Handler {
+	return v.gate(func(verified) error { return nil })
+}
+
+func (v *verifier) RequirePermission(permission string) func(http.Handler) http.Handler {
+	return v.gate(func(got verified) error {
+		switch got.id.Subject {
+		case "staff", hostApp:
+			return nil
+		case "support":
+			if permission != billing.MerchantAccessGrantPermanent {
+				return nil
+			}
+		}
+		return billingauth.Refusal(billing.CodePermissionRequired)
+	})
+}
+
+func (v *verifier) Sensitive() func(http.Handler) http.Handler {
+	return v.gate(func(got verified) error {
+		if time.Since(got.signedIn) > 15*time.Minute {
+			refusal := billingauth.Refusal(billing.CodeStepUpRequired)
+			refusal.Metadata = map[string]any{"step_up_methods": []string{"password"}}
+			return refusal
+		}
+		return nil
+	})
+}
+
+func (v *verifier) Identity(ctx context.Context) (openrails.Identity, bool) {
+	got, ok := ctx.Value(verifiedKey{}).(verified)
+	return got.id, ok
 }
 
 func (v *verifier) token(t testing.TB, subject string) string {
@@ -123,17 +181,32 @@ func (v *verifier) token(t testing.TB, subject string) string {
 // staleToken is subject's live session signed in an hour ago, as a stolen
 // token's is.
 func (v *verifier) staleToken(t testing.TB, subject string) string {
-	return v.mint(t, subject, "", time.Now().Add(-time.Hour))
+	return v.issue(t, grant{subject: subject, signedIn: time.Now().Add(-time.Hour)})
 }
 
 func (v *verifier) sessionToken(t testing.TB, subject, sid string) string {
-	return v.mint(t, subject, sid, time.Now())
+	return v.issue(t, grant{subject: subject, sid: sid})
 }
 
-func (v *verifier) mint(t testing.TB, subject, sid string, signedIn time.Time) string {
-	claims := jwt.MapClaims{"sub": subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix(), "auth_time": signedIn.Unix()}
-	if sid != "" {
-		claims["sid"] = sid
+// apiKeyToken is subject's own API key, automating their account.
+func (v *verifier) apiKeyToken(t testing.TB, subject string) string {
+	return v.issue(t, grant{subject: subject, credential: string(openrails.CredentialAPIKey)})
+}
+
+// hostToken is the host backend's API key.
+func (v *verifier) hostToken(t testing.TB) string {
+	return v.issue(t, grant{subject: hostApp, kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialAPIKey)})
+}
+
+func (v *verifier) issue(t testing.TB, g grant) string {
+	if g.signedIn.IsZero() {
+		g.signedIn = time.Now()
+	}
+	claims := jwt.MapClaims{"sub": g.subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix(), "auth_time": g.signedIn.Unix(), "jti": uuid.NewString()}
+	for name, value := range map[string]string{"sid": g.sid, "kind": g.kind, "cred": g.credential, "inv_iss": g.invokerIssuer, "inv": g.invoker} {
+		if value != "" {
+			claims[name] = value
+		}
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(v.secret)
 	require.NoError(t, err)
@@ -228,7 +301,6 @@ func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configu
 		nmi:    newNMIFake(clock.Now),
 		auth:   &verifier{secret: []byte("e2e-subscriptions-" + uuid.NewString())},
 	}
-	w.auth.slug = w.slug
 	if len(configure) > 0 {
 		w.cfg = configure[0]
 	}
@@ -248,22 +320,6 @@ func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configu
 func (w *world) start() {
 	t := w.t
 	t.Helper()
-	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{
-		Verifier: w.auth,
-		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
-			if _, err := uuid.Parse(p.Identity().Subject); err == nil {
-				return billingauth.CustomerIdentity{ID: cid(p.Identity().Subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
-			}
-			return billingauth.CustomerIdentity{}, nil
-		},
-		Authority: func(_ context.Context, q billingauth.Requirement) (billingauth.Authority, error) {
-			if q.Scope != billingauth.MerchantScope || q.Target.MerchantSlug != w.slug {
-				return billingauth.Authority{}, nil
-			}
-			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: "billing-staff"}, Permission: q.Permission}, nil
-		},
-	})
-	require.NoError(t, err)
 	pool, dbURL := w.pool, w.dsn
 	stripe, nmi := http.RoundTripper(w.stripe), http.RoundTripper(w.nmi)
 	riverConfig := &river.Config{
@@ -300,13 +356,12 @@ func (w *world) start() {
 	if w.selfService {
 		scope = openrails.CustomerSelfService
 	}
-	routes := openrails.Routes{Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, Customers: scope}
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, Customers: scope}
 	if w.mount != nil {
 		w.mount(&routes)
 	}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps}
-	deps := hooks(identity)
-	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = pool, stripe, nmi, w.clock
+	deps := openrails.Deps{Postgres: pool, StripeTransport: stripe, NMITransport: nmi, Clock: w.clock}
 	if w.deps != nil {
 		w.deps(&deps)
 	}
@@ -327,9 +382,9 @@ func (w *world) start() {
 	require.NoError(t, openrailshttp.Mount(mux, rt, routes))
 	w.server = httptest.NewServer(mux)
 	local := rt
-	staff := w.auth.token(t, "staff")
+	host := w.auth.hostToken(t)
 	over, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return staff, nil }))
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return host, nil }))
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
@@ -767,9 +822,11 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 	return c.enrollOnce(tp, rail, priceID, entitlement, method)
 }
 
-func (c *customer) enrollOnce(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
+func (c *customer) enrollOnce(_ topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	attempt, err := c.w.client[tp].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
+	// The host charges a saved card in process. Over HTTP it may only mint a
+	// session its customer pays signed in (identity_test.go).
+	attempt, err := c.w.client[embedded].CreateCheckoutAttempt(c.w.t.Context(), billing.CreateCheckoutAttemptParams{
 		OfferKind: billing.OfferRecurring, Customer: c.identity(), Entitlement: entitlement, PriceID: pid(priceID),
 		IdempotencyKey: "enroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(method)},
 		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
@@ -825,7 +882,7 @@ func (w *world) latestAttempt(customerID string) map[string]any {
 // confirmAttempt confirms a Solana attempt through the merchant route.
 func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (int, map[string]any) {
 	w.t.Helper()
-	return w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts/"+id.String()+"/confirm", map[string]string{"signature": signature})
+	return w.hostJSON(http.MethodPost, "/v1/merchant/checkout-attempts/"+id.String()+"/confirm", map[string]string{"signature": signature})
 }
 
 func (c *customer) entitled(entitlement string) bool {
@@ -937,22 +994,6 @@ func (w *world) openFindings(findingType string) []string {
 	keys, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	require.NoError(w.t, err)
 	return keys
-}
-
-// hooks hands an authentication integration to the engine as Deps hooks.
-func hooks(identity *billingauth.Integration) openrails.Deps {
-	deps := openrails.Deps{Authenticate: func(r *http.Request) (openrails.Identity, error) {
-		return identity.Authentication.AuthenticateRequest(r.Context(), r)
-	}}
-	if identity.Authorization != nil {
-		deps.Authorize = func(r *http.Request, id openrails.Identity, required openrails.Requirement) error {
-			return identity.Authorization.Authorize(r.Context(), r, id, required)
-		}
-	}
-	if identity.RecentSignIn != nil {
-		deps.RecentSignIn = func(r *http.Request) error { return identity.RecentSignIn.CheckRecentSignIn(r.Context(), r) }
-	}
-	return deps
 }
 
 // typedPriceID reads a price id the harness keeps as text.

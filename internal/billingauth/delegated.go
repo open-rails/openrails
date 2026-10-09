@@ -1,17 +1,11 @@
 package billingauth
 
 import (
-	"context"
 	"errors"
-	"net/http"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
-
-// DelegatedCredentialClassAttribute is the reserved signed delegated-token
-// attribute carrying issuer-verified interaction provenance.
-const DelegatedCredentialClassAttribute = "openrails_credential_class"
 
 // CredentialClass is provenance supplied by a trusted verifier. An automation
 // credential can authorize ordinary self reads but does not itself establish
@@ -24,123 +18,32 @@ const (
 	CredentialClassAutomation  CredentialClass = "automation"
 )
 
-// DelegatedPrincipal is the resolved identity a host supplies for the
-// browser-direct self-service and merchant surfaces (/v1/me/* and
-// /v1/merchant/*, issue #339). It is the framework-neutral counterpart of the
-// control plane's
-// resolved delegated token: the host verifies the incoming credential however
-// it likes (its own federated-issuer registry, a session, a gateway header)
-// and returns the EXPLICITLY mapped {merchant, subject, optional permissions}
-// principal.
-//
-// EXPLICIT SUBSYSTEM MAPPING — NO FALLBACKS: the host must resolve BOTH the
-// OpenRails merchant and the acting subject itself. OpenRails performs no
-// try-merchant-then-subject (or any other implicit) resolution on a
-// host-supplied principal; a principal with an empty/invalid merchant or
-// subject is rejected with 401 (fail closed).
-type DelegatedPrincipal struct {
-	// CredentialClass is derived from verified credentials, never a request
-	// header or body. Unknown keeps existing self reads but cannot authorize CIT.
+// Payer is who accepted a payment: the customer route's verified customer,
+// or the customer a merchant relays an acceptance for.
+type Payer struct {
+	// CredentialClass is CredentialClassUserSession only for the customer's
+	// own interactive sign-in.
 	CredentialClass CredentialClass
-	// MerchantID is the merchant the host maps the credential to (required).
-	// The mapping is the host's configuration, explicit and never inferred.
-	MerchantID billing.MerchantID
-
-	// MerchantSlug is the merchant's display/audit slug (optional).
-	MerchantSlug string
-
-	// SubjectID is the acting customer: the canonical end-user /
-	// subject id every self-service read and write is scoped to (REQUIRED).
-	// The host is responsible for presenting the CANONICAL id (the shared
-	// subject across all of its issuers) — OpenRails uses this value verbatim
-	// as the billing account key, exactly like a delegated token's
-	// `delegated_sub`.
+	MerchantID      billing.MerchantID
+	// SubjectID is the paying customer's canonical UUID.
 	SubjectID string
-
-	// Issuer identifies the verifying issuer / host system for audit
-	// (optional; e.g. the host's issuer URL or service name). It fills the
-	// same audit slot as a delegated token's validated `iss`.
+	// Issuer names who vouched for the acceptance, for audit.
 	Issuer string
-
-	// Invoker is the opaque, host-owned spend principal this credential acts
-	// as under SubjectID's account — the SAME string the host passes as
-	// AdmitRequest.Invoker, so the identity that is metered is the identity
-	// that reads (or#930).
-	//
-	// Set it ONLY for a credential that spends a payer's money WITHOUT being
-	// the payer: a platform's end user drawing on the platform org's balance
-	// under a spend delegation. A principal that carries an Invoker is
-	// INVOKER-SCOPED and OpenRails narrows it to exactly one thing — reading
-	// its own spend windows. Every other self-service route
-	// refuses it (middleware.PayerScopedRequired), because SubjectID there
-	// names an account the invoker does not own.
-	//
-	// Leave empty for the payer's own credential; the subject is then both
-	// payer and invoker, and the full self-service surface applies.
-	Invoker string
-
-	// Permissions are optional for self-service routes. For an in-process host
-	// principal the embedding host is TRUSTED, so these permissions are accepted
-	// as authoritative and are NOT filtered against an allowlist (#564); the host
-	// must not supply more than it intends. (Signed delegated tokens on the
-	// standalone wire path are separately bounded by AuthKit at verify time.)
-	Permissions []string
-
-	// Email / EmailVerified / Username are optional non-authoritative contact
-	// metadata (hosted checkout prefill etc.); authorization remains
-	// SubjectID + Permissions.
+	// Invoker is set when an invoker spends SubjectID's balance without
+	// being SubjectID; such a payer accepts nothing.
+	Invoker       string
 	Email         string
 	EmailVerified bool
 	Username      string
 }
 
-// ErrDelegatedPrincipalInvalid indicates a host-supplied principal is missing
-// its explicit merchant or subject mapping. OpenRails maps it to 401.
-var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an explicit merchant and subject")
+// ErrPayerInvalid is a payer without its merchant or customer.
+var ErrPayerInvalid = errors.New("payer requires an explicit merchant and customer")
 
-// ValidateDelegatedPrincipal enforces the explicit-mapping contract: a usable principal carries
-// a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
-// catalog are enforced by the adapting middleware, which owns those types.)
-func ValidateDelegatedPrincipal(p *DelegatedPrincipal) error {
+// ValidatePayer refuses a payer without a merchant or customer.
+func ValidatePayer(p *Payer) error {
 	if p == nil || p.MerchantID.IsZero() || strings.TrimSpace(p.SubjectID) == "" || (p.CredentialClass != CredentialClassUnknown && p.CredentialClass != CredentialClassUserSession && p.CredentialClass != CredentialClassAutomation) {
-		return ErrDelegatedPrincipalInvalid
+		return ErrPayerInvalid
 	}
 	return nil
-}
-
-// DelegatedAuthenticator is the host-pluggable auth boundary for the
-// delegated self-service surface (issue #339). The control plane's
-// delegated-token verifier is the default implementation; a host that
-// verifies its own credentials (one system, one credential) implements this
-// single method and passes it via the embed/embedded Options. It is pure
-// net/http: implementers never touch gin, context keys, or status codes.
-//
-// Return ErrUnauthenticated (or any non-nil error) when the request carries
-// no valid credential; OpenRails maps that to 401. A returned error's message
-// is surfaced to the client, so it should be safe to expose.
-type DelegatedAuthenticator interface {
-	AuthenticateDelegated(ctx context.Context, r *http.Request) (*DelegatedPrincipal, error)
-}
-
-// DelegatedAuthenticatorFunc adapts an ordinary function to the
-// DelegatedAuthenticator interface, so a host can pass a closure without
-// declaring a type:
-//
-//	opts.DelegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(
-//		func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-//			user, err := hostAuth.Verify(r) // the host's own credential check
-//			if err != nil {
-//				return nil, billingauth.ErrUnauthenticated
-//			}
-//			return &billingauth.DelegatedPrincipal{
-//				MerchantID:    deploymentMerchantID, // explicit per-deployment mapping
-//				SubjectID:   user.CanonicalID,
-//				Issuer:      "https://auth.host.example",
-//			}, nil
-//		})
-type DelegatedAuthenticatorFunc func(ctx context.Context, r *http.Request) (*DelegatedPrincipal, error)
-
-// AuthenticateDelegated implements DelegatedAuthenticator.
-func (f DelegatedAuthenticatorFunc) AuthenticateDelegated(ctx context.Context, r *http.Request) (*DelegatedPrincipal, error) {
-	return f(ctx, r)
 }

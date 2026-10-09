@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/operator"
 )
@@ -60,14 +59,13 @@ func (c *Client) AuthenticateUser(r *http.Request) (Identity, error) {
 	if err != nil {
 		return Identity{}, err
 	}
-	customer, err := billing.ParseCustomerID(user.UserID)
-	if err != nil {
+	if _, err := billing.ParseCustomerID(user.UserID); err != nil {
 		return Identity{}, ErrUnauthenticated
 	}
 	return Identity{
-		Kind: billingauth.User, Issuer: a.Config.ControlPlane.Auth.Issuer, SubjectID: user.UserID, CustomerID: customer,
-		CredentialClass: billingauth.CredentialClassUserSession, Email: user.Email, EmailVerified: user.EmailVerified,
-		Username: user.Username, SessionID: user.SessionID,
+		Issuer: a.Config.ControlPlane.Auth.Issuer, Subject: user.UserID, SubjectKind: SubjectUser,
+		Credential: Credential{Kind: CredentialSession, ID: user.SessionID},
+		Email:      user.Email, EmailVerified: user.EmailVerified, Username: user.Username,
 	}, nil
 }
 

@@ -12,8 +12,8 @@ import (
 )
 
 func paymentMethodDeleteAuthority(ctx context.Context, payer uuid.UUID) (Origin, string) {
-	if user, ok := billingauth.FromContext(ctx); ok {
-		actor, err := uuid.Parse(strings.TrimSpace(user.UserID))
+	if c, ok := billingauth.IdentityFromContext(ctx); ok {
+		actor, err := uuid.Parse(strings.TrimSpace(c.Subject))
 		if err == nil && actor == payer && payer != uuid.Nil {
 			return OriginUser, actor.String()
 		}

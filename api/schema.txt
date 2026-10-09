@@ -16,6 +16,7 @@ migration 0012_provider_applied_coverage.up.sql sha256:33533330adbe12918eae947cd
 migration 0013_federated_grants.up.sql sha256:515cb9f231fbfd2850c0c3e379009be93da9ca702b8cec7bfdf31710857830cf
 migration 0014_operation_authorization_extensions.up.sql sha256:7e96a488b7144c28ce497c77a1c746bd3175cfb056f145fa69559d72b2215c69
 migration 0015_owed_repayment.up.sql sha256:54ad22cbf5293b6a00f7cbf18822c8c013f32c6e75a9e910899e7d95f50da460
+migration 0016_identity_facts.up.sql sha256:3ae50466191affffa4e919d8b67f94aac547205e517e7466110e6788e47dbbcb
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -485,11 +486,15 @@ table billing.customers
   column email text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column last_seen_at timestamp with time zone NOT NULL DEFAULT now()
+  column username text
+  column blocked boolean NOT NULL DEFAULT false
   constraint customers_email_check CHECK (((email IS NULL) OR ((email = btrim(email)) AND (email <> ''::text) AND (octet_length(email) <= 320))))
   constraint customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint customers_pkey PRIMARY KEY (merchant_id, id)
+  constraint customers_username_check CHECK (((username IS NULL) OR ((username = btrim(username)) AND (username <> ''::text) AND (octet_length(username) <= 256))))
   index CREATE INDEX customers_id_idx ON billing.customers USING btree (id, merchant_id)
   index CREATE UNIQUE INDEX customers_pkey ON billing.customers USING btree (merchant_id, id)
+  index CREATE INDEX customers_username_idx ON billing.customers USING btree (merchant_id, lower(username)) WHERE (username IS NOT NULL)
 
 table billing.dashboard_configs
   column merchant_id uuid NOT NULL
@@ -1655,7 +1660,10 @@ table billing.provider_intents
   column destructive_run_id uuid
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column custodian_id uuid
+  column subject text
+  column credential text
   constraint provider_intents_addressed_check CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
+  constraint provider_intents_credential_check CHECK ((credential <> ''::text))
   constraint provider_intents_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
   constraint provider_intents_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint provider_intents_executed_check CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL)))
@@ -1667,6 +1675,7 @@ table billing.provider_intents
   constraint provider_intents_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE SET NULL (price_id)
   constraint provider_intents_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint provider_intents_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text])))
+  constraint provider_intents_subject_check CHECK ((subject <> ''::text))
   constraint provider_intents_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE SET NULL (subscription_id)
   index CREATE INDEX provider_intents_actor_created_at_intent_type_idx ON billing.provider_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]))
   index CREATE INDEX provider_intents_checkout_attempt_idx ON billing.provider_intents USING btree (merchant_id, ((payload ->> 'checkout_attempt_id'::text))) WHERE (payload ? 'checkout_attempt_id'::text)

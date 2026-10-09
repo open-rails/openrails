@@ -34,7 +34,6 @@ func (p *Authenticator) Authenticate(ctx context.Context, r *http.Request) (bill
 		EmailVerified: cl.EmailVerified,
 		Username:      cl.Username,
 		SessionID:     cl.SessionID,
-		Entitlements:  cl.Entitlements,
 	}, nil
 }
 

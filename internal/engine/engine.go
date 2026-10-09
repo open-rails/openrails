@@ -14,12 +14,13 @@ import (
 	"context"
 
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/riverqueue/river"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
@@ -40,8 +41,6 @@ type Engine struct {
 	closed      bool
 	stopWorkers func()
 	routes      map[string][]routebundle.Route
-	// authAPIBase is Deps.AuthKit's JSON API path, for the admin console.
-	authAPIBase string
 
 	handlerOnce sync.Once
 	handler     http.Handler
@@ -80,10 +79,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if err != nil {
 		return nil, err
 	}
-	auth, err := integration(deps)
-	if err != nil {
-		return nil, err
-	}
 	consoleAssets := deps.ConsoleAssets
 	if consoleAssets == nil {
 		consoleAssets = admin.FS()
@@ -101,21 +96,19 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		cfg.DB = &db
 	}
 	bootstrap := &app.BootstrapOptions{
-		PGXPool:          deps.Postgres,
-		Redis:            deps.Redis,
-		UserDirectory:    userDirectory(deps),
-		UsernameResolver: usernameResolver(deps),
-		StripeTransport:  deps.StripeTransport,
-		NMITransport:     deps.NMITransport,
-		DNSResolver:      deps.DNSResolver,
-		Clock:            deps.Clock,
-		EmailSender:      deps.Email,
+		PGXPool:         deps.Postgres,
+		Redis:           deps.Redis,
+		StripeTransport: deps.StripeTransport,
+		NMITransport:    deps.NMITransport,
+		DNSResolver:     deps.DNSResolver,
+		Clock:           deps.Clock,
+		EmailSender:     deps.Email,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
-	e := &Engine{App: application, merchant: cfg.Merchant, authAPIBase: authAPIBase(deps)}
+	e := &Engine{App: application, merchant: cfg.Merchant}
 	fail := func(err error) (*Engine, error) {
 		_ = e.Close(ctx)
 		return nil, err
@@ -128,9 +121,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(fmt.Errorf("initialize merchant services: %w", err))
 	}
 	application.ConsoleAssets = consoleAssets
-	rt.Auth = auth
-	rt.CheckoutCustomer = checkoutCustomer(deps)
-	rt.AuthenticateCustomer = deps.AuthenticateCustomer
 	signerPending, err := configureMerchant(ctx, application, e.merchant)
 	if err != nil {
 		return fail(err)
@@ -206,29 +196,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			}
 		}
 	}
-	if (deps.UserExists == nil) != (deps.UserEmail == nil) {
-		return fmt.Errorf("openrails: set Deps.UserExists and Deps.UserEmail together")
-	}
 	if deps.Email != nil && cfg.SendGrid != nil {
 		return fmt.Errorf("openrails: set Deps.Email or Config.SendGrid, not both")
 	}
 	if cfg.SendGrid != nil && strings.TrimSpace(cfg.SendGrid.APIKey) == "" {
 		return fmt.Errorf("openrails: Config.SendGrid.APIKey is required")
-	}
-	if cfg.ControlPlane != nil && (deps.AuthKit != nil || deps.Authenticate != nil) {
-		return fmt.Errorf("openrails: Config.ControlPlane authenticates with its own AuthKit; leave Deps.AuthKit and Deps.Authenticate unset")
-	}
-	if deps.AuthKit != nil {
-		if deps.Authenticate != nil || deps.Authorize != nil || deps.RecentSignIn != nil {
-			return fmt.Errorf("openrails: set Deps.AuthKit or Deps.Authenticate/Authorize/RecentSignIn, not both")
-		}
-	} else {
-		if deps.CustomerFor != nil || deps.AuthorityFor != nil {
-			return fmt.Errorf("openrails: Deps.CustomerFor and Deps.AuthorityFor require Deps.AuthKit")
-		}
-		if deps.Authenticate == nil && (deps.Authorize != nil || deps.RecentSignIn != nil) {
-			return fmt.Errorf("openrails: Deps.Authorize and Deps.RecentSignIn require Deps.Authenticate")
-		}
 	}
 	if !cfg.RateLimitsDisabled {
 		if cfg.RateLimits == nil {

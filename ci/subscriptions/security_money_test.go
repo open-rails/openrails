@@ -40,11 +40,9 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 				}
 			}
 
-			for _, tp := range []topology{embedded, remote} {
-				_, err := w.client[tp].CreateCheckoutAttempt(ctx, request(cheap.ID, "content:vip"))
-				require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
-			}
-			_, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
+			_, err := client.CreateCheckoutAttempt(ctx, request(cheap.ID, "content:vip"))
+			require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
+			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
 			negative := -24
 			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "neg-duration-" + uuid.NewString()[:8], UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &negative})
@@ -57,7 +55,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			require.Error(t, err, "an archived price is not purchasable")
 
 			// The caller cannot name an amount, a currency or a quantity.
-			status, body := w.staffJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{
+			status, body := w.hostJSON(http.MethodPost, "/v1/merchant/checkout-attempts", map[string]any{
 				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "payment": map[string]any{"psp": rail}, "amount": "1", "currency": "JPY", "quantity": 0,
 			})
 			require.Equal(t, http.StatusBadRequest, status, "%v", body)

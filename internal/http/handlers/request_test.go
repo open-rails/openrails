@@ -22,8 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -50,36 +50,41 @@ func TestPricedCheckoutRejectsBeforeEngine(t *testing.T) {
 	}
 }
 
-// Only the customer's own interactive session may take a payment action; the
-// checkout principal copies verified facts without promoting the class.
-func TestCustomerActionRequiresInteractiveSession(t *testing.T) {
-	classes := []billingauth.CredentialClass{billingauth.CredentialClassUnknown, billingauth.CredentialClassAutomation, billingauth.CredentialClassUserSession}
-	for _, class := range classes {
-		for _, invoker := range []string{"", "automation-agent"} {
-			wire := httptest.NewRequest(http.MethodPost, "/v1/me/invoices/id/pay-now", strings.NewReader(`{"credential_class":"user_session"}`))
-			wire.Header.Set("Credential-Class", "user_session")
-			rec := httptest.NewRecorder()
-			r := httprequest.NewHTTP(rec, wire, nil)
-			payer, mid := uuid.NewString(), billing.MerchantID(uuid.New())
-			r.SetUserContext(billingauth.UserContext{UserID: payer})
-			r.Set(middleware.PrincipalContextKey, &middleware.Principal{CredentialType: middleware.CredentialHostDelegatedUser, CredentialClass: class, Invoker: invoker, MerchantID: mid, Subject: payer})
-
-			_, ok := customerActionPayer(r)
-			require.Equal(t, class == billingauth.CredentialClassUserSession && invoker == "", ok, "%s/%q", class, invoker)
-			if !ok {
-				require.Equal(t, http.StatusForbidden, rec.Code)
-				require.Contains(t, rec.Body.String(), "customer_action_required")
-			}
-			require.Equal(t, billingauth.DelegatedPrincipal{CredentialClass: class, Invoker: invoker, SubjectID: payer, MerchantID: mid}, checkoutVerifiedPrincipal(r))
-		}
-	}
+// A payment action is the admitted customer's own, from the route gate's
+// scope only.
+func TestCustomerActionRequiresTheAdmittedCustomer(t *testing.T) {
 	r, rec := newTestRequest(http.MethodPost, "/", nil, nil)
 	_, ok := customerActionPayer(r)
-	require.False(t, ok, "no principal is no customer action")
-	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.False(t, ok, "no scope is no customer action")
+	require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+	wire := httptest.NewRequest(http.MethodPost, "/v1/me/invoices/id/pay-now", strings.NewReader(`{}`))
+	payer, mid := billing.CustomerID(uuid.New()), billing.MerchantID(uuid.New())
+	who := billingauth.Identity{Issuer: "host", Subject: payer.String(), SubjectKind: billingauth.SubjectUser, Invoker: billingauth.Invoker{Issuer: "host", ID: payer.String()}, Email: "a@example.test", EmailVerified: true}
+	wire = wire.WithContext(billingauth.BindIdentity(customerscope.Bind(wire.Context(), mid, payer, payer.String(), true), who))
+	r = httprequest.NewHTTP(httptest.NewRecorder(), wire, nil)
+	got, ok := customerActionPayer(r)
+	require.True(t, ok)
+	require.Equal(t, payer.String(), got.String())
+
+	// An invoker acting for the customer, or the customer automating its own
+	// account, takes no payment action.
+	for _, present := range []struct {
+		invoker string
+		present bool
+	}{{"u_42", true}, {payer.String(), false}} {
+		automated := httptest.NewRequest(http.MethodPost, "/v1/me/invoices/id/pay-now", strings.NewReader(`{}`))
+		automated = automated.WithContext(billingauth.BindIdentity(customerscope.Bind(automated.Context(), mid, payer, present.invoker, present.present), who))
+		rec := httptest.NewRecorder()
+		_, ok = customerActionPayer(httprequest.NewHTTP(rec, automated, nil))
+		require.False(t, ok, "%+v", present)
+		require.Equal(t, http.StatusForbidden, rec.Code)
+		require.Contains(t, rec.Body.String(), "customer_action_required")
+	}
+	require.Equal(t, billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: payer.String(), Issuer: "host", Email: "a@example.test", EmailVerified: true}, checkoutVerifiedPrincipal(r))
 }
 
-// The payment Idempotency-Key is caller text that may be logged: it is
+// The payment Idempotency-Key is who text that may be logged: it is
 // bounded and scanned for card numbers before it is used.
 func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 	for key, ok := range map[string]bool{

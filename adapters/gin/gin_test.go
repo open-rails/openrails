@@ -1,7 +1,6 @@
 package openrailsgin
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -9,12 +8,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
+
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -38,28 +40,15 @@ func (b *Bundle) Mount(target *gin.Engine) error {
 	return MountRoutes(target, b.routes)
 }
 
-func denyDelegated(calls *int) func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
-	return func(*http.Request, string) (*billingauth.DelegatedPrincipal, error) {
-		*calls++
-		return nil, billingauth.ErrUnauthenticated
-	}
-}
-
 // inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
-	auth := &billingauth.Integration{
-		Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
-			return billingauth.Identity{}, billingauth.ErrUnauthenticated
-		}),
-		Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
-			return billingauth.ErrUnauthenticated
-		}),
-	}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: auth, AuthenticateCustomer: denyDelegated(new(int))}}
-	selection := config.Routes{Storefront: true, Merchant: true, CatalogEdits: true,
-		CustomerProfiles: []config.CustomerRoutes{{Delegated: true, Scope: config.CustomerSelfService}}}
+	rt := &app.Runtime{Config: cfg}
+	rt.SetConfiguredMerchant(testMerchant)
+	graph := &app.App{Config: cfg, Runtime: rt}
+	selection := config.Routes{Auth: authtest.Deny{}, Storefront: true, Merchant: true, CatalogEdits: true,
+		CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -162,7 +151,9 @@ func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
+	rt := &app.Runtime{Config: cfg}
+	rt.SetConfiguredMerchant(testMerchant)
+	graph := &app.App{Config: cfg, Runtime: rt}
 	for _, tc := range []struct {
 		prefixes []string
 		valid    bool
@@ -171,15 +162,14 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		{[]string{"/audiences/{portal}/one", "/audiences/{platform}/two"}, false},
 		{[]string{"/api/v1/merchants/{slug}/billing/me"}, true},
 	} {
-		calls := 0
-		graph.Runtime.AuthenticateCustomer = denyDelegated(&calls)
+		fake := &authtest.Fake{}
 		var profiles []config.CustomerRoutes
 		for _, prefix := range tc.prefixes {
-			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Delegated: true})
+			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Auth: fake})
 		}
 		err := embedhttp.ValidateRoutes(config.Routes{CustomerProfiles: profiles}, profiles, graph.Runtime)
 		if err == nil {
-			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
+			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles)
 			require.NoError(t, buildErr)
 			if err = embedhttp.ValidateRouteTable(table); err == nil {
 				engine := gin.New()
@@ -196,7 +186,7 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 					w := serve(engine, request.method, request.path, nil)
 					require.Equal(t, request.status, w.Code, "%s %s: %s", request.method, request.path, w.Body.String())
 				}
-				require.Equal(t, 1, calls)
+				require.Equal(t, 1, fake.Refused("Required"))
 			}
 		}
 		require.Equal(t, tc.valid, err == nil, "%v: %v", tc.prefixes, err)
@@ -213,3 +203,5 @@ func TestCheckoutFramePolicy(t *testing.T) {
 	require.Equal(t, "frame-ancestors 'self'", w.Header().Get("Content-Security-Policy"))
 	require.Equal(t, "page", w.Body.String())
 }
+
+var testMerchant = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))

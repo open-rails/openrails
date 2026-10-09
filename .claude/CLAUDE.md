@@ -36,7 +36,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
-- Vocabulary: customer (not payer or user); invoker for the opaque caller; `canceled`.
+- Vocabulary: customer (not payer or user); subject (the native account acted as), invoker (the party actually acting, may be foreign), credential (how it was proven); `canceled`.
 
 ## Money
 - All amounts are **micros** (millionths of a currency unit) for USD; every currency's

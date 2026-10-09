@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -213,11 +212,11 @@ const maxGrantHours = math.MaxInt64 / int64(time.Hour)
 
 // CreateEntitlement records the merchant's own grant of an entitlement. One
 // with no end also needs merchant:access:grant-permanent.
-func CreateEntitlement(gate billingauth.Gate) func(*httprequest.Request) {
+func CreateEntitlement(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) { createEntitlement(r, gate) }
 }
 
-func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
+func createEntitlement(r *httprequest.Request, gate StaffCan) {
 	customerID := customerIDParam(r.Param("customer_id"))
 	if customerID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid customer_id").WithParam("customer_id"))
@@ -282,14 +281,13 @@ func createEntitlement(r *httprequest.Request, gate billingauth.Gate) {
 
 // permitPermanentGrant requires merchant:access:grant-permanent for a manual
 // grant with no end, on top of the route's own permission.
-func permitPermanentGrant(r *httprequest.Request, gate billingauth.Gate) bool {
+func permitPermanentGrant(r *httprequest.Request, gate StaffCan) bool {
 	if gate != nil {
-		_, err := gate.Authorize(r.Request.Context(), r.Request, billing.MerchantAccessGrantPermanent)
+		err := gate(r.Request, billing.MerchantAccessGrantPermanent)
 		if err == nil {
 			return true
 		}
-		var refusal billingauth.GateError
-		if errors.As(err, &refusal) && refusal.Status != http.StatusForbidden {
+		if refusal := billingauth.AsRefusal(err); refusal.Status != http.StatusForbidden {
 			r.AbortGate(refusal)
 			return false
 		}

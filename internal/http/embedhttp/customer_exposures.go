@@ -8,31 +8,19 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
 func validateCustomerRoutes(profiles []config.CustomerRoutes, rt *app.Runtime) error {
-	var auth *billingauth.Integration
-	if rt != nil {
-		auth = rt.Auth
-	}
 	for _, e := range profiles {
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		if e.Delegated && (rt == nil || rt.AuthenticateCustomer == nil) {
-			return fmt.Errorf("openrails: customer routes %q are Delegated; set Deps.AuthenticateCustomer", e.Prefix)
-		}
-		if !e.Delegated && (auth == nil || auth.Authentication == nil) {
-			return fmt.Errorf("openrails: customer routes %q need Deps.AuthKit or Deps.Authenticate", e.Prefix)
-		}
-		if !e.Delegated && strings.TrimSpace(e.Merchant) == "" {
-			return fmt.Errorf("openrails: customer routes %q need a merchant: set Config.Merchant or CustomerRoutes.Merchant", e.Prefix)
+		if httproutes.IsNilAuth(e.Auth) {
+			return fmt.Errorf("openrails: customer routes %q need Routes.Auth (or the profile's own Auth)", e.Prefix)
 		}
 		if e.Scope != config.CustomerSelfService && e.Scope != config.CustomerSubscriptionManagement && e.Scope != config.CustomerBillingManagement {
 			return fmt.Errorf("openrails: customer routes %q need a Scope (CustomerSelfService, CustomerSubscriptionManagement or CustomerBillingManagement)", e.Prefix)
@@ -61,9 +49,9 @@ func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string 
 	return out
 }
 
-// BuildCustomerRoutes builds additional customer audiences from the same
-// authoritative registrations used by the canonical customer surface.
-func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, auth *billingauth.Integration) (*router.Table, error) {
+// BuildCustomerRoutes mounts each customer profile, gated by its Auth at its
+// merchant (or at the merchant each verdict names, when it has none).
+func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes) (*router.Table, error) {
 	if err := validateCustomerRoutes(exposures, a.Runtime); err != nil {
 		return nil, err
 	}
@@ -80,33 +68,23 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, auth *bi
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		var authn billingauth.DelegatedAuthenticator
-		if e.Delegated {
-			authenticate, profile := a.Runtime.AuthenticateCustomer, e.Prefix
-			if authenticate == nil {
-				return nil, fmt.Errorf("openrails HTTP: customer exposure %q is Delegated; set Deps.AuthenticateCustomer", e.Prefix)
-			}
-			authn = billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-				return authenticate(r, profile)
-			})
-		}
-		if authn == nil {
+		mount := httproutes.CustomerMount{Auth: e.Auth, Providers: providers}
+		if strings.TrimSpace(e.Merchant) != "" {
 			target, err := merchanttarget.Resolve(context.Background(), nil, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), e.Merchant)
 			if err != nil {
 				return nil, fmt.Errorf("customer merchant %q: %w", e.Merchant, err)
 			}
-			authn = nativeCustomer(auth, target)
+			mount.Merchant = target
 		}
 		table := &router.Table{}
 		rr := router.NewMux(table, e.Prefix, a.Runtime)
-		delegated := middleware.DelegatedPrincipalRequired(authn)
 		switch e.Scope {
 		case config.CustomerSubscriptionManagement:
-			httproutes.RegisterCustomerSubscriptionManagementRoutes(rr, a.Runtime, delegated)
+			httproutes.RegisterCustomerSubscriptionManagementRoutes(rr, a.Runtime, mount)
 		case config.CustomerBillingManagement:
-			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, delegated, providers)
+			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, mount)
 		default:
-			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, delegated, providers)
+			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, mount)
 		}
 		wrapped := wrapCustomerRoutes(a.Runtime, table, host, e.Prefix)
 		out.Entries = append(out.Entries, wrapped.Entries...)

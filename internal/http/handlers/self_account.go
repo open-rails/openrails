@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"strings"
-
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
@@ -19,20 +17,15 @@ import (
 // GetMyUsage/GetMyInvoices), and every query is scoped to the request
 // merchant.
 
-// selfAccountPayer resolves the acting payer from the delegated principal, or
-// writes the error response and returns false.
+// selfAccountPayer is the customer route's verified customer, or writes the
+// 401 and returns false.
 func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
-	user := r.GetUser()
-	if user == nil || strings.TrimSpace(user.ID) == "" {
-		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
+	scope, ok := r.CustomerScope()
+	if !ok {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return identity.CustomerID(uuid.Nil), false
 	}
-	payer := identity.CustomerIDFromString(user.ID)
-	if payer.IsZero() {
-		r.ErrorCode(billing.CodeInvalidParam, "payer could not be resolved from subject")
-		return identity.CustomerID(uuid.Nil), false
-	}
-	return payer, true
+	return identity.CustomerID(scope.Customer()), true
 }
 
 // GetMyBalance returns the customer's own money in one currency.

@@ -18,6 +18,7 @@ sql:
       - "internal/migrate/postgres/0013_federated_grants.up.sql"
       - "internal/migrate/postgres/0014_operation_authorization_extensions.up.sql"
       - "internal/migrate/postgres/0015_owed_repayment.up.sql"
+      - "internal/migrate/postgres/0016_identity_facts.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

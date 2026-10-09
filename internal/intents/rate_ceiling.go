@@ -422,15 +422,24 @@ func (c *RateCeiling) emitFinding(ctx context.Context, merchantID uuid.UUID, fin
 }
 
 // ResolveActor picks the actor for a producing enqueue: an explicit override
-// wins, otherwise the ambient authenticated principal on the context (set by
-// the auth middleware). Empty for system/background paths that carry no
-// principal — the per-actor ceiling is then inert (per-merchant still applies).
+// wins, otherwise the invoker the route gate admitted (a merchant route's
+// staff, a customer route's customer), keyed as limits key it. Empty for
+// system/background paths: the per-invoker ceiling is then inert (per-merchant
+// still applies).
 func ResolveActor(ctx context.Context, explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if uc, ok := billingauth.FromContext(ctx); ok {
-		return uc.UserID
+	if who, ok := admitted(ctx); ok {
+		return billingauth.InvokerKey(who)
 	}
 	return ""
+}
+
+// admitted is who the route gate admitted on ctx.
+func admitted(ctx context.Context) (billingauth.Identity, bool) {
+	if staff, ok := billingauth.StaffFromContext(ctx); ok {
+		return staff.Identity, true
+	}
+	return billingauth.IdentityFromContext(ctx)
 }

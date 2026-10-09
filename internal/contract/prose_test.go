@@ -147,7 +147,8 @@ func TestDocsNameWhatExists(t *testing.T) {
 }
 
 // TestREADMEEmbeddedExample keeps the README's install example the program
-// in examples/embedded, which compiles: its catalog and its newBilling.
+// in examples/embedded, which compiles: its catalog, its newBilling and its
+// billingAuth.
 func TestREADMEEmbeddedExample(t *testing.T) {
 	root := filepath.Join("..", "..")
 	read := func(rel string) string {
@@ -165,6 +166,12 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	require.True(t, ok)
 	body, _, _ = strings.Cut(body, "\n}\n")
 	require.Contains(t, program, "func newBilling("+body+"\n}\n", "the README's newBilling")
+
+	// The Auth the README mounts is the program's, method for method.
+	_, auth, ok := strings.Cut(readme, "// billingAuth guards OpenRails")
+	require.True(t, ok)
+	auth, _, _ = strings.Cut(auth, "\n```")
+	require.Contains(t, program, "// billingAuth guards OpenRails"+auth+"\n", "the README's billingAuth")
 }
 
 // proseDocs lists the documents, relative to the repository root.

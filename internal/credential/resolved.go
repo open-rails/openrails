@@ -5,11 +5,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"strings"
 )
 
 type ResolvedServiceCredential struct {
+	// KeyID is the API key's id and Issuer the deployment holding it: the
+	// actor a staff verdict names.
+	KeyID  string
+	Issuer string
 	// OwnerGroupID is the internal id of the merchant permission-group the
 	// credential is nested under (#567) — the caller's authority anchor.
 	OwnerGroupID string
@@ -79,12 +82,8 @@ type ResolvedDelegated struct {
 	// was pinned from (every delegated token is FEDERATED merchant-signed, #259).
 	// Used for audit and issuer/subject attribution (#246).
 	Issuer string
-	// Invoker is the opaque host-owned spend principal this credential acts as
-	// under CustomerID's account (or#930). Non-empty means INVOKER-SCOPED: the
-	// caller spends the payer's money without being the payer, so it may read
-	// its own spend windows and nothing else. Only the host-principal seam
-	// (billingauth.DelegatedPrincipal) sets it — the invoker string is host-owned
-	// and opaque, so a signed delegated token has nothing to carry it in.
+	// Invoker is the invoker spending CustomerID's balance without being the
+	// customer (or#930); a signed access token has nothing to carry it in.
 	Invoker string
 	// Permissions is the token's claim, already bounded by AuthKit's verifier to the
 	// signing remote-app's stored authority (#564): an over-claim rejects the token,
@@ -118,47 +117,6 @@ func (r *ResolvedDelegated) HasPermission(perm string) bool {
 		}
 	}
 	return false
-}
-
-// ResolvedDelegatedFromHostPrincipal validates a host-supplied IN-PROCESS
-// delegated principal (billingauth.DelegatedAuthenticator output) and converts it
-// to ResolvedDelegated. When OpenRails runs as a subsystem the embedding host is
-// TRUSTED (in process), so its supplied permissions are authoritative — no
-// allowlist (#564); merchant + subject must be explicit. Shared by the gin self
-// surface and the merchant routes (internal/http/middleware + routes) so both gate the same way.
-func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*ResolvedDelegated, error) {
-	if p == nil {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	if err := billingauth.ValidateDelegatedPrincipal(p); err != nil {
-		return nil, err
-	}
-	merchantID := p.MerchantID
-	subject := strings.TrimSpace(p.SubjectID)
-	customerID := identity.CustomerIDFromString(subject)
-	if customerID.IsZero() {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	perms := make([]string, 0, len(p.Permissions))
-	for _, perm := range p.Permissions {
-		if perm = strings.TrimSpace(perm); perm != "" {
-			perms = append(perms, perm)
-		}
-	}
-	return &ResolvedDelegated{
-		CredentialClass:  p.CredentialClass,
-		Merchant:         strings.TrimSpace(p.MerchantSlug),
-		MerchantID:       merchantID,
-		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
-		CustomerID:       customerID.UUID(),
-		DelegatedSubject: subject,
-		Issuer:           strings.TrimSpace(p.Issuer),
-		Invoker:          strings.TrimSpace(p.Invoker),
-		Permissions:      perms,
-		Email:            p.Email,
-		EmailVerified:    p.EmailVerified,
-		Username:         p.Username,
-	}, nil
 }
 
 func LooksLikeJWT(token string) bool {

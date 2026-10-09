@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -91,8 +92,10 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, in CheckoutSessionM
 	return link, nil
 }
 
-// GetCheckoutSession is the session document for its id.
-func (s *Service) GetCheckoutSession(ctx context.Context, id string) (*checkoutsession.CheckoutSession, error) {
+// GetCheckoutSession is the session document for its id. viewer is the
+// customer the request authenticated as, zero for the capability alone; only
+// the session's own customer is shown its saved cards.
+func (s *Service) GetCheckoutSession(ctx context.Context, id string, viewer billing.CustomerID) (*checkoutsession.CheckoutSession, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -104,6 +107,10 @@ func (s *Service) GetCheckoutSession(ctx context.Context, id string) (*checkouts
 	}
 	now := s.now()
 	session, err := rt.CheckoutSessions.Get(ctx, strings.TrimSpace(id), now)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := hostedViewer(session, viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -145,18 +152,23 @@ func (s *Service) GetCheckoutSession(ctx context.Context, id string) (*checkouts
 	if config.CheckoutEmbedAllowed(rt.Config, session.Origin) {
 		out.EmbedOrigin = &session.Origin
 	}
-	if out.SavedMethods, err = hostedSavedMethods(ctx, rt, session); err != nil {
-		return nil, err
+	out.SavedMethods = []checkoutsession.CheckoutSessionSavedMethod{}
+	if owner {
+		if out.SavedMethods, err = hostedSavedMethods(ctx, rt, session); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
 
-// PayCheckoutSession starts or resumes the session's current attempt.
+// PayCheckoutSession starts or resumes the session's current attempt. A
+// saved card pays only for viewer, the session's own customer; a new card
+// pays on the capability alone.
 // Every submission of one attempt sends the engine the same idempotency key,
 // so repeated and concurrent submissions charge at most once. The attempt
 // advances only after the engine reports it terminally failed; an ambiguous
 // error keeps it, and the next submission replays the same key.
-func (s *Service) PayCheckoutSession(ctx context.Context, id string, input checkoutsession.PayCheckoutSessionParams, clientIP string) (*checkoutsession.CheckoutSessionPayResult, error) {
+func (s *Service) PayCheckoutSession(ctx context.Context, id string, input checkoutsession.PayCheckoutSessionParams, clientIP string, viewer billing.CustomerID) (*checkoutsession.CheckoutSessionPayResult, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -170,6 +182,13 @@ func (s *Service) PayCheckoutSession(ctx context.Context, id string, input check
 	session, err := rt.CheckoutSessions.Get(ctx, strings.TrimSpace(id), now)
 	if err != nil {
 		return nil, err
+	}
+	owner, err := hostedViewer(session, viewer)
+	if err != nil {
+		return nil, err
+	}
+	if !owner && !input.PaymentMethodID.IsZero() {
+		return nil, checkoutsession.ErrProofRequired
 	}
 	if session.Expired(now) {
 		return nil, checkoutsession.ErrExpired
@@ -186,9 +205,11 @@ func (s *Service) PayCheckoutSession(ctx context.Context, id string, input check
 	if !ok {
 		return nil, checkoutsession.ErrInvalid
 	}
-	saved, err := hostedSavedMethods(ctx, rt, session)
-	if err != nil {
-		return nil, err
+	var saved []checkoutsession.CheckoutSessionSavedMethod
+	if owner {
+		if saved, err = hostedSavedMethods(ctx, rt, session); err != nil {
+			return nil, err
+		}
 	}
 	payment, card, err := checkoutsession.Payment(option, input, customer.VerifiedEmail, func(method string) bool {
 		for _, m := range saved {
@@ -460,22 +481,41 @@ func (s *Service) hostedRuntime() (*app.Runtime, error) {
 	return rt, nil
 }
 
-// hostedBuyer is the buyer's current identity, asked on every action. A
-// customer the host says may no longer buy is ErrForbidden; a lookup failure
-// stays retryable.
+// hostedBuyer is the buyer's identity, read again on every action: a
+// customer the merchant declared blocked (EnsureCustomer) may not buy, even
+// on a session minted before the block.
 func hostedBuyer(ctx context.Context, rt *app.Runtime, customerID billing.CustomerID, minted checkoutsession.Buyer) (billing.CheckoutCustomerIdentity, error) {
-	if rt.CheckoutCustomer == nil {
-		return billing.CheckoutCustomerIdentity{ID: customerID, VerifiedEmail: minted.VerifiedEmail, Username: minted.Username}, nil
-	}
-	current, err := rt.CheckoutCustomer(ctx, customerID)
-	if errors.Is(err, billingauth.ErrForbidden) {
-		return billing.CheckoutCustomerIdentity{}, checkoutsession.ErrForbidden
-	}
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return billing.CheckoutCustomerIdentity{}, apperr.New(http.StatusServiceUnavailable, "service_unavailable", "Checkout is temporarily unavailable.")
+		return billing.CheckoutCustomerIdentity{}, err
 	}
-	current.ID, current.ClientIP = customerID, ""
-	return current, nil
+	out := billing.CheckoutCustomerIdentity{ID: customerID, VerifiedEmail: minted.VerifiedEmail, Username: minted.Username}
+	row, err := rt.DB.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: customerID.UUID()})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return out, nil
+	case err != nil:
+		return billing.CheckoutCustomerIdentity{}, apperr.New(http.StatusServiceUnavailable, "service_unavailable", "Checkout is temporarily unavailable.")
+	case row.Blocked:
+		return billing.CheckoutCustomerIdentity{}, checkoutsession.ErrBlocked
+	}
+	if out.Username == "" && row.Username != nil {
+		out.Username = *row.Username
+	}
+	return out, nil
+}
+
+// hostedViewer refuses an authenticated viewer who is not the session's
+// customer: to them the session does not exist. It reports whether the
+// viewer is that customer, who alone sees and pays with its saved cards.
+func hostedViewer(session checkoutsession.Session, viewer billing.CustomerID) (bool, error) {
+	switch {
+	case viewer.IsZero():
+		return false, nil
+	case viewer.UUID() != session.CustomerID:
+		return false, checkoutsession.ErrNotFound
+	}
+	return true, nil
 }
 
 // hostedAppOrigin is the minting app's origin, from its configuration and

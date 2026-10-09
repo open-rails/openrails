@@ -34,8 +34,8 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 | POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/captcha/status` | public | — | — | 200 `CaptchaStatus` |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
-| GET | `/v1/products` | optional | — | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/prices` | optional | — | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/products` | public | — | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/prices` | public | — | — | 200 `ListPage<Price>` |  |
 
 ## Customer (`/v1/me`)
 

@@ -8,10 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -21,21 +19,22 @@ import (
 )
 
 func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
-	p, ok := middleware.PrincipalFromRequest(r)
-	if !ok || p.InvokerScoped() || p.CredentialClass != billingauth.CredentialClassUserSession {
-		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
+	if !customerInitiatedChargeAllowed(r) {
 		return identity.CustomerID{}, false
 	}
 	return selfAccountPayer(r)
 }
 
-// customerInitiatedChargeAllowed refuses a customer-initiated charge from a
-// delegated credential that is not the customer's own interactive session
-// (automation, unknown class or an invoker). Requests without a delegated
-// principal are authenticated by the standalone user session.
+// customerInitiatedChargeAllowed refuses a customer-initiated charge unless
+// the customer acts in person: not an invoker, an application or a key
+// automating the account.
 func customerInitiatedChargeAllowed(r *httprequest.Request) bool {
-	p, ok := middleware.PrincipalFromRequest(r)
-	if ok && (p.InvokerScoped() || p.CredentialClass != billingauth.CredentialClassUserSession) {
+	scope, ok := r.CustomerScope()
+	if !ok {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
+		return false
+	}
+	if !scope.Present() {
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
 		return false
 	}

@@ -67,9 +67,9 @@ and accepted invitations decide what each person may do.
 
 **Where it finds the API.** The console reads `config.json` beneath its path:
 `api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
-`auth_base_url` is the AuthKit JSON API staff sign in through: `Deps.AuthKit`'s
-own (`/api/v1` by default), `Routes.AdminConsole.AuthBaseURL` when set, the
-control plane's standalone. Both are paths on the console's own origin. The
+`auth_base_url` is the AuthKit JSON API staff sign in through:
+`Routes.AdminConsole.AuthBaseURL` embedded (required), the control plane's
+standalone. Both are paths on the console's own origin. The
 merchant API answers no cross-origin requests, so the console, the API and
 AuthKit share one origin. A separate host such as `billing.example.com` works by
 sending that host to the same server, or to a router (for example a Gin engine
@@ -217,9 +217,8 @@ Standalone SaaS deployments that do serve it in production should front it with
 their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
-Who may sign in is decided by the merchant API, not the console: with AuthKit,
-`Deps.AuthorityFor` names the group whose members hold each merchant
-permission; with other auth, `Deps.Authorize` decides.
+Who may sign in is decided by the merchant API, not the console: embedded, the
+mount's `Auth.RequirePermission` decides each merchant permission.
 
 ### Viewing it
 
@@ -238,7 +237,7 @@ Every write runs through auth-ui's step-up dialog: when OpenRails answers
 asks the user to confirm it's them and the write is retried. Who can sign in
 and what they may do: standalone, the merchant team roster and fixed roles
 (`owner`/`support`/`viewer`, see the merchant guide); embedded, the host's
-authority (`Deps.AuthorityFor` or `Deps.Authorize`).
+`Routes.Auth`.
 
 **At a trusted issuer**, the console is that issuer's OAuth 2.0 client
 (auth-ui's issuer client): the login page redirects there, `/callback`

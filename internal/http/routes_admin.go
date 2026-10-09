@@ -8,15 +8,10 @@ import (
 
 func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
 	opts := httproutes.Options{
-		Gate: httproutes.NewGate(httproutes.GateOptions{
-			Authenticator:             s.authenticator,
-			ResourceTokenResolver:     s.controlPlane,
-			AdminPermissionChecker:    s.controlPlane,
-			ServiceCredentialResolver: s.controlPlane,
-			DelegatedAuthenticator:    s.delegatedAuthenticator,
-		}),
-		AdminLimiter:  s.adminLimiter,
-		CatalogWrites: s.catalogEdits,
+		Auth:              s.staffAuth(),
+		AuthBindsMerchant: true,
+		AdminLimiter:      s.adminLimiter,
+		CatalogWrites:     s.catalogEdits,
 	}
 	// The control plane's own merchant routes: API keys (#757), the team (#760)
 	// and the merchant's name (#1106). Their handlers touch only the control

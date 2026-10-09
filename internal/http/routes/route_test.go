@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -128,21 +129,21 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{ProviderRoutes: &providers, CatalogWrites: true, External: External{
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, CatalogWrites: true, External: External{
 		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
 		ListFederatedGrants: handler, CreateFederatedGrant: handler, RevokeFederatedGrant: handler, ListMyFederatedGrants: handler, AcceptFederatedGrant: handler,
 		MerchantCreationEnabled: true,
 	}}
-	pass := func(next router.Handler) router.Handler { return next }
+	customers := CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 
 	RegisterMetaRoutes(at(""), opts)
 	RegisterUserRoutes(at("/v1"), rt, opts)
 	RegisterMerchantRoutes(at("/v1"), rt, opts)
 	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
-	RegisterSelfServiceRoutes(at("/v1/me"), rt, pass, providers)
+	RegisterSelfServiceRoutes(at("/v1/me"), rt, customers)
 	RegisterPlatformRoutes(at("/v1/platform"), rt, PlatformOptions{})
 
 	var unmounted []string
@@ -173,8 +174,8 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterMerchantRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/merchant/billing-archive")
 	require.Equal(t, map[string]int{"GET /v1/merchant/billing-archive": 1, "POST /v1/merchant/billing-archive": 1}, archive)
 	management, subscriptions := map[string]int{}, map[string]int{}
-	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, pass, providers)
-	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, pass)
+	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, customers)
+	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, customers)
 	require.Len(t, subscriptions, 4)
 	require.Len(t, management, 28)
 	for key := range subscriptions {
@@ -204,8 +205,8 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, seen, "GET /v1/products")
 
 	closed, open := map[string]int{}, map[string]int{}
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{})
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{CatalogWrites: true})
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: closed}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}})
+	RegisterMerchantRoutes(recorder{base: "/v1", seen: open}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, CatalogWrites: true})
 	require.NotContains(t, closed, "POST /v1/merchant/catalog/products")
 	require.Contains(t, closed, "GET /v1/merchant/catalog/products")
 	require.Contains(t, closed, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")

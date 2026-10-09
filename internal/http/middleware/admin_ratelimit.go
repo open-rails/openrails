@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/open-rails/openrails/internal/billingauth"
+
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
@@ -120,9 +122,10 @@ func NewAdminOperationLimiter(rdb *redis.Client) *AdminOperationLimiter {
 	}
 }
 
-// AdminRateLimitMW applies one operation policy after the merchant permission
-// gate has pinned the effective principal. Non-human service credentials have
-// no UserID and retain their existing admission controls.
+// AdminRateLimitMW applies one operation policy after the route gate has
+// admitted its staff member, keyed on the invoker: who actually acts,
+// whatever credential they signed in with. A route the gate admitted nobody
+// to is refused.
 func (l *AdminOperationLimiter) AdminRateLimitMW(operation AdminOperation) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
@@ -130,17 +133,19 @@ func (l *AdminOperationLimiter) AdminRateLimitMW(operation AdminOperation) route
 				next(r)
 				return
 			}
-			user, ok := r.UserContext()
-			if !ok || strings.TrimSpace(user.UserID) == "" {
+			staff, ok := r.Staff()
+			if !ok {
+				r.AbortCode(billing.CodeAuthenticationRequired, "")
+				return
+			}
+			// An application acting itself keeps its own admission controls;
+			// a user, or anyone acting on a subject's behalf, is metered as
+			// its invoker.
+			if staff.SubjectKind == billingauth.SubjectApplication && billingauth.SelfActing(staff.Identity) {
 				next(r)
 				return
 			}
-
-			userID, err := canonicalAdminUserID(user.UserID)
-			if err != nil {
-				r.AbortCode(billing.CodeInternalError, "administrative operation rate limit unavailable")
-				return
-			}
+			userID := adminActorKey(staff.Invoker.Issuer, staff.Invoker.ID)
 			decision := l.evaluate(r.Request.Context(), userID, operation)
 			event := AdminRateLimitEvent{
 				UserID:     userID,
@@ -350,6 +355,15 @@ func adminRateLimitCounterKey(userID string, operation AdminOperation, window ad
 
 func adminRateLimitLockKey(userID string) string {
 	return fmt.Sprintf("admin-rl:{%s}:lock", userID)
+}
+
+// adminActorKey is an invoker's limiter key: its UUID, or for another
+// issuer's opaque id, the pair.
+func adminActorKey(issuer, subject string) string {
+	if id, err := canonicalAdminUserID(subject); err == nil {
+		return id
+	}
+	return issuer + "|" + subject
 }
 
 func canonicalAdminUserID(userID string) (string, error) {

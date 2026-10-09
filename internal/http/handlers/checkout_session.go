@@ -12,7 +12,8 @@ import (
 
 // Checkout sessions (#1124). Minting needs the signed-in customer or the
 // merchant; reading and paying need only the session id, which is never
-// logged.
+// logged. Saved cards are shown to, and pay for, only the session's own
+// customer, as the customer gate verifies them.
 
 // MintCheckoutSessionParams is the signed-in customer's mint body.
 type MintCheckoutSessionParams struct {
@@ -94,7 +95,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	session, err := svc.GetCheckoutSession(r.Request.Context(), r.Param("id"))
+	session, err := svc.GetCheckoutSession(r.Request.Context(), r.Param("id"), checkoutViewer(r))
 	if err != nil {
 		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
@@ -119,7 +120,7 @@ func PayCheckoutSession(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	result, err := svc.PayCheckoutSession(r.Request.Context(), r.Param("id"), body, r.ClientIP())
+	result, err := svc.PayCheckoutSession(r.Request.Context(), r.Param("id"), body, r.ClientIP(), checkoutViewer(r))
 	if err != nil {
 		writeCheckoutAttemptError(r, err, checkoutAttemptErrorContext{})
 		return
@@ -128,4 +129,13 @@ func PayCheckoutSession(r *httprequest.Request) {
 		recordCardFailure(r)
 	}
 	r.SuccessJSON(result)
+}
+
+// checkoutViewer is the customer presenting a checkout session, zero when
+// the capability is presented alone.
+func checkoutViewer(r *httprequest.Request) billing.CustomerID {
+	if scope, ok := r.CustomerScope(); ok {
+		return scope.Customer()
+	}
+	return billing.CustomerID{}
 }

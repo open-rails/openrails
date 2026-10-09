@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -153,6 +154,29 @@ func (r *Request) InternalError(msg string, cause error) {
 	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
 	response.Error.RequestID = requestID
 	r.t.WriteJSON(http.StatusInternalServerError, response)
+}
+
+// Through runs net/http middleware (the host's auth) inside the route chain:
+// next sees the request and writer the middleware passed on, and does not
+// run when the middleware answers the request itself.
+func (r *Request) Through(mw func(http.Handler) http.Handler, next func(*Request)) {
+	t, ok := r.t.(*httpTransport)
+	if !ok || mw == nil {
+		r.InternalError("auth middleware unavailable", errors.New("request: Through needs the net/http transport and a middleware"))
+		return
+	}
+	outer := t.w
+	mw(http.HandlerFunc(func(w http.ResponseWriter, passed *http.Request) {
+		if passed == nil {
+			passed = r.Request
+		}
+		r.Request, t.r = passed, passed
+		if w != nil {
+			t.w = w
+			defer func() { t.w = outer }()
+		}
+		next(r)
+	})).ServeHTTP(outer, r.Request)
 }
 
 // FromHTTP adapts a plain net/http handler to a route handler, for a route
@@ -403,34 +427,39 @@ func (r *Request) Set(key string, value any) {
 	r.t.Set(key, value)
 }
 
+// GetUser is a customer route's admitted customer, as the checkout services
+// take it: from the route gate only, never the request's path, query or body.
+// Nil anywhere else.
 func (r *Request) GetUser() *checkout.UserIdentity {
-	if uc, ok := r.UserContext(); ok && uc.UserID != "" {
-		user := &checkout.UserIdentity{
-			ID:       uc.UserID,
-			Username: uc.Username,
-			Roles:    uc.Roles,
-			ClientIP: r.ClientIP(),
-		}
-		if uc.EmailVerified && uc.Email != "" {
-			email := uc.Email
-			user.Email = &email
-		}
-		return user
-	}
-
-	user, ok := r.Get("user")
+	scope, ok := r.CustomerScope()
 	if !ok {
 		return nil
 	}
-
-	if ui, ok := user.(*checkout.UserIdentity); ok {
-		if ui.ClientIP == "" {
-			ui.ClientIP = r.ClientIP()
-		}
-		return ui
+	c, _ := billingauth.IdentityFromContext(r.Request.Context())
+	user := &checkout.UserIdentity{ID: scope.Customer().String(), Username: c.Username, ClientIP: r.ClientIP()}
+	if c.EmailVerified && c.Email != "" {
+		email := c.Email
+		user.Email = &email
 	}
+	return user
+}
 
-	return nil
+// CustomerScope is a customer route's acting customer, as the route gate
+// bound it.
+func (r *Request) CustomerScope() (customerscope.Scope, bool) {
+	if r == nil || r.Request == nil {
+		return customerscope.Scope{}, false
+	}
+	return customerscope.From(r.Request.Context())
+}
+
+// Staff is the staff identity a merchant route admitted, as the route gate
+// bound it.
+func (r *Request) Staff() (billingauth.Staff, bool) {
+	if r == nil || r.Request == nil {
+		return billingauth.Staff{}, false
+	}
+	return billingauth.StaffFromContext(r.Request.Context())
 }
 
 // ClientIP returns the resolved client IP for this request (#746): the raw

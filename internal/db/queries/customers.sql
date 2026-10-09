@@ -21,12 +21,23 @@ ON CONFLICT (merchant_id, id) DO NOTHING;
 -- name: PutCustomer :one
 -- The merchant's declaration of a customer: materialize it, or replace its
 -- declared fields.
-INSERT INTO billing.customers (id, merchant_id, email)
-VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(email))
+INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
+VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(email), sqlc.narg(username), sqlc.arg(blocked))
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   email = EXCLUDED.email,
+  username = EXCLUDED.username,
+  blocked = EXCLUDED.blocked,
   last_seen_at = now()
 RETURNING *;
+
+-- name: CustomerIDsByUsername :many
+-- The CCBill username bridge: the merchant's customers that declared the
+-- username. Two answers are ambiguous and resolve nothing.
+SELECT c.id FROM billing.customers c
+WHERE c.merchant_id = sqlc.arg(merchant_id)
+  AND lower(c.username) = lower(sqlc.arg(username)::text)
+ORDER BY c.id
+LIMIT 2;
 
 -- name: SetCustomerEmail :exec
 UPDATE billing.customers SET email = sqlc.arg(email)

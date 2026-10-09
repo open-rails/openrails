@@ -144,19 +144,13 @@ func findingIsOpen(f reconcile.FindingRecord) bool {
 		f.Status == reconcile.FindingStatusReconcileRequired
 }
 
-// resolveActorIdentity is the stamped resolved_by: the authenticated admin's
-// user id (or email). Service credentials carry no user identity — recorded
-// as the generic label.
+// resolveActorIdentity is the stamped resolved_by: the authorized staff
+// member's id, person or machine.
 func resolveActorIdentity(r *httprequest.Request) string {
-	if uc, ok := r.UserContext(); ok {
-		if strings.TrimSpace(uc.UserID) != "" {
-			return uc.UserID
-		}
-		if strings.TrimSpace(uc.Email) != "" {
-			return uc.Email
-		}
+	if staff, ok := r.Staff(); ok {
+		return staff.Subject
 	}
-	return "service-credential"
+	return "unknown"
 }
 
 // AdminResolveFinding resolves one finding: approve runs its recommendation

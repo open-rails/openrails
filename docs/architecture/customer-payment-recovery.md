@@ -2,57 +2,23 @@
 
 A customer can pay an unpaid invoice or retry a past-due subscription from the
 existing self-service billing surface. These commands accept no customer identifier:
-the verified customer principal owns the addressed resource. `Idempotency-Key`
+the admitted customer owns the addressed resource. `Idempotency-Key`
 is required, customer-scoped and bound to the accepted request. Same-key replay
 returns the existing result after settlement; a different key cannot displace
 unresolved work. The existing invoice/subscription read exposes `recovery` and
 any unresolved operation, without a second operation API.
 
 These are customer HTTP routes; the Go Client carries merchant routes only.
-Embedded hosts verify customer credentials with their AuthKit client or
-`Deps.Authenticate`.
-
-The authenticator must verify a customer's credential before mapping it to the
-customer and set `CredentialClass: openrails.CredentialUserSession` on the
-`openrails.Identity` it returns. The host explicitly maps a verified
-credential in `Deps.Authenticate`; device-key credentials are
-automation authority and do not establish customer interaction. It is never accepted from a request header/body. Unknown or
-automation classes retain their existing self reads but cannot initiate CIT. The host verifier owns verification and any explicit live admission policy. A merchant API key or service credential cannot
-become customer-present by supplying a payment method. Ambient host request
-context remains isolated. The default runtime Client is the merchant-owner
-client and is not a customer credential. An explicit per-mount verifier override
-is possible, but is a deliberate host policy decision.
-
-
-The built-in delegated-token receiver reads the reserved signed attribute
-`attributes.openrails_credential_class`. Missing means unknown; only
-`user_session` and `automation` are valid explicit values. A delegated subject
-alone is not evidence of customer interaction. For AuthKit's HTTP mint route,
-the host authorizer can read the original verified claims from its context:
-
-```go
-DelegatedAuthorization: func(ctx context.Context, request authkit.DelegationRequest) (authkit.DelegationGrant, error) {
-    claims, ok := verify.ClaimsFromContext(ctx)
-    if !ok || claims.UserID == "" || claims.UserID != request.UserID {
-        return authkit.DelegationGrant{}, authkit.ErrDelegationRefused
-    }
-    class := openrails.CredentialUserSession
-    if claims.DeviceKeyID != "" || claims.TokenType != "" {
-        class = openrails.CredentialAutomation
-    }
-    return authkit.DelegationGrant{Attributes: map[string]any{
-        "openrails_credential_class": class,
-    }}, nil
-}
-```
-
-That callback constructs its grant from verified context; it never copies the
-requested grant's class. A programmatic issuer without original credential
-provenance leaves the attribute absent or marks automation. The device-key
-login → HTTP delegation → OpenRails workflow qualifies this distinction with
-real signing keys and sender proofs. Altering the signed class invalidates the
-token. Host bridges supplying `DelegatedPrincipal` directly obey the same rule.
-
+The mount's `Auth` admits the customer: the identity's subject is the customer,
+and only a user acting in person (its invoker is itself, and its credential is
+a session, a device key or an access token, not an API key or a signed token)
+initiates a payment. An invoker acting on the customer's behalf, an
+application subject, or a user automating its own account with an API key
+keeps its read routes but is refused a customer-initiated charge with
+`403 customer_action_required`. Nothing in a request header or body raises a
+credential to in person, and a merchant credential never becomes
+customer-present by naming a payment method. The default runtime Client is the
+merchant-owner client and is not a customer credential.
 
 For NMI invoice pay, a customer action freezes initial or subsequent unscheduled
 stored-credential posture. An initial approved reference is captured only from

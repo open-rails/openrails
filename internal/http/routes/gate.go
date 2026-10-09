@@ -1,268 +1,489 @@
 package routes
 
 import (
-	"context"
-	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
 	"strings"
 
-	auth "github.com/open-rails/helpers/auth"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/customerscope"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/requestauth"
 )
 
-type GateOptions struct {
-	Authenticator             billingauth.Authenticator
-	ResourceTokenResolver     ResourceTokenResolver
-	AdminPermissionChecker    authpolicy.AdminPermissionChecker
-	ServiceCredentialResolver ServiceCredentialResolver
-	DelegatedAuthenticator    billingauth.DelegatedAuthenticator
-}
+// The route gate stacks the host's Auth middleware on each route by the
+// route's catalog tier, then reads the identity it admitted. The middleware
+// answers its own refusals; OpenRails refuses a request admitted without an
+// identity or an invoker, a subject a route does not serve, and one at no
+// merchant, and binds the identity in its own context, where handlers
+// re-check it.
 
-func NewGate(opts GateOptions) billingauth.Gate {
-	return legacyGate(opts)
-}
+// MountError refuses a route the mount cannot gate. Mounting stops; a route
+// is never mounted open.
+type MountError struct{ Route, Reason string }
 
-type legacyGate GateOptions
+func (e MountError) Error() string { return "openrails: " + e.Route + ": " + e.Reason }
 
-type ServiceCredentialResolver interface {
-	LooksLikeAPIKey(token string) bool
-	ResolveAPIKey(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
-}
-
-// ResourceTokenResolver verifies a trusted issuer's RFC 9068 access token
-// and resolves its merchant and permissions (#1140).
-type ResourceTokenResolver interface {
-	ResolveResourceToken(r *http.Request) (*credential.ResolvedResourceAccess, error)
-	// RequireRecentResourceSignIn is nil when r's token says its user signed
-	// in at the issuer recently enough for a sensitive operation.
-	RequireRecentResourceSignIn(r *http.Request) error
-}
-
-// ResourceUserResolver verifies a trusted issuer's access token on a
-// signed-in user's own routes and resolves the merchants it may act on.
-type ResourceUserResolver interface {
-	ResolveResourceUser(r *http.Request) (*credential.ResourceUser, error)
-}
-
-func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
-	// #685: in-process host principal, attached to the request CONTEXT by the
-	// embed SDK's in-process transport. Trusted precisely because context values
-	// cannot arrive on a network request (no header is consulted); gated on
-	// permissions like every other credential.
-	if hp, ok := requestauth.HostPrincipalFromContext(ctx); ok {
-		if hp.MerchantID.IsZero() {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
-		}
-		resolved := &credential.ResolvedServiceCredential{
-			OwnerGroupRef: "in-process-host",
-			MerchantID:    hp.MerchantID,
-			MerchantSlug:  hp.MerchantSlug,
-			Permissions:   hp.Permissions,
-		}
-		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-		}
-		return billingauth.Principal{MerchantID: hp.MerchantID, Kind: billingauth.Machine, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
+// IsNilAuth reports a missing Auth, typed nil pointers included.
+func IsNilAuth(a billingauth.Auth) bool {
+	if a == nil {
+		return true
 	}
-	if req != nil && credential.LooksLikeResourceToken(authorizationToken(req.Header.Get("Authorization"))) {
-		return g.authorizeResourceToken(req, perm)
+	v := reflect.ValueOf(a)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Func, reflect.Interface, reflect.Slice, reflect.Chan:
+		return v.IsNil()
 	}
-	if resolved, err, handled := g.resolveAPIKey(ctx, req); handled {
-		if err != nil {
-			switch {
-			case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved):
-				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialMerchantUnresolved)
-			case errors.Is(err, credential.ErrServiceCredentialScopeDenied):
-				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialResourceScopeDenied)
-			case errors.Is(err, credential.ErrServiceCredentialHostMismatch):
-				// The API key resolves to a different Host merchant.
-				return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
-			default:
-				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialInvalid)
+	return false
+}
+
+func authName(a billingauth.Auth) string { return fmt.Sprintf("%T", a) }
+
+// through runs one of the host's middleware inside the route chain; a nil
+// one refuses the mount.
+func through(route Route, name string, mw func(http.Handler) http.Handler) router.Middleware {
+	if mw == nil {
+		panic(MountError{Route: route.Key(), Reason: "Auth." + name + " returned no middleware"})
+	}
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) { r.Through(mw, next) }
+	}
+}
+
+// admittedIdentity reads who the middleware admitted; a panicking Identity admits nobody.
+func admittedIdentity(a billingauth.Auth, r *http.Request) (c billingauth.Identity, ok bool) {
+	defer func() {
+		if v := recover(); v != nil {
+			log.WithField("auth", authName(a)).Errorf("openrails: Auth.Identity panicked: %v", v)
+			c, ok = billingauth.Identity{}, false
+		}
+	}()
+	c, ok = a.Identity(r.Context())
+	return c, ok && strings.TrimSpace(c.Subject) != ""
+}
+
+// refuse answers a refusal of OpenRails' own. A fault is a misbehaving Auth
+// and logs at ERROR; logs never carry credentials or emails.
+func refuse(r *httprequest.Request, route Route, a billingauth.Auth, code, fault string) {
+	entry := log.WithFields(log.Fields{"route": route.Key(), "tier": string(route.Auth), "code": code, "request_id": r.RequestID(), "auth": authName(a)})
+	if fault != "" {
+		entry.Error("openrails: " + fault)
+	} else {
+		entry.Info("openrails: route gate refused")
+	}
+	r.AbortCode(code, "")
+}
+
+// pin binds target as the merchant the request acts on.
+func pin(r *httprequest.Request, target billingauth.Target) bool {
+	if !middleware.EnforceMerchantBinding(r, target.MerchantID) {
+		return false
+	}
+	ctx := merchanttarget.WithResolved(r.Request.Context(), target)
+	r.Request = r.Request.WithContext(merchant.WithID(ctx, target.MerchantID))
+	r.Set("openrails.merchant_id", target.MerchantID)
+	return true
+}
+
+// gateTarget is the merchant pinned before the host's middleware ran, or
+// that an internal Auth's middleware resolved.
+func gateTarget(r *http.Request) billingauth.Target {
+	if target, ok := merchanttarget.FromContext(r.Context()); ok && !target.MerchantID.IsZero() {
+		return target
+	}
+	if id, ok := merchant.FromContext(r.Context()); ok && !id.IsZero() {
+		return billingauth.Target{MerchantID: id}
+	}
+	return billingauth.Target{}
+}
+
+// customerGates gates a customer route: the mount's merchant (the profile's,
+// else the configured one), the host's Required, then a person as the
+// customer.
+func (e *Env) customerGates(route Route) []router.Middleware {
+	auth := e.Customers
+	if IsNilAuth(auth) {
+		panic(MountError{Route: route.Key(), Reason: "a customer route needs Routes.Auth"})
+	}
+	var out []router.Middleware
+	switch fixed := e.CustomerMerchant; {
+	case !fixed.MerchantID.IsZero():
+		out = append(out, fixedMerchant(fixed))
+	case !e.AuthBindsMerchant:
+		out = append(out, e.mountedMerchant())
+	}
+	return append(out, through(route, "Required", auth.Required()), e.customerCheck(route, auth))
+}
+
+// fixedMerchant pins the mount's merchant; a request selector may only agree.
+func fixedMerchant(fixed billingauth.Target) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			target := fixed
+			if resolved, ok := merchanttarget.FromContext(r.Request.Context()); ok {
+				// A renamed slug may still name this book; a reused slug may not.
+				if resolved.MerchantID != fixed.MerchantID {
+					r.AbortCode(billing.CodeMerchantBindingMismatch, "")
+					return
+				}
+				target = resolved
+			}
+			if host, ok := merchant.HostMerchant(r.Request.Context()); ok && host != target.MerchantID {
+				r.AbortCode(billing.CodeHostMerchantMismatch, "")
+				return
+			}
+			if err := merchanttarget.Assert(r.Request, target); err != nil {
+				r.AbortGate(err)
+				return
+			}
+			if pin(r, target) {
+				next(r)
 			}
 		}
-		if resolved == nil {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialInvalid)
-		}
-		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-		}
-		return billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Machine, Permissions: resolved.Permissions}, nil
 	}
-	if g.DelegatedAuthenticator != nil && req != nil {
-		principal, err := g.DelegatedAuthenticator.AuthenticateDelegated(ctx, req)
-		if err != nil {
-			return billingauth.Principal{}, billingauth.Unauthenticated(err)
-		}
-		resolved, verr := credential.ResolvedDelegatedFromHostPrincipal(principal)
-		if verr != nil {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedPrincipalInvalid)
-		}
-		if !resolved.HasPermission(perm) {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-		}
-		return billingauth.Principal{
-			MerchantID: resolved.MerchantID,
-			Kind:       billingauth.Delegated,
-			Subject:    resolved.DelegatedSubject,
-			UserContext: billingauth.UserContext{
-				UserID:        resolved.DelegatedSubject,
-				Email:         resolved.Email,
-				EmailVerified: resolved.EmailVerified,
-				Username:      resolved.Username,
-				Merchant:      resolved.Merchant,
-			},
-			Permissions: resolved.Permissions,
-		}, nil
-	}
-	if g.Authenticator == nil {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthenticationRequired, "bearer principal required")
-	}
-	uc, err := g.Authenticator.Authenticate(ctx, req)
-	if err != nil {
-		return billingauth.Principal{}, billingauth.Unauthenticated(err)
-	}
-	if verr := uc.ValidateSubject(); verr != nil {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAuthenticationRequired, verr.Error())
-	}
-	if g.AdminPermissionChecker == nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "authorization unavailable"}
-	}
-	if strings.TrimSpace(uc.Merchant) == "" {
-		// The selector is an untrusted hint: membership is checked against the
-		// merchant it names, and the resolved merchant must agree below.
-		if target, ok := merchanttarget.FromContext(ctx); ok {
-			uc.Merchant = target.MerchantSlug
-		} else if req != nil {
-			if selector, _, err := merchant.ParseSelector(req.Header); err == nil {
-				uc.Merchant = selector.Slug
+}
+
+func (e *Env) customerCheck(route Route, a billingauth.Auth) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			c, ok := admittedIdentity(a, r.Request)
+			if !ok {
+				refuse(r, route, a, billing.CodeAuthenticationRequired, "Auth.Required admitted a request Auth.Identity finds no identity on")
+				return
+			}
+			// The customer is the subject: a user, the same whatever
+			// credential they signed in with. An invoker acting on the
+			// subject's behalf, or an application subject, may only read its
+			// own spend limits.
+			if c.SubjectKind != billingauth.SubjectUser && c.SubjectKind != billingauth.SubjectApplication {
+				refuse(r, route, a, billing.CodePermissionRequired, "Auth.Identity names a subject that is neither a user nor an application")
+				return
+			}
+			if strings.TrimSpace(c.Invoker.ID) == "" || strings.TrimSpace(c.Invoker.Issuer) == "" {
+				refuse(r, route, a, billing.CodeAuthenticationRequired, "Auth.Identity names no invoker; a subject acting itself is its own invoker")
+				return
+			}
+			if (!billingauth.SelfActing(c) || c.SubjectKind != billingauth.SubjectUser) && !route.InvokerScoped {
+				refuse(r, route, a, billing.CodeInvokerScopedPrincipal, "")
+				return
+			}
+			id, err := billing.ParseCustomerID(c.Subject)
+			if err != nil || id.IsZero() || id.String() != c.Subject {
+				refuse(r, route, a, billing.CodeAuthenticationRequired, "Auth.Identity names a subject that is not a canonical UUID")
+				return
+			}
+			target := gateTarget(r.Request)
+			if target.MerchantID.IsZero() {
+				refuse(r, route, a, billing.CodeMerchantUnresolved, "a customer route admitted an identity at no merchant")
+				return
+			}
+			if bindCustomer(r, c, id, target) {
+				next(r)
 			}
 		}
 	}
-	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, req, uc.Merchant, perm)
-	if err != nil {
-		switch {
-		case errors.Is(err, auth.ErrRevoked), errors.Is(err, billingauth.ErrUnauthenticated):
-			return billingauth.Principal{}, credentialFailure(err)
-		case errors.Is(err, billing.ErrPermissionRequired):
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-		case errors.Is(err, billing.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
-		default:
-			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Code: billing.CodeInternalError, Message: "failed to check permission"}
+}
+
+// bindCustomer binds the admitted customer and its scope: the only place a
+// customer scope is made.
+func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.CustomerID, target billingauth.Target) bool {
+	if !pin(r, target) {
+		return false
+	}
+	ctx := billingauth.BindIdentity(r.Request.Context(), c)
+	r.Request = r.Request.WithContext(customerscope.Bind(ctx, target.MerchantID, id, billingauth.InvokerKey(c), billingauth.Interactive(c)))
+	return true
+}
+
+// checkoutViewer asks the host's Required who presents a checkout session,
+// when a credential is presented, without letting it refuse: the capability
+// alone pays with a new card, and only the session's own customer sees and
+// pays with its saved cards.
+func (e *Env) checkoutViewer(route Route) router.Middleware {
+	a := e.Viewers
+	if IsNilAuth(a) {
+		return func(next router.Handler) router.Handler { return next }
+	}
+	required := a.Required()
+	if required == nil {
+		panic(MountError{Route: route.Key(), Reason: "Auth.Required returned no middleware"})
+	}
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if !presentsCredential(r.Request) {
+				next(r)
+				return
+			}
+			admitted, ok := probe(required, r.Request)
+			if !ok {
+				next(r)
+				return
+			}
+			c, ok := admittedIdentity(a, admitted)
+			id, err := billing.ParseCustomerID(c.Subject)
+			mid, _ := merchant.FromContext(r.Request.Context())
+			if at := gateTarget(admitted); !at.MerchantID.IsZero() && at.MerchantID != mid {
+				ok = false
+			}
+			if !ok || !billingauth.Interactive(c) || err != nil || id.IsZero() || id.String() != c.Subject || mid.IsZero() {
+				next(r)
+				return
+			}
+			r.Request = admitted
+			if bindCustomer(r, c, id, billingauth.Target{MerchantID: mid}) {
+				next(r)
+			}
 		}
 	}
-	if membershipMID.IsZero() {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantUnresolved)
+}
+
+// presentsCredential reports a request carrying an explicit credential or a
+// cookie the mount admitted (ExplicitCredentials strips the rest).
+func presentsCredential(r *http.Request) bool {
+	return r != nil && (strings.TrimSpace(r.Header.Get("Authorization")) != "" || r.Header.Get("Cookie") != "")
+}
+
+// probe runs middleware for its decision alone: the request it admitted, or
+// false. Its own refusal is discarded.
+func probe(mw func(http.Handler) http.Handler, r *http.Request) (*http.Request, bool) {
+	var admitted *http.Request
+	mw(http.HandlerFunc(func(_ http.ResponseWriter, passed *http.Request) { admitted = passed })).ServeHTTP(discard{header: http.Header{}}, r)
+	return admitted, admitted != nil
+}
+
+type discard struct{ header http.Header }
+
+func (d discard) Header() http.Header       { return d.header }
+func (discard) Write(b []byte) (int, error) { return len(b), nil }
+func (discard) WriteHeader(int)             {}
+
+// staffGates gates a merchant route: the mount's merchant, then the host's
+// RequirePermission for the route's permission (and Also) and, for an
+// operation that moves money or removes access by a user in person,
+// Sensitive.
+func (e *Env) staffGates(route Route) []router.Middleware {
+	a := e.Auth
+	if IsNilAuth(a) {
+		panic(MountError{Route: route.Key(), Reason: "a merchant route needs Routes.Auth"})
 	}
-	uc.Merchant = canonical
-	mid, ok := merchant.FromContext(ctx)
-	if !ok {
-		mid = membershipMID
+	var out []router.Middleware
+	if !e.AuthBindsMerchant {
+		out = append(out, e.mountedMerchant())
 	}
-	// #766: uc.Merchant was resolved from the USER'S group membership, but mid
-	// may instead be the Host-pinned merchant (merchant.WithHostMerchant, set by
-	// ResolveMerchantFromHostHTTP alongside merchant.WithID — #734). Without this
-	// assertion a user with permission on merchant A, whose request lands on
-	// merchant B's Host, would get a Principal scoped to B on authority checked
-	// against A. Mirrors merchantForIssuer's identical Host-pin check
-	// (internal/controlplane/issuer_registry.go) for the service-JWT/API-key/
-	// delegated paths; HostMerchant (not the plain FromContext merchant) is the
-	// right signal because it is a no-op unless a Host resolver actually ran, so
-	// single-merchant self-hosters are unaffected.
-	if hostMID, ok := merchant.HostMerchant(ctx); ok {
-		if hostMID != membershipMID {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
+	out = append(out, through(route, "RequirePermission", a.RequirePermission(route.Perm)))
+	if route.Also != "" {
+		out = append(out, through(route, "RequirePermission", a.RequirePermission(route.Also)))
+	}
+	if Sensitive(route) {
+		out = append(out, inPerson(route, a))
+	}
+	return append(out, e.staffCheck(route, a))
+}
+
+// inPerson stacks the host's Sensitive for a user acting in person. A key or
+// an application has no sign-in to renew; the provider's permission check
+// already admitted it.
+func inPerson(route Route, a billingauth.Auth) router.Middleware {
+	sensitive := a.Sensitive()
+	if sensitive == nil {
+		panic(MountError{Route: route.Key(), Reason: "Auth.Sensitive returned no middleware"})
+	}
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			c, ok := admittedIdentity(a, r.Request)
+			if ok && (c.SubjectKind == billingauth.SubjectUser || c.SubjectKind == billingauth.SubjectApplication) && !billingauth.Interactive(c) {
+				next(r)
+				return
+			}
+			r.Through(sensitive, next)
 		}
 	}
-	if mid != membershipMID {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeMerchantContextMismatch)
-	}
-	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
 }
 
-// authorizeResourceToken gates an RFC 9068 access token: only its own
-// verifier sees it, and it never falls through to another credential kind.
-func (g legacyGate) authorizeResourceToken(req *http.Request, perm string) (billingauth.Principal, error) {
-	if g.ResourceTokenResolver == nil {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenIssuerUnknown)
+// Sensitive reports a merchant route whose operation moves money or removes
+// access: the host's Sensitive stacks on it.
+func Sensitive(route Route) bool {
+	return route.Auth == AuthMerchant && (billing.RequiresRecentSignIn(route.Perm) || route.Also != "" && billing.RequiresRecentSignIn(route.Also))
+}
+
+// mountedMerchant pins the configured merchant, the one the host's
+// RequirePermission checks and customers buy from; a request selector may
+// only agree. Without one the request is refused.
+func (e *Env) mountedMerchant() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if e.Runtime == nil || e.Runtime.ConfiguredMerchant().IsZero() {
+				r.AbortCode(billing.CodeMerchantUnresolved, "")
+				return
+			}
+			bound := e.Runtime.ConfiguredMerchant()
+			target := billingauth.Target{MerchantID: bound}
+			// Without a selector, nothing is read before the request is
+			// authenticated; a selector is resolved and must agree.
+			if _, present, _ := merchant.ParseSelector(r.Request.Header); present {
+				var err error
+				if target, err = merchanttarget.Resolve(r.Request.Context(), r.Request, e.Runtime.Merchants, bound, ""); err != nil {
+					r.AbortGate(err)
+					return
+				}
+			} else if resolved, ok := merchanttarget.FromContext(r.Request.Context()); ok && resolved.MerchantID == bound {
+				target = resolved
+			}
+			if pin(r, target) {
+				next(r)
+			}
+		}
 	}
-	resolved, err := g.ResourceTokenResolver.ResolveResourceToken(req)
+}
+
+func (e *Env) staffCheck(route Route, a billingauth.Auth) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			c, ok := admittedIdentity(a, r.Request)
+			if !ok {
+				refuse(r, route, a, billing.CodeAuthenticationRequired, "Auth admitted a merchant request Auth.Identity finds no identity on")
+				return
+			}
+			if strings.TrimSpace(c.Invoker.ID) == "" || strings.TrimSpace(c.Invoker.Issuer) == "" {
+				refuse(r, route, a, billing.CodeAuthenticationRequired, "Auth.Identity names no invoker; a subject acting itself is its own invoker")
+				return
+			}
+			if c.SubjectKind != billingauth.SubjectUser && c.SubjectKind != billingauth.SubjectApplication {
+				refuse(r, route, a, billing.CodePermissionRequired, "Auth.Identity names a subject that is neither a user nor an application")
+				return
+			}
+			// A machine-only permission is automation's: never a user in
+			// person, whatever their roles grant.
+			if billingauth.Interactive(c) && (billing.MachineOnly(route.Perm) || billing.MachineOnly(route.Also)) {
+				refuse(r, route, a, billing.CodePermissionRequired, "")
+				return
+			}
+			target := gateTarget(r.Request)
+			if target.MerchantID.IsZero() {
+				refuse(r, route, a, billing.CodeMerchantUnresolved, "a merchant route admitted an identity at no merchant")
+				return
+			}
+			if !pin(r, target) {
+				return
+			}
+			r.Request = r.Request.WithContext(billingauth.BindStaff(r.Request.Context(), billingauth.Staff{Identity: c, Permission: route.Perm, Merchant: target.MerchantID}))
+			next(r)
+		}
+	}
+}
+
+// staffCan answers a handler that asks one more permission of the host's
+// RequirePermission, on the merchant the route already resolved.
+func (e *Env) staffCan(r *http.Request, perm string) error {
+	if IsNilAuth(e.Auth) {
+		return billingauth.ErrUnauthenticated
+	}
+	if _, ok := billingauth.StaffFromContext(r.Context()); !ok {
+		return billingauth.ErrUnauthenticated
+	}
+	mw, err := e.permission(perm)
 	if err != nil {
-		return billingauth.Principal{}, credential.ResourceTokenRefusal(err)
+		return err
 	}
-	if !resolved.HasPermission(perm) {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
+	if _, ok := probe(mw, r); !ok {
+		return billingauth.ErrForbidden
 	}
-	if hostMID, ok := merchant.HostMerchant(req.Context()); ok && hostMID != resolved.MerchantID {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
-	}
-	principal := billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Delegated, Subject: resolved.Subject, Permissions: resolved.Permissions}
-	if resolved.Machine {
-		principal.Kind = billingauth.Machine
-		return principal, nil
-	}
-	principal.UserContext = billingauth.UserContext{
-		UserID: resolved.Subject, Email: resolved.Email, EmailVerified: resolved.EmailVerified,
-		Username: resolved.Username, Merchant: resolved.MerchantSlug,
-	}
-	return principal, nil
+	return nil
 }
 
-// RequireRecentSignIn implements billingauth.Gate with the control plane's
-// AuthKit Sensitive check.
-func (g legacyGate) RequireRecentSignIn(ctx context.Context, req *http.Request, p billingauth.Principal) error {
-	if req != nil && p.Kind == billingauth.Delegated && g.ResourceTokenResolver != nil &&
-		credential.LooksLikeResourceToken(authorizationToken(req.Header.Get("Authorization"))) {
-		return g.ResourceTokenResolver.RequireRecentResourceSignIn(req)
+func (e *Env) permission(perm string) (mw func(http.Handler) http.Handler, err error) {
+	if cached, ok := e.permissions.Load(perm); ok {
+		return cached.(func(http.Handler) http.Handler), nil
 	}
-	var check func(context.Context) error
-	if g.AdminPermissionChecker != nil {
-		check = func(ctx context.Context) error { return g.AdminPermissionChecker.CheckRecentSignIn(ctx, req) }
+	defer func() {
+		if v := recover(); v != nil {
+			mw, err = nil, fmt.Errorf("Auth.RequirePermission(%q) panicked: %v", perm, v)
+		}
+	}()
+	if mw = e.Auth.RequirePermission(perm); mw == nil {
+		return nil, fmt.Errorf("Auth.RequirePermission(%q) returned no middleware", perm)
 	}
-	return billingauth.RequireRecentSignIn(ctx, p, check)
+	e.permissions.Store(perm, mw)
+	return mw, nil
 }
 
-// resolveAPIKey resolves an API key; handled is false for any other
-// credential.
-func (g legacyGate) resolveAPIKey(ctx context.Context, r *http.Request) (*credential.ResolvedServiceCredential, error, bool) {
-	resolver := g.ServiceCredentialResolver
-	if resolver == nil || r == nil {
-		return nil, nil, false
+// staffAsks are the permissions merchant handlers ask of RequirePermission
+// beyond their route's (StaffCan).
+var staffAsks = []string{billing.MerchantAccessGrantPermanent, billing.MerchantInvoicesUpdate, billing.MerchantInvoicesCollect}
+
+// Permissions is every merchant permission the merchant API asks of
+// RequirePermission, sorted: its routes' and its handlers' further asks.
+func Permissions() []string {
+	seen := map[string]bool{}
+	for _, p := range staffAsks {
+		seen[p] = true
 	}
-	token := bearerToken(r.Header.Get("Authorization"))
-	if token == "" || !resolver.LooksLikeAPIKey(token) {
-		return nil, nil, false
+	for _, r := range Catalog() {
+		if r.Group != Merchant {
+			continue
+		}
+		for _, p := range []string{r.Perm, r.Also} {
+			if p != "" {
+				seen[p] = true
+			}
+		}
 	}
-	resolved, err := resolver.ResolveAPIKey(ctx, token)
-	return resolved, err, true
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
-// credentialFailure is the 401 for a credential a live check refused.
-func credentialFailure(err error) billingauth.GateError {
-	return billingauth.Unauthenticated(err)
+// recheck is each gated handler's own check, wrapped directly around it: a
+// customer route runs only with the customer scope the gate bound, a
+// merchant route only with the staff member it admitted for this route's
+// permission, at the merchant the request is pinned to. Whatever runs
+// between the gate and the handler, a missing verdict is a 401.
+func recheck(route Route, h router.Handler) router.Handler {
+	switch route.Auth {
+	case AuthCustomer:
+		return func(r *httprequest.Request) {
+			scope, ok := customerscope.From(r.Request.Context())
+			_, admitted := billingauth.IdentityFromContext(r.Request.Context())
+			mid, pinned := merchant.FromContext(r.Request.Context())
+			if !ok || !admitted || !pinned || mid != scope.Merchant() {
+				refuse(r, route, nil, billing.CodeAuthenticationRequired, "a customer handler ran without the route gate's customer")
+				return
+			}
+			h(r)
+		}
+	case AuthMerchant:
+		return func(r *httprequest.Request) {
+			staff, ok := billingauth.StaffFromContext(r.Request.Context())
+			mid, pinned := merchant.FromContext(r.Request.Context())
+			if !ok || staff.Permission != route.Perm || !pinned || mid != staff.Merchant {
+				refuse(r, route, nil, billing.CodeAuthenticationRequired, "a merchant handler ran without the route gate's staff member")
+				return
+			}
+			h(r)
+		}
+	}
+	return h
 }
 
-func bearerToken(header string) string {
-	header = strings.TrimSpace(header)
-	const prefix = "Bearer "
-	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return ""
+// Guarded is route's handler as the mount registers it, with its re-check.
+func (e *Env) Guarded(route Route) router.Handler {
+	h := route.Handler
+	if route.Bind != nil {
+		h = route.Bind(e)
 	}
-	return strings.TrimSpace(header[len(prefix):])
-}
-
-func authorizationToken(header string) string {
-	fields := strings.Fields(header)
-	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {
-		return fields[1]
+	if h == nil {
+		return nil
 	}
-	return ""
+	return recheck(route, h)
 }

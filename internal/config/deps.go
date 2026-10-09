@@ -11,13 +11,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/iam"
 	"github.com/redis/go-redis/v9"
-
-	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // Deps is everything an embedded engine reaches outside its own process:
-// connections, credentials and the host's hooks. Config is plain data.
+// connections, credentials and test seams. Config is plain data. Auth is not
+// here: it is supplied where routes are mounted (Routes.Auth); the engine
+// itself authenticates nobody.
 type Deps struct {
 	// Postgres is the host's pool; its role owns OpenRails' tables (Migrate).
 	// Nil opens one from Config.DB.
@@ -27,54 +26,6 @@ type Deps struct {
 	// Vault is a borrowed, authenticated client for Config.SecretBackend
 	// vault. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client
-
-	// AuthKit authenticates callers with the host's AuthKit: its
-	// *authkit.Client (or an authkit Verifier for the host's audiences).
-	// OpenRails derives authentication, live authorization and the recent
-	// sign-in check from it. Mutually exclusive with Authenticate.
-	AuthKit billingauth.Verifier
-	// CustomerFor maps an AuthKit caller to the customer who pays (a canonical
-	// UUID; "" for none). Default: a user pays for themselves, so the customer
-	// is the AuthKit user ID.
-	CustomerFor func(ctx context.Context, caller billingauth.Identity) (billing.CustomerID, error)
-	// AuthorityFor names the AuthKit group and permission that authorize a
-	// staff operation. Required, with AuthKit, for the staff and machine route
-	// groups: only the host knows which group holds its billing staff.
-	AuthorityFor func(ctx context.Context, required billingauth.Requirement) (billingauth.Authority, error)
-
-	// Authenticate, Authorize and RecentSignIn are for hosts with other auth.
-	// Authenticate says who is calling; return ErrUnauthenticated when the
-	// request carries no valid credential. Required (or AuthKit) for any
-	// published route group except provider webhooks.
-	Authenticate func(*http.Request) (billingauth.Identity, error)
-	// Authorize checks live, for the exact operation and target, that an
-	// authenticated identity holds a staff permission. Return ErrForbidden to
-	// refuse. Required for the staff and machine route groups.
-	Authorize func(*http.Request, billingauth.Identity, billingauth.Requirement) error
-	// RecentSignIn reports whether the request's user signed in recently
-	// enough to move money or grant access. Nil refuses those operations to
-	// native users.
-	RecentSignIn func(*http.Request) error
-	// AuthenticateCustomer authenticates the customer route profiles marked
-	// Delegated: it maps a request to an explicit merchant and paying
-	// customer. profile is the profile's Prefix. Required when a profile is
-	// Delegated.
-	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
-
-	// CheckoutCustomer is the buyer's current identity, asked on every
-	// checkout session action, which carries no user token: return ErrForbidden for a
-	// customer who may no longer buy. Default with AuthKit (and no
-	// CustomerFor): the AuthKit user, refused when banned or deleted.
-	// Otherwise nil keeps the identity given when the session was minted.
-	CheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)
-
-	// UserExists and UserEmail let OpenRails address billing notices; nil
-	// sends none.
-	UserExists func(ctx context.Context, userID string) (bool, error)
-	UserEmail  func(ctx context.Context, userID string) (username, email string, ok bool, err error)
-	// ResolveUsername maps a provider-supplied username to a user ID (the
-	// CCBill username bridge).
-	ResolveUsername func(ctx context.Context, username string) (userID string, err error)
 
 	// ConsoleAssets is a host-built admin console (web/admin's Vite build,
 	// rooted at index.html). Nil uses the build embedded in this module, when

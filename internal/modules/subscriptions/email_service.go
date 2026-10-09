@@ -84,15 +84,6 @@ func (s *EmailService) SetDomainServices(
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
-// SetDefaultUserDirectory fills the optional identity seam during startup.
-// An explicit host directory always takes precedence. Call before serving or
-// starting workers, alongside SetDomainServices.
-func (s *EmailService) SetDefaultUserDirectory(users identity.UserDirectory) {
-	if s.users == nil {
-		s.users = users
-	}
-}
-
 func (s *EmailService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -496,12 +487,9 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 	}, nil
 }
 
-// getUserEmail resolves the user's username + email via the injected
-// UserDirectory. When no directory is wired (e.g. a non-AuthKit embedded host
-// that provided none) or the user has no usable email, it returns
-// errUserEmailUnavailable so callers gracefully skip the email instead of
-// failing. A directory lookup error is surfaced as errUserEmailUnavailable too,
-// matching the previous behavior (emails are best-effort, never load-bearing).
+// getUserEmail is the customer's declared username and email. A customer
+// with no email, or a failed lookup, is errUserEmailUnavailable: callers skip
+// the email (emails are best-effort, never load-bearing).
 func (s *EmailService) getUserEmail(ctx context.Context, userID string) (username string, email string, err error) {
 	if s.users == nil {
 		return "", "", errUserEmailUnavailable

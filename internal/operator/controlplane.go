@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
-	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
 )
 
 // AttachOptions configures the embedded AuthKit control plane: the only seam
@@ -233,15 +232,6 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 
 	if a.Runtime != nil {
 		a.Runtime.ReserveAPIHosts(opts.Auth.Issuer, opts.Auth.RequestOrigin, opts.Frontend.BaseURL)
-		// The standalone control plane explicitly opts billing into AuthKit's
-		// public directory API. Preserve independently injected host adapters.
-		directory := billingauthkit.NewDirectory(cp.Core())
-		if a.Runtime.EmailService != nil {
-			a.Runtime.EmailService.SetDefaultUserDirectory(directory)
-		}
-		if a.Runtime.WebhookDispatcher != nil && a.Runtime.WebhookDispatcher.ProfileRepo == nil {
-			a.Runtime.WebhookDispatcher.ProfileRepo = directory
-		}
 	}
 	return nil
 }

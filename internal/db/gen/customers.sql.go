@@ -12,6 +12,41 @@ import (
 	"github.com/google/uuid"
 )
 
+const customerIDsByUsername = `-- name: CustomerIDsByUsername :many
+SELECT c.id FROM billing.customers c
+WHERE c.merchant_id = $1
+  AND lower(c.username) = lower($2::text)
+ORDER BY c.id
+LIMIT 2
+`
+
+type CustomerIDsByUsernameParams struct {
+	MerchantID uuid.UUID
+	Username   string
+}
+
+// The CCBill username bridge: the merchant's customers that declared the
+// username. Two answers are ambiguous and resolve nothing.
+func (q *Queries) CustomerIDsByUsername(ctx context.Context, arg CustomerIDsByUsernameParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, customerIDsByUsername, arg.MerchantID, arg.Username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const ensureCustomer = `-- name: EnsureCustomer :one
 
 INSERT INTO billing.customers (id, merchant_id, issuer)
@@ -19,7 +54,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked
 `
 
 type EnsureCustomerParams struct {
@@ -42,6 +77,8 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
+		&i.Username,
+		&i.Blocked,
 	)
 	return i, err
 }
@@ -83,7 +120,7 @@ func (q *Queries) FillCustomerEmail(ctx context.Context, arg FillCustomerEmailPa
 }
 
 const getCustomer = `-- name: GetCustomer :one
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at FROM billing.customers
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -102,12 +139,14 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
+		&i.Username,
+		&i.Blocked,
 	)
 	return i, err
 }
 
 const listCustomers = `-- name: ListCustomers :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at FROM billing.customers c
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
    OR c.id::text ILIKE $2 || '%'
@@ -149,6 +188,8 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 			&i.Email,
 			&i.CreatedAt,
 			&i.LastSeenAt,
+			&i.Username,
+			&i.Blocked,
 		); err != nil {
 			return nil, err
 		}
@@ -198,24 +239,34 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 }
 
 const putCustomer = `-- name: PutCustomer :one
-INSERT INTO billing.customers (id, merchant_id, email)
-VALUES ($1, $2, $3)
+INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   email = EXCLUDED.email,
+  username = EXCLUDED.username,
+  blocked = EXCLUDED.blocked,
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, email, created_at, last_seen_at
+RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked
 `
 
 type PutCustomerParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	Email      *string
+	Username   *string
+	Blocked    bool
 }
 
 // The merchant's declaration of a customer: materialize it, or replace its
 // declared fields.
 func (q *Queries) PutCustomer(ctx context.Context, arg PutCustomerParams) (BillingCustomer, error) {
-	row := q.db.QueryRow(ctx, putCustomer, arg.ID, arg.MerchantID, arg.Email)
+	row := q.db.QueryRow(ctx, putCustomer,
+		arg.ID,
+		arg.MerchantID,
+		arg.Email,
+		arg.Username,
+		arg.Blocked,
+	)
 	var i BillingCustomer
 	err := row.Scan(
 		&i.ID,
@@ -224,6 +275,8 @@ func (q *Queries) PutCustomer(ctx context.Context, arg PutCustomerParams) (Billi
 		&i.Email,
 		&i.CreatedAt,
 		&i.LastSeenAt,
+		&i.Username,
+		&i.Blocked,
 	)
 	return i, err
 }

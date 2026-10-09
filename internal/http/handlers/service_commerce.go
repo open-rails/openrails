@@ -7,6 +7,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/requestauth"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
@@ -37,6 +38,15 @@ func ServiceCreateCheckoutAttempt(r *httprequest.Request) {
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		r.ErrorCode("idempotency_key_required", "")
 		return
+	}
+	// A saved card is the customer's to spend: over HTTP only on a checkout
+	// session the customer pays, signed in. The embedding host's own Go
+	// client acts while its customer is signed in to it.
+	if !input.PaymentOptions.PaymentMethodID.IsZero() {
+		if _, host := requestauth.HostPrincipalFromContext(r.Request.Context()); !host {
+			r.ErrorCode("customer_proof_required", "")
+			return
+		}
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {

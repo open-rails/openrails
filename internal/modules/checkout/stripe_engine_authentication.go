@@ -20,13 +20,13 @@ type StripeEngineAuthentication struct {
 	ProviderPaymentMethodID string                   `json:"provider_payment_method_id,omitempty"`
 }
 
-func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.BillingProviderIntent, error) {
+func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, error) {
 	var empty gen.BillingProviderIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return empty, err
 	}
-	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid {
+	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid {
 		return empty, apperr.New(403, "customer_session_required", "payment authentication requires an interactive customer session")
 	}
 	if s == nil || s.SubscriptionService == nil {
@@ -46,7 +46,7 @@ func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uui
 // StripePaymentAuthentication exposes an original PI only to its interactive
 // payer. Credential scopes and the immutable operation, not request body fields,
 // select the account and card. The HTTP adapter must send Cache-Control:no-store.
-func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal, resolver intents.StripeEngineServiceResolver) (StripeEngineAuthentication, error) {
+func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (StripeEngineAuthentication, error) {
 	in, err := s.ownedStripeEngineOperation(ctx, id, principal)
 	if err != nil {
 		return StripeEngineAuthentication{}, err
@@ -92,7 +92,7 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 
 // ConfirmStripePaymentAuthentication ignores browser outcome assertions and
 // drives the existing verifier against the original provider payment identity.
-func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (billing.PaymentOperation, error) {
+func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (billing.PaymentOperation, error) {
 	in, err := s.ownedStripeEngineOperation(ctx, id, principal)
 	if err != nil {
 		return billing.PaymentOperation{}, err

@@ -4,19 +4,20 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
 // CustomerProfiles are the customer surfaces a selection mounts: Customers
-// at /v1/me, then CustomerProfiles, each native one defaulting to merchant.
-func CustomerProfiles(sel config.Routes, merchant string) []config.CustomerRoutes {
+// at /v1/me, then CustomerProfiles. A profile without its own Auth uses
+// Routes.Auth; one without a merchant serves the configured one.
+func CustomerProfiles(sel config.Routes) []config.CustomerRoutes {
 	var out []config.CustomerRoutes
 	if sel.Customers != config.CustomersNone {
 		out = append(out, config.CustomerRoutes{Scope: sel.Customers})
@@ -26,25 +27,21 @@ func CustomerProfiles(sel config.Routes, merchant string) []config.CustomerRoute
 		if out[i].Prefix == "" {
 			out[i].Prefix = "/v1/me"
 		}
-		if !out[i].Delegated && strings.TrimSpace(out[i].Merchant) == "" {
-			out[i].Merchant = merchant
+		if httproutes.IsNilAuth(out[i].Auth) {
+			out[i].Auth = sel.Auth
 		}
 	}
 	return out
 }
 
-// ValidateRoutes checks that every selected group has the authority it needs,
-// before anything mounts.
+// ValidateRoutes refuses a selection whose groups lack the Auth they need,
+// before anything mounts: nothing is ever mounted open.
 func ValidateRoutes(sel config.Routes, profiles []config.CustomerRoutes, rt *app.Runtime) error {
-	var auth *billingauth.Integration
-	if rt != nil {
-		auth = rt.Auth
-	}
 	if sel.CatalogEdits && !sel.Merchant {
 		return fmt.Errorf("openrails: Routes.CatalogEdits adds the merchant API's catalog writes; set Routes.Merchant")
 	}
-	if sel.Merchant && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails: Routes.Merchant needs Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with Deps.Authorize")
+	if sel.Merchant && httproutes.IsNilAuth(sel.Auth) {
+		return fmt.Errorf("openrails: Routes.Merchant needs Routes.Auth (its Staff and RecentSignIn gate every merchant route)")
 	}
 	return validateCustomerRoutes(profiles, rt)
 }
@@ -65,15 +62,12 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	if a == nil || a.Runtime == nil || a.Config == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
-	profiles := CustomerProfiles(sel, a.Config.Merchant.Slug)
+	profiles := CustomerProfiles(sel)
 	if err := ValidateRoutes(sel, profiles, a.Runtime); err != nil {
 		return nil, err
 	}
 	asm := FromApp(a)
-	if a.Runtime.Auth != nil {
-		asm.Authenticator = integrationAuthenticator{auth: a.Runtime.Auth}
-		asm.Gate = integrationGate{auth: a.Runtime.Auth, runtime: a.Runtime}
-	}
+	asm.Auth = sel.Auth
 	active := routeSets(sel)
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, sel.Storefront || len(profiles) > 0)
 	if err != nil {
@@ -84,7 +78,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	providers.Webhooks = true
 	capabilities := configuredCapabilities(a.Runtime, active, profiles, providers)
 	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, CatalogWrites: sel.CatalogEdits})
-	extra, err := BuildCustomerRoutes(a, profiles, a.Runtime.Auth)
+	extra, err := BuildCustomerRoutes(a, profiles)
 	if err != nil {
 		return nil, err
 	}

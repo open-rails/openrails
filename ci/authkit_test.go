@@ -20,7 +20,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/hostauth"
 	"github.com/open-rails/openrails/internal/operator"
 )
 
@@ -90,8 +89,8 @@ func newAccount(t *testing.T, cp *openrails.Client) authtest.User {
 
 // Operator paths: Bootstrap binds a registered merchant to a group keyed by
 // the merchant and mints its first deployment key once; customer portal groups
-// are keyed by the customer; billing reads users through AuthKit; the example
-// authority manifest parses against OpenRails' roles.
+// are keyed by the customer; the example authority manifest parses against
+// OpenRails' roles.
 func TestControlPlaneOperatorPaths(t *testing.T) {
 	f := newFixture(t)
 	cp := f.attachControlPlane(t, nil)
@@ -126,25 +125,6 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	roles, err = cp.AuthKit().GroupRoles(ctx, operator.CustomerGroup(customer.ID), []iam.Subject{iam.UserSubject(customer.ID)})
 	require.NoError(t, err)
 	require.Equal(t, "owner", roles[iam.UserSubject(customer.ID)].Name())
-
-	directory := hostauth.NewDirectory(cp.AuthKit())
-	payer := newAccount(t, cp)
-	username, email, ok, err := directory.EmailIdentity(ctx, payer.ID)
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, []string{payer.Username, payer.Email}, []string{username, email})
-	renamed := "r" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	_, err = cp.AuthKit().UpdateUser(ctx, iam.UserActor(payer.ID), payer.ID, iam.UserUpdate{Username: &renamed})
-	require.NoError(t, err)
-	id, err := directory.GetUserIDByUsername(ctx, payer.Username)
-	require.NoError(t, err)
-	require.Equal(t, payer.ID, id, "a former username still resolves")
-	results, err := cp.AuthKit().DeleteUsers(ctx, iam.UserActor(payer.ID), []string{payer.ID})
-	require.NoError(t, err)
-	require.NoError(t, results[0].Err)
-	_, _, ok, err = directory.EmailIdentity(ctx, payer.ID)
-	require.NoError(t, err)
-	require.False(t, ok, "billing mails no deleted account")
 
 	raw, err := os.ReadFile(filepath.Join("..", "config", "bootstrap.example.yaml"))
 	require.NoError(t, err)

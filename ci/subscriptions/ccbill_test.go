@@ -368,3 +368,28 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 func (w *world) engineCharges() int {
 	return len(w.stripe.mutations("/v1/payment_intents")) + len(w.nmi.Attempts())
 }
+
+// CCBill names its buyer by username: the one the merchant last declared for
+// a customer with EnsureCustomer, not anything OpenRails asks a host for.
+func TestCCBillUsernameIsTheDeclaredOne(t *testing.T) {
+	w := newWorld(t)
+	importCCBill(t, w)
+	buyer, other := w.newCustomer(), w.newCustomer()
+	name := "Buyer" + uuid.NewString()[:8]
+	_, err := w.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Username: &name})
+	require.NoError(t, err)
+	failure := func(username string) map[string]string {
+		return map[string]string{"transactionId": ccbillNumericID(), "email": "buyer@example.test", "username": username,
+			"formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO, "billedCurrencyCode": "840",
+			"failureCode": "BE-140", "failureReason": "declined"}
+	}
+	w.deliverCCBill("NewSaleFailure", failure(strings.ToLower(name)))
+	require.True(t, buyer.hasNotification("payment_method_failed"), "the declared username reaches its customer")
+	require.False(t, other.hasNotification("payment_method_failed"))
+
+	renamed := "Renamed" + uuid.NewString()[:8]
+	_, err = w.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Username: &renamed})
+	require.NoError(t, err)
+	status, body := w.postCCBill("NewSaleFailure", ccbillSourceIP, failure(name))
+	require.NotEqual(t, http.StatusOK, status, "a username no customer holds names nobody: %v", body)
+}

@@ -771,6 +771,8 @@ export type CurrencyUnits = {
 export type Customer = {
   id: string
   email: string | null
+  username: string | null
+  blocked: boolean
   created_at: string
   last_seen_at: string
 }
@@ -943,6 +945,8 @@ export type EffectiveTier = {
 
 export type EnsureCustomerParams = {
   email?: string | null
+  username?: string | null
+  blocked?: boolean
 }
 
 export type EntitlementCheck = {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -25,7 +24,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -86,7 +84,6 @@ type Runtime struct {
 	// NMIClients is the single PSP-scoped NMI client factory (#1055).
 	NMIClients *railresolve.NMIFactory
 
-	Auth          *billingauth.Integration
 	StripeClients *stripeapi.Factory
 	DB            *db.DB
 	// leaseDB is the small pool idempotency lease renewals use (#1099).
@@ -248,13 +245,6 @@ type Runtime struct {
 	CheckoutAttemptService *checkout.CheckoutAttemptService
 	// CheckoutSessions stores checkout sessions (#1124).
 	CheckoutSessions *checkoutsession.Store
-	// CheckoutCustomer is the buyer's current identity for a checkout session
-	// action; ErrForbidden for one who may no longer buy. Nil uses the
-	// identity given at mint.
-	CheckoutCustomer func(ctx context.Context, customerID billing.CustomerID) (billing.CheckoutCustomerIdentity, error)
-	// AuthenticateCustomer authenticates Delegated customer route profiles
-	// (Deps.AuthenticateCustomer); profile is the profile's prefix.
-	AuthenticateCustomer func(r *http.Request, profile string) (*billingauth.DelegatedPrincipal, error)
 
 	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil

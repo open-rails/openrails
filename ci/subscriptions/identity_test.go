@@ -1,0 +1,339 @@
+//go:build e2e && integration
+
+package subscriptions_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/riverqueue/river"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/openrailstest"
+)
+
+// A person never creates a checkout for someone else: the checkout routes
+// are automation's, whatever a staff member's roles grant. A saved card is
+// charged over HTTP only on a session its own customer pays, signed in.
+func TestCheckoutIsAutomationAndTheCustomersOwn(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.selfService = true
+	w.start()
+	price := w.membership("content:members", 9_990_000)
+	a, b := w.newCustomer(), w.newCustomer()
+	aCard, bCard := a.saveCard("nmi", visa), b.saveCard("nmi", mastercard)
+	charges := len(w.railLedger("nmi"))
+
+	// "staff" holds every permission, the machine-only ones included.
+	staff := w.auth.token(t, "staff")
+	for path, body := range map[string]any{
+		"/v1/merchant/checkout-sessions": map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID},
+		"/v1/merchant/checkout-attempts": map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID,
+			"payment": map[string]any{"psp": "nmi", "payment_method_id": aCard}},
+		"/v1/merchant/checkout-attempts/" + billing.CheckoutAttemptID(uuid.New()).String() + "/confirm": map[string]any{"signature": "sig"},
+	} {
+		status, out := w.merchantJSON(staff, http.MethodPost, path, body)
+		require.Equal(t, http.StatusForbidden, status, "%s: %v", path, out)
+		code, _ := errorOf(out)
+		require.Equal(t, billing.CodePermissionRequired, code, path)
+	}
+
+	// The host's own backend charges no saved card without its customer.
+	_, err := w.client[remote].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		OfferKind: billing.OfferRecurring, Customer: a.identity(), Entitlement: "content:members", PriceID: price.ID,
+		IdempotencyKey: "proofless-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(aCard)},
+	})
+	requireCode(t, err, http.StatusForbidden, "customer_proof_required")
+
+	// It mints a session; only A, signed in, pays it with A's card.
+	session := w.handOver(a, price.ID)
+	option := session.option("nmi")
+	for name, try := range map[string]func() (int, map[string]any){
+		"B's credential, A's card": func() (int, map[string]any) {
+			return session.payAs(b, map[string]any{"option_id": option, "payment_method_id": aCard})
+		},
+		"B's credential, B's card": func() (int, map[string]any) {
+			return session.payAs(b, map[string]any{"option_id": option, "payment_method_id": bCard})
+		},
+		"no credential, A's card": func() (int, map[string]any) {
+			return session.pay(map[string]any{"option_id": option, "payment_method_id": aCard})
+		},
+		"A's API key, A's card": func() (int, map[string]any) {
+			return session.w.page(http.MethodPost, "/v1/checkout-sessions/"+session.id+"/pay", w.auth.apiKeyToken(t, a.id), map[string]any{"option_id": option, "payment_method_id": aCard})
+		},
+	} {
+		status, out := try()
+		require.Contains(t, []int{http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity}, status, "%s: %v", name, out)
+	}
+	w.settle()
+	require.Len(t, w.railLedger("nmi"), charges, "no refused proof charged anything")
+	require.False(t, a.entitled("content:members"))
+
+	a.payWithSaved(session, "nmi", aCard)
+	require.Len(t, w.railLedger("nmi"), charges+1)
+	require.True(t, a.entitled("content:members"))
+	require.False(t, b.entitled("content:members"))
+}
+
+// The customer is the subject, whatever credential they signed in with: a
+// session and a device key reach the same billing.
+func TestCustomerIsTheSubjectWhateverTheCredential(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.newCustomer()
+	card := c.saveCard("nmi", visa)
+	device := w.auth.issue(t, grant{subject: c.id, credential: string(openrails.CredentialDeviceKey), sid: "dk_" + uuid.NewString()[:8]})
+	for name, token := range map[string]string{"session": c.token, "device key": device} {
+		status, out := w.callAt(w.server.URL, token, http.MethodGet, "/payment-methods", "", nil)
+		require.Equal(t, http.StatusOK, status, "%s: %v", name, out)
+		data, _ := out["data"].([]any)
+		require.Len(t, data, 1, name)
+		require.Equal(t, card, data[0].(map[string]any)["id"], name)
+	}
+}
+
+// An application spends its own balance through invokers acting for it, each
+// metered on its own window: one invoker exhausting its limit leaves the
+// other's, and together they never spend more than the balance.
+func TestInvokersShareTheSubjectsBalanceOnTheirOwnLimits(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	ctx, host := t.Context(), w.client[remote]
+	const balance, limit, step = int64(600_000), int64(400_000), int64(100_000)
+	const cozy = "https://cozy.example"
+	app := w.newCustomer()
+	_, err := host.CreateCreditGrant(ctx, app.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: balance, Source: "test", SourceID: "seed"})
+	require.NoError(t, err)
+	key := func(user string) string { return cozy + "|" + user }
+	var delegations []billing.SpendDelegation
+	for _, user := range []string{"u_1", "u_2"} {
+		delegations = append(delegations, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: key(user),
+			Windows: []billing.BudgetWindow{{Key: "hour", WindowSeconds: 3600, Limit: limit, Currency: "USD"}}})
+	}
+	_, err = host.SetSpendDelegations(ctx, app.cid(), delegations)
+	require.NoError(t, err)
+
+	spend := func(user string) int64 {
+		var admitted int64
+		for range 10 {
+			deadline := w.clock.Now().Add(time.Hour)
+			verdicts, err := host.Admit(ctx, []billing.AdmitParams{{RequestID: uuid.NewString(), CustomerID: app.cid(), Invoker: key(user), InvokerType: billing.InvokerTypeDelegated,
+				Currency: "USD", EstimatedAmount: step, ExpiresAt: &deadline}})
+			require.NoError(t, err)
+			if !verdicts[0].Allowed() {
+				t.Logf("%s refused: %+v", user, verdicts[0].Error)
+				break
+			}
+			admitted += step
+		}
+		return admitted
+	}
+	require.Equal(t, limit, spend("u_1"), "u_1 spends up to its own limit")
+	require.Equal(t, balance-limit, spend("u_2"), "u_2 is not held to u_1's window, only to what the balance has left")
+	require.Zero(t, spend("u_1"))
+	got, err := host.GetBalance(ctx, app.cid(), "USD")
+	require.NoError(t, err)
+	require.Equal(t, balance, got.HeldAmount, "together they never spend more than the balance")
+
+	// Each invoker reads its own window, as the application acting for it.
+	for user, used := range map[string]int64{"u_1": limit, "u_2": balance - limit} {
+		token := w.auth.issue(t, grant{subject: app.id, kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialSignedToken), invokerIssuer: cozy, invoker: user})
+		status, out := w.callAt(w.server.URL, token, http.MethodGet, "/spend-limits?currency=USD", "", nil)
+		require.Equal(t, http.StatusOK, status, "%s: %v", user, out)
+		require.Equal(t, key(user), out["invoker"])
+		windows := out["windows"].([]any)
+		require.Len(t, windows, 1)
+		require.Equal(t, fmt.Sprint(used), windows[0].(map[string]any)["used"], user)
+		status, out = w.callAt(w.server.URL, token, http.MethodGet, "/balance?currency=USD", "", nil)
+		require.Equal(t, http.StatusForbidden, status, "an invoker spends the balance but does not manage the account: %v", out)
+		code, _ := errorOf(out)
+		require.Equal(t, billing.CodeInvokerScopedPrincipal, code)
+	}
+}
+
+// A provider write records who made it: the subject whose authority it used,
+// the invoker that acted (the key its rate ceiling counts) and the credential.
+func TestIntentsRecordSubjectInvokerAndCredential(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.armDestructive()
+	latest := func() [3]string {
+		t.Helper()
+		var subject, invoker, credential *string
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT subject, actor, credential FROM billing.provider_intents
+			WHERE origin IN ('user', 'admin') ORDER BY created_at DESC, id DESC LIMIT 1`)).Scan(&subject, &invoker, &credential))
+		require.NotNil(t, subject)
+		require.NotNil(t, invoker)
+		require.NotNil(t, credential)
+		return [3]string{*subject, *invoker, *credential}
+	}
+	refund := func(token string) {
+		t.Helper()
+		e := enroll(t, w, "nmi", embedded)
+		payment := completed(w.payments(embedded, e.c.id))[0]
+		client, err := openrails.NewRemote(w.server.URL+mountPrefix, openrails.WithDefaultMerchant(w.slug),
+			openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+		require.NoError(t, err)
+		_, err = client.RefundPayment(t.Context(), payment.ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", IdempotencyKey: "audit-" + uuid.NewString()})
+		require.NoError(t, err)
+	}
+
+	refund(w.auth.sessionToken(t, "staff", "s_audit"))
+	require.Equal(t, [3]string{"staff", "staff", "session:s_audit"}, latest())
+
+	refund(w.auth.issue(t, grant{subject: hostApp, kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialAPIKey), sid: "key_ops", invokerIssuer: "https://ops.example", invoker: "ops_7"}))
+	require.Equal(t, [3]string{hostApp, "https://ops.example|ops_7", "api_key:key_ops"}, latest())
+
+	c := w.newCustomer()
+	card := c.saveCard("nmi", visa)
+	device := w.auth.issue(t, grant{subject: c.id, credential: string(openrails.CredentialDeviceKey), sid: "dk_self"})
+	status, out := w.callAt(w.server.URL, device, http.MethodDelete, "/payment-methods/"+card, "", nil)
+	require.Less(t, status, 300, "%v", out)
+	require.Equal(t, [3]string{c.id, c.id, "device_key:dk_self"}, latest())
+}
+
+// IDOR: a signed-in customer naming another customer's object on any
+// customer route, or on a checkout session, is refused and changes nothing.
+// Every such route needs a fixture here: a new one fails until it has one.
+func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.selfService = true
+	w.start()
+	ctx := t.Context()
+	group := "g" + uuid.NewString()[:8]
+	from := w.tierPrice(group, 1, 1000, monthHours, false)
+	to := w.tierPrice(group, 2, 2000, monthHours, false)
+
+	// A's objects: a membership with an upgrade awaiting authentication, a
+	// saved card and a card setup, an open invoice, a notification and a
+	// checkout session.
+	a, sub := w.engineMember("stripe", embedded, from)
+	w.stripe.setDecline(visa.Last4, "auth")
+	pending, err := w.client[embedded].ChangeTier(ctx, sub, billing.ChangeTierParams{PriceID: to.ID, IdempotencyKey: "idor-" + uuid.NewString()})
+	require.NoError(t, err)
+	require.Equal(t, "requires_action", pending.Status)
+	aCard := a.saveCard("nmi", visa)
+	setup := a.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})["id"].(string)
+	_, err = w.client[remote].SetCreditLimit(ctx, a.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 100_000_000})
+	require.NoError(t, err)
+	_, err = w.client[remote].RecordUsage(ctx, billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+	require.NoError(t, err)
+	w.advance(time.Minute)
+	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	w.waitJob(job.Job.ID)
+	invoices, err := w.client[embedded].ListInvoices(ctx, billing.InvoiceListParams{CustomerID: a.cid()})
+	require.NoError(t, err)
+	require.NotEmpty(t, invoices.Items)
+	invoice := invoices.Items[0].ID.String()
+	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.notifications (merchant_id, customer_id, event_type, data)
+		SELECT id, $2, 'test.idor', '{}' FROM billing.merchants WHERE slug = $1`), w.slug, a.cid().UUID())
+	require.NoError(t, err)
+	notes, _ := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)
+	require.NotEmpty(t, notes)
+	notification := notes[0].(map[string]any)["id"].(string)
+	session := w.handOver(a, from.ID)
+
+	b := w.newCustomer()
+	bCard := b.saveCard("nmi", mastercard)
+	before := w.railLedger("stripe")
+	nmiBefore := w.railLedger("nmi")
+
+	op := pending.OperationID.String()
+	probes := map[string]struct {
+		path string
+		body any
+	}{
+		"POST /v1/me/subscriptions/{id}/cancel":                      {"/subscriptions/" + sub.String() + "/cancel", map[string]any{"reason": "not mine"}},
+		"POST /v1/me/subscriptions/{id}/resume":                      {"/subscriptions/" + sub.String() + "/resume", map[string]any{}},
+		"PUT /v1/me/subscriptions/{id}/payment-method":               {"/subscriptions/" + sub.String() + "/payment-method", map[string]any{"payment_method_id": bCard}},
+		"GET /v1/me/subscriptions/{id}":                              {"/subscriptions/" + sub.String(), nil},
+		"POST /v1/me/subscriptions/{id}/retry-now":                   {"/subscriptions/" + sub.String() + "/retry-now", map[string]any{}},
+		"POST /v1/me/subscriptions/{id}/change-tier":                 {"/subscriptions/" + sub.String() + "/change-tier", map[string]any{"price_id": to.ID}},
+		"POST /v1/me/subscriptions/{id}/change-tier/preview":         {"/subscriptions/" + sub.String() + "/change-tier/preview", map[string]any{"price_id": to.ID}},
+		"GET /v1/me/payment-operations/{id}/authentication":          {"/payment-operations/" + op + "/authentication", nil},
+		"POST /v1/me/payment-operations/{id}/authentication/confirm": {"/payment-operations/" + op + "/authentication/confirm", map[string]any{}},
+		"GET /v1/me/invoices/{id}":                                   {"/invoices/" + invoice, nil},
+		"POST /v1/me/invoices/{id}/pay-now":                          {"/invoices/" + invoice + "/pay-now", map[string]any{"payment_method_id": bCard}},
+		"PUT /v1/me/payment-methods/{id}":                            {"/payment-methods/" + aCard, map[string]any{"payment_token": w.nmi.Tokenize(mastercard), "billing_details": map[string]any{"name": "Not Mine"}}},
+		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
+		"GET /v1/me/payment-method-setups/{id}":                      {"/payment-method-setups/" + setup, nil},
+		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
+		"POST /v1/me/notifications/{id}/read":                        {"/notifications/" + notification + "/read", map[string]any{}},
+	}
+	probed := 0
+	for _, route := range routes.Catalog() {
+		if route.Group != routes.Customer || !strings.Contains(route.Path, "{") {
+			continue
+		}
+		probe, ok := probes[route.Key()]
+		require.True(t, ok, "%s names an object and has no IDOR fixture", route.Key())
+		status, out := w.callAt(w.server.URL, b.token, route.Method, probe.path, "idor-"+uuid.NewString(), probe.body)
+		require.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, status, "%s with A's id: %v", route.Key(), out)
+		probed++
+	}
+	require.Len(t, probes, probed, "every fixture names a mounted route")
+
+	read := session.read()
+	require.Empty(t, read["saved_methods"], "a guest sees no saved cards")
+	status, out := w.page(http.MethodGet, "/v1/checkout-sessions/"+session.id, b.token, nil)
+	require.Equal(t, http.StatusNotFound, status, "to B, A's session does not exist: %v", out)
+	status, out = session.payAs(b, map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard})
+	require.Equal(t, http.StatusNotFound, status, "B paying A's session: %v", out)
+
+	// Nothing of A's changed.
+	w.settle()
+	require.Equal(t, before, w.railLedger("stripe"))
+	require.Equal(t, nmiBefore, w.railLedger("nmi"))
+	got := w.subscription(embedded, sub)
+	require.Equal(t, billing.SubscriptionActive, got.Status)
+	require.Equal(t, from.ID, got.PriceID)
+	require.Nil(t, got.CanceledAt)
+	methods, err := w.client[embedded].ListPaymentMethods(ctx, a.cid(), billing.PageRequest{})
+	require.NoError(t, err)
+	require.Len(t, methods.Items, 2, "A's cards are A's")
+	again, err := w.client[embedded].GetInvoice(ctx, invoices.Items[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, invoices.Items[0].AmountDue, again.AmountDue)
+	unread := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)[0].(map[string]any)
+	require.Nil(t, unread["read_at"])
+	require.NotEmpty(t, unwrap(a.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))["client_secret"], "A's upgrade still waits for A")
+}
+
+// The harness's own Auth passes the conformance kit a host runs in its CI.
+func TestHarnessAuthConforms(t *testing.T) {
+	t.Parallel()
+	v := &verifier{secret: []byte("conformance-" + uuid.NewString())}
+	stranger := &verifier{secret: []byte("stranger-" + uuid.NewString())}
+	customer := uuid.NewString()
+	signedOut := v.sessionToken(t, customer, "s_out")
+	v.revoked.Store("s_out", struct{}{})
+	req := func(token string) func() *http.Request {
+		return func() *http.Request {
+			r := httptest.NewRequest(http.MethodPost, mountPrefix+"/v1/merchant/payments/pay_x/refunds", nil)
+			r.Header.Set("Authorization", "Bearer "+token)
+			return r
+		}
+	}
+	openrailstest.CheckAuth(t, v, openrailstest.AuthCases{
+		Permission: billing.MerchantPaymentsRefund,
+		Customer:   req(v.token(t, customer)),
+		Staff:      req(v.token(t, "support")),
+		Refused: map[string]func() *http.Request{
+			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),
+		},
+		StaleStaff: req(v.staleToken(t, "support")),
+		Machine:    req(v.hostToken(t)),
+	})
+}

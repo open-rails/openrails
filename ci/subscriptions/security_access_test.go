@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // callAt sends one customer request with token to a mounted server.
@@ -221,27 +219,13 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	// A host's own customer authenticator classifies credentials; "auto-"
-	// subjects are the customer's API automation.
-	merchantID := w.client[embedded].MerchantID().String()
-	hostAuth := func(r *http.Request) (*billingauth.DelegatedPrincipal, error) {
-		p, err := w.auth.AuthenticateRequest(r.Context(), r)
-		if err != nil {
-			return nil, err
-		}
-		subject, class := p.Identity().Subject, billingauth.CredentialClassUserSession
-		if id, ok := strings.CutPrefix(subject, "auto-"); ok {
-			subject, class = id, billingauth.CredentialClassAutomation
-		}
-		return &billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(uuid.MustParse(merchantID)), MerchantSlug: w.slug, SubjectID: subject, CredentialClass: class, Issuer: issuer}, nil
-	}
-	self := w.peer(w.slug, openrails.CustomerSelfService, w.auth, w.declaredPSPs(), hostAuth)
+	self := w.peer(w.slug, openrails.CustomerSelfService, w.auth, w.declaredPSPs())
 	group := "g" + uuid.NewString()[:8]
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
 	c, sub := w.engineMember("nmi", embedded, basic)
 	post := w.finitePass("content:post")
-	bot := w.auth.token(t, "auto-"+c.id)
+	bot := w.auth.apiKeyToken(t, c.id)
 	charges := len(w.railLedger("nmi"))
 
 	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change-tier", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})

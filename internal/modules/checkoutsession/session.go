@@ -45,8 +45,11 @@ var (
 	ErrNotFound  = apperr.New(http.StatusNotFound, "checkout_session_not_found", "Checkout session not found.")
 	ErrExpired   = apperr.New(http.StatusGone, "checkout_session_expired", "Checkout session expired.")
 	ErrForbidden = apperr.New(http.StatusForbidden, "checkout_session_unavailable", "Checkout session is not available.")
-	ErrBusy      = apperr.New(http.StatusConflict, "checkout_payment_in_progress", "A payment is already being processed.")
-	ErrInvalid   = apperr.New(http.StatusUnprocessableEntity, "checkout_request_invalid", "Checkout request is invalid.")
+	ErrBlocked   = apperr.New(http.StatusForbidden, "customer_blocked", "This customer may not buy.")
+	// ErrProofRequired is a saved card offered without its customer signed in.
+	ErrProofRequired = apperr.New(http.StatusForbidden, "customer_proof_required", "A saved card pays only for its customer, signed in.")
+	ErrBusy          = apperr.New(http.StatusConflict, "checkout_payment_in_progress", "A payment is already being processed.")
+	ErrInvalid       = apperr.New(http.StatusUnprocessableEntity, "checkout_request_invalid", "Checkout request is invalid.")
 )
 
 // Option is one payment option as minted: the browser-facing option plus the

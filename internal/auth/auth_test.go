@@ -35,7 +35,7 @@ func TestUserAuthenticator(t *testing.T) {
 	claims := verify.Claims{Kind: iam.ActorUser, UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", RootRole: "root:admin", Entitlements: []string{"premium"}}
 	uc, err := NewAuthenticator(&countingVerifier{claims: claims}).Authenticate(t.Context(), bearer("Bearer x"))
 	require.NoError(t, err)
-	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", Entitlements: []string{"premium"}}, uc, "token role snapshots are never carried")
+	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", SessionID: "sid"}, uc, "token role snapshots are never carried")
 
 	// DPoP proofs are single-use and belong to the delegated verifier.
 	v := &countingVerifier{claims: claims}

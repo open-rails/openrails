@@ -8,14 +8,11 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/credential"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// customerParam reads the {customer_id} path value and checks that the
-// credential may act on that customer.
+// customerParam reads the {customer_id} path value of a merchant route.
 func customerParam(r *httprequest.Request) (billing.CustomerID, bool) {
 	id, err := billing.ParseCustomerID(r.Param("customer_id"))
 	if err != nil || id.IsZero() {
@@ -25,53 +22,28 @@ func customerParam(r *httprequest.Request) (billing.CustomerID, bool) {
 	return id, requireServiceCustomerScope(r, id)
 }
 
-// requireServiceCustomerScope refuses a service credential scoped to other
-// customers.
-func requireServiceCustomerScope(r *httprequest.Request, customer billing.CustomerID) bool {
-	if v, ok := r.Get(middleware.ServiceCredentialContextKey); ok {
-		resolved, ok := v.(*credential.ResolvedServiceCredential)
-		if !ok || resolved == nil {
-			r.InternalError("service credential state invalid", nil)
-			return false
-		}
-		if !resolved.AllowsCustomer(customer.UUID()) {
-			r.ErrorCode(billing.CodeServiceCredentialCustomerScopeDenied, "")
-			return false
-		}
-		return true
-	}
-	if hasMerchantRoutePrincipal(r) {
-		return true
-	}
-	r.ErrorCode(billing.CodeAuthenticationRequired, "")
-	return false
+// requireServiceCustomerScope refuses a merchant route the staff gate did
+// not authorize. Staff act on any customer of their merchant.
+func requireServiceCustomerScope(r *httprequest.Request, _ billing.CustomerID) bool {
+	return requireMerchantRoutePrincipal(r)
 }
 
 // serviceCustomerScopeAllows reports what requireServiceCustomerScope would
 // decide, without answering.
-func serviceCustomerScopeAllows(r *httprequest.Request, customer billing.CustomerID) bool {
-	if v, ok := r.Get(middleware.ServiceCredentialContextKey); ok {
-		resolved, ok := v.(*credential.ResolvedServiceCredential)
-		return ok && resolved != nil && resolved.AllowsCustomer(customer.UUID())
-	}
-	return hasMerchantRoutePrincipal(r)
-}
-
-const MerchantRoutePrincipalContextKey = "openrails.merchant_route_principal"
-
-func hasMerchantRoutePrincipal(r *httprequest.Request) bool {
-	if r == nil {
-		return false
-	}
-	_, ok := r.Get(MerchantRoutePrincipalContextKey)
+func serviceCustomerScopeAllows(r *httprequest.Request, _ billing.CustomerID) bool {
+	_, ok := r.Staff()
 	return ok
 }
 
+// StaffCan asks the route's staff gate one more permission on the merchant
+// it already authorized; nil grants it. A handler whose answer depends on it
+// (a permanent grant, which invoice actions to offer) takes one.
+type StaffCan func(r *http.Request, permission string) error
+
+// requireMerchantRoutePrincipal is a merchant handler's own check that the
+// staff gate authorized the request.
 func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
-	if hasMerchantRoutePrincipal(r) {
-		return true
-	}
-	if _, ok := r.Get(middleware.ServiceCredentialContextKey); ok {
+	if _, ok := r.Staff(); ok {
 		return true
 	}
 	r.ErrorCode(billing.CodeAuthenticationRequired, "")

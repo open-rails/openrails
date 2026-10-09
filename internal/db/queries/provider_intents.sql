@@ -23,13 +23,13 @@
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
     payload, idempotency_key, status, next_attempt_at, origin, origin_reason,
-    actor, expires_at, psp_id, custodian_id
+    actor, subject, credential, expires_at, psp_id, custodian_id
 ) VALUES (
     COALESCE(sqlc.narg(id)::uuid, uuidv7()), sqlc.arg(merchant_id), sqlc.arg(rail), sqlc.arg(intent_type),
     sqlc.narg(subscription_id), sqlc.narg(payment_id), sqlc.narg(price_id),
     sqlc.narg(payload), sqlc.arg(idempotency_key), 'pending',
     sqlc.arg(next_attempt_at)::timestamptz, sqlc.arg(origin),
-    sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(expires_at),
+    sqlc.narg(origin_reason), sqlc.narg(actor), sqlc.narg(subject), sqlc.narg(credential), sqlc.narg(expires_at),
     sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
@@ -60,6 +60,14 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     actor = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE billing.provider_intents.actor
+    END,
+    subject = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.subject
+        ELSE billing.provider_intents.subject
+    END,
+    credential = CASE
+        WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.credential
+        ELSE billing.provider_intents.credential
     END,
     expires_at = CASE
         WHEN billing.provider_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership', 'subscription_collection') AND (billing.provider_intents.status IN ('superseded', 'expired') OR (billing.provider_intents.status = 'pending' AND billing.provider_intents.attempts = 0)) THEN EXCLUDED.expires_at
@@ -415,7 +423,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- operation posts a row before it executes, so a rolling-window count over
 -- created_at is the burst gauge, stopping a burst at the producer.
 
--- Destructive user/admin intents this actor created in the window, across
+-- Destructive user/admin intents this invoker created in the window, across
 -- merchants: one stolen credential operating across merchants is the shape
 -- this leg must see.
 -- name: CountDestructiveIntentsByActorSince :one

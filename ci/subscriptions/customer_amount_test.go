@@ -38,12 +38,12 @@ func TestHostedCreditDepositSnapshot(t *testing.T) {
 		require.Equal(t, []string{"100000000", "75000000"}[i], session.read()["due_today"])
 		body := map[string]any{"option_id": session.option("nmi"), "payment_method_id": method}
 		changed := map[string]any{"option_id": session.option("nmi"), "payment_method_id": method, "amount": "1000000"}
-		status, _ := session.pay(changed)
+		status, _ := session.payAs(buyer, changed)
 		require.Equal(t, http.StatusBadRequest, status, "the payment form cannot change the minted amount")
-		status, paid := session.pay(body)
+		status, paid := session.payAs(buyer, body)
 		require.Equal(t, http.StatusOK, status, "%v", paid)
 		require.Equal(t, "succeeded", paid["status"])
-		status, replay := session.pay(body)
+		status, replay := session.payAs(buyer, body)
 		require.Equal(t, http.StatusOK, status, "%v", replay)
 		require.Equal(t, paid["payment_id"], replay["payment_id"])
 		pay.settle()
@@ -76,6 +76,13 @@ func TestCreditDepositAttemptIdempotency(t *testing.T) {
 		buyer := w.newCustomer()
 		method := buyer.saveCard("nmi", visa)
 		request := billing.CreateCheckoutAttemptParams{Customer: buyer.identity(), PriceID: price.ID, Amount: new(int64(100_000_000)), IdempotencyKey: "chosen-deposit", PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)}}
+		if tp == remote {
+			// Over HTTP a saved card is charged only on a session its
+			// customer pays.
+			_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), request)
+			requireCode(t, err, http.StatusForbidden, "customer_proof_required")
+			continue
+		}
 		result, err := w.client[tp].CreateCheckoutAttempt(t.Context(), request)
 		require.NoError(t, err, tp)
 		require.Equal(t, billing.CheckoutAttemptSucceeded, result.Status)
@@ -91,5 +98,5 @@ func TestCreditDepositAttemptIdempotency(t *testing.T) {
 		require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused, tp)
 	}
 	w.settle()
-	require.Len(t, w.nmi.Sales(), 2, "only the two distinct buyers' original deposits were charged")
+	require.Len(t, w.nmi.Sales(), 1, "only the original deposit was charged")
 }

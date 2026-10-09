@@ -57,12 +57,12 @@ func initialMembershipQuoteFingerprint(terms subscriptions.InitialMembershipTerm
 // payer. Only the validated self-session adapter supplies sessionID; other
 // callers leave their opaque replay key unbound. Provider routing/credentials
 // never come from the quoted payload.
-func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted subscriptions.InitialMembershipTerms, key string, principal billingauth.DelegatedPrincipal, sessionID *uuid.UUID) (*CheckoutResponse, error) {
+func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted subscriptions.InitialMembershipTerms, key string, principal billingauth.Payer, sessionID *uuid.UUID) (*CheckoutResponse, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if billingauth.ValidateDelegatedPrincipal(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != accepted.CustomerID.String() {
+	if billingauth.ValidatePayer(&principal) != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid || principal.SubjectID != accepted.CustomerID.String() {
 		return nil, apperr.New(403, "customer_session_required", "initial membership requires its interactive customer session")
 	}
 	if accepted.CollectionPolicy != models.CollectionPolicyEngine || accepted.Amount <= 0 || accepted.Amount != accepted.RecurringAmount || accepted.Pending {

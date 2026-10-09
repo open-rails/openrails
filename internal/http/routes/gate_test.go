@@ -2,347 +2,559 @@ package routes
 
 import (
 	"context"
-	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	auth "github.com/open-rails/helpers/auth"
-
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/credential"
-	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/customerscope"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/requestauth"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-const (
-	userA = "11111111-1111-4111-8111-111111111111"
-	userB = "22222222-2222-4222-8222-222222222222"
-)
+// openTiers are the tiers no Auth runs on: their credential is the request
+// itself (a capability id or a provider signature) or there is none.
+var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession}
 
-var (
-	merchantA = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
-	merchantB = billing.MerchantID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
-)
-
-func userAuth(uc billingauth.UserContext, err error) billingauth.Authenticator {
-	return billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) { return uc, err })
+// openRoutes is every route no Auth gates. A route that joins it is a
+// reviewed change.
+var openRoutes = []string{
+	"GET /health/live", "GET /health/ready", "GET /metrics", "GET /v1/capabilities",
+	"GET /v1/captcha/client.js", "GET /v1/captcha/status",
+	"GET /v1/checkout-config", "GET /v1/currencies", "GET /v1/prices", "GET /v1/products", "GET /v1/solana/tokens",
+	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
+	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
+	"POST /v1/webhooks/{rail}/{account_id}",
 }
 
-// membership grants the permission on the listed merchant slugs; a zero ID is
-// a granted but unresolvable merchant.
-type membership struct {
-	granted  map[string]billing.MerchantID
-	inferred string
-	err      error
-	refs     []string
-}
-
-func (m *membership) ResolveAuthorizedMerchant(_ context.Context, _ *http.Request, ref, _ string) (billing.MerchantID, string, error) {
-	m.refs = append(m.refs, ref)
-	if m.err != nil {
-		return billing.MerchantID{}, "", m.err
-	}
-	if ref == "" {
-		if ref = m.inferred; ref == "" {
-			return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
+// Every catalog route declares exactly one tier of the closed set, and the
+// permission that tier checks: a merchant route one exact merchant
+// permission, a customer route none, and no customer path names a customer.
+func TestEveryRouteDeclaresOneTier(t *testing.T) {
+	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthUser, AuthCustomer, AuthMerchant, AuthOperator, AuthProvider}
+	permissions := Permissions()
+	var open []string
+	for _, r := range Catalog() {
+		key := r.Key()
+		require.Contains(t, tiers, r.Auth, "%s declares no known tier", key)
+		if slices.Contains(openTiers, r.Auth) {
+			open = append(open, key)
+		}
+		switch r.Auth {
+		case AuthMerchant:
+			require.NotContains(t, r.Perm, "*", "%s: a permission is exact, never a glob", key)
+			if r.Group == Merchant {
+				require.Contains(t, permissions, r.Perm, key)
+			}
+			require.Equal(t, billing.RequiresRecentSignIn(r.Perm) || r.Also != "" && billing.RequiresRecentSignIn(r.Also), Sensitive(r), key)
+		case AuthCustomer:
+			require.Empty(t, r.Perm, key)
+			require.Equal(t, Customer, r.Group, key)
+			require.False(t, Sensitive(r), "%s: customer self-service never steps up", key)
+			for _, param := range []string{"{customer_id}", "{subject}", "{user_id}"} {
+				require.NotContains(t, r.Path, param, "%s: a customer route takes its customer from the gate only", key)
+			}
 		}
 	}
-	id, ok := m.granted[ref]
-	if !ok {
-		return billing.MerchantID{}, "", billing.ErrPermissionRequired
+	sort.Strings(open)
+	want := slices.Clone(openRoutes)
+	sort.Strings(want)
+	require.Equal(t, want, open, "the routes no Auth gates")
+	for _, p := range permissions {
+		require.True(t, strings.HasPrefix(p, "merchant:") && !strings.Contains(p, "*"), p)
 	}
-	return id, ref, nil
-}
-
-func (m *membership) CheckRecentSignIn(context.Context, *http.Request) error { return nil }
-
-type credResolver struct {
-	key    *credential.ResolvedServiceCredential
-	keyErr error
-}
-
-func (credResolver) LooksLikeAPIKey(token string) bool { return strings.HasPrefix(token, "sk_") }
-func (c credResolver) ResolveAPIKey(context.Context, string) (*credential.ResolvedServiceCredential, error) {
-	return c.key, c.keyErr
-}
-
-func hostDelegated(p *billingauth.DelegatedPrincipal, err error) billingauth.DelegatedAuthenticator {
-	return billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) { return p, err })
-}
-
-func serviceCredential(perms ...string) *credential.ResolvedServiceCredential {
-	return &credential.ResolvedServiceCredential{MerchantID: merchantA, Permissions: perms}
-}
-
-// Every credential kind reaches a merchant route only through its own verified
-// merchant and an explicit permission; failures keep distinct, stable codes.
-func TestGateAuthorizesEachCredentialKind(t *testing.T) {
-	read := billing.MerchantSettingsRead
-	type want struct {
-		status   int
-		message  string
-		merchant billing.MerchantID
-		subject  string
-		userID   string
-		userSlug string
+	require.Contains(t, permissions, billing.MerchantAccessGrantPermanent, "handlers' further asks are permissions too")
+	for _, builtin := range []string{billing.MerchantMembersRead, billing.MerchantMembersManage, billing.MerchantCredentialsManage} {
+		require.NotContains(t, permissions, builtin, "AuthKit registers its own built-ins; the merchant API never asks them")
 	}
-	for _, tc := range []struct {
-		name   string
-		opts   GateOptions
-		host   *requestauth.HostPrincipal
-		header map[string]string
-		want   want
-	}{
-		{name: "host principal without merchant", host: &requestauth.HostPrincipal{Permissions: []string{"merchant:*"}}, want: want{status: 401, message: "host_principal_invalid"}},
-		{name: "host principal lacking permission", host: &requestauth.HostPrincipal{MerchantID: merchantA, Permissions: []string{billing.MerchantCatalogRead}}, want: want{status: 403, message: "permission_required"}},
-		{name: "host principal wins over any header", host: &requestauth.HostPrincipal{MerchantID: merchantA, Subject: "svc", Permissions: []string{"merchant:*"}},
-			opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("never consulted")}}, header: map[string]string{"Authorization": "Bearer sk_1"}, want: want{merchant: merchantA, subject: "svc"}},
+}
 
-		{name: "api key", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(read)}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key glob", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*")}}, header: bearer("sk_1"), want: want{merchant: merchantA}},
-		{name: "api key lacking permission", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential("root:*")}}, header: bearer("sk_1"), want: want{status: 403, message: "permission_required"}},
-		{name: "api key resolved to nothing", opts: GateOptions{ServiceCredentialResolver: credResolver{}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
-		{name: "api key scope denied", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialScopeDenied}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_resource_scope_denied"}},
-		{name: "api key merchant unresolved", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialMerchantUnresolved}}, header: bearer("sk_1"), want: want{status: 403, message: "service_credential_merchant_unresolved"}},
-		{name: "api key for another host", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: credential.ErrServiceCredentialHostMismatch}}, header: bearer("sk_1"), want: want{status: 403, message: "host_merchant_mismatch"}},
-		{name: "api key invalid", opts: GateOptions{ServiceCredentialResolver: credResolver{keyErr: errors.New("bad key")}}, header: bearer("sk_1"), want: want{status: 401, message: "service_credential_invalid"}},
+// recordingAuth records which middleware ran, in order, and admits who.
+type recordingAuth struct {
+	mu    sync.Mutex
+	calls []string
+	who   billingauth.Identity
+}
 
-		{name: "a JWT that is no access token is a user session", opts: GateOptions{ServiceCredentialResolver: credResolver{key: serviceCredential(read)}, Authenticator: userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated)}, header: bearer("a.b.c"), want: want{status: 401, message: "authentication required"}},
+type admittedKey struct{}
 
-		{name: "host delegated principal", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: userA, Permissions: []string{read}}, nil)}, want: want{merchant: merchantA, subject: userA, userID: userA}},
-		{name: "host delegated principal lacking permission", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: userA, Permissions: []string{billing.MerchantUsageRead}}, nil)}, want: want{status: 403, message: "permission_required"}},
-		{name: "host delegated principal with opaque subject", opts: GateOptions{DelegatedAuthenticator: hostDelegated(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(merchantA), SubjectID: "user-1", Permissions: []string{read}}, nil)}, want: want{status: 401, message: "delegated_principal_invalid"}},
-		{name: "host delegated rejection", opts: GateOptions{DelegatedAuthenticator: hostDelegated(nil, billingauth.ErrUnauthenticated)}, want: want{status: 401, message: "authentication required"}},
-
-		{name: "no credential path", want: want{status: 401, message: "bearer principal required"}},
-		{name: "user with opaque subject", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: "user-1"}, nil), AdminPermissionChecker: &membership{}}, want: want{status: 401}},
-		{name: "user without membership checker", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil)}, want: want{status: 500, message: "authorization unavailable"}},
-		{name: "membership lookup failure", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: errors.New("db")}}, want: want{status: 500, message: "failed to check permission"}},
-		{name: "revoked session", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: errors.Join(errors.New("session_revoked"), auth.ErrRevoked)}}, want: want{status: 401, message: "credential_revoked"}},
-		{name: "ambiguous membership", opts: GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: &membership{err: credential.ErrMerchantAmbiguous}}, want: want{status: 403, message: "merchant_unresolved"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/configuration", nil)
-			for k, v := range tc.header {
-				r.Header.Set(k, v)
-			}
-			ctx := r.Context()
-			if tc.host != nil {
-				ctx = requestauth.WithHostPrincipal(ctx, tc.host)
-			}
-			principal, err := NewGate(tc.opts).Authorize(ctx, r, read)
-			assertGate(t, principal, err, tc.want.status, tc.want.message)
-			if tc.want.status == 0 {
-				require.Equal(t, tc.want.merchant, principal.MerchantID)
-				require.Equal(t, tc.want.subject, principal.Subject)
-				require.Equal(t, tc.want.userID, principal.UserContext.UserID)
-				require.Equal(t, tc.want.userSlug, principal.UserContext.Merchant)
-			}
+func (a *recordingAuth) record(name string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a.mu.Lock()
+			a.calls = append(a.calls, name)
+			a.mu.Unlock()
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), admittedKey{}, true)))
 		})
 	}
 }
+func (a *recordingAuth) Required() func(http.Handler) http.Handler { return a.record("Required") }
+func (a *recordingAuth) RequirePermission(p string) func(http.Handler) http.Handler {
+	return a.record("RequirePermission:" + p)
+}
+func (a *recordingAuth) Sensitive() func(http.Handler) http.Handler { return a.record("Sensitive") }
+func (a *recordingAuth) Identity(ctx context.Context) (billingauth.Identity, bool) {
+	return a.who, ctx.Value(admittedKey{}) != nil
+}
+func (a *recordingAuth) take() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := a.calls
+	a.calls = nil
+	return out
+}
 
-// A user session's merchant comes from its token or an explicit selector, is
-// authorized by live membership, and must agree with any Host or context pin.
-func TestGateUserSessionMerchantSelection(t *testing.T) {
-	for _, tc := range []struct {
-		name, tokenMerchant, selector string
-		checker                       membership
-		ctx                           func(context.Context) context.Context
-		status                        int
-		message                       string
-		merchant                      billing.MerchantID
-		asked, slug                   string
-	}{
-		{name: "explicit selector", selector: " b ", checker: membership{granted: map[string]billing.MerchantID{"b": merchantB}}, merchant: merchantB, asked: "b", slug: "b"},
-		{name: "single membership inferred", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}, merchant: merchantA, asked: "", slug: "a"},
-		{name: "no selector and no single membership", checker: membership{}, status: 403, message: "merchant_unresolved", asked: ""},
-		{name: "selected merchant without live permission", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}}, status: 403, message: "permission_required", asked: "b"},
-		{name: "granted merchant that does not resolve", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"b": {}}}, status: 403, message: "merchant_unresolved", asked: "b"},
-		{name: "token merchant cannot be overridden", tokenMerchant: "a", selector: "b", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA, "b": merchantB}}, merchant: merchantA, asked: "a", slug: "a"},
-		{name: "must match the Host merchant", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
-			ctx: func(ctx context.Context) context.Context { return merchant.WithHostMerchant(ctx, merchantB) }, status: 403, message: "host_merchant_mismatch", asked: "a"},
-		{name: "must match the pinned merchant", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
-			ctx: func(ctx context.Context) context.Context { return merchant.WithID(ctx, merchantB) }, status: 403, message: "merchant_context_mismatch", asked: "a"},
-		{name: "agreeing pins", selector: "a", checker: membership{granted: map[string]billing.MerchantID{"a": merchantA}},
-			ctx: func(ctx context.Context) context.Context {
-				return merchant.WithHostMerchant(merchant.WithID(ctx, merchantA), merchantA)
-			}, merchant: merchantA, asked: "a", slug: "a"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			checker := tc.checker
-			gate := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA, Merchant: tc.tokenMerchant}, nil), AdminPermissionChecker: &checker})
-			r := httptest.NewRequest(http.MethodGet, "/v1/merchant/configuration", nil)
-			if tc.selector != "" {
-				r.Header.Set(merchant.SelectorHeader, tc.selector)
+// gatedRuntime is a database-free runtime bound to merchantA with catalog
+// edits open.
+func gatedRuntime(t *testing.T) *app.Runtime {
+	open := &catalogpolicy.Exposure{}
+	require.NoError(t, open.Decide(true))
+	rt := &app.Runtime{Config: &config.Config{}, CatalogEdits: open}
+	rt.SetConfiguredMerchant(merchantA)
+	return rt
+}
+
+// everyGatedSurface mounts every group an embedded host can publish, gated
+// by a.
+func everyGatedSurface(t *testing.T, a billingauth.Auth) (*router.Table, *app.Runtime) {
+	rt := gatedRuntime(t)
+	providers := routesurface.AllProviderRoutes()
+	table := &router.Table{}
+	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
+	RegisterMerchantRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, CatalogWrites: true})
+	RegisterSelfServiceRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
+	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
+	return table, rt
+}
+
+func filled(path string) string { return wildcard.ReplaceAllString(path, "x") }
+
+// serveSafely serves a request; a handler panicking on the bare runtime past
+// every gate answers handlerReached.
+func serveSafely(h http.Handler, r *http.Request) (code int) {
+	defer func() {
+		if recover() != nil {
+			code = handlerReached
+		}
+	}()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	return rec.Code
+}
+
+// Mount stacks exactly the tier's middleware on each route, in AuthKit's
+// order: Required on a customer route; RequirePermission for the route's
+// permission (and Also) and, for one that moves money or removes access by a
+// user in person, Sensitive on a merchant route; nothing on an open route.
+func TestMountComposesTierMiddleware(t *testing.T) {
+	for _, who := range []billingauth.Identity{authtest.User(userA), authtest.Application(userA)} {
+		rec := &recordingAuth{who: who}
+		table, _ := everyGatedSurface(t, rec)
+		h := table.Handler()
+		mounted := map[string]bool{}
+		for _, key := range routeKeys(table) {
+			mounted[key] = true
+		}
+		checked, sensitive := 0, 0
+		for _, r := range Catalog() {
+			if !mounted[r.Key()] || r.Group == ControlPlane || r.Group == Platform {
+				continue
 			}
-			ctx := r.Context()
-			if tc.ctx != nil {
-				ctx = tc.ctx(ctx)
+			var want []string
+			switch r.Auth {
+			case AuthCustomer:
+				want = []string{"Required"}
+			case AuthMerchant:
+				want = []string{"RequirePermission:" + r.Perm}
+				if r.Also != "" {
+					want = append(want, "RequirePermission:"+r.Also)
+				}
+				if Sensitive(r) && billingauth.Interactive(who) {
+					want = append(want, "Sensitive")
+					sensitive++
+				}
 			}
-			principal, err := gate.Authorize(ctx, r, billing.MerchantSettingsRead)
-			assertGate(t, principal, err, tc.status, tc.message)
-			require.Equal(t, []string{tc.asked}, checker.refs)
-			if tc.status == 0 {
-				require.Equal(t, tc.merchant, principal.MerchantID)
-				require.Equal(t, userA, principal.Subject)
-				require.Equal(t, tc.slug, principal.UserContext.Merchant)
+			req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
+			req.Header.Set("Authorization", "Bearer any")
+			serveSafely(h, req)
+			require.Equal(t, want, rec.take(), "%s as %s", r.Key(), who.SubjectKind)
+			checked++
+		}
+		require.Greater(t, checked, 180)
+		if billingauth.Interactive(who) {
+			require.Greater(t, sensitive, 20)
+		}
+	}
+}
+
+// A pass-through Auth, whose middleware checks nothing and admits no identity,
+// gets no route past OpenRails' own check: every gated route is refused
+// before its handler.
+func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
+	table, _ := everyGatedSurface(t, authtest.PassThrough{})
+	h := table.Handler()
+	gated := 0
+	for _, r := range Catalog() {
+		if r.Auth != AuthCustomer && r.Auth != AuthMerchant || r.Group != Merchant && r.Group != Customer {
+			continue
+		}
+		req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
+		req.Header.Set("Authorization", "Bearer forged")
+		code := serveSafely(h, req)
+		if r.CatalogWrite || code == http.StatusNotFound {
+			// Unmounted for this configuration (a feature it lacks).
+			if code == http.StatusNotFound {
+				continue
 			}
-		})
+		}
+		require.Equal(t, http.StatusUnauthorized, code, r.Key())
+		gated++
 	}
-
-	checker := &membership{granted: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}
-	principal, err := NewGate(GateOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), AdminPermissionChecker: checker}).Authorize(t.Context(), nil, billing.MerchantSettingsRead)
-	require.NoError(t, err, "a nil request still infers from membership")
-	require.Equal(t, merchantA, principal.MerchantID)
+	require.Greater(t, gated, 170)
 }
 
-func bearer(token string) map[string]string {
-	return map[string]string{"Authorization": "Bearer " + token}
-}
-
-func assertGate(t *testing.T, principal billingauth.Principal, err error, status int, message string) {
-	t.Helper()
-	if status == 0 {
-		require.NoError(t, err)
-		return
+// Every gated handler re-checks the verdict the gate bound: reached without
+// it, by any path, it answers 401 and does not run.
+func TestHandlersRecheckTheirVerdict(t *testing.T) {
+	rt := gatedRuntime(t)
+	env := newEnv(rt, Options{Auth: authtest.Deny{}, CatalogWrites: true})
+	env.Customers = authtest.Deny{}
+	for _, r := range Catalog() {
+		if r.Auth != AuthCustomer && r.Auth != AuthMerchant {
+			continue
+		}
+		h := env.Guarded(r)
+		if h == nil {
+			continue
+		}
+		for _, ctx := range []context.Context{
+			context.Background(),
+			merchant.WithID(context.Background(), merchantA),
+			// The other tier's verdict is not this one's.
+			billingauth.BindStaff(customerscope.Bind(merchant.WithID(context.Background(), merchantA), merchantA, billing.CustomerID(uuid.MustParse(userA)), userA, true),
+				billingauth.Staff{Identity: authtest.User(userA), Permission: "merchant:other:read", Merchant: merchantA}),
+		} {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}")).WithContext(ctx)
+			code := func() (code int) {
+				defer func() {
+					if recover() != nil {
+						code = handlerReached
+					}
+				}()
+				h(httprequest.NewHTTP(w, req, rt))
+				return w.Code
+			}()
+			require.Equal(t, http.StatusUnauthorized, code, r.Key())
+		}
 	}
-	var gateErr billingauth.GateError
-	require.ErrorAs(t, err, &gateErr)
-	require.Equal(t, status, gateErr.Status, gateErr.Message)
-	if _, coded := billing.LookupErrorCode(message); coded {
-		require.Equal(t, message, gateErr.Code)
-	} else if message != "" {
-		require.Equal(t, message, gateErr.Message)
-	}
-	require.NotEmpty(t, gateErr.Code, "every gate refusal carries its code")
-	require.Zero(t, principal)
 }
 
-type gateFunc func(context.Context, *http.Request, string) (billingauth.Principal, error)
-
-func (f gateFunc) Authorize(ctx context.Context, r *http.Request, perm string) (billingauth.Principal, error) {
-	return f(ctx, r, perm)
-}
-
-func (gateFunc) RequireRecentSignIn(context.Context, *http.Request, billingauth.Principal) error {
-	return nil
-}
-
-// The permission middleware turns the gate's answer into the request's only
-// merchant and principal, and refuses before the handler on any failure.
-func TestMerchantPermissionMiddleware(t *testing.T) {
-	type seen struct {
-		merchant  billing.MerchantID
-		user      string
-		principal any
-	}
-	run := func(gate billingauth.Gate, header map[string]string, ctx context.Context) (*httptest.ResponseRecorder, *seen) {
-		var got *seen
-		mw := Options{Gate: gate}.RequireMerchantPermission(billing.MerchantPaymentsRead)
-		rec := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/v1/merchant/payments", nil).WithContext(ctx)
+// The customer gate admits a user, whatever credential they signed in with,
+// as the customer the request acts for, at the mount's merchant; a service
+// or a non-UUID subject is no customer.
+func TestCustomerGate(t *testing.T) {
+	rt := gatedRuntime(t)
+	run := func(who billingauth.Identity, header map[string]string) (int, customerscope.Scope) {
+		a := &recordingAuth{who: who}
+		table := &router.Table{}
+		var seen customerscope.Scope
+		mux := router.NewMux(table, "/v1/me", rt)
+		env := newEnv(rt, Options{})
+		env.Customers = a
+		route, _ := Lookup(GET, "/v1/me/balance")
+		mux.Handle(GET, "/balance", func(r *httprequest.Request) {
+			seen, _ = r.CustomerScope()
+			r.NoContent()
+		}, env.gates(route)...)
+		req := httptest.NewRequest(GET, "/v1/me/balance", nil)
 		for k, v := range header {
-			r.Header.Set(k, v)
+			req.Header.Set(k, v)
 		}
-		mw(func(req *httprequest.Request) {
-			got = &seen{}
-			got.merchant, _ = merchant.FromContext(req.Request.Context())
-			if uc, ok := req.UserContext(); ok {
-				got.user = uc.UserID
-			}
-			got.principal, _ = req.Get(httphandlers.MerchantRoutePrincipalContextKey)
-			req.Status(http.StatusNoContent)
-		})(httprequest.NewHTTP(rec, r, nil))
-		return rec, got
+		return serveSafely(table.Handler(), req), seen
 	}
-	allow := billingauth.Principal{MerchantID: merchantA, Subject: userA, UserContext: billingauth.UserContext{UserID: userA}}
-	allowGate := gateFunc(func(_ context.Context, _ *http.Request, perm string) (billingauth.Principal, error) {
-		require.Equal(t, billing.MerchantPaymentsRead, perm)
-		return allow, nil
-	})
+	user := authtest.User(userA)
+	code, scope := run(user, nil)
+	require.Equal(t, http.StatusNoContent, code)
+	require.Equal(t, userA, scope.Customer().String())
+	require.Equal(t, merchantA, scope.Merchant())
 
-	rec, got := run(allowGate, nil, t.Context())
-	require.Equal(t, http.StatusNoContent, rec.Code)
-	require.Equal(t, merchantA, got.merchant)
-	require.Equal(t, userA, got.user)
-	require.Equal(t, allow, got.principal)
+	device := user
+	device.Credential = billingauth.Credential{Kind: billingauth.CredentialDeviceKey, ID: "dk_1"}
+	foreign := authtest.Application(userB)
+	foreign.Invoker = billingauth.Invoker{Issuer: "https://cozy.example", ID: "u_42"}
+	code, scope = run(device, nil)
+	require.Equal(t, http.StatusNoContent, code, "a device key is its user")
+	require.Equal(t, userA, scope.Customer().String())
 
-	for _, tc := range []struct {
-		name   string
-		gate   billingauth.Gate
+	for name, tc := range map[string]struct {
+		who    billingauth.Identity
 		header map[string]string
-		ctx    context.Context
 		status int
 	}{
-		{"no gate", nil, nil, t.Context(), 500},
-		{"gate refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-		}), nil, t.Context(), 403},
-		{"gate failure is not a refusal", gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-			return billingauth.Principal{}, errors.New("db down")
-		}), nil, t.Context(), 500},
-		{"id selector for another merchant", allowGate, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, t.Context(), 409},
-		{"malformed id selector", allowGate, map[string]string{merchant.SelectorHeader: "id:nope"}, t.Context(), 400},
-		{"slug selector without a resolved target", allowGate, map[string]string{merchant.SelectorHeader: "a"}, t.Context(), 409},
-		{"configured merchant differs", allowGate, nil, merchant.WithID(t.Context(), merchantB), 409},
+		"an application acting itself":   {authtest.Application(userA), nil, http.StatusForbidden},
+		"an invoker for another subject": {foreign, nil, http.StatusForbidden},
+		"no subject kind":                {withKind(user, ""), nil, http.StatusForbidden},
+		"no invoker":                     {withInvoker(user, billingauth.Invoker{}), nil, http.StatusUnauthorized},
+		"an opaque subject":              {authtest.User("user-1"), nil, http.StatusUnauthorized},
+		"a non-canonical UUID":           {authtest.User(strings.ToUpper(merchantB.String())), nil, http.StatusUnauthorized},
+		"another merchant's selector":    {user, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, http.StatusConflict},
 	} {
-		rec, got := run(tc.gate, tc.header, tc.ctx)
-		require.Equal(t, tc.status, rec.Code, tc.name)
-		require.Nil(t, got, "%s reached the handler", tc.name)
+		code, _ := run(tc.who, tc.header)
+		require.Equal(t, tc.status, code, name)
 	}
-
-	rec, _ = run(gateFunc(func(context.Context, *http.Request, string) (billingauth.Principal, error) {
-		return billingauth.Principal{}, billingauth.Refusal(billing.CodeSenderProofRequired)
-	}), nil, t.Context())
-	require.Equal(t, http.StatusUnauthorized, rec.Code)
-	require.Contains(t, rec.Header().Get("WWW-Authenticate"), "DPoP")
 }
 
-// Required auth pins a UUID subject for the handler (surviving request
-// reassignment); optional auth never refuses.
-func TestUserAuthMiddleware(t *testing.T) {
-	for _, tc := range []struct {
-		name           string
-		authn          billingauth.Authenticator
-		seenAs         string
-		requiredStatus int
-	}{
-		{"valid", userAuth(billingauth.UserContext{UserID: userA}, nil), userA, http.StatusNoContent},
-		{"rejected", userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated), "", http.StatusUnauthorized},
-		{"opaque subject", userAuth(billingauth.UserContext{UserID: "42"}, nil), "", http.StatusUnauthorized},
-		{"auth disabled", nil, "", http.StatusInternalServerError},
-	} {
-		opts := Options{Authenticator: tc.authn}
-		for _, mw := range []struct {
-			name   string
-			mw     router.Middleware
-			status int
-		}{
-			{"required", opts.requiredMW(), tc.requiredStatus},
-			{"optional", opts.optionalMW(), http.StatusNoContent},
-		} {
-			user := "unset"
-			rec := httptest.NewRecorder()
-			mw.mw(func(r *httprequest.Request) {
-				r.Request = r.Request.WithContext(context.Background())
-				uc, _ := r.UserContext()
-				user = uc.UserID
-				r.Status(http.StatusNoContent)
-			})(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/me/balance", nil), nil))
-			require.Equal(t, mw.status, rec.Code, "%s/%s", tc.name, mw.name)
-			if rec.Code == http.StatusNoContent {
-				require.Equal(t, tc.seenAs, user, "%s/%s", tc.name, mw.name)
-			}
+// The staff gate refuses what the host's middleware admitted without an
+// identity, a person on a machine-only route, and anything at another merchant.
+func TestStaffGate(t *testing.T) {
+	rt := gatedRuntime(t)
+	run := func(a billingauth.Auth, key string, header map[string]string) (int, billingauth.Staff) {
+		method, path, _ := strings.Cut(key, " ")
+		route, ok := Lookup(method, path)
+		require.True(t, ok, key)
+		env := newEnv(rt, Options{Auth: a})
+		table := &router.Table{}
+		var seen billingauth.Staff
+		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
+			seen, _ = r.Staff()
+			r.NoContent()
+		}, env.gates(route)...)
+		req := httptest.NewRequest(route.Method, filled(route.Path), strings.NewReader("{}"))
+		for k, v := range header {
+			req.Header.Set(k, v)
 		}
+		return serveSafely(table.Handler(), req), seen
+	}
+	person := authtest.User(userA)
+	service := authtest.Application("svc_1")
+	personalKey := person
+	personalKey.Credential = billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "pk_1"}
+
+	code, staff := run(&recordingAuth{who: person}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	require.Equal(t, http.StatusNoContent, code)
+	require.Equal(t, billingauth.Staff{Identity: person, Permission: billing.MerchantPaymentsRefund, Merchant: merchantA}, staff)
+
+	for _, key := range []string{"POST /v1/merchant/checkout-sessions", "POST /v1/merchant/checkout-attempts", "POST /v1/merchant/checkout-attempts/{id}/confirm"} {
+		code, _ = run(&recordingAuth{who: person}, key, nil)
+		require.Equal(t, http.StatusForbidden, code, "%s: a person never creates a checkout for someone else", key)
+		code, staff = run(&recordingAuth{who: service}, key, nil)
+		require.Equal(t, http.StatusNoContent, code, key)
+		require.Equal(t, "k_svc_1", staff.Credential.ID)
+		code, _ = run(&recordingAuth{who: personalKey}, key, nil)
+		require.Equal(t, http.StatusNoContent, code, "%s: a user's API key automates the account", key)
+	}
+
+	for name, tc := range map[string]struct {
+		auth   billingauth.Auth
+		header map[string]string
+		status int
+	}{
+		"admitted without an identity":   {authtest.PassThrough{}, nil, http.StatusUnauthorized},
+		"an unknown subject kind":        {&recordingAuth{who: withKind(person, "")}, nil, http.StatusForbidden},
+		"no invoker":                     {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, http.StatusUnauthorized},
+		"another merchant's selector":    {&recordingAuth{who: person}, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, http.StatusConflict},
+		"a refusing RequirePermission":   {&refusingPermission{recordingAuth{who: person}}, nil, http.StatusForbidden},
+		"a panicking Identity":           {panickingIdentity{}, nil, http.StatusUnauthorized},
+		"a refusing Sensitive (step-up)": {&staleAuth{recordingAuth{who: person}}, nil, http.StatusForbidden},
+	} {
+		code, _ := run(tc.auth, "POST /v1/merchant/payments/{id}/refunds", tc.header)
+		require.Equal(t, tc.status, code, name)
+	}
+	code, _ = run(&staleAuth{recordingAuth{who: service}}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	require.Equal(t, http.StatusNoContent, code, "automation has no sign-in to renew")
+	code, _ = run(&staleAuth{recordingAuth{who: personalKey}}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	require.Equal(t, http.StatusNoContent, code, "a user's API key automates the account")
+	unbound := gatedRuntime(t)
+	unbound.SetConfiguredMerchant(billing.MerchantID{})
+	env := newEnv(unbound, Options{Auth: &recordingAuth{who: person}})
+	route, _ := Lookup(GET, "/v1/merchant/payments")
+	table := &router.Table{}
+	router.NewMux(table, "", unbound).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
+	require.Equal(t, http.StatusForbidden, serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/merchant/payments", nil)), "no configured merchant, no merchant API")
+}
+
+type refusingPermission struct{ recordingAuth }
+
+func (*refusingPermission) RequirePermission(string) func(http.Handler) http.Handler {
+	fake := &authtest.Fake{}
+	token := fake.Person(userA)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.Clone(r.Context())
+			r.Header.Set("Authorization", "Bearer "+token)
+			fake.RequirePermission("anything")(next).ServeHTTP(w, r)
+		})
 	}
 }
+
+type staleAuth struct{ recordingAuth }
+
+func (*staleAuth) Sensitive() func(http.Handler) http.Handler {
+	return (&authtest.Fake{}).Sensitive()
+}
+
+type panickingIdentity struct{ authtest.PassThrough }
+
+func (panickingIdentity) Identity(context.Context) (billingauth.Identity, bool) {
+	panic("broken provider")
+}
+
+// Mount refuses a route the Auth gives no middleware for: nothing is
+// mounted open.
+func TestMountFailsClosed(t *testing.T) {
+	rt := gatedRuntime(t)
+	for name, mount := range map[string]func(){
+		"merchant without Auth": func() { RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{}) },
+		"merchant with a typed nil Auth": func() {
+			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: (*authtest.Fake)(nil)})
+		},
+		"customers without Auth": func() {
+			RegisterSelfServiceRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
+		},
+		"a nil RequirePermission": func() {
+			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: nilPermission{}})
+		},
+	} {
+		require.PanicsWithError(t, mountErrorFor(t, mount), mount, name)
+	}
+}
+
+type nilPermission struct{ authtest.Deny }
+
+func (nilPermission) RequirePermission(string) func(http.Handler) http.Handler { return nil }
+
+func mountErrorFor(t *testing.T, mount func()) (msg string) {
+	t.Helper()
+	defer func() {
+		v := recover()
+		err, ok := v.(MountError)
+		require.True(t, ok, "%v", v)
+		msg = err.Error()
+	}()
+	mount()
+	return ""
+}
+
+// The checkout viewer shows saved cards only to the session's own customer:
+// a presented credential the Auth admits binds that customer; a refused or
+// absent one leaves the capability alone.
+func TestCheckoutViewer(t *testing.T) {
+	route, _ := Lookup(GET, "/v1/checkout-sessions/{id}")
+	run := func(a billingauth.Auth, authorization string) (bool, customerscope.Scope) {
+		env := newEnv(gatedRuntime(t), Options{Auth: a})
+		var scope customerscope.Scope
+		var bound, reached bool
+		h := env.checkoutViewer(route)(func(r *httprequest.Request) {
+			reached = true
+			scope, bound = r.CustomerScope()
+		})
+		req := httptest.NewRequest(GET, "/v1/checkout-sessions/ocs_x", nil)
+		req = req.WithContext(merchant.WithID(req.Context(), merchantA))
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		h(httprequest.NewHTTP(httptest.NewRecorder(), req, nil))
+		require.True(t, reached, "the capability is never refused here")
+		return bound, scope
+	}
+	fake := &authtest.Fake{}
+	bound, scope := run(fake, "Bearer "+fake.Person(userB))
+	require.True(t, bound)
+	require.Equal(t, userB, scope.Customer().String())
+	for name, authorization := range map[string]string{"anonymous": "", "refused": "Bearer forged", "a service": "Bearer " + fake.Machine("svc_1")} {
+		bound, _ = run(fake, authorization)
+		require.False(t, bound, name)
+	}
+	bound, _ = run(nil, "Bearer "+fake.Person(userB))
+	require.False(t, bound, "a mount without Auth shows no saved cards")
+}
+
+// Only the route gate makes a customer scope or binds a verdict.
+func TestBindersHaveOneSite(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	calls := map[string][]string{}
+	require.NoError(t, filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if name := d.Name(); name == "node_modules" || name == ".git" || name == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, src, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			name := pkg.Name + "." + sel.Sel.Name
+			switch name {
+			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff":
+				rel, _ := filepath.Rel(root, path)
+				calls[name] = append(calls[name], filepath.ToSlash(rel))
+			}
+			return true
+		})
+		return nil
+	}))
+	gate := "internal/http/routes/gate.go"
+	require.Equal(t, map[string][]string{
+		"customerscope.Bind":       {gate},
+		"billingauth.BindIdentity": {gate},
+		"billingauth.BindStaff":    {gate},
+	}, calls)
+}
+
+func withKind(id billingauth.Identity, kind billingauth.SubjectKind) billingauth.Identity {
+	id.SubjectKind = kind
+	return id
+}
+
+func withInvoker(id billingauth.Identity, invoker billingauth.Invoker) billingauth.Identity {
+	id.Invoker = invoker
+	return id
+}
+
+var _ = merchanttarget.FromContext

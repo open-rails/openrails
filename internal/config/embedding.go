@@ -3,12 +3,20 @@ package config
 import (
 	"fmt"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // Routes selects the HTTP surface Client.Routes returns and the adapters
-// mount on the root router. Processor webhooks and GET /v1/capabilities are
-// always mounted.
+// mount on the root router, and the Auth that guards it. Processor webhooks
+// and GET /v1/capabilities are always mounted.
 type Routes struct {
+	// Auth is the host's auth middleware. OpenRails stacks it on its own
+	// routes by tier: Required on /v1/me (and to show a checkout session's
+	// buyer their saved cards); RequirePermission, and Sensitive for a user
+	// in person moving money, on the merchant API. A selection whose groups
+	// need it refuses to mount without it.
+	Auth billingauth.Auth
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
 	// Empty is the root.
 	Prefix string
@@ -16,21 +24,20 @@ type Routes struct {
 	// products, prices, currencies, checkout config, checkout sessions (read
 	// and pay), Solana Pay and the captcha.
 	Storefront bool
-	// Customers mounts signed-in customers' own billing at /v1/me/*,
-	// authenticated by Deps.AuthKit or Deps.Authenticate. CustomersNone, the
-	// zero value, mounts none.
+	// Customers mounts signed-in customers' own billing at /v1/me/*, behind
+	// Auth.Required. CustomersNone, the zero value, mounts none.
 	Customers CustomerHTTPScope
 	// Merchant mounts the merchant API (/v1/merchant/*) for staff and
-	// machines, each route gated by its merchant permission. It needs
-	// Deps.AuthKit with Deps.AuthorityFor, or Deps.Authenticate with
-	// Deps.Authorize.
+	// machines, each route behind Auth.RequirePermission for its exact
+	// merchant permission, and Auth.Sensitive for a user in person on one
+	// that moves money or removes access.
 	Merchant bool
 	// CatalogEdits adds the merchant API's catalog-write routes; it needs
 	// Merchant. The Go client edits the catalog either way. Every mount of the
 	// merchant API in one process must agree.
 	CatalogEdits bool
 	// CustomerProfiles mount further customer surfaces: another prefix,
-	// another merchant, or Delegated authentication.
+	// another merchant, or their own Auth.
 	CustomerProfiles []CustomerRoutes
 	// CookieOrigin admits cookie-authenticated requests from this exact origin
 	// (https, or http on loopback); unsafe ones must carry it as Origin.
@@ -48,9 +55,8 @@ type AdminConsole struct {
 	// Path is where the console is served: an absolute path without a
 	// trailing slash, outside Prefix's API. Empty is "/admin".
 	Path string
-	// AuthBaseURL is the AuthKit JSON API staff sign in through. Empty is
-	// Deps.AuthKit's (its APIBase, "/api/v1" by default) or, with
-	// Config.ControlPlane, the control plane's.
+	// AuthBaseURL is the AuthKit JSON API staff sign in through; required
+	// unless Config.ControlPlane serves one.
 	AuthBaseURL string
 	// Extensions is the host's data for the console extensions it builds in
 	// (scripts/build-admin-console.sh --extensions), keyed by extension id and
@@ -140,16 +146,15 @@ const (
 // credential management.
 type CustomerRoutes struct {
 	// Prefix is the surface's base relative to the mount; default /v1/me.
-	// Whole-segment {parameters} reach Deps.AuthenticateCustomer through
+	// Whole-segment {parameters} reach the profile's Auth through
 	// Request.PathValue.
 	Prefix string
-	// Merchant is the merchant slug native customers buy from; default
-	// Config.Merchant.Slug.
+	// Merchant is the merchant slug the surface's customers buy from;
+	// default the configured merchant (Config.Merchant).
 	Merchant string
 	// Scope selects the surface's routes; it is required.
 	Scope CustomerHTTPScope
-	// Delegated authenticates this surface with Deps.AuthenticateCustomer,
-	// which names an explicit merchant and paying customer, instead of
-	// Deps.AuthKit or Deps.Authenticate.
-	Delegated bool
+	// Auth guards this surface's customers (its Required) instead of
+	// Routes.Auth.
+	Auth billingauth.Auth
 }

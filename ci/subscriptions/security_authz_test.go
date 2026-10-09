@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	auth "github.com/open-rails/helpers/auth"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -20,7 +18,6 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 // refused is a customer or merchant request the engine must not honor: it
@@ -144,39 +141,11 @@ func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 	}
 }
 
-// peer is another process on this database. Subjects "auto-<uuid>" are the
-// customer's automation credentials, not their interactive session.
-func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier, psps map[string]openrails.PSPConfig, delegated ...func(*http.Request) (*billingauth.DelegatedPrincipal, error)) *rival {
+// peer is another process on this database, guarded by v.
+func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier, psps map[string]openrails.PSPConfig) *rival {
 	t := w.t
-	identity, err := billingauth.NewIntegration(billingauth.IntegrationOptions{
-		Verifier: v,
-		Customer: func(_ context.Context, p auth.Principal) (billingauth.CustomerIdentity, error) {
-			subject := p.Identity().Subject
-			if _, err := uuid.Parse(subject); err == nil {
-				return billingauth.CustomerIdentity{ID: cid(subject), CredentialClass: billingauth.CredentialClassUserSession}, nil
-			}
-			if id, ok := strings.CutPrefix(subject, "auto-"); ok {
-				if _, err := uuid.Parse(id); err == nil {
-					return billingauth.CustomerIdentity{ID: cid(id), CredentialClass: billingauth.CredentialClassAutomation}, nil
-				}
-			}
-			return billingauth.CustomerIdentity{}, nil
-		},
-		Authority: func(_ context.Context, q billingauth.Requirement) (billingauth.Authority, error) {
-			if q.Scope != billingauth.MerchantScope || q.Target.MerchantSlug != slug {
-				return billingauth.Authority{}, nil
-			}
-			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: "rival-staff"}, Permission: q.Permission}, nil
-		},
-	})
-	require.NoError(t, err)
 	profile := openrails.CustomerRoutes{Merchant: slug, Scope: scope}
-	deps := hooks(identity)
-	if len(delegated) > 0 {
-		profile.Delegated = true
-		deps.AuthenticateCustomer = func(r *http.Request, _ string) (*billingauth.DelegatedPrincipal, error) { return delegated[0](r) }
-	}
-	deps.Postgres, deps.StripeTransport, deps.NMITransport, deps.Clock = w.pool, w.stripe, w.nmi, w.clock
+	deps := openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Schema: w.schema, RiverSchema: w.schema,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
@@ -185,7 +154,7 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 	}, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	routes := openrails.Routes{Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, CustomerProfiles: []openrails.CustomerRoutes{profile}}
+	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, Storefront: true, Merchant: true, CatalogEdits: true, CustomerProfiles: []openrails.CustomerRoutes{profile}}
 	if slug != w.slug {
 		return w.serve(slug, rt, routes)
 	}

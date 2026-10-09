@@ -56,8 +56,8 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if r.State.SubscriptionService == nil || r.State.PriceService == nil || r.State.ProductService == nil {
 		return nil, api.Coded(billing.CodeServiceUnavailable, "subscriptions are not configured")
 	}
-	uc, ok := r.UserContext()
-	if !ok || uc.UserID == "" {
+	scope, ok := r.CustomerScope()
+	if !ok {
 		return nil, api.Coded(billing.CodeAuthenticationRequired, "")
 	}
 
@@ -69,7 +69,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		}
 		return nil, fmt.Errorf("load subscription: %w", err)
 	}
-	if oldSub.CustomerID.String() != uc.UserID {
+	if oldSub.CustomerID != scope.Customer().UUID() {
 		return nil, api.Coded(codeSubscriptionNotFound, "")
 	}
 	if oldSub.Rail != models.RailSolana {

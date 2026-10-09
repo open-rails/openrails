@@ -73,7 +73,7 @@ type CheckoutAttemptCreateRequest struct {
 
 	// Acceptance, when set, is the present payer accepting a recurring price's
 	// quoted terms in this request: the quote is confirmed and charged at once.
-	Acceptance *billingauth.DelegatedPrincipal
+	Acceptance *billingauth.Payer
 }
 
 type CheckoutAttemptConfirmPayment struct {

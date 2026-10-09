@@ -1,11 +1,8 @@
 package handlers
 
 import (
-	"strings"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -36,17 +33,14 @@ func GetMySpendLimits(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	principal, ok := middleware.PrincipalFromRequest(r)
+	scope, ok := r.CustomerScope()
 	if !ok {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return
 	}
-	// A payer's own credential is its own invoker; a delegated credential carries
-	// the host-owned invoker it spends under.
-	invoker := strings.TrimSpace(principal.Invoker)
-	if invoker == "" {
-		invoker = strings.TrimSpace(principal.Subject)
-	}
+	// The invoker reads its own windows; a customer acting itself is its own
+	// invoker.
+	invoker := scope.Invoker()
 	if invoker == "" {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "invoker could not be resolved from the credential")
 		return

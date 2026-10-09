@@ -34,7 +34,9 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 		PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(e.method)},
 		SuccessURL:     "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
 	}
-	attempt, err := w.client[tp].CreateCheckoutAttempt(t.Context(), params)
+	// A saved card is charged in process; over HTTP only on a session its
+	// customer pays.
+	attempt, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), params)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
 	require.NotNil(t, attempt.SubscriptionID)
@@ -132,12 +134,12 @@ func TestDurationOrderCanDisableRenewalAtCreation(t *testing.T) {
 		require.Equal(t, billing.SubscriptionCanceled, sub.Status, "one command records the paid order without a later renewal")
 		require.NotNil(t, sub.CanceledAt)
 		require.Nil(t, sub.NextRetryAt)
-		replayed, err := w.client[tp].CreateCheckoutAttempt(t.Context(), params)
+		replayed, err := w.client[embedded].CreateCheckoutAttempt(t.Context(), params)
 		require.NoError(t, err)
 		require.Equal(t, e.sub, *replayed.SubscriptionID)
 		require.Len(t, e.providerLedger(), 1, "same order replay cannot charge twice")
 		params.AutoRenew = new(true)
-		_, err = w.client[tp].CreateCheckoutAttempt(t.Context(), params)
+		_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), params)
 		require.Error(t, err, "an idempotency key cannot change the accepted renewal preference")
 		require.Len(t, e.providerLedger(), 1)
 		w.advance(73 * time.Hour)
@@ -161,7 +163,7 @@ func TestDurationOrderWithoutRenewalRefusesUnsupportedTrialBeforeCharge(t *testi
 		e := &engineCase{w: w, rail: rail, tp: tp}
 		e.c = w.newCustomer()
 		e.method = e.c.saveCard(rail, visa)
-		_, err = w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
+		_, err = w.client[embedded].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: e.c.identity(), Entitlement: "content:trial-order", PriceID: price.ID,
 			AutoRenew: new(false), IdempotencyKey: "trial-order-" + uuid.NewString(),
 			PaymentOptions: billing.CheckoutPaymentOptions{PSP: rail, PaymentMethodID: pmid(e.method)},

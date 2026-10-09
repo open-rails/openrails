@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -75,15 +78,18 @@ func TestAdminRateLimitMW(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	l, events := testAdminLimiter(&now)
 	handled := 0
-	serve := func(user string) *httptest.ResponseRecorder {
+	serveAs := func(subject string, kind billingauth.SubjectKind) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		r := request.NewHTTP(w, httptest.NewRequest(http.MethodPost, "/v1/merchant/subscriptions/sub_1/cancel", nil), nil)
-		if user != "" {
-			r.SetUserContext(billingauth.UserContext{UserID: user})
+		wire := httptest.NewRequest(http.MethodPost, "/v1/merchant/subscriptions/sub_1/cancel", nil)
+		if subject != "" {
+			staff := billingauth.Staff{Identity: billingauth.Identity{Issuer: "test", Subject: subject, SubjectKind: kind, Invoker: billingauth.Invoker{Issuer: "test", ID: subject}}, Merchant: billing.MerchantID(uuid.New())}
+			wire = wire.WithContext(billingauth.BindStaff(wire.Context(), staff))
 		}
+		r := request.NewHTTP(w, wire, nil)
 		l.AdminRateLimitMW(AdminOperationDestructive)(func(*request.Request) { handled++ })(r)
 		return w
 	}
+	serve := func(user string) *httptest.ResponseRecorder { return serveAs(user, billingauth.SubjectUser) }
 
 	for i := 1; i <= 6; i++ {
 		w := serve(adminUser)
@@ -115,11 +121,20 @@ func TestAdminRateLimitMW(t *testing.T) {
 	require.EqualValues(t, 1, (*events)[len(*events)-1].Counts["minute"], "unlock clears the counters too")
 	require.Error(t, l.Unlock(context.Background(), "not-a-uuid", actor))
 
-	// Service credentials carry no human user and keep their own admission.
+	// A service subject keeps its own admission; a person is metered on
+	// (Issuer, Subject) whatever its id looks like; no admitted staff is
+	// refused.
 	handled = 0
 	for range 20 {
-		require.Equal(t, http.StatusOK, serve("").Code)
+		require.Equal(t, http.StatusOK, serveAs("svc_1", billingauth.SubjectApplication).Code)
 	}
 	require.Equal(t, 20, handled)
-	require.Equal(t, http.StatusInternalServerError, serve("not-a-uuid").Code)
+	for i := 1; i <= 6; i++ {
+		want := http.StatusOK
+		if i == 6 {
+			want = http.StatusTooManyRequests
+		}
+		require.Equal(t, want, serve("issuer-user-7").Code)
+	}
+	require.Equal(t, http.StatusUnauthorized, serve("").Code)
 }

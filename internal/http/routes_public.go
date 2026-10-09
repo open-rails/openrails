@@ -21,7 +21,8 @@ import (
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
-		Authenticator: s.authenticator,
+		Auth:              s.customerAuth(),
+		AuthBindsMerchant: true,
 		External: httproutes.External{
 			CaptchaStatus: embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()),
 			CaptchaScript: embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha),

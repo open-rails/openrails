@@ -258,7 +258,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [],
+        "security": [
+          {},
+          {
+            "bearer": []
+          }
+        ],
         "x-openrails-auth": "checkout_session",
         "x-openrails-throttle": "checkout_session_read",
         "x-openrails-errors": [
@@ -268,6 +273,7 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
+          "customer_blocked",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -323,7 +329,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [],
+        "security": [
+          {},
+          {
+            "bearer": []
+          }
+        ],
         "x-openrails-auth": "checkout_session",
         "x-openrails-throttle": "checkout_session_pay",
         "x-openrails-errors": [
@@ -338,6 +349,8 @@
           "checkout_session_not_found",
           "checkout_session_unavailable",
           "credential_custody_transition_required",
+          "customer_blocked",
+          "customer_proof_required",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -492,6 +505,7 @@
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
           "customer_action_required",
+          "customer_blocked",
           "invalid_param",
           "resource_conflict",
           "resource_not_found",
@@ -543,6 +557,7 @@
           "authentication_required",
           "checkout_offer_unavailable",
           "checkout_session_unavailable",
+          "customer_blocked",
           "invalid_param",
           "resource_access_denied",
           "resource_conflict",
@@ -606,6 +621,7 @@
           "card_declined",
           "card_not_saved",
           "checkout_attempt_closed",
+          "customer_proof_required",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -916,16 +932,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [
-          {},
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "optional",
+        "security": [],
+        "x-openrails-auth": "public",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:optional",
+          "tier:public",
           "request"
         ]
       }
@@ -1005,16 +1016,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [
-          {},
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "optional",
+        "security": [],
+        "x-openrails-auth": "public",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:optional",
+          "tier:public",
           "request"
         ]
       }
@@ -16633,6 +16639,19 @@
               }
             ]
           },
+          "username": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blocked": {
+            "type": "boolean"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -16645,6 +16664,8 @@
         "required": [
           "id",
           "email",
+          "username",
+          "blocked",
           "created_at",
           "last_seen_at"
         ]
@@ -17246,6 +17267,19 @@
                 "type": "null"
               }
             ]
+          },
+          "username": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blocked": {
+            "type": "boolean"
           }
         }
       },
@@ -24516,7 +24550,7 @@
       "credential_expired",
       "credential_revoked",
       "database_busy",
-      "delegated_principal_invalid",
+      "host_merchant_mismatch",
       "insufficient_scope",
       "internal_error",
       "invoker_scoped_principal",
@@ -24525,8 +24559,10 @@
       "merchant_not_found",
       "merchant_selector_invalid",
       "merchant_unresolved",
+      "permission_required",
       "rate_limit_exceeded",
       "sender_proof_required",
+      "step_up_required",
       "use_dpop_nonce"
     ],
     "tier:merchant": [
@@ -24539,10 +24575,8 @@
       "captcha_invalid",
       "captcha_required",
       "credential_expired",
-      "credential_identity_mismatch",
       "credential_revoked",
       "database_busy",
-      "delegated_principal_invalid",
       "host_merchant_mismatch",
       "host_principal_invalid",
       "insufficient_scope",
@@ -24572,13 +24606,6 @@
       "database_busy",
       "internal_error",
       "permission_required",
-      "rate_limit_exceeded"
-    ],
-    "tier:optional": [
-      "captcha_invalid",
-      "captcha_required",
-      "database_busy",
-      "internal_error",
       "rate_limit_exceeded"
     ],
     "tier:provider_signature": [
@@ -24910,6 +24937,11 @@
       "type": "authorization_error",
       "meaning": "Only the customer may take this action, through their own step."
     },
+    "customer_blocked": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The merchant declared this customer blocked: it may not buy."
+    },
     "customer_email_required": {
       "status": 400,
       "type": "invalid_request_error",
@@ -24924,6 +24956,11 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "Customer-present payment is unsupported for this rail or method."
+    },
+    "customer_proof_required": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "A saved card is charged only on a checkout session its customer pays, signed in; mint one instead."
     },
     "customer_session_required": {
       "status": 403,

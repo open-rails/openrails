@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -18,14 +17,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 )
 
-// checkoutVerifiedPrincipal copies middleware-verified facts without promoting
-// any credential class. The engine branch alone requires interactive initiation.
-func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrincipal {
-	principal, ok := middleware.PrincipalFromRequest(r)
+// checkoutVerifiedPrincipal is the customer route's verified customer as the
+// payer the engine checks: interactive only for the customer's own sign-in.
+func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.Payer {
+	scope, ok := r.CustomerScope()
 	if !ok {
-		return billingauth.DelegatedPrincipal{}
+		return billingauth.Payer{}
 	}
-	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: billing.MerchantID(principal.MerchantID), SubjectID: principal.Subject, Invoker: principal.Invoker}
+	c, _ := billingauth.IdentityFromContext(r.Request.Context())
+	return scope.Payer(c)
 }
 
 // checkoutAttemptErrorContext carries per-request context threaded into

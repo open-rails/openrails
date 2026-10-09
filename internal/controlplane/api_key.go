@@ -85,6 +85,8 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 		permissions[i] = perm.String()
 	}
 	return &ResolvedServiceCredential{
+		KeyID:         key.ID,
+		Issuer:        key.Issuer,
 		OwnerGroupID:  key.Group.ID,
 		OwnerGroupRef: slug,
 		MerchantID:    mid,

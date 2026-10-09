@@ -117,7 +117,7 @@ func (e *Env) platformPermissionMW(perm string) router.Middleware {
 			}
 			allowed, err := e.Root.HasRootPermission(r.Request.Context(), r.Request, perm)
 			if errors.Is(err, auth.ErrRevoked) || errors.Is(err, billingauth.ErrUnauthenticated) {
-				r.AbortGate(credentialFailure(err))
+				r.AbortGate(billingauth.Unauthenticated(err))
 				return
 			}
 			if err != nil {

@@ -5,20 +5,43 @@ merchant; a future SaaS consumer account may explicitly link separate merchant
 customer records. Shared wallets and cross-merchant account linking belong to
 OpenRails-SaaS, not the engine.
 
-## Deployment boundaries
+## Who is calling: one contract
 
-| Surface | Embedded application | Standalone or SaaS server |
+OpenRails authenticates nobody itself. Every customer and merchant route asks
+an `openrails.Auth`, given at `Mount` as `Routes.Auth`: net/http middleware in
+AuthKit's shape. The embedded host supplies its own; the standalone server
+supplies its trusted issuers, API keys and control-plane sessions through the
+same contract, and the in-process Go client its own host authority.
+
+| Route tier | What runs | Who it admits |
 | --- | --- | --- |
-| Go business client | In-process application authority | API key, or a trusted issuer's client-credentials access token |
-| Browser self-service | `Deps.Authenticate` maps the normal user credential to its paying customer | A trusted issuer's DPoP-bound access token with scope `openrails:self` |
-| User billing routes | `Deps.Authenticate` | Local AuthKit user credential, or a trusted issuer's access token |
-| Merchant operations | `Deps.Authorize`, live per operation | Verified credential plus current merchant permission |
-| Platform operations | Owned by the host | Local human operator plus current root permission |
+| public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
+| checkout session | the session id; `Required` only to show saved cards | the session's own customer sees and pays with its saved cards |
+| customer (`/v1/me`) | `Required` | a user subject, the customer; an invoker acting for someone else, or an application, only on its own spend limits |
+| merchant (`/v1/merchant`) | `RequirePermission(permission)`, then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that exact permission on the mounted merchant |
 
-Embedded applications supply `Deps.Authenticate`, `Deps.Authorize` and
-`Deps.RecentSignIn` over their own request verifier, with explicit customer and
-permission mappings; live admission is an explicit host policy.
-Remote JWKS verification cannot independently observe a remote user's ban.
+The middleware answers its own refusals. Afterwards OpenRails reads
+`Auth.Identity` and refuses a request it finds no identity or invoker on, so a
+middleware that checks nothing admits no one; each handler checks the
+identity again before it runs. A mount whose groups need `Auth` fails without
+one.
+
+An identity has three parts:
+
+- the **subject**: the native account acted as, a user or an application.
+  Its money and authority are used: a customer route's customer, a merchant
+  permission's holder. A user is the same subject on every credential.
+- the **invoker**: the party actually acting, the subject itself or someone
+  acting on its behalf, possibly another issuer's user. Spend limits, spend
+  delegations, staff rate limits and the destructive-operation ceiling key on
+  it: its id, as `issuer|id` when another issuer vouches for it.
+- the **credential**: how it was proven (session, device key, API key, signed
+  token or access token). Only a user acting in person starts a payment for
+  itself; `merchant:checkout:create` is refused to one, and only one is asked
+  for a recent sign-in.
+
+Provider writes record all three: the subject, the invoker and the
+credential (`kind:id`).
 
 The standalone control plane is mandatory and uses closed registration. Its
 own sign-in (password, passwordless, registration) is opt-in

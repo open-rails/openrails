@@ -812,7 +812,7 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 }
 
 const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
-SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
+SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
@@ -899,6 +899,8 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg 
 			&i.BillingProviderIntent.DestructiveRunID,
 			&i.BillingProviderIntent.DestructiveRunClass,
 			&i.BillingProviderIntent.CustodianID,
+			&i.BillingProviderIntent.Subject,
+			&i.BillingProviderIntent.Credential,
 			&i.LedgerAmount,
 			&i.LedgerMatches,
 		); err != nil {

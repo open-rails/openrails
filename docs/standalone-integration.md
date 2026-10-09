@@ -306,6 +306,14 @@ resource_server:
   `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
   `permission_required`.
 
+These tokens, merchant API keys and the control plane's own sessions answer the
+same `openrails.Auth` contract an embedded host implements, through the same
+route gate: a token's `sub` is the subject (a user), and its invoker; a client
+acting for itself and an API key are an application subject. Customer routes
+take the customer only from the subject, and `merchant:checkout:create` is
+refused to a user acting in person. A trusted issuer's user token is vouched
+for by its issuer: the standalone server asks it for no recent sign-in.
+
 ### Webhooks
 
 Point each rail's webhook directly at OpenRails — not through your app:

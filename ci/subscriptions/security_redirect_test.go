@@ -21,9 +21,14 @@ func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	var c *customer
 	var method string
 	create := func(tp topology, success, cancel string) error {
+		payment := billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)}
+		if tp == remote {
+			// Over HTTP the host charges a card the customer just entered.
+			payment = billing.CheckoutPaymentOptions{PSP: "nmi", PaymentToken: w.nmi.Tokenize(visa), BillingDetails: &billing.BillingDetails{Name: new("Redirect Payer"), Address: &billing.BillingAddress{PostalCode: new("10001"), Country: new("US")}}}
+		}
 		_, err := w.client[tp].CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 			OfferKind: billing.OfferRecurring, Customer: billing.CheckoutCustomerIdentity{ID: cid(c.id)}, Entitlement: "content:members", PriceID: price.ID,
-			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "stripe", PaymentMethodID: pmid(method)},
+			IdempotencyKey: "redirect-" + uuid.NewString(), PaymentOptions: payment,
 			SuccessURL: success, CancelURL: cancel,
 		})
 		return err
