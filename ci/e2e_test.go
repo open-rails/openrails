@@ -160,10 +160,10 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	check := billing.CheckEntitlementsParams{Entitlements: []string{"content:" + productA.Key}}
 	owned, err := alice.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), check)
 	require.NoError(t, err)
-	require.True(t, owned["content:"+productA.Key])
+	require.True(t, owned.Entitlements["content:"+productA.Key])
 	foreign, err := bob.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), check)
 	require.NoError(t, err)
-	require.Equal(t, map[string]bool{"content:" + productA.Key: false}, foreign)
+	require.Equal(t, map[string]bool{"content:" + productA.Key: false}, foreign.Entitlements)
 }
 
 func TestCatalogEnsureIsIdempotent(t *testing.T) {
@@ -284,10 +284,10 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	premium := billing.CheckEntitlementsParams{Entitlements: []string{"content:premium"}}
 	before, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
 	require.NoError(t, err)
-	require.False(t, before["content:premium"])
+	require.False(t, before.Entitlements["content:premium"])
 	_, err = client.CreateEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(customer)), billing.CreateEntitlementParams{Entitlement: "content:premium"})
 	require.NoError(t, err)
 	after, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
 	require.NoError(t, err)
-	require.True(t, after["content:premium"], "the public access check observes the entitlement granted for the product")
+	require.True(t, after.Entitlements["content:premium"], "the public access check observes the entitlement granted for the product")
 }

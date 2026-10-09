@@ -253,18 +253,24 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 	return &out, nil
 }
 
-// CheckEntitlements answers which of params.Entitlements the customer holds at
-// params.At (zero: now); every requested key is in the result and an empty
-// list answers an empty map. One call checks at most
-// billing.MaxEntitlementChecks keys; more is refused with invalid_param, not
-// split, so every answer reads one instant.
-func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (map[string]bool, error) {
+// CheckEntitlements answers which of params.Entitlements the customer holds,
+// and the keys they hold under each of params.Prefixes, at params.At (zero:
+// now); every requested key and prefix is in the answer. One call checks at
+// most billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
+// prefixes; more is refused with invalid_param, not split, so every answer
+// reads one instant. A prefix is bytes OpenRails gives no meaning.
+func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
 	}
-	if len(params.Entitlements) > billing.MaxEntitlementChecks {
+	switch {
+	case len(params.Entitlements) == 0 && len(params.Prefixes) == 0:
+		return nil, invalidErr("entitlements or prefixes is required")
+	case len(params.Entitlements) > billing.MaxEntitlementChecks:
 		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per check", billing.MaxEntitlementChecks))
+	case len(params.Prefixes) > billing.MaxEntitlementPrefixes:
+		return nil, invalidErr(fmt.Sprintf("at most %d prefixes per check", billing.MaxEntitlementPrefixes))
 	}
 	for _, key := range params.Entitlements {
 		if strings.TrimSpace(key) == "" {
@@ -281,7 +287,10 @@ func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.Custo
 	if out.Entitlements == nil {
 		out.Entitlements = map[string]bool{}
 	}
-	return out.Entitlements, nil
+	if out.Held == nil {
+		out.Held = map[string]billing.HeldEntitlements{}
+	}
+	return &out, nil
 }
 
 // ListEntitlementCustomers returns one page of the customers holding

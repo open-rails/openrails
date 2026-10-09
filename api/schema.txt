@@ -17,6 +17,7 @@ migration 0013_federated_grants.up.sql sha256:515cb9f231fbfd2850c0c3e379009be93d
 migration 0014_operation_authorization_extensions.up.sql sha256:7e96a488b7144c28ce497c77a1c746bd3175cfb056f145fa69559d72b2215c69
 migration 0015_owed_repayment.up.sql sha256:54ad22cbf5293b6a00f7cbf18822c8c013f32c6e75a9e910899e7d95f50da460
 migration 0016_identity_facts.up.sql sha256:3ae50466191affffa4e919d8b67f94aac547205e517e7466110e6788e47dbbcb
+migration 0017_entitlement_keyspace_index.up.sql sha256:e7ac741d89b1942109638e7dca67ba964de3ccf8a162905908939804bce142bd
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -560,6 +561,7 @@ table billing.entitlements
   constraint entitlements_valid_time_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
   index CREATE INDEX entitlements_closed_at_idx ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL))
   index CREATE INDEX entitlements_customer_id_entitlement_starts_at_ends_at_idx ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
+  index CREATE INDEX entitlements_customer_keyspace_idx ON billing.entitlements USING btree (merchant_id, customer_id, entitlement COLLATE "C") INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX entitlements_destructive_run_id_idx ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
   index CREATE INDEX entitlements_entitlement_customer_id_idx ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE UNIQUE INDEX entitlements_grant_id_entitlement_key ON billing.entitlements USING btree (merchant_id, grant_id, entitlement) WHERE (deleted_at IS NULL)

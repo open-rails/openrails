@@ -217,7 +217,7 @@ func run(ctx context.Context) error {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !held[entitlement] {
+		if !held.Entitlements[entitlement] {
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
 			return
 		}

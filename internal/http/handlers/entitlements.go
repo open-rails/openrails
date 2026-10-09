@@ -134,7 +134,8 @@ func ServiceListEntitlementCustomers(r *httprequest.Request) {
 }
 
 // ServiceCheckEntitlements answers which of the requested keys the customer
-// holds at at (zero: now). It reads only those keys.
+// holds, and the keys they hold under each requested prefix, both at one
+// instant (zero: now). It reads only those keys and key ranges.
 func ServiceCheckEntitlements(r *httprequest.Request) {
 	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
 	if !ok {
@@ -144,16 +145,26 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	if err := entitlements.ValidateCheck(req); err != nil {
+		writeRefusal(r, err, "entitlement check failed")
+		return
+	}
 	at := req.At
 	if at.IsZero() {
 		at = r.Clock.Now()
 	}
-	result, err := r.State.EntitlementService.CheckMany(r.Request.Context(), customer.String(), req.Entitlements, at)
+	svc := r.State.EntitlementService
+	result, err := svc.CheckMany(r.Request.Context(), customer.String(), req.Entitlements, at)
 	if err != nil {
 		writeRefusal(r, err, "entitlement check failed")
 		return
 	}
-	r.SuccessJSON(billing.EntitlementCheck{Entitlements: result})
+	held, err := svc.HeldByPrefix(r.Request.Context(), customer.String(), req.Prefixes, req.PrefixLimit, at)
+	if err != nil {
+		writeRefusal(r, err, "entitlement check failed")
+		return
+	}
+	r.SuccessJSON(billing.EntitlementCheck{Entitlements: result, Held: held})
 }
 
 // SelfListEntitlements is the customer's own active entitlements.

@@ -62,6 +62,70 @@ func (q *Queries) CheckResourceEntitlements(ctx context.Context, arg CheckResour
 	return items, nil
 }
 
+const listHeldEntitlementsByPrefix = `-- name: ListHeldEntitlementsByPrefix :many
+SELECT r.prefix::text AS prefix, held.entitlement::text AS entitlement
+FROM unnest($1::text[], $2::text[]) AS r(prefix, upper)
+CROSS JOIN LATERAL (
+ SELECT DISTINCT e.entitlement COLLATE "C" AS entitlement
+ FROM billing.entitlements e
+ WHERE e.merchant_id=$3::uuid
+   AND e.customer_id=$4::uuid
+   AND e.entitlement COLLATE "C" >= r.prefix COLLATE "C"
+   AND e.entitlement COLLATE "C" < r.upper COLLATE "C"
+   AND e.starts_at<=$5::timestamptz
+   AND (e.ends_at IS NULL OR e.ends_at>$5::timestamptz)
+   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+ ORDER BY 1
+ LIMIT $6::int
+) held
+ORDER BY 1, 2
+`
+
+type ListHeldEntitlementsByPrefixParams struct {
+	Prefixes   []string
+	Uppers     []string
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AtTime     time.Time
+	RowLimit   int32
+}
+
+type ListHeldEntitlementsByPrefixRow struct {
+	Prefix      string
+	Entitlement string
+}
+
+// The distinct keys a customer holds at at_time under each prefix, in byte
+// order, at most row_limit per prefix (callers pass limit+1 to detect
+// truncation). [prefix, upper) is the prefix's byte range: upper is the prefix
+// with its last byte incremented.
+func (q *Queries) ListHeldEntitlementsByPrefix(ctx context.Context, arg ListHeldEntitlementsByPrefixParams) ([]ListHeldEntitlementsByPrefixRow, error) {
+	rows, err := q.db.Query(ctx, listHeldEntitlementsByPrefix,
+		arg.Prefixes,
+		arg.Uppers,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AtTime,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListHeldEntitlementsByPrefixRow
+	for rows.Next() {
+		var i ListHeldEntitlementsByPrefixRow
+		if err := rows.Scan(&i.Prefix, &i.Entitlement); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOffersForEntitlements = `-- name: ListOffersForEntitlements :many
 SELECT wanted.entitlement::text AS entitlement, offer.product_id, offer.product_key,
  offer.product_name, offer.entitlements, offer.price_id, offer.price_key,

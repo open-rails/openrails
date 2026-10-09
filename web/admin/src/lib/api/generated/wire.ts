@@ -374,6 +374,8 @@ export type ChangeTierParams = {
 
 export type CheckEntitlementsParams = {
   entitlements?: string[]
+  prefixes?: string[]
+  prefix_limit?: number
   at?: string
 }
 
@@ -951,6 +953,7 @@ export type EnsureCustomerParams = {
 
 export type EntitlementCheck = {
   entitlements: Record<string, boolean> | null
+  held: Record<string, HeldEntitlements> | null
 }
 
 export type EntitlementListParams = {
@@ -1086,6 +1089,11 @@ export type GeneratedWidget = {
 
 export type Health = {
   status: "ok" | "ready"
+}
+
+export type HeldEntitlements = {
+  keys: string[]
+  truncated: boolean
 }
 
 export type HostEvent = {

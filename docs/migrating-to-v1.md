@@ -139,7 +139,7 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.CheckEntitlements(` with a `billing.CustomerID` and `billing.CheckEntitlementsParams` (`Entitlements`, at most 100, and `At`), answering `map[string]bool` |
+| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.CheckEntitlements(` with a `billing.CustomerID` and `billing.CheckEntitlementsParams` (`Entitlements`, at most 100, and `At`), answering `billing.EntitlementCheck` |
 | `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `At`), answering `billing.EntitlementLookup` |
 | `ListCustomersWithEntitlement` | `client.ListEntitlementCustomers(` |
 | `GrantEntitlement`, `RevokeEntitlement` | `client.CreateEntitlement(`, `client.DeleteEntitlement(` |

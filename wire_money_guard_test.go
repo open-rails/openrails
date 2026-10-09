@@ -133,6 +133,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
 
 	"billing/resource_offers.go:OfferListParams.Limit limit": notMoneyPageSize,
+
+	"billing/entitlements.go:CheckEntitlementsParams.PrefixLimit prefix_limit": notMoneyPageSize,
 }
 
 const (

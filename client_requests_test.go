@@ -157,18 +157,18 @@ func TestClientRequestShapes(t *testing.T) {
 		}},
 		{"entitlement check", func() error {
 			got, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", "team"}})
-			if err == nil && (!got["pro"] || got["team"] || len(got) != 2) {
+			if err == nil && (!got.Entitlements["pro"] || got.Entitlements["team"] || len(got.Entitlements) != 2 || got.Held == nil) {
 				err = errors.New("check not decoded")
 			}
 			return err
 		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, map[string]any{"entitlements": []any{"pro", "team"}}, b, "a zero At is omitted")
+			require.Equal(t, map[string]any{"entitlements": []any{"pro", "team"}}, b, "zero At, prefixes and limit are omitted")
 		}},
-		{"entitlement check empty", func() error {
-			_, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{})
+		{"entitlement check prefixes only", func() error {
+			_, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Prefixes: []string{"content:t:"}, PrefixLimit: 5})
 			return err
 		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, []any{}, b["entitlements"], "an empty check sends a list, not null")
+			require.Equal(t, map[string]any{"entitlements": []any{}, "prefixes": []any{"content:t:"}, "prefix_limit": float64(5)}, b, "no keys send a list, not null")
 		}},
 		{"access list pages", func() error {
 			page, err := client.ListProductAccess(t.Context(), customerID, billing.PageRequest{Limit: 7, Cursor: "cursor"})
@@ -385,6 +385,14 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"entitlement check over bound": func() error {
 			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: make([]string, billing.MaxEntitlementChecks+1)})
+			return err
+		},
+		"entitlement check empty": func() error {
+			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: []string{}})
+			return err
+		},
+		"entitlement check prefixes over bound": func() error {
+			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Prefixes: make([]string, billing.MaxEntitlementPrefixes+1)})
 			return err
 		},
 		"effective tier customer": func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },

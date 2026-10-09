@@ -29,11 +29,21 @@ prefix `/v1` standalone, `/billing/v1` embedded):
 - `POST /v1/merchant/entitlements/lookup` body `{"customer_ids": [...], "at": "RFC3339"}` —
   the primary host read (max 500 customers); `{"customers": {id: [EntitlementRecord]}}`,
   a customer with none maps to `[]`. Omitted `at` = now.
-- `POST /v1/merchant/customers/{customer_id}/entitlements/check` body `{"entitlements": [...], "at"}` —
-  `{"entitlements": {key: bool}}` for up to 100 keys (Go: `CheckEntitlements`).
+- `POST /v1/merchant/customers/{customer_id}/entitlements/check` body
+  `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` —
+  `{"entitlements": {key: bool}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
+  for up to 100 keys and 10 prefixes, both at one instant (Go: `CheckEntitlements`). At
+  least one key or prefix is required.
 - `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — reverse lookup:
   one page of customer ids holding an active window (`{data, next_cursor}`).
 - `GET /v1/me/entitlements?at=` — the signed-in customer's own active windows.
+
+A prefix is a byte prefix, nothing more: OpenRails gives keys and prefixes no grammar,
+and keys stay opaque. `held` lists the distinct keys the customer holds whose bytes start
+with the prefix, in byte order, at most `prefix_limit` of them (default 1,000, at most
+10,000); `truncated` is true when more are held. A prefix's last byte must be printable
+ASCII (`!` to `~`), because the range it reads ends at that byte plus one. Every requested
+prefix is answered, with `"keys": []` when none is held.
 
 Embedded hosts sharing the DB may run the SQL predicate above directly
 (add `customer_id = $1 AND entitlement = $2`); it is exactly what the API executes.

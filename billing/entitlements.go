@@ -85,6 +85,14 @@ const MaxEntitlementLookupCustomers = 500
 // MaxEntitlementChecks bounds the keys of one entitlement check.
 const MaxEntitlementChecks = 100
 
+// Bounds of the prefixes of one entitlement check and of the keys answered
+// under each.
+const (
+	MaxEntitlementPrefixes  = 10
+	DefaultHeldEntitlements = 1000
+	MaxHeldEntitlements     = 10000
+)
+
 // EntitlementListParams reads the active entitlements of up to
 // MaxEntitlementLookupCustomers customers at At (zero: now).
 type EntitlementListParams struct {
@@ -99,15 +107,30 @@ type EntitlementLookup struct {
 }
 
 // CheckEntitlementsParams asks which of up to MaxEntitlementChecks keys a
-// customer holds at At (zero: now).
+// customer holds at At (zero: now), and which keys they hold under each of up
+// to MaxEntitlementPrefixes byte prefixes: at most PrefixLimit per prefix
+// (zero: DefaultHeldEntitlements, at most MaxHeldEntitlements). A prefix is
+// bytes, not grammar: OpenRails gives it no meaning. Its last byte must be
+// printable ASCII (0x21-0x7E). At least one key or prefix is required.
 type CheckEntitlementsParams struct {
 	Entitlements []string  `json:"entitlements"`
+	Prefixes     []string  `json:"prefixes,omitempty"`
+	PrefixLimit  int       `json:"prefix_limit,omitempty"`
 	At           time.Time `json:"at,omitzero"`
 }
 
-// EntitlementCheck answers every requested key.
+// EntitlementCheck answers every requested key, and every requested prefix in
+// Held ({} when none was asked).
 type EntitlementCheck struct {
-	Entitlements map[string]bool `json:"entitlements"`
+	Entitlements map[string]bool             `json:"entitlements"`
+	Held         map[string]HeldEntitlements `json:"held"`
+}
+
+// HeldEntitlements is the keys a customer holds under one prefix, in byte
+// order. Truncated: more were held than the limit returned.
+type HeldEntitlements struct {
+	Keys      []string `json:"keys"`
+	Truncated bool     `json:"truncated"`
 }
 
 // EntitlementCustomerListParams pages the customers holding one entitlement

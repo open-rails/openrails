@@ -213,7 +213,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.Equal(t, billing.CheckoutAttemptSucceeded, got.Status)
 	access, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckEntitlementsParams{Entitlements: []string{"content:webhook"}})
 	require.NoError(t, err)
-	require.True(t, access["content:webhook"])
+	require.True(t, access.Entitlements["content:webhook"])
 	payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
 	require.NoError(t, err)
 	require.Len(t, payments.Items, 1, "event replay must not duplicate the payment")

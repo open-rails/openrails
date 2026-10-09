@@ -14932,6 +14932,15 @@
               "type": "string"
             }
           },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prefix_limit": {
+            "type": "integer"
+          },
           "at": {
             "type": "string",
             "format": "date-time"
@@ -17298,10 +17307,24 @@
                 "type": "null"
               }
             ]
+          },
+          "held": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/HeldEntitlements"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "entitlements"
+          "entitlements",
+          "held"
         ]
       },
       "EntitlementListParams": {
@@ -17903,6 +17926,24 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "HeldEntitlements": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "keys",
+          "truncated"
         ]
       },
       "HostEvent": {

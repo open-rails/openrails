@@ -73,7 +73,7 @@ func (c *customer) entitledAt(entitlement string, at time.Time) bool {
 	c.w.t.Helper()
 	got, err := c.w.client[embedded].CheckEntitlements(c.w.t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: at})
 	require.NoError(c.w.t, err)
-	return got[entitlement]
+	return got.Entitlements[entitlement]
 }
 
 // SEC-25: revoked access stays revoked. A refund that revokes a stacked,

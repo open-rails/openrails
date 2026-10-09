@@ -10,6 +10,28 @@ SELECT candidate.entitlement::text AS entitlement, EXISTS (
 ) AS has_access
 FROM unnest(sqlc.arg(entitlements)::text[]) AS candidate(entitlement);
 
+-- name: ListHeldEntitlementsByPrefix :many
+-- The distinct keys a customer holds at at_time under each prefix, in byte
+-- order, at most row_limit per prefix (callers pass limit+1 to detect
+-- truncation). [prefix, upper) is the prefix's byte range: upper is the prefix
+-- with its last byte incremented.
+SELECT r.prefix::text AS prefix, held.entitlement::text AS entitlement
+FROM unnest(sqlc.arg(prefixes)::text[], sqlc.arg(uppers)::text[]) AS r(prefix, upper)
+CROSS JOIN LATERAL (
+ SELECT DISTINCT e.entitlement COLLATE "C" AS entitlement
+ FROM billing.entitlements e
+ WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid
+   AND e.customer_id=sqlc.arg(customer_id)::uuid
+   AND e.entitlement COLLATE "C" >= r.prefix COLLATE "C"
+   AND e.entitlement COLLATE "C" < r.upper COLLATE "C"
+   AND e.starts_at<=sqlc.arg(at_time)::timestamptz
+   AND (e.ends_at IS NULL OR e.ends_at>sqlc.arg(at_time)::timestamptz)
+   AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+ ORDER BY 1
+ LIMIT sqlc.arg(row_limit)::int
+) held
+ORDER BY 1, 2;
+
 -- Discovery only: all pricing and benefits are revalidated at admission.
 -- One page per requested key; uuid.Nil in after_ids starts a key's first page.
 -- name: ListOffersForEntitlements :many
