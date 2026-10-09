@@ -74,6 +74,9 @@ func TestEngineNMIKnownPreDispatchFailureRecovers(t *testing.T) {
 	e := enroll(t, w, "nmi", embedded)
 	end := e.periodEnd()
 	e.refreshBeforePeriodEnd()
+	// A released attempt is retried by the next due pass. River's own pass
+	// (every minute) would start it between this scenario's two passes.
+	w.jobs.PeriodicJobs().Clear()
 	// The second vault read happens after the submission fence. Its failure
 	// proves this live caller has not made the sale, so another attempt is safe.
 	var reads atomic.Int32
