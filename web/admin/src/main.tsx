@@ -28,6 +28,14 @@ const router = createBrowserRouter(
         })),
     },
     {
+      path: "/callback",
+      hydrateFallbackElement: routeLoading,
+      lazy: () =>
+        import("@/pages/callback").then((module) => ({
+          Component: module.CallbackPage,
+        })),
+    },
+    {
       path: "/",
       hydrateFallbackElement: routeLoading,
       element: <AppLayout />,
@@ -200,7 +208,7 @@ loadBootstrap(bootstrapURL()).then(
       <StrictMode>
         <ThemeProvider>
           <QueryClientProvider client={queryClient}>
-            <ConsoleSession client={session}>
+            <ConsoleSession session={session}>
               <RouterProvider router={router} />
               <Toaster />
             </ConsoleSession>

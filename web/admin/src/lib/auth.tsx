@@ -1,10 +1,8 @@
 // The console's operator. auth-ui owns the browser session (sign-in, refresh,
-// step-up); the console adds the merchants the user belongs to and the one
+// step-up); the console adds the merchants the user may act on and the one
 // its requests are made as.
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useAuth as useSession } from "@openrails/auth-ui/react"
-import type { UserProfile } from "@openrails/auth-ui/client"
 
 import {
   api,
@@ -16,6 +14,7 @@ import type {
   MerchantMembership,
   MerchantMembershipList,
 } from "@/lib/api/types"
+import { useIdentity, type ConsoleUser } from "@/lib/identity"
 import { queryClient } from "@/lib/query-client"
 
 export interface ConsoleAuth {
@@ -24,7 +23,7 @@ export interface ConsoleAuth {
   signedIn: boolean
   // The merchant list could not be loaded: not the same as having none.
   merchantsFailed: boolean
-  me: UserProfile | null
+  me: ConsoleUser | null
   merchants: MerchantMembership[]
   activeMerchant?: MerchantMembership
   selectMerchant: (slug: string) => void
@@ -59,10 +58,10 @@ export async function loadMerchants(): Promise<MerchantMembership[]> {
 }
 
 export function useAuth(): ConsoleAuth {
-  const session = useSession()
+  const session = useIdentity()
   const signedIn = session.status === "signed_in"
   const membership = useQuery({
-    queryKey: ["auth", "merchants", session.userId],
+    queryKey: ["auth", "merchants", session.user?.id ?? null],
     queryFn: loadMerchants,
     enabled: signedIn,
     staleTime: Infinity,
@@ -94,7 +93,7 @@ export function useAuth(): ConsoleAuth {
       session.status === "signed_out" || (signedIn && !membership.isPending),
     signedIn,
     merchantsFailed: membership.isError,
-    me: signedIn ? session.user : null,
+    me: session.user,
     merchants,
     activeMerchant: merchants.find((merchant) => merchant.slug === active),
     selectMerchant,

@@ -60,7 +60,7 @@ beforeEach(async () => {
   // console does long before its first write.
   await import("@/lib/step-up-host")
   await mount(
-    <ConsoleSession client={session}>
+    <ConsoleSession session={{ kind: "local", client: session }}>
       <span />
     </ConsoleSession>
   )
