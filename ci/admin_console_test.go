@@ -120,6 +120,14 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
 
+	// A hosted product's console extensions read their data from config.json.
+	hosted := openrails.Routes{AdminConsole: &openrails.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}
+	hostedMux := http.NewServeMux()
+	require.NoError(t, openrailshttp.Mount(hostedMux, cp, hosted))
+	require.Contains(t, get(hostedMux, "/admin/config.json").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
+	_, err = cp.Routes(openrails.Routes{AdminConsole: &openrails.AdminConsole{Extensions: map[string]any{"Hosted": true}}})
+	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
+
 	overlapping := openrails.Routes{AdminConsole: &openrails.AdminConsole{Path: "/v1"}}
 	_, err = standaloneHandler(cp, overlapping)
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
