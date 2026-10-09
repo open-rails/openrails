@@ -126,7 +126,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		face := intValue(g.Amount)
 		restoring := reversal.Amount > 0
 		cashDelta := reversal.Amount
-		var faceDelta, withdrawn, retired, expired, revoked int64
+		var faceDelta, withdrawn, retired, expired, revoked, repaid int64
 		retiredAccount := ledger.RevokedCredits
 		source := "credit"
 		cashSource := "cash"
@@ -147,6 +147,12 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			}
 			expired = min(max(retiredBalance.Expired, 0), faceDelta-withdrawn)
 			revoked = min(max(retiredBalance.Revoked, 0), faceDelta-withdrawn-expired)
+			// Value that repaid owed is owed again when its payment is reversed.
+			standing, err := q.GetPurchasedCreditRepaidOwed(ctx, gen.GetPurchasedCreditRepaidOwedParams{MerchantID: mid.UUID(), GrantID: g.ID})
+			if err != nil {
+				return err
+			}
+			repaid = min(max(standing, 0), faceDelta-withdrawn-expired-revoked)
 		} else {
 			if reversesID == nil {
 				return fmt.Errorf("purchased credit recovery must identify the reversed payment")
@@ -178,6 +184,8 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			withdrawn = recoveredPart(origin.Withdrawn, 0, after) - recoveredPart(origin.Withdrawn, 0, before)
 			expired = recoveredPart(origin.Expired, origin.Withdrawn, after) - recoveredPart(origin.Expired, origin.Withdrawn, before)
 			revoked = recoveredPart(origin.Revoked, origin.Withdrawn+origin.Expired, after) - recoveredPart(origin.Revoked, origin.Withdrawn+origin.Expired, before)
+			prior := origin.Withdrawn + origin.Expired + origin.Revoked
+			repaid = recoveredPart(origin.Repaid, prior, after) - recoveredPart(origin.Repaid, prior, before)
 			terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: mid.UUID(), GrantID: g.ID})
 			if err != nil {
 				return err
@@ -205,10 +213,14 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 			var id uuid.UUID
 			var err error
 			var customer *uuid.UUID
-			if account == ledger.CustomerBalance {
+			switch account {
+			case ledger.CustomerBalance:
 				id, err = l.EnsureCustomerBalance(ctx, g.CustomerID, currency)
 				customer = &g.CustomerID
-			} else {
+			case ledger.ArrearsLiability:
+				id, err = l.EnsureCustomerArrears(ctx, g.CustomerID, currency)
+				customer = &g.CustomerID
+			default:
 				id, err = l.EnsureSystemAccount(ctx, account, currency)
 			}
 			if err != nil {
@@ -231,10 +243,11 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err := post(retiredAccount, retired, ledger.CreditRefundFunding, false, "retired_"+source); err != nil {
 			return err
 		}
-		expiredSource, revokedSource := "expired_credit", "revoked_credit"
+		expiredSource, revokedSource, repaidSource := "expired_credit", "revoked_credit", "repaid_owed"
 		if restoring {
 			expiredSource += "_restore:" + reversesID.String()
 			revokedSource += "_restore:" + reversesID.String()
+			repaidSource += "_restore:" + reversesID.String()
 		}
 		if err := post(ledger.ExpiredCredits, expired, ledger.CreditRefundFunding, !restoring, expiredSource); err != nil {
 			return err
@@ -242,7 +255,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err := post(ledger.RevokedCredits, revoked, ledger.CreditRefundFunding, !restoring, revokedSource); err != nil {
 			return err
 		}
-		if err := post(ledger.CreditRefundLoss, faceDelta-withdrawn-retired-expired-revoked, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
+		if err := post(ledger.ArrearsLiability, repaid, ledger.CreditRefundFunding, !restoring, repaidSource); err != nil {
+			return err
+		}
+		if err := post(ledger.CreditRefundLoss, faceDelta-withdrawn-retired-expired-revoked-repaid, ledger.CreditRefundFunding, !restoring, lossSource); err != nil {
 			return err
 		}
 		if err := post(ledger.RailClearing, cashDelta, cashType, restoring, cashSource); err != nil {

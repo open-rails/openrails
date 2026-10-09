@@ -16518,6 +16518,7 @@
               "expire",
               "owed_accrual",
               "owed_payment",
+              "owed_repayment",
               "owed_writeoff",
               "reinstate",
               "revoke",

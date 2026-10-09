@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -435,6 +436,8 @@ type DepositParams struct {
 	SourceID    *string    // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt   *time.Time // nil is permanent; expiry is an immutable operation term
 	Description *string
+	// RepayOwed applies the new credit to outstanding owed first.
+	RepayOwed bool
 	// Internal fulfillment terms: duration is anchored to the first grant, including on replay.
 	expiryHours int
 }
@@ -561,7 +564,11 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	if err := gl.MaterializeGrant(ctx, g); err != nil {
 		return nil, err
 	}
-
+	if params.RepayOwed {
+		if _, err := owed.Repay(ctx, q, tenantID, g, params.Amount, now); err != nil {
+			return nil, err
+		}
+	}
 	return creditGrantTxn(g)
 }
 

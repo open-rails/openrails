@@ -184,8 +184,8 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 }
 
 // operationCapacity is what a new or grown hold may take, read under the payer
-// lock: the balance net of every financial hold, plus the arrears credit line
-// still available.
+// lock: the balance net of every financial hold, then net of outstanding owed
+// under prepaid, or plus the arrears credit line still available.
 func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, bal *models.MoneyBalance) (int64, error) {
 	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "financial holds")
 	if err != nil {
@@ -195,18 +195,18 @@ func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, me
 	if err != nil {
 		return 0, err
 	}
-	if settings.BillingMode != BillingModeArrears {
-		return capacity, nil
-	}
 	outstanding, err := s.moneyLedger(q, merchantID).OutstandingOwed(ctx, customer.UUID(), operationAuthorizationCurrency)
 	if err != nil {
 		return 0, err
 	}
-	if settings.CreditLimitAmount < 0 {
-		return 0, fmt.Errorf("operation authorization: credit limit is negative")
-	}
 	if outstanding < 0 {
 		return 0, fmt.Errorf("operation authorization: outstanding owed is negative")
+	}
+	if settings.BillingMode != BillingModeArrears {
+		return subtractOperationCapacity(capacity, outstanding, "outstanding owed")
+	}
+	if settings.CreditLimitAmount < 0 {
+		return 0, fmt.Errorf("operation authorization: credit limit is negative")
 	}
 	if settings.CreditLimitAmount > outstanding {
 		return addOperationCapacity(capacity, settings.CreditLimitAmount-outstanding)

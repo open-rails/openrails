@@ -47,9 +47,8 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 		txType = "withdrawal"
 	case "owed_accrual":
 		txType = "owed_accrual"
-	case "owed_payment":
+	case "owed_payment", "owed_repayment":
 		amount = -amount
-		txType = "owed_payment"
 	case "credit_expire", "expire":
 		amount = -amount
 		txType = "expiry"
@@ -101,7 +100,7 @@ func creditTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.CreditTr
 		txType, amount = billing.CreditRevoke, -amount
 	case "credit_reinstate":
 		txType = billing.CreditReinstate
-	case "owed_payment", "owed_writeoff":
+	case "owed_payment", "owed_writeoff", "owed_repayment":
 		amount = -amount
 	}
 	out := billing.CreditTransaction{

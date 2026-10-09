@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/modules/money/owed"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -112,6 +113,10 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 			return err
 		}
 		if err := gl.MaterializeGrant(ctx, grant); err != nil {
+			return err
+		}
+		// Only the paid part repays debt; promotional value never does.
+		if _, err := owed.Repay(ctx, q, mid.UUID(), grant, min(p.Amount, p.PaidAmount), s.now()); err != nil {
 			return err
 		}
 		result = grant.ID

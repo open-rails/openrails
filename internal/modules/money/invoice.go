@@ -168,6 +168,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 				movements[txOwedAccrual] += m.Total
 			case "owed_payment":
 				movements[txOwedPayment] -= m.Total
+			case "owed_repayment":
+				movements[txOwedRepayment] -= m.Total
 			case "credit_expire", "expire":
 				movements["expiry"] -= m.Total
 			default:
@@ -186,6 +188,17 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		}
 
 		receivable := pendingReceivable
+		// Owed that funding already repaid is not billed again: an invoice
+		// claims at most the owed no other invoice claims.
+		owed, oerr := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
+		if oerr != nil {
+			return oerr
+		}
+		claimed, cerr := q.SumOwedInvoiceClaims(ctx, gen.SumOwedInvoiceClaimsParams{MerchantID: tenantID, CustomerID: payerID, Currency: cur})
+		if cerr != nil {
+			return cerr
+		}
+		due := min(receivable, max(owed-claimed, 0))
 
 		// --- closing balance snapshot (derived, #491) ---
 		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
@@ -212,8 +225,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		invoiceID := uuidutil.NewV7()
 		invoiceNumber := fmt.Sprintf("INV-%s", invoiceID.String())
 		totalAmount := receivable
-		amountPaid := int64(0)
-		amountDue := totalAmount
+		amountPaid := receivable - due
+		amountDue := due
 		status := "open"
 		issuedAt := &now
 		dueAt := &now
@@ -230,8 +243,10 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 		var paidAt *time.Time
 		if amountDue == 0 {
 			status = "paid"
-			totalAmount = usageTotal
-			amountPaid = usageTotal
+			if receivable == 0 {
+				totalAmount = usageTotal
+				amountPaid = usageTotal
+			}
 			paidAt = &now
 		}
 		inv = &models.Invoice{

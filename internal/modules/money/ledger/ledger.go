@@ -69,10 +69,13 @@ const (
 	// inverse of OwedAccrual, posted when an invoice is voided. Distinct from
 	// OwedPayment, which means a rail actually collected.
 	OwedWriteoff TransferType = "owed_writeoff"
+	// OwedRepayment pays debt from a newly funded credit lot (customer balance
+	// -> arrears liability), carrying that lot's grant_id.
+	OwedRepayment TransferType = "owed_repayment"
 )
 
 // AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
-var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff}
+var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_grant_id_transfer_type_key.
@@ -492,3 +495,21 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 // was retired in migration 014 — admission holds live in Redis (#513), so every
 // transfer here is posted. Re-add a durable two-phase path here (with an expiry
 // sweep) if a future flow genuinely needs in-ledger holds.
+
+// RepayOwed pays a customer's debt from their balance (DR customer_balance /
+// CR arrears_liability), attributed to the funding credit lot.
+func (l *Ledger) RepayOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, lot uuid.UUID, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
+	cust, err := l.EnsureCustomerBalance(ctx, customer, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	liab, err := l.EnsureCustomerArrears(ctx, customer, currency)
+	if err != nil {
+		return gen.BillingLedgerTransfer{}, err
+	}
+	c := customer
+	return l.Apply(ctx, Transfer{
+		Debit: cust, Credit: liab, Amount: amount, Currency: currency, Type: OwedRepayment,
+		Coord: coord, GrantID: &lot, Customer: &c, Invoice: invoice,
+	})
+}

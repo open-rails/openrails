@@ -230,7 +230,7 @@ const getCreditLotRemaining = `-- name: GetCreditLotRemaining :one
 SELECT (g.amount - COALESCE((
     SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
     WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-      AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
+      AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
 ), 0))::bigint AS remaining
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid AND g.id = $2::uuid
@@ -541,7 +541,7 @@ WHERE g.merchant_id = $1::uuid AND g.kind = 'credit' AND g.event = 'grant'
   AND (g.amount - COALESCE((
         SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = $1::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
+          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0)) > 0
 LIMIT $3::int
 `
@@ -739,7 +739,7 @@ SELECT g.id,
     (g.amount - COALESCE((
         SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
+          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0))::bigint AS remaining
 FROM billing.grants g
 WHERE g.merchant_id = $1::uuid
@@ -1171,7 +1171,7 @@ SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
         SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-          AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_refund', 'credit_refund_restore')
+          AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_refund', 'credit_refund_restore')
     ), 0) - COALESCE((
         SELECT ceil(g.amount::numeric * sum(-refund.amount) / payment.amount)
         FROM billing.payments refund JOIN billing.payments payment
@@ -1496,7 +1496,7 @@ WHERE g.merchant_id = $1::uuid
         g.amount - COALESCE((
             SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
             WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
-              AND t.transfer_type IN ('credit_spend', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
+              AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
         ), 0)) > 0)
   )
 ORDER BY g.created_at

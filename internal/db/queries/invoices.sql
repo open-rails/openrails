@@ -468,3 +468,34 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'in
   AND (sqlc.narg(after_id)::uuid IS NULL OR a.id > sqlc.narg(after_id)::uuid)
 ORDER BY a.id
 LIMIT sqlc.arg(page_size)::int;
+
+-- name: ListOwedInvoiceClaims :many
+-- Invoices that still claim a customer's owed money, oldest first, locked so a
+-- collection cannot start on one while funding repays it.
+SELECT id, amount_due, collection_intent_id
+FROM billing.invoices
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)::text
+  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+ORDER BY due_at NULLS FIRST, created_at, id
+FOR UPDATE;
+
+-- name: SumOwedInvoiceClaims :one
+SELECT COALESCE(SUM(amount_due), 0)::bigint AS amount
+FROM billing.invoices
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)::text
+  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0;
+
+-- name: ApplyInvoiceBalancePayment :execrows
+-- Pays an invoice from the customer's funded balance. An invoice with a
+-- collection in flight keeps its claim.
+UPDATE billing.invoices
+SET amount_paid = amount_paid + sqlc.arg(amount)::bigint,
+    amount_due = amount_due - sqlc.arg(amount)::bigint,
+    status = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN 'paid' ELSE status END,
+    paid_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN sqlc.arg(now)::timestamptz ELSE paid_at END,
+    next_collection_attempt_at = CASE WHEN amount_due = sqlc.arg(amount)::bigint THEN NULL ELSE next_collection_attempt_at END,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
+  AND status IN ('open', 'past_due', 'uncollectible')
+  AND collection_intent_id IS NULL
+  AND amount_due >= sqlc.arg(amount)::bigint;

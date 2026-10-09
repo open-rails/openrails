@@ -71,6 +71,24 @@ negative, corrective or decreasing evidence keeps the money reserved. Eligible
 evidence settles at pass-through: rated cost equals provider cost, and cost
 above the hold posts as owed instead of being clamped.
 
+## Owed and the next funding
+
+Settlement never re-gates, so cost above the hold is owed even by a prepaid
+customer with no credit line. A prepaid customer's open, extension and
+admission capacity is the balance net of holds and of what is owed, so no new
+hold is granted against money already owed; arrears capacity is unchanged.
+
+The next funding repays the debt first, in the same transaction and under the
+same customer lock: a purchased-credit lot repays from its paid part (a bonus
+never repays debt), and `CreateCreditGrant` from its amount. Each repayment is
+an `owed_repayment` credit transaction on the funding lot, so a replayed
+funding repays once. It pays the invoices that claim the debt first, oldest
+first, as balance payments; an invoice whose collection is in flight keeps its
+claim. Debt no invoice claims yet is repaid directly, and a later invoice
+claims only what is still owed. The repaid part of a lot is used credit: a
+refund returns only unused credit, and a chargeback of the lot makes the
+repaid part owed again (a won dispute repays it).
+
 Observations are kept 90 days after their operation is settled or released
 ([data retention](../operations.md#data-retention)); authorizations and
 qualifications are permanent.

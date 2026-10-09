@@ -189,7 +189,7 @@ export type CreditTransaction = {
   id: string
   customer_id: string
   currency: string
-  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
   amount: string
   credit_grant_id: string | null
   invoker: string | null

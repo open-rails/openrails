@@ -116,6 +116,30 @@ func (q *Queries) GetPurchasedCreditRefundState(ctx context.Context, arg GetPurc
 	return i, err
 }
 
+const getPurchasedCreditRepaidOwed = `-- name: GetPurchasedCreditRepaidOwed :one
+SELECT COALESCE(sum(CASE
+    WHEN transfer_type='owed_repayment' THEN amount
+    WHEN operation='purchased_credit_refund' AND source='repaid_owed' THEN -amount
+    WHEN operation='purchased_credit_refund' AND source LIKE 'repaid_owed_restore:%' THEN amount
+    ELSE 0 END),0)::bigint AS amount
+FROM billing.ledger_transfers
+WHERE merchant_id=$1::uuid AND grant_id=$2::uuid
+`
+
+type GetPurchasedCreditRepaidOwedParams struct {
+	MerchantID uuid.UUID
+	GrantID    uuid.UUID
+}
+
+// Owed the lot repaid and still stands repaid: repayments, less what reversals
+// revived, plus what recoveries repaid again.
+func (q *Queries) GetPurchasedCreditRepaidOwed(ctx context.Context, arg GetPurchasedCreditRepaidOwedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getPurchasedCreditRepaidOwed, arg.MerchantID, arg.GrantID)
+	var amount int64
+	err := row.Scan(&amount)
+	return amount, err
+}
+
 const getPurchasedCreditRetiredBalance = `-- name: GetPurchasedCreditRetiredBalance :one
 SELECT
  COALESCE(sum(CASE WHEN cr.account_type='expired_credits' THEN lt.amount WHEN dr.account_type='expired_credits' THEN -lt.amount ELSE 0 END),0)::bigint AS expired,
@@ -149,7 +173,8 @@ SELECT
  COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund'),0)::bigint AS withdrawn,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.source='expired_credit'),0)::bigint AS expired,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.source='revoked_credit'),0)::bigint AS revoked,
- COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund' OR lt.source IN ('consumed_credit','expired_credit','revoked_credit')),0)::bigint AS face,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.source='repaid_owed'),0)::bigint AS repaid,
+ COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund' OR lt.source IN ('consumed_credit','expired_credit','revoked_credit','repaid_owed')),0)::bigint AS face,
  COALESCE(sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_refund_cash_restore'),0)::bigint AS recovery,
  count(*)::bigint AS legs
 FROM billing.ledger_transfers lt
@@ -168,6 +193,7 @@ type GetPurchasedCreditReversalStateRow struct {
 	Withdrawn int64
 	Expired   int64
 	Revoked   int64
+	Repaid    int64
 	Face      int64
 	Recovery  int64
 	Legs      int64
@@ -181,6 +207,7 @@ func (q *Queries) GetPurchasedCreditReversalState(ctx context.Context, arg GetPu
 		&i.Withdrawn,
 		&i.Expired,
 		&i.Revoked,
+		&i.Repaid,
 		&i.Face,
 		&i.Recovery,
 		&i.Legs,

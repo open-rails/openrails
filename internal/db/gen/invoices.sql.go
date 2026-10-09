@@ -12,6 +12,44 @@ import (
 	"github.com/google/uuid"
 )
 
+const applyInvoiceBalancePayment = `-- name: ApplyInvoiceBalancePayment :execrows
+UPDATE billing.invoices
+SET amount_paid = amount_paid + $3::bigint,
+    amount_due = amount_due - $3::bigint,
+    status = CASE WHEN amount_due = $3::bigint THEN 'paid' ELSE status END,
+    paid_at = CASE WHEN amount_due = $3::bigint THEN $4::timestamptz ELSE paid_at END,
+    next_collection_attempt_at = CASE WHEN amount_due = $3::bigint THEN NULL ELSE next_collection_attempt_at END,
+    updated_at = $4::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2 AND id = $5
+  AND status IN ('open', 'past_due', 'uncollectible')
+  AND collection_intent_id IS NULL
+  AND amount_due >= $3::bigint
+`
+
+type ApplyInvoiceBalancePaymentParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Amount     int64
+	Now        time.Time
+	InvoiceID  uuid.UUID
+}
+
+// Pays an invoice from the customer's funded balance. An invoice with a
+// collection in flight keeps its claim.
+func (q *Queries) ApplyInvoiceBalancePayment(ctx context.Context, arg ApplyInvoiceBalancePaymentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, applyInvoiceBalancePayment,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Amount,
+		arg.Now,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const applyInvoicePaymentSnapshot = `-- name: ApplyInvoicePaymentSnapshot :execrows
 UPDATE billing.invoices
 SET amount_paid = amount_paid + $3::bigint,
@@ -1099,6 +1137,49 @@ func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListIn
 	return items, nil
 }
 
+const listOwedInvoiceClaims = `-- name: ListOwedInvoiceClaims :many
+SELECT id, amount_due, collection_intent_id
+FROM billing.invoices
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3::text
+  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+ORDER BY due_at NULLS FIRST, created_at, id
+FOR UPDATE
+`
+
+type ListOwedInvoiceClaimsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+type ListOwedInvoiceClaimsRow struct {
+	ID                 uuid.UUID
+	AmountDue          int64
+	CollectionIntentID *uuid.UUID
+}
+
+// Invoices that still claim a customer's owed money, oldest first, locked so a
+// collection cannot start on one while funding repays it.
+func (q *Queries) ListOwedInvoiceClaims(ctx context.Context, arg ListOwedInvoiceClaimsParams) ([]ListOwedInvoiceClaimsRow, error) {
+	rows, err := q.db.Query(ctx, listOwedInvoiceClaims, arg.MerchantID, arg.CustomerID, arg.Currency)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOwedInvoiceClaimsRow
+	for rows.Next() {
+		var i ListOwedInvoiceClaimsRow
+		if err := rows.Scan(&i.ID, &i.AmountDue, &i.CollectionIntentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingInvoiceItemsByPayer = `-- name: ListPendingInvoiceItemsByPayer :many
 SELECT source_type,
        COALESCE(NULLIF(metadata ->> 'source', ''), source_id)::text AS source,
@@ -1477,6 +1558,26 @@ func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg Se
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const sumOwedInvoiceClaims = `-- name: SumOwedInvoiceClaims :one
+SELECT COALESCE(SUM(amount_due), 0)::bigint AS amount
+FROM billing.invoices
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3::text
+  AND status IN ('open', 'past_due', 'uncollectible') AND amount_due > 0
+`
+
+type SumOwedInvoiceClaimsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+func (q *Queries) SumOwedInvoiceClaims(ctx context.Context, arg SumOwedInvoiceClaimsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumOwedInvoiceClaims, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var amount int64
+	err := row.Scan(&amount)
+	return amount, err
 }
 
 const sumPendingInvoiceItemAmountBySourceInPeriod = `-- name: SumPendingInvoiceItemAmountBySourceInPeriod :many

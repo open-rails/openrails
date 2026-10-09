@@ -26,7 +26,7 @@ FROM billing.grants g
 LEFT JOIN billing.grants term ON term.merchant_id=g.merchant_id AND term.supersedes_id=g.id
   AND term.event IN ('revoke','expire','supersede')
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_spend') AS spent,
+  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend','owed_repayment')) AS spent,
          sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END) FILTER (WHERE lt.transfer_type IN ('credit_revoke','credit_refund','credit_refund_restore')) AS revoked,
          sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_expire') AS expired
   FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
@@ -113,7 +113,7 @@ FROM page g
 LEFT JOIN billing.grants term ON term.merchant_id = g.merchant_id AND term.supersedes_id = g.id
   AND term.event IN ('revoke','expire','supersede')
 LEFT JOIN LATERAL (
-  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_spend') AS spent,
+  SELECT sum(lt.amount) FILTER (WHERE lt.transfer_type IN ('credit_spend','owed_repayment')) AS spent,
          sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END) FILTER (WHERE lt.transfer_type IN ('credit_revoke','credit_refund','credit_refund_restore')) AS revoked,
          sum(lt.amount) FILTER (WHERE lt.transfer_type='credit_expire') AS expired
   FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
