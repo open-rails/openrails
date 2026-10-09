@@ -1038,7 +1038,7 @@
     ],
     "internal/config": [
       "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
-      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming NamingConfig\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
+      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming NamingConfig\n\n\tSchema string\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
       "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",

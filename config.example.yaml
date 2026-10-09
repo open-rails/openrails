@@ -57,6 +57,7 @@ auth:
   # Declare only when AuthKit receives direct client connections.
   # Behind proxies, configure top-level trusted_proxies instead.
   direct_peer_ip: true
+  # schema: profiles # the server's AuthKit tables; defaults to 'profiles' (env AUTH_SCHEMA)
   # Site naming policy for merchant names and usernames (shown defaults).
   naming:
     enabled: true

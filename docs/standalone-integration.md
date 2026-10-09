@@ -373,7 +373,7 @@ each acts for.
 | `server.Config` | Meaning |
 |---|---|
 | `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
-| `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, development allowances. |
+| `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, its tables' `Schema` (default `profiles`), development allowances. |
 | `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
 | `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
 | `MerchantCreation` | Lets signed-in users create merchants: reserved names, a pattern and a free allowance. |

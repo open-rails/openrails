@@ -165,6 +165,11 @@ type AuthConfig struct {
 	// Naming is the site naming policy for merchant names and usernames.
 	Naming NamingConfig
 
+	// Schema is the Postgres schema of the server's AuthKit tables; empty is
+	// AuthKit's default, profiles. Deployments sharing a database without
+	// sharing accounts use different schemas.
+	Schema string
+
 	// Issuer is the token issuer OpenRails signs as, such as
 	// "https://openrails.example.com". Required.
 	Issuer string

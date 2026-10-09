@@ -44,7 +44,9 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_, _ = f.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{f.schema}.Sanitize()+" CASCADE")
+		for _, schema := range []string{f.schema, f.authSchema()} {
+			_, _ = f.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		}
 		f.pool.Close()
 	})
 

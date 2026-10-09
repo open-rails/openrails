@@ -275,7 +275,7 @@ func usernames(p config.NamingPolicy) authkit.UsernameConfig {
 // on OpenRails' River fleet, in riverSchema.
 func authConfig(auth *config.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig, riverSchema string) authkit.Config {
 	return authkit.Config{
-		Database: authkit.DatabaseConfig{RiverSchema: riverSchema},
+		Database: authkit.DatabaseConfig{Schema: strings.TrimSpace(auth.Schema), RiverSchema: riverSchema},
 		Token: authkit.TokenConfig{
 			Issuer:                  strings.TrimSpace(auth.Issuer),
 			IssuedAudiences:         []string{billingauth.TokenAudience},

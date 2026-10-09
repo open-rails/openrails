@@ -3319,6 +3319,7 @@ pkg openrails/server, type AuthConfig struct, MintDisabled bool
 pkg openrails/server, type AuthConfig struct, Naming config.NamingConfig
 pkg openrails/server, type AuthConfig struct, PublicKeysJSON string
 pkg openrails/server, type AuthConfig struct, RequestOrigin string
+pkg openrails/server, type AuthConfig struct, Schema string
 pkg openrails/server, type AuthRateLimit = config.AuthRateLimit
 pkg openrails/server, type AuthRateLimit struct
 pkg openrails/server, type AuthRateLimit struct, Cooldown time.Duration

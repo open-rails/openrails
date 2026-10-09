@@ -51,6 +51,7 @@ merchants:
 			cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
 			cfg.Auth = server.AuthConfig{
 				Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
+				Schema: f.authSchema(),
 			}
 		})
 		graph, cp := operator.Of(srv)

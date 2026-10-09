@@ -34,12 +34,18 @@ func (f *fixture) newServer(t *testing.T, edit func(*server.Config, *server.Deps
 	return srv
 }
 
+// authSchema is the schema of the fixture's standalone AuthKit.
+func (f *fixture) authSchema() string { return f.schema + "_auth" }
+
 // buildServer is newServer reporting New's error.
 func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.Deps)) (*server.Server, error) {
 	t.Helper()
+	// Each test's AuthKit has its own schema, as its billing tables do: its
+	// accounts, and the sign-in limits AuthKit counts per device, are its own.
 	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: server.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
+		Schema: f.authSchema(),
 	}}
 	deps := server.Deps{Engine: openrails.Deps{Postgres: f.pool}}
 	if edit != nil {
