@@ -68,7 +68,7 @@ func (k issuerKey) mintAs(t *testing.T, typ string, edit func(jwt.MapClaims)) st
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
-		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(),
+		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(), "auth_time": now.Unix(),
 		"scope": "openrails:merchant", "permissions": []string{billing.MerchantOperationsRead},
 	}
 	if edit != nil {
@@ -637,6 +637,11 @@ func TestResourceServerFederatedGrants(t *testing.T) {
 		"unknown role":  {owner, body{"email": "x@example.test", "role": "admin"}, http.StatusBadRequest, "unknown_role"},
 		"beyond caller": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{billing.MerchantMembersManage} }), body{"email": "x@example.test", "role": "owner"}, http.StatusForbidden, "role_escalation"},
 		"not an owner":  {staff(nil), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodePermissionRequired},
+		"stale sign-in": {host.mint(t, func(c jwt.MapClaims) {
+			c["permissions"], c["auth_time"] = []string{"merchant:*"}, time.Now().Add(-time.Hour).Unix()
+		}), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodeStepUpRequired},
+		"no sign-in time": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"}; delete(c, "auth_time") }),
+			body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodeStepUpRequired},
 	} {
 		w := send(http.MethodPost, grants, tc.token, tc.payload)
 		require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
