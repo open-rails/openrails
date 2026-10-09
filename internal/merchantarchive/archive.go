@@ -182,6 +182,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if err := q.SetCatalogBatchMerchant(ctx, id.String()); err != nil {
 				return err
 			}
+			if h.Version == 1 {
+				if _, err := tx.Exec(ctx, legacyEntitlementsDDL); err != nil {
+					return err
+				}
+			}
 			receipt, err := q.BeginBillingRestore(ctx, id.UUID())
 			if err != nil {
 				return err
@@ -205,7 +210,11 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			if dropBefore, ok := partitionDropBefore[p.Name]; ok {
 				args = append(args, dropBefore(restoreNow))
 			}
-			_, err := tx.Exec(ctx, insertQuery(p), args...)
+			target := "billing." + p.Name
+			if p.Name == contract.LegacyEntitlements.Name {
+				target = legacyEntitlementsTable
+			}
+			_, err := tx.Exec(ctx, insertQuery(target, p), args...)
 			return err
 		})
 		if err != nil {
@@ -233,8 +242,8 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if invalidReceipts {
 			return &Error{Code: "integrity", Table: "catalog_applications"}
 		}
-		if info.LegacyDurations {
-			if err := q.RestoreLegacySubscriptionEntitlementBounds(ctx, id.UUID()); err != nil {
+		if info.LegacyAccess {
+			if err := convertLegacyAccess(ctx, tx, id, info.LegacyDurations, restoreNow); err != nil {
 				return err
 			}
 		}
@@ -267,11 +276,71 @@ func scope(ctx context.Context, tx pgx.Tx, id billing.MerchantID) error {
 	return nil
 }
 
+// legacyEntitlementsTable holds a version 1 archive's per-key windows while
+// restore converts them to product access.
+const legacyEntitlementsTable = "pg_temp.legacy_entitlements"
+
+const legacyEntitlementsDDL = `CREATE TEMP TABLE legacy_entitlements (
+	merchant_id uuid NOT NULL, id uuid NOT NULL, entitlement text COLLATE "C" NOT NULL,
+	starts_at timestamptz NOT NULL, ends_at timestamptz, source_id uuid, source_type text,
+	revoked_at timestamptz, revoke_reason text, created_at timestamptz, updated_at timestamptz,
+	deleted_at timestamptz, customer_id uuid NOT NULL, grant_id uuid, destructive_run_id uuid
+) ON COMMIT DROP`
+
+// legacySubscriptionBounds bounds the open subscription windows of archives
+// preceding explicit access terms by their immutable paid grants, as
+// migration 8 did.
+const legacySubscriptionBounds = `WITH paid_bounds AS (
+	SELECT e.id, CASE WHEN bool_or(g.ends_at IS NULL) THEN NULL ELSE max(g.ends_at) END AS ends_at
+	FROM pg_temp.legacy_entitlements e
+	JOIN billing.subscriptions s ON s.merchant_id = e.merchant_id AND s.id = e.source_id
+	JOIN billing.grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id
+	  AND g.source_type = 'subscription' AND g.source_id = s.id::text
+	  AND g.kind = 'entitlement' AND g.event = 'grant'
+	  AND g.spec_snapshot->'entitlements' ? e.entitlement
+	WHERE e.merchant_id = $1 AND e.source_type = 'subscription' AND e.ends_at IS NULL
+	  AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+	  AND s.access_duration_hours_snapshot IS NOT NULL
+	  AND NOT EXISTS (SELECT 1 FROM billing.grants terminal
+	      WHERE terminal.merchant_id = g.merchant_id AND terminal.supersedes_id = g.id
+	        AND terminal.event IN ('revoke', 'expire', 'supersede'))
+	GROUP BY e.id
+)
+UPDATE pg_temp.legacy_entitlements e SET ends_at = b.ends_at
+FROM paid_bounds b WHERE b.id = e.id AND b.ends_at IS NOT NULL`
+
+// convertLegacyAccess converts a version 1 archive's per-key windows to
+// product access, as migration 16 converts a database. The cutover's access
+// changes need an operator's approval, which a restore cannot take: an archive
+// whose conversion changes any customer's access is refused, to be cut over
+// where it was exported.
+func convertLegacyAccess(ctx context.Context, tx pgx.Tx, id billing.MerchantID, legacyDurations bool, at time.Time) error {
+	if legacyDurations {
+		if _, err := tx.Exec(ctx, legacySubscriptionBounds, id.UUID()); err != nil {
+			return err
+		}
+	}
+	q := gen.New(tx)
+	if _, err := q.ConvertEntitlementWindows(ctx, gen.ConvertEntitlementWindowsParams{MerchantID: id.UUID(), Source: legacyEntitlementsTable, At: at}); err != nil {
+		return err
+	}
+	changes, err := q.ListProductAccessChanges(ctx, gen.ListProductAccessChangesParams{MerchantID: id.UUID(), Source: legacyEntitlementsTable, At: at})
+	if err != nil {
+		return err
+	}
+	if len(changes) > 0 {
+		c := changes[0]
+		return &Error{Code: "unsupported_state", Table: "entitlements", Count: int64(len(changes)),
+			Err: fmt.Errorf("product access conversion changes access (customer %s %s %q); cut the archive over before exporting it", c.CustomerID, c.Change, c.Entitlement)}
+	}
+	return nil
+}
+
 // insertQuery inserts one archived row. A partitioned table takes one more
 // parameter, the oldest key it still keeps: a row older than that has no
 // partition, and retention would drop it on the next pass, so it is not
 // restored.
-func insertQuery(p contract.Profile) string {
+func insertQuery(target string, p contract.Profile) string {
 	cols, params := make([]string, len(p.Columns)), make([]string, len(p.Columns))
 	keep := ""
 	for i, c := range p.Columns {
@@ -281,7 +350,7 @@ func insertQuery(p contract.Profile) string {
 			keep = fmt.Sprintf(" WHERE %s >= $%d::timestamptz", params[i], len(p.Columns)+1)
 		}
 	}
-	return "INSERT INTO billing." + p.Name + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
+	return "INSERT INTO " + target + " (" + strings.Join(cols, ",") + ") SELECT " + strings.Join(params, ",") + keep
 }
 
 // partitionKeys and partitionDropBefore index retention.Partitioned by table.

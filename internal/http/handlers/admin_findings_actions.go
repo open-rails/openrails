@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -161,10 +162,10 @@ func executeFindingAction(r *httprequest.Request, finding reconcile.FindingRecor
 		// Plain resolution: machinery keyed off the finding status (e.g. the
 		// #679 breaker) re-arms once the finding leaves the open states.
 		return result, nil
-	case recommend.ActionRevokeEntitlement:
-		return result, executeRevokeEntitlement(r, params, result)
-	case recommend.ActionRecordAdminGrant:
-		return result, executeRecordAdminGrant(r, finding, params, result)
+	case recommend.ActionRevokeProductAccess:
+		return result, executeRevokeProductAccess(r, params, result)
+	case recommend.ActionGrantProduct:
+		return result, executeGrantProduct(r, finding, params, result)
 	case recommend.ActionCancelAndRefund:
 		return result, executeCancelAndRefund(r, finding, params, notes, result)
 	default:
@@ -172,14 +173,14 @@ func executeFindingAction(r *httprequest.Request, finding reconcile.FindingRecor
 	}
 }
 
-// executeRevokeEntitlement: as-of revoke via the existing entitlement service.
-func executeRevokeEntitlement(r *httprequest.Request, params map[string]any, result map[string]any) error {
+// executeRevokeProductAccess revokes one product-access window as of a time.
+func executeRevokeProductAccess(r *httprequest.Request, params map[string]any, result map[string]any) error {
 	svc := r.State.EntitlementService
 	if svc == nil {
 		return errors.New("entitlement service unavailable")
 	}
 	ctx := r.Request.Context()
-	entID, err := paramUUID(params, "entitlement_id")
+	accessID, err := paramUUID(params, "access_id")
 	if err != nil {
 		return err
 	}
@@ -192,59 +193,55 @@ func executeRevokeEntitlement(r *httprequest.Request, params map[string]any, res
 		t := parsed.UTC()
 		asOf = &t
 	}
-	ent, err := svc.GetByID(ctx, entID)
+	access, err := svc.GetAccessByID(ctx, accessID)
 	if err != nil {
-		return paramErrorf("entitlement %s not found", entID)
+		return paramErrorf("product access %s not found", accessID)
 	}
-	if ent.RevokedAt != nil {
+	if access.RevokedAt != nil {
 		result["revoke"] = "noop_already_revoked"
 		return nil
 	}
-	if err := svc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-		EntitlementID: &entID,
-		Reason:        models.EntitlementRevokeAdmin,
-		AsOf:          asOf,
-	}); err != nil {
-		return fmt.Errorf("revoke entitlement %s: %w", entID, err)
+	if err := svc.RevokeAccess(ctx, entitlements.RevokeAccessParams{AccessID: &accessID, Reason: models.AccessRevokeAdmin, AsOf: asOf}); err != nil {
+		return fmt.Errorf("revoke product access %s: %w", accessID, err)
 	}
 	result["revoke"] = "revoked"
-	result["entitlement_id"] = entID.String()
-	convergeAfterMutation(r, ent.CustomerID) // #511: re-converge inline; the sweep re-measures
+	result["access_id"] = accessID.String()
+	convergeAfterMutation(r, access.CustomerID)
 	return nil
 }
 
-// executeRecordAdminGrant: an admin-sourced product-access grant via the
-// existing grants machinery (makes freeloader access legitimate). Idempotent:
-// SourceID is keyed to the finding.
-func executeRecordAdminGrant(r *httprequest.Request, finding reconcile.FindingRecord, params map[string]any, result map[string]any) error {
+// executeGrantProduct grants the product free (makes freeloader access
+// legitimate), once per finding.
+func executeGrantProduct(r *httprequest.Request, finding reconcile.FindingRecord, params map[string]any, result map[string]any) error {
 	svc := productAccessService(r)
 	if svc == nil {
 		return errors.New("product access service unavailable")
 	}
 	ctx := r.Request.Context()
-	customerID := paramString(params, "customer_id")
-	if customerID == "" {
-		return paramErrorf("recommendation param \"customer_id\" is required")
+	customerID, err := paramUUID(params, "customer_id")
+	if err != nil {
+		return err
 	}
 	productID, err := paramTypedID(params, "product_id", billing.ParseProductID)
 	if err != nil {
 		return err
 	}
-	grant, created, err := svc.GrantProductAccess(ctx, productaccess.GrantParams{
-		UserID:     customerID,
-		ProductID:  productID.UUID(),
-		SourceType: models.ProductAccessSourceAdmin,
-		SourceID:   "finding:" + finding.ID.String(),
-	})
-	if err != nil {
-		return fmt.Errorf("record admin grant: %w", err)
+	admin, ok := r.Staff()
+	if !ok {
+		return errors.New("missing admin identity")
 	}
-	result["grant_id"] = grant.ID.String()
-	result["grant_created"] = created
+	grant := productaccess.Grant{CustomerID: customerID, ProductID: productID.UUID(), Reason: grants.ReasonStaff, Actor: admin.Subject, IdempotencyKey: "finding:" + finding.ID.String()}
 	if reason := paramString(params, "reason"); reason != "" {
+		grant.Note = &reason
 		result["reason"] = reason
 	}
-	convergeAfterMutation(r, grant.CustomerID)
+	window, created, err := svc.GrantProduct(ctx, grant)
+	if err != nil {
+		return fmt.Errorf("grant product: %w", err)
+	}
+	result["access_id"] = window.ID.String()
+	result["grant_created"] = created
+	convergeAfterMutation(r, window.CustomerID)
 	return nil
 }
 
@@ -345,8 +342,8 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 			}
 			if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, locked, subscriptions.LocalCancellation{
 				EndedAt: now, CancelType: models.CancelTypeMerchant, Feedback: &feedback,
-				RevokeReason: models.EntitlementRevokeAdmin, RevokeAsOf: now,
-				RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
+				RevokeReason: models.AccessRevokeAdmin, RevokeAsOf: now,
+				RevokeSources: []models.AccessSourceType{models.AccessSourceSubscription, models.AccessSourceGrace},
 			}); err != nil {
 				return fmt.Errorf("cancel subscription %s: %w", subID, err)
 			}

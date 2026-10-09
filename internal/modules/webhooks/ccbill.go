@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -878,10 +879,9 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
 
-		// Update entitlements based on product tier change
-		if err := s.updateEntitlementsForUpgrade(ctx, txdb, entitlementService, productService, priceService, subscription, oldPriceID, newPrice.ID); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to update entitlements for subscription upgrade")
-			// Don't fail the webhook - entitlement issues shouldn't block subscription updates
+		if err := s.updateAccessForUpgrade(ctx, entitlementService, priceService, subscription, oldPriceID, newPrice.ID); err != nil {
+			log.WithContext(ctx).WithError(err).Error("failed to update product access for subscription upgrade")
+			// Don't fail the webhook - access issues shouldn't block subscription updates
 		}
 
 		// Add notification to queue for user about successful upgrade and send immediate email
@@ -920,134 +920,53 @@ func (s *CCBillWebhookService) handleUpgradeSuccess(ctx context.Context) error {
 	return nil
 }
 
-// updateEntitlementsForUpgrade handles entitlement changes when a subscription is upgraded/downgraded.
-// It revokes entitlements that are no longer in the new product's spec and grants new ones.
-func (s *CCBillWebhookService) updateEntitlementsForUpgrade(
+// updateAccessForUpgrade moves the subscription's access from the old product
+// to the new one: the old product's window closes now and the new product is
+// granted for the rest of the period. A price change within one product keeps
+// its window.
+func (s *CCBillWebhookService) updateAccessForUpgrade(
 	ctx context.Context,
-	txdb *db.DB,
 	entitlementService *entitlements.EntitlementService,
-	productService *catalog.ProductService,
 	priceService *catalog.PriceService,
 	subscription *models.Subscription,
 	oldPriceID uuid.UUID,
 	newPriceID uuid.UUID,
 ) error {
-	// Get old and new prices
 	oldPrice, err := priceService.GetByID(ctx, oldPriceID)
 	if err != nil {
 		return fmt.Errorf("failed to get old price: %w", err)
 	}
-
 	newPrice, err := priceService.GetByID(ctx, newPriceID)
 	if err != nil {
 		return fmt.Errorf("failed to get new price: %w", err)
 	}
-
-	// Get old and new products
-	oldProduct, err := productService.GetByID(ctx, oldPrice.ProductID)
-	if err != nil {
-		return fmt.Errorf("failed to get old product: %w", err)
+	if oldPrice.ProductID == newPrice.ProductID {
+		return nil
 	}
-
-	newProduct, err := productService.GetByID(ctx, newPrice.ProductID)
-	if err != nil {
-		return fmt.Errorf("failed to get new product: %w", err)
+	now := s.now().UTC()
+	st := models.AccessSourceSubscription
+	sid := subscription.ID.String()
+	if err := entitlementService.RevokeAccess(ctx, entitlements.RevokeAccessParams{
+		UserID: subscription.CustomerID.String(), ProductID: oldPrice.ProductID,
+		SourceType: &st, SourceID: &sid, Reason: models.AccessRevokeDowngrade,
+	}); err != nil {
+		return fmt.Errorf("revoke old product access: %w", err)
 	}
-
-	// Build entitlement sets for old and new products
-	oldEntitlements := make(map[string]bool)
-	if len(oldProduct.Entitlements) > 0 {
-		for _, name := range oldProduct.Entitlements {
-			oldEntitlements[name] = true
-		}
+	exists, err := entitlementService.AccessExistsBySource(ctx, st, sid, newPrice.ProductID)
+	if err != nil || exists {
+		return err
 	}
-
-	newEntitlements := make(map[string]bool)
-	if len(newProduct.Entitlements) > 0 {
-		for _, name := range newProduct.Entitlements {
-			newEntitlements[name] = true
-		}
+	params := entitlements.PushAccessParams{
+		UserID: subscription.CustomerID.String(), CustomerID: subscription.CustomerID, ProductID: newPrice.ProductID,
+		NotBefore: &now, Indefinite: true, SourceType: st, SourceID: sid,
 	}
-
-	now := s.now()
-
-	// Revoke entitlements that are no longer in the new product (downgrade case)
-	for oldEnt := range oldEntitlements {
-		if !newEntitlements[oldEnt] {
-			// This entitlement is being removed - revoke only this specific entitlement
-			reason := models.EntitlementRevokeDowngrade
-			st := models.EntitlementSourceSubscription
-			sid := subscription.ID
-			if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-				UserID:      subscription.CustomerID.String(),
-				Entitlement: oldEnt,
-				SourceType:  &st,
-				SourceID:    &sid,
-				Reason:      reason,
-			}); err != nil {
-				log.WithContext(ctx).WithError(err).WithField("entitlement", oldEnt).Warn("failed to revoke entitlement during upgrade")
-			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"entitlement":     oldEnt,
-					"action":          "revoked",
-				}).Info("Revoked entitlement during subscription tier change")
-			}
-		}
+	if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+		end := subscription.CurrentPeriodEndsAt.UTC()
+		params.Indefinite, params.EndsAt = false, &end
 	}
-
-	// Grant new entitlements that weren't in the old product (upgrade case)
-	for newEnt := range newEntitlements {
-		if !oldEntitlements[newEnt] {
-			// This is a new entitlement - check if it already exists
-			exists, err := entitlementService.ExistsBySource(ctx, models.EntitlementSourceSubscription, subscription.ID, newEnt)
-			if err != nil {
-				log.WithContext(ctx).WithError(err).WithField("entitlement", newEnt).Warn("failed to check entitlement existence")
-				continue
-			}
-			if exists {
-				continue
-			}
-
-			// Grant new entitlement window tied to subscription.
-			notBefore := now.UTC()
-			var params entitlements.PushNewEntitlementParams
-			if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
-				endAt := subscription.CurrentPeriodEndsAt.UTC()
-				params = entitlements.PushNewEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: newEnt,
-					NotBefore:   &notBefore,
-					EndsAt:      &endAt,
-					SourceType:  models.EntitlementSourceSubscription,
-					SourceID:    subscription.ID,
-				}
-			} else {
-				params = entitlements.PushNewEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: newEnt,
-					NotBefore:   &notBefore,
-					Indefinite:  true,
-					SourceType:  models.EntitlementSourceSubscription,
-					SourceID:    subscription.ID,
-				}
-			}
-			if _, err := entitlementService.PushNewEntitlement(ctx, params); err != nil {
-				log.WithContext(ctx).WithError(err).WithField("entitlement", newEnt).Warn("failed to grant entitlement during upgrade")
-			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"user_id":         subscription.CustomerID.String(),
-					"entitlement":     newEnt,
-					"action":          "granted",
-				}).Info("Granted new entitlement during subscription tier change")
-			}
-		}
+	if _, err := entitlementService.PushAccess(ctx, params); err != nil {
+		return fmt.Errorf("grant new product access: %w", err)
 	}
-
-	// For entitlements that exist in both products, no action needed - they continue
-	// The indefinite window remains valid
-
 	return nil
 }
 
@@ -1338,7 +1257,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 				sub.CancelFeedback = &refundReason
 			}
 			_, n, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
-				ccbillNotice{revoke: models.EntitlementRevokeRefund, ended: subscriptions.PremiumEndReasonRefund})
+				ccbillNotice{revoke: models.AccessRevokeRefund, ended: subscriptions.PremiumEndReasonRefund})
 			if err != nil {
 				return fmt.Errorf("cancel refunded subscription %s: %w", sub.ID, err)
 			}
@@ -1483,7 +1402,7 @@ func (s *CCBillWebhookService) handleVoid(ctx context.Context) error {
 					voided.CancelFeedback = &reason
 				}
 				_, n, err := s.ccbillMirrorTransition(ctx, txdb, voided, lifecycle.Cancel{Kind: lifecycle.CancelMerchant, Immediate: true, At: s.now().UTC()},
-					ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonRail})
+					ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail})
 				if err != nil {
 					return fmt.Errorf("cancel voided subscription %s: %w", voided.ID, err)
 				}
@@ -1607,7 +1526,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 			sub.CancelFeedback = &feedback
 		}
 		_, n, err := s.ccbillMirrorTransition(ctx, txdb, sub, lifecycle.Cancel{Kind: lifecycle.CancelChargeback, Immediate: true, At: s.now().UTC()},
-			ccbillNotice{revoke: models.EntitlementRevokeChargeback, ended: subscriptions.PremiumEndReasonChargeback})
+			ccbillNotice{revoke: models.AccessRevokeChargeback, ended: subscriptions.PremiumEndReasonChargeback})
 		if err != nil {
 			return fmt.Errorf("cancel charged-back subscription %s: %w", sub.ID, err)
 		}
@@ -1881,7 +1800,7 @@ func (s *CCBillWebhookService) handleCancel(ctx context.Context) error {
 	}
 	now := s.now().UTC()
 	var ev lifecycle.Event = lifecycle.ProviderCanceled{At: now}
-	notice := ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
+	notice := ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonRail}
 	if data.Source == "failedRB" {
 		ev = lifecycle.Cancel{Kind: lifecycle.CancelExpired, Immediate: true, At: now}
 		notice.ended, notice.providerStopped = subscriptions.PremiumEndReasonExpired, true
@@ -1911,5 +1830,5 @@ func (s *CCBillWebhookService) handleExpiration(ctx context.Context) error {
 			return nil
 		}
 		return lifecycle.ProviderCanceled{At: now}
-	}, ccbillNotice{revoke: models.EntitlementRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
+	}, ccbillNotice{revoke: models.AccessRevokeAdmin, ended: subscriptions.PremiumEndReasonExpired})
 }

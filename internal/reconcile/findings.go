@@ -202,15 +202,15 @@ type MaterializeSubscriptionAction struct {
 
 // MaterializeResult reports what one materialization actually did.
 type MaterializeResult struct {
-	SubscriptionID      uuid.UUID
-	Created             bool
-	EntitlementsGranted int
-	PaymentBackfilled   bool
+	SubscriptionID    uuid.UUID
+	Created           bool
+	AccessGranted     bool
+	PaymentBackfilled bool
 }
 
 // BackfillPaymentAction inserts the missing local payment for a rail
 // charge (PS-4), deduped on (tenant, rail, transaction_id), and grants
-// the subscription's entitlements when the period is current.
+// the subscription's product when the period is current.
 type BackfillPaymentAction struct {
 	PspID         *uuid.UUID
 	Rail          string
@@ -225,9 +225,9 @@ type BackfillPaymentAction struct {
 	SubscriptionID *uuid.UUID
 	CustomerID     uuid.UUID
 	Metadata       map[string]any
-	// Grant, when non-nil, grants entitlements for the current period after
+	// Grant, when non-nil, grants the product for the current period after
 	// the backfill (charge covers a period that is still running).
-	Grant *GrantEntitlementsAction
+	Grant *GrantAccessAction
 }
 
 // RecordRefundAction records a rail refund locally (PS-5) as a
@@ -259,12 +259,12 @@ type AdoptPaymentMethodAction struct {
 	Card models.Card
 }
 
-// GrantEntitlementsAction grants subscription-sourced entitlement windows
-// (PS-4 current-period grant / PS-1 materialization).
-type GrantEntitlementsAction struct {
+// GrantAccessAction grants a subscription's product for one window (PS-4
+// current-period grant / PS-1 materialization).
+type GrantAccessAction struct {
 	SubscriptionID uuid.UUID
 	CustomerID     uuid.UUID
-	Entitlements   []string
+	ProductID      uuid.UUID
 	StartsAt       time.Time
 	EndsAt         *time.Time
 }

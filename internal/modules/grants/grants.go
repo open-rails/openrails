@@ -3,20 +3,24 @@
 //
 //   - derive-1 (Grant / Revoke / Expire / Supersede) appends immutable grant
 //     events; it is the SOLE writer of billing.grants.
-//   - derive-2 (Materialize) folds the grant log into projections: entitlement
-//     windows in billing.entitlements and credit lots as ledger deposits.
+//   - derive-2 (Materialize) folds the grant log into projections: product
+//     access windows in billing.product_access and credit lots as deposits.
 //
 // Grants are immutable: revoke/expire/supersede are NEW events referencing the
-// original. A credit grant carries the lot amount+currency and IS the FIFO lot.
+// original. An access grant gives a product for a window; the customer's keys
+// are the product's at check time. A credit grant carries the lot
+// amount+currency and IS the FIFO lot.
 package grants
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -26,9 +30,11 @@ import (
 type Kind string
 
 const (
+	Access Kind = "access"
+	Credit Kind = "credit"
+	// Entitlement and Ownership grants are history from before product access.
 	Entitlement Kind = "entitlement"
 	Ownership   Kind = "ownership"
-	Credit      Kind = "credit"
 )
 
 // SourceType is the origin of a grant.
@@ -37,12 +43,25 @@ type SourceType string
 const (
 	Purchase     SourceType = "purchase"
 	Subscription SourceType = "subscription"
-	Admin        SourceType = "admin"
 	Grace        SourceType = "grace"
+	// Granted is a free product grant: comp, staff, import or migration.
+	Granted SourceType = "grant"
+	// Admin is an operator's credit deposit.
+	Admin SourceType = "admin"
 )
 
-// Spec is the product spec snapshot captured on a grant at issuance, so derive-2
-// is a pure function of the grant (exact + historical replay).
+// GrantReason says why a free product was granted.
+type GrantReason string
+
+const (
+	ReasonComp      GrantReason = "comp"
+	ReasonStaff     GrantReason = "staff"
+	ReasonImport    GrantReason = "import"
+	ReasonMigration GrantReason = "migration"
+)
+
+// Spec is captured on a credit grant at issuance, so derive-2 is a pure
+// function of the grant. Historical entitlement grants carried their keys.
 type Spec struct {
 	Entitlements []string           `json:"entitlements,omitempty"`
 	Deposit      *DepositProvenance `json:"deposit,omitempty"`
@@ -112,6 +131,9 @@ type GrantInput struct {
 	Amount   *int64  // credit lots
 	Currency *string // credit lots
 	Reason   *string // free-text provenance (or#906: a deposit's description)
+	// Actor and GrantReason attribute a free product grant (Source Granted).
+	Actor       string
+	GrantReason GrantReason
 }
 
 // Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
@@ -129,13 +151,75 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.BillingGrant, er
 	if starts.IsZero() {
 		starts = l.now()
 	}
+	var actor, reason *string
+	if in.Actor != "" {
+		actor = &in.Actor
+	}
+	if in.GrantReason != "" {
+		r := string(in.GrantReason)
+		reason = &r
+	}
 	return l.q.InsertGrant(ctx, gen.InsertGrantParams{
 		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: in.Product,
 		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
 		Event: "grant", SupersedesID: nil, SpecSnapshot: spec,
 		StartsAt: starts, EndsAt: in.EndsAt, Amount: in.Amount, Currency: in.Currency,
-		Reason: in.Reason,
+		Reason: in.Reason, Actor: actor, GrantReason: reason,
 	})
+}
+
+// GrantAccessOnce appends an access grant at its natural key (a purchase, a
+// period start, an idempotency key). A replay returns the recorded grant and
+// created=false.
+func (l *Ledger) GrantAccessOnce(ctx context.Context, in GrantInput) (g gen.BillingGrant, created bool, err error) {
+	if in.Product == nil {
+		return g, false, fmt.Errorf("grants: an access grant needs its product")
+	}
+	starts := in.StartsAt
+	if starts.IsZero() {
+		starts = l.now()
+	}
+	var actor, reason *string
+	if in.Actor != "" {
+		actor = &in.Actor
+	}
+	if in.GrantReason != "" {
+		r := string(in.GrantReason)
+		reason = &r
+	}
+	g, err = l.q.InsertAccessGrantOnce(ctx, gen.InsertAccessGrantOnceParams{
+		MerchantID: l.merchant, CustomerID: in.Customer, ProductID: *in.Product,
+		SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
+		StartsAt: starts, EndsAt: in.EndsAt, Reason: in.Reason, Actor: actor, GrantReason: reason,
+	})
+	if err == nil {
+		return g, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return g, false, err
+	}
+	switch {
+	case in.Source == Granted:
+		g, err = l.q.GetAccessGrantByIdempotencyKey(ctx, gen.GetAccessGrantByIdempotencyKeyParams{MerchantID: l.merchant, IdempotencyKey: in.SourceID})
+	case in.Source == Purchase && in.Payment != nil:
+		g, err = l.q.GetAccessGrantByPurchase(ctx, gen.GetAccessGrantByPurchaseParams{MerchantID: l.merchant, PaymentID: *in.Payment, ProductID: *in.Product})
+	default:
+		var found []gen.BillingGrant
+		found, err = l.q.ListAccessGrantsAt(ctx, gen.ListAccessGrantsAtParams{
+			MerchantID: l.merchant, CustomerID: in.Customer, ProductID: *in.Product,
+			SourceType: string(in.Source), SourceID: in.SourceID, StartsAt: starts,
+		})
+		if err == nil && len(found) == 0 {
+			err = pgx.ErrNoRows
+		}
+		if err == nil {
+			g = found[0]
+		}
+	}
+	if err != nil {
+		return g, false, fmt.Errorf("grants: read recorded access grant: %w", err)
+	}
+	return g, false, nil
 }
 
 // Revoke appends a 'revoke' event terminating the grant (derive-1), effective now.
@@ -180,9 +264,10 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	})
 }
 
-// MaterializeGrant projects a single grant event (derive-2): entitlement windows
-// for entitlement grants and a deposit for credit grants. Ownership grants
-// are read directly. Terminated grants have their projection retracted.
+// MaterializeGrant projects a single grant event (derive-2): the access window
+// of an access grant and the deposit of a credit grant. Terminated grants have
+// their projection retracted. Historical entitlement and ownership grants have
+// no projection.
 func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error {
 	if g.Event != "grant" {
 		return fmt.Errorf("grants: MaterializeGrant needs a grant event, got %q", g.Event)
@@ -193,46 +278,22 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 	}
 
 	switch Kind(g.Kind) {
-	case Entitlement:
+	case Access:
 		if terminated {
-			_, err := l.q.RevokeEntitlementsByGrant(ctx, gen.RevokeEntitlementsByGrantParams{
+			_, err := l.q.RevokeProductAccessByGrant(ctx, gen.RevokeProductAccessByGrantParams{
 				MerchantID: l.merchant, GrantID: g.ID, RevokedAt: l.now(), RevokeReason: "grant_revoked",
 			})
 			return err
 		}
-		feats, err := specFeatures(g.SpecSnapshot)
-		if err != nil {
-			return err
+		if g.ProductID == nil || g.SourceID == nil {
+			return fmt.Errorf("grants: access grant %s lacks its product or source", g.ID)
 		}
-
-		for _, f := range feats {
-			exists, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
-				MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
-			})
-			if err != nil {
-				return err
-			}
-			if exists {
-				continue
-			}
-			// Keep this source's full interval even when other sources overlap it.
-			endAt := g.EndsAt
-			gid := g.ID
-			// The window keeps its grant's source, so source-keyed readers
-			// (revoke by subscription, grace, purchase) work, and links to its
-			// grant by grant_id. A grant's source_id is free text; a window's is
-			// the source's uuid, else the grant's own id.
-			entSourceID := gid
-			if parsed, perr := uuid.Parse(sourceIDOf(g)); perr == nil {
-				entSourceID = parsed
-			}
-			if err := l.q.MaterializeEntitlement(ctx, gen.MaterializeEntitlementParams{
-				Entitlement: f, StartsAt: g.StartsAt, SourceType: g.SourceType,
-				MerchantID: l.merchant, CustomerID: g.CustomerID, EndsAt: endAt,
-				SourceID: &entSourceID, GrantID: gid,
-			}); err != nil {
-				return fmt.Errorf("grants: materialize entitlement %q: %w", f, err)
-			}
+		if err := l.q.MaterializeProductAccess(ctx, gen.MaterializeProductAccessParams{
+			MerchantID: l.merchant, CustomerID: g.CustomerID, ProductID: *g.ProductID, GrantID: g.ID,
+			SourceType: g.SourceType, SourceID: *g.SourceID, PaymentID: g.PaymentID,
+			StartsAt: g.StartsAt, EndsAt: g.EndsAt,
+		}); err != nil {
+			return fmt.Errorf("grants: materialize product access: %w", err)
 		}
 		return nil
 
@@ -266,7 +327,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 		}
 		return nil
 
-	case Ownership:
+	case Entitlement, Ownership:
 		return nil
 
 	default:
@@ -309,35 +370,22 @@ func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.BillingGrant) 
 }
 
 // RevokeBySourceAsOf appends a revoke event to every LIVE grant of the customer
-// that matches `kind` + one of `sourceTypes` + `sourceID` — the write-path
-// companion to a source-keyed effect revocation, keeping the grant ledger the
-// source of truth (the grant is terminated, so DERIVE sees a terminated grant
-// with a separately retracted effect — consistent). Idempotent: an
-// already-terminated grant is skipped. `sourceID` is compared as the grant's
-// free-text source_id (e.g. a subscription or payment UUID string). asOf is the
-// effective revocation instant threaded onto each termination's starts_at
-// (valid time); the zero Time means "now".
+// that matches kind, one of sourceTypes and sourceID (a subscription or
+// payment id string): the ledger side of a source-keyed retraction, so derive
+// sees a terminated grant beside its retracted window. Already-terminated
+// grants are skipped. asOf is the effective instant (valid time); zero is now.
 func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kind Kind, sourceTypes []SourceType, sourceID, reason string, asOf time.Time) error {
-	all, err := l.q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{MerchantID: l.merchant, CustomerID: customer})
+	types := make([]string, len(sourceTypes))
+	for i, st := range sourceTypes {
+		types[i] = string(st)
+	}
+	live, err := l.q.ListLiveGrantsBySource(ctx, gen.ListLiveGrantsBySourceParams{
+		MerchantID: l.merchant, CustomerID: customer, Kind: string(kind), SourceTypes: types, SourceID: sourceID,
+	})
 	if err != nil {
 		return fmt.Errorf("grants: list grants for revoke-by-source: %w", err)
 	}
-	want := make(map[string]bool, len(sourceTypes))
-	for _, st := range sourceTypes {
-		want[string(st)] = true
-	}
-	for i := range all {
-		g := all[i]
-		if g.Event != "grant" || Kind(g.Kind) != kind || !want[g.SourceType] || sourceIDOf(g) != sourceID {
-			continue
-		}
-		terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
-		if err != nil {
-			return fmt.Errorf("grants: termination check for %s: %w", g.ID, err)
-		}
-		if terminated {
-			continue
-		}
+	for _, g := range live {
 		if _, err := l.RevokeAsOf(ctx, g.ID, reason, asOf); err != nil {
 			return fmt.Errorf("grants: revoke %s by source: %w", g.ID, err)
 		}
@@ -370,10 +418,9 @@ func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUI
 	})
 }
 
-// UngrantedGrantablePayments returns completed, positive, one-off payments for a
-// product that PROMISES grants (non-empty entitlements) yet produced
-// NO grant — the spec-aware detection behind `derive.grant.missing` (grant tier,
-// #511). Empty-spec products / pure fees are never flagged. Surface-only.
+// UngrantedGrantablePayments returns completed, positive, one-off payments
+// that produced NO grant — the detection behind `derive.grant.missing` (grant
+// tier, #511): every purchase grants its product or a credit lot. Surface-only.
 func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer *uuid.UUID) ([]gen.ListUngrantedGrantablePaymentsRow, error) {
 	return l.q.ListUngrantedGrantablePayments(ctx, gen.ListUngrantedGrantablePaymentsParams{
 		MerchantID: l.merchant, CustomerID: customer,
@@ -388,17 +435,6 @@ func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer *uuid.UUID) 
 	return l.q.ListLiveGrantsWithRefundedPayment(ctx, gen.ListLiveGrantsWithRefundedPaymentParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})
-}
-
-func specFeatures(raw []byte) ([]string, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var s Spec
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, fmt.Errorf("grants: parse spec_snapshot: %w", err)
-	}
-	return s.Entitlements, nil
 }
 
 // --- #631 derive-1 from stored sources -------------------------------------
@@ -432,150 +468,121 @@ func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUI
 	})
 }
 
-// DeriveSubscriptionGrant creates the entitlement grant(s) — and, when no live
-// window overlaps, the window — for a subscription that has none (derive-1). The
-// window is the subscription period [COALESCE(period_start,started_at),
-// COALESCE(period_end,ended_at)); access-state gating already happened in the
-// detection query. Re-runnable: once a grant exists the detection excludes the sub.
+// DeriveSubscriptionGrant creates the access grant and window for a
+// subscription that has none (derive-1): the subscription's product for
+// [COALESCE(period_start, started_at), + accepted access duration); access
+// state gating already happened in the detection query. Re-runnable: once a
+// grant exists the detection excludes the subscription.
 func (l *Ledger) DeriveSubscriptionGrant(ctx context.Context, sub gen.ListUngrantedSubscriptionsRow) error {
-	start, end, ok := subscriptionWindow(sub)
+	start, end, ok := subscriptionWindow(sub.StartedAt, sub.CurrentPeriodStartsAt, sub.AccessDurationHoursSnapshot)
 	if !ok {
 		return nil
 	}
-	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: sub.CustomerID, Source: Subscription, SourceID: sub.ID.String(), Feats: entitlementKeys(sub.Entitlements), Start: start, End: end})
+	_, err := l.deriveAccessWindow(ctx, customerWindow{Customer: sub.CustomerID, Product: sub.ProductID, Source: Subscription, SourceID: sub.ID.String(), Start: start, End: end})
 	return err
 }
 
-// GrantSubscriptionWindow records a subscription's entitlement grants for
-// one window and projects them, skipping a window already on the ledger. It
-// returns how many windows it materialized.
-func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscription uuid.UUID, feats []string, start time.Time, end *time.Time) (int, error) {
-	return l.deriveEntitlementWindows(ctx, customerWindow{Customer: customer, Source: Subscription, SourceID: subscription.String(), Feats: feats, Start: start.UTC(), End: end})
+// GrantSubscriptionWindow records a subscription's access grant for one
+// window of its product and projects it, skipping a window already on the
+// ledger. It reports whether it materialized one.
+func (l *Ledger) GrantSubscriptionWindow(ctx context.Context, customer, subscription, product uuid.UUID, source SourceType, start time.Time, end *time.Time) (bool, error) {
+	return l.deriveAccessWindow(ctx, customerWindow{Customer: customer, Product: product, Source: source, SourceID: subscription.String(), Start: start.UTC(), End: end})
 }
 
-// DeriveWalletGrant creates the entitlement grant(s) — and, when no live window
-// overlaps, the window — for a solana wallet payment that has none (derive-1).
-// Window = [purchased_at, expiration_rfc3339); grant source is `purchase`,
-// payment-linked so the refund check sees it.
+// DeriveWalletGrant creates the access grant and window for a solana wallet
+// payment that has none (derive-1): [purchased_at, expiration_rfc3339),
+// source purchase, payment-linked so the refund check sees it.
 func (l *Ledger) DeriveWalletGrant(ctx context.Context, pay gen.ListUngrantedWalletPaymentsRow) error {
 	if !pay.ExpiresAt.After(pay.PurchasedAt) {
 		return nil
 	}
 	pid := pay.ID
 	exp := pay.ExpiresAt.UTC()
-	_, err := l.deriveEntitlementWindows(ctx, customerWindow{Customer: pay.CustomerID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Feats: entitlementKeys(pay.Entitlements), Start: pay.PurchasedAt.UTC(), End: &exp})
+	_, err := l.deriveAccessWindow(ctx, customerWindow{Customer: pay.CustomerID, Product: pay.ProductID, Source: Purchase, SourceID: pay.ID.String(), Payment: &pid, Start: pay.PurchasedAt.UTC(), End: &exp})
 	return err
 }
 
-// AdminGrantExists reports whether an entitlement grant from this admin source is
-// already recorded — the #636 idempotency check for the admin-comp import path.
-func (l *Ledger) AdminGrantExists(ctx context.Context, sourceID string) (bool, error) {
-	return l.q.AdminGrantExistsForSource(ctx, gen.AdminGrantExistsForSourceParams{MerchantID: l.merchant, SourceID: sourceID})
-}
-
-// GrantAdmin records an operator/manual "comp" as a source-of-truth admin grant
-// (source_type=admin) + materializes its entitlement window(s) — derive-1 for the
-// access FACT that has no payment/subscription behind it (#636). The host (e.g. the
-// host-one legacy migrate) hands over the comp instead of writing entitlements.
-// Idempotent by sourceID; end nil means indefinite. Returns the number of
-// source-owned feature windows materialized and whether the source was already
-// imported (an idempotent skip with no write).
-func (l *Ledger) GrantAdmin(ctx context.Context, customer uuid.UUID, sourceID string, feats []string, start time.Time, end *time.Time) (created int, alreadyExists bool, err error) {
-	exists, err := l.AdminGrantExists(ctx, sourceID)
+// GrantProduct records a free product grant (source grant) and projects its
+// window, once per idempotency key: a replay returns the recorded grant with
+// created=false. end nil is indefinite.
+func (l *Ledger) GrantProduct(ctx context.Context, customer, product uuid.UUID, idempotencyKey string, start time.Time, end *time.Time, actor string, reason GrantReason, note *string) (gen.BillingGrant, bool, error) {
+	g, created, err := l.GrantAccessOnce(ctx, GrantInput{
+		Customer: customer, Product: &product, Kind: Access, Source: Granted, SourceID: idempotencyKey,
+		StartsAt: start.UTC(), EndsAt: end, Reason: note, Actor: actor, GrantReason: reason,
+	})
 	if err != nil {
-		return 0, false, err
+		return g, false, err
 	}
-	if exists {
-		return 0, true, nil
+	if created {
+		if err := l.MaterializeGrant(ctx, g); err != nil {
+			return g, false, err
+		}
 	}
-	created, err = l.deriveEntitlementWindows(ctx, customerWindow{Customer: customer, Source: Admin, SourceID: sourceID, Feats: feats, Start: start.UTC(), End: end})
-	return created, false, err
+	return g, created, nil
 }
 
-// customerWindow is one source's derived access window: grant N entitlement
-// features for [Start, End) (End nil = indefinite), keyed to (Source, SourceID).
+// customerWindow is one source's access window: the product for
+// [Start, End) (End nil = indefinite), keyed to (Source, SourceID).
 type customerWindow struct {
 	Customer uuid.UUID
+	Product  uuid.UUID
 	Source   SourceType
 	SourceID string
 	Payment  *uuid.UUID
-	Feats    []string
 	Start    time.Time
 	End      *time.Time
 }
 
-// deriveEntitlementWindows records one entitlement grant per feature and asks
-// derive-2 to project it. The GRANT is provenance — recorded UNCONDITIONALLY
-// (#695: detection keys on grant existence, so a recorded grant is what makes
-// the sweep converge); whether a WINDOW materializes is MaterializeGrant's
-// decision alone. Every distinct source retains its whole interval; a standing
-// subscription window already represents subsequent paid periods of that source.
-// Replay is keyed by the source's exact interval, including an indefinite end.
-// Overlapping paid periods remain distinct immutable purchase facts.
-func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow) (int, error) {
-	created := 0
-	for _, f := range w.Feats {
-		exists, err := l.q.EntitlementGrantWindowExists(ctx, gen.EntitlementGrantWindowExistsParams{
-			MerchantID: l.merchant, CustomerID: w.Customer, SourceType: string(w.Source), SourceID: w.SourceID,
-			Entitlement: f, StartsAt: w.Start, EndsAt: w.End,
-		})
-		if err != nil {
-			return created, fmt.Errorf("grants: derive-1 replay check %q: %w", f, err)
-		}
-		if exists {
-			continue
-		}
-
-		g, err := l.Grant(ctx, GrantInput{
-			Customer: w.Customer, Kind: Entitlement, Source: w.Source, SourceID: w.SourceID, Payment: w.Payment,
-			Spec: &Spec{Entitlements: []string{f}}, StartsAt: w.Start, EndsAt: w.End,
-		})
-		if err != nil {
-			return created, fmt.Errorf("grants: derive-1 grant %s/%q: %w", w.SourceID, f, err)
-		}
-		if err := l.MaterializeGrant(ctx, g); err != nil {
-			return created, fmt.Errorf("grants: derive-1 materialize %s/%q: %w", w.SourceID, f, err)
-		}
-		materialized, err := l.q.EntitlementExistsForGrant(ctx, gen.EntitlementExistsForGrantParams{
-			MerchantID: l.merchant, GrantID: g.ID, Entitlement: f,
-		})
-		if err != nil {
-			return created, fmt.Errorf("grants: derive-1 window check %s/%q: %w", w.SourceID, f, err)
-		}
-		if materialized {
-			created++
-		}
+// deriveAccessWindow records the source's access grant and asks derive-2 to
+// project it. The GRANT is provenance — recorded UNCONDITIONALLY (#695:
+// detection keys on grant existence); whether a WINDOW materializes is
+// MaterializeGrant's decision. Replay is keyed by the exact interval.
+func (l *Ledger) deriveAccessWindow(ctx context.Context, w customerWindow) (bool, error) {
+	exists, err := l.q.AccessGrantWindowExists(ctx, gen.AccessGrantWindowExistsParams{
+		MerchantID: l.merchant, CustomerID: w.Customer, ProductID: w.Product, SourceType: string(w.Source), SourceID: w.SourceID,
+		StartsAt: w.Start, EndsAt: w.End,
+	})
+	if err != nil {
+		return false, fmt.Errorf("grants: derive-1 replay check: %w", err)
 	}
-	return created, nil
+	if exists {
+		return false, nil
+	}
+	product := w.Product
+	g, created, err := l.GrantAccessOnce(ctx, GrantInput{
+		Customer: w.Customer, Product: &product, Kind: Access, Source: w.Source, SourceID: w.SourceID, Payment: w.Payment,
+		StartsAt: w.Start, EndsAt: w.End,
+	})
+	if err != nil {
+		return false, fmt.Errorf("grants: derive-1 grant %s: %w", w.SourceID, err)
+	}
+	if !created {
+		return false, nil
+	}
+	if err := l.MaterializeGrant(ctx, g); err != nil {
+		return false, fmt.Errorf("grants: derive-1 materialize %s: %w", w.SourceID, err)
+	}
+	return true, nil
 }
 
 // subscriptionWindow uses the accepted access duration independently of billing.
-func subscriptionWindow(s gen.ListUngrantedSubscriptionsRow) (time.Time, *time.Time, bool) {
-	start := s.StartedAt
-	if s.CurrentPeriodStartsAt != nil && !s.CurrentPeriodStartsAt.IsZero() {
-		start = *s.CurrentPeriodStartsAt
+func subscriptionWindow(startedAt time.Time, periodStart *time.Time, hours *int32) (time.Time, *time.Time, bool) {
+	start := startedAt
+	if periodStart != nil && !periodStart.IsZero() {
+		start = *periodStart
 	}
 	if start.IsZero() {
 		return time.Time{}, nil, false
 	}
 	start = start.UTC()
-	if s.AccessDurationHoursSnapshot == nil {
+	if hours == nil {
 		return start, nil, true
 	}
-	if *s.AccessDurationHoursSnapshot <= 0 {
+	if *hours <= 0 {
 		return time.Time{}, nil, false
 	}
-	end := start.Add(time.Duration(*s.AccessDurationHoursSnapshot) * time.Hour)
+	end := start.Add(time.Duration(*hours) * time.Hour)
 	return start, &end, true
-}
-
-// entitlementKeys decodes the already normalized opaque entitlement list.
-func entitlementKeys(raw []byte) []string {
-	var names []string
-	if err := json.Unmarshal(raw, &names); err != nil {
-		return nil
-	}
-	return names
 }
 
 // sourceIDOf is a grant's source id; "" when it has none (NULL).

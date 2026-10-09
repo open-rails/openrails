@@ -23,6 +23,9 @@ type EntitlementChange struct {
 	ProductKey string    `json:"product_key"`
 	Added      []string  `json:"added"`
 	Removed    []string  `json:"removed"`
+	// Holders is how many customers held the product when it changed: whose
+	// access the edit changed.
+	Holders int64 `json:"holders"`
 }
 
 // MaxEntitlementReplacements bounds the pairs of one ReplaceEntitlements call.

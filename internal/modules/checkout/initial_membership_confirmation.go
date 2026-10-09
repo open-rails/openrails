@@ -41,14 +41,16 @@ func initialMembershipQuoteFingerprint(terms subscriptions.InitialMembershipTerm
 	terms.AcceptedAt, terms.PeriodStart, terms.PeriodEnd = time.Time{}, time.Time{}, time.Time{}
 	type fingerprintTerms struct {
 		subscriptions.InitialMembershipTerms
-		Entitlements        any                               `json:"entitlements"`
+		Entitlements        any                               `json:"entitlements,omitempty"`
 		Replaces            *subscriptions.ReplacedMembership `json:"replaces,omitempty"`
 		AccessDurationHours json.RawMessage                   `json:"access_duration_hours,omitempty"`
 	}
+	accepted, _ := grants.AcceptedEntitlementsValue(terms.Entitlements, legacy)
+	terms.Entitlements = nil
 	raw, _ := json.Marshal(struct {
 		Terms    fingerprintTerms
 		Duration time.Duration
-	}{fingerprintTerms{InitialMembershipTerms: terms, Entitlements: grants.AcceptedEntitlementValue(terms.Entitlements, legacy), Replaces: terms.Replaces, AccessDurationHours: access}, duration})
+	}{fingerprintTerms{InitialMembershipTerms: terms, Entitlements: accepted, Replaces: terms.Replaces, AccessDurationHours: access}, duration})
 	digest := sha256.Sum256(raw)
 	return fmt.Sprintf("%x", digest)
 }

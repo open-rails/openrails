@@ -17,21 +17,21 @@ import (
 )
 
 type recordedAccess struct {
-	grants  []entitlements.PushNewEntitlementParams
-	revoked []models.EntitlementSourceType
+	grants  []entitlements.PushAccessParams
+	revoked []models.AccessSourceType
 }
 
-func (r *recordedAccess) PushNewEntitlement(_ context.Context, p entitlements.PushNewEntitlementParams) (*models.Entitlement, error) {
+func (r *recordedAccess) PushAccess(_ context.Context, p entitlements.PushAccessParams) (*models.ProductAccess, error) {
 	r.grants = append(r.grants, p)
 	return nil, nil
 }
-func (*recordedAccess) ListDistinctEntitlementNamesBySource(context.Context, models.EntitlementSourceType, uuid.UUID) ([]string, error) {
+func (*recordedAccess) ListLiveProductsBySource(context.Context, models.AccessSourceType, string) ([]uuid.UUID, error) {
 	return nil, nil
 }
-func (*recordedAccess) RevokeExistingEntitlement(context.Context, entitlements.RevokeExistingEntitlementParams) error {
+func (*recordedAccess) RevokeAccess(context.Context, entitlements.RevokeAccessParams) error {
 	return nil
 }
-func (r *recordedAccess) RevokeSourcesForSubscriptionAsOf(_ context.Context, _ string, _ uuid.UUID, _ time.Time, _ models.EntitlementRevokeReason, sources ...models.EntitlementSourceType) error {
+func (r *recordedAccess) RevokeSourcesForSubscriptionAsOf(_ context.Context, _ string, _ uuid.UUID, _ time.Time, _ models.AccessRevokeReason, sources ...models.AccessSourceType) error {
 	r.revoked = append(r.revoked, sources...)
 	return nil
 }
@@ -45,11 +45,11 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 	for _, hours := range []*int{new(24), new(1000), nil} {
 		r := &recordedAccess{}
 		svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(start), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return r }}
-		sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: hours, EntitlementsSnapshot: []string{"premium"}, Status: models.StatusActive, CollectionPolicy: models.CollectionPolicyEngine, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd}
+		sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: hours, Status: models.StatusActive, CollectionPolicy: models.CollectionPolicyEngine, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd}
 		_, err := svc.ApplyEffects(context.Background(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: billingEnd}}, start, EffectOptions{})
 		require.NoError(t, err)
 		require.Len(t, r.grants, 1)
-		require.Equal(t, []models.EntitlementSourceType{models.EntitlementSourceGrace}, r.revoked, "a newly paid period supersedes all old renewal grace, never prior paid access")
+		require.Equal(t, []models.AccessSourceType{models.AccessSourceGrace}, r.revoked, "a newly paid period supersedes all old renewal grace, never prior paid access")
 		r.revoked = nil
 		grant := r.grants[0]
 		require.Equal(t, start, *grant.NotBefore)
@@ -60,7 +60,7 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 			require.False(t, grant.Indefinite)
 			require.Equal(t, start.Add(time.Duration(*hours)*time.Hour), *grant.EndsAt)
 		}
-		require.NoError(t, pushRenewalGrace(context.Background(), nil, r, sub, []string{"premium"}, start, billingEnd))
+		require.NoError(t, pushRenewalGrace(context.Background(), nil, r, sub, start, billingEnd))
 		require.Len(t, r.grants, 1, "grace must not override deliberate independent access duration")
 		require.True(t, EngineCollectionDue(sub, billingEnd, false), "access expiration never stops recurring billing")
 		_, err = Transition(sub, lifecycle.Cancel{Kind: lifecycle.CancelUser, At: start.Add(time.Hour)}, start.Add(time.Hour))
@@ -68,11 +68,11 @@ func TestBillingPeriodDoesNotDetermineAccess(t *testing.T) {
 		require.False(t, EngineCollectionDue(sub, billingEnd, false), "user cancellation stops the next charge")
 		_, err = svc.ApplyEffects(context.Background(), nil, sub, []lifecycle.Effect{lifecycle.EndAccess{At: billingEnd}}, start.Add(time.Hour), EffectOptions{})
 		require.NoError(t, err)
-		require.Equal(t, []models.EntitlementSourceType{models.EntitlementSourceGrace}, r.revoked, "cancel keeps every paid access grant")
+		require.Equal(t, []models.AccessSourceType{models.AccessSourceGrace}, r.revoked, "cancel keeps every paid access grant")
 		r.revoked = nil
 		_, err = svc.ApplyEffects(context.Background(), nil, sub, []lifecycle.Effect{lifecycle.EndAccess{At: start, Revoke: true}}, start, EffectOptions{})
 		require.NoError(t, err)
-		require.Contains(t, r.revoked, models.EntitlementSourceSubscription, "explicit revoke still removes paid access")
+		require.Contains(t, r.revoked, models.AccessSourceSubscription, "explicit revoke still removes paid access")
 	}
 }
 
@@ -96,10 +96,10 @@ func TestAcceptedAccessDurationReplay(t *testing.T) {
 			require.Equal(t, tc.want, renewal.AccessDurationHours)
 			// Immutable history validates the access interval, independently of billing.
 			merchant, customer, subscription := uuid.New(), uuid.New(), uuid.New()
-			initial.CustomerID, initial.SubscriptionID = customer, subscription
-			initial.Entitlements = []string{"premium"}
+			product := uuid.New()
+			initial.CustomerID, initial.SubscriptionID, initial.ProductID = customer, subscription, product
 			source := subscription.String()
-			row := gen.BillingGrant{MerchantID: merchant, CustomerID: customer, Kind: "entitlement", SourceType: "subscription", SourceID: &source, Event: "grant", StartsAt: start, EndsAt: accessEnd(start, tc.want), SpecSnapshot: []byte(`{"entitlements":["premium"]}`)}
+			row := gen.BillingGrant{MerchantID: merchant, CustomerID: customer, ProductID: &product, Kind: "access", SourceType: "subscription", SourceID: &source, Event: "grant", StartsAt: start, EndsAt: accessEnd(start, tc.want)}
 			require.NoError(t, ValidateInitialMembershipHistory(merchant, initial, []gen.BillingGrant{row}))
 			row.EndsAt = new(start.Add(48 * time.Hour))
 			require.Error(t, ValidateInitialMembershipHistory(merchant, initial, []gen.BillingGrant{row}))
@@ -135,7 +135,7 @@ func TestLatePaidPeriodRetainsExpiredAccessHistory(t *testing.T) {
 	now := start.Add(48 * time.Hour)
 	recorded := &recordedAccess{}
 	svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(now), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return recorded }}
-	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: new(24), EntitlementsSnapshot: []string{"premium"}}
+	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), AccessDurationHoursSnapshot: new(24)}
 	_, err := svc.ApplyEffects(t.Context(), nil, sub, []lifecycle.Effect{lifecycle.GrantPeriod{Start: start, End: start.Add(720 * time.Hour)}}, now, EffectOptions{})
 	require.NoError(t, err)
 	require.Len(t, recorded.grants, 1, "late settlement still records what was bought")
@@ -148,27 +148,27 @@ func TestNativeGraceUsesDeclaredCadenceAndKeepsPaidWindow(t *testing.T) {
 	paidEnd := start.Add(24 * time.Hour)
 	sub := &models.Subscription{ID: uuid.New(), CustomerID: uuid.New(), Status: models.StatusPastDue, CollectionPolicy: models.CollectionPolicyNMISchedule,
 		Price: &models.Price{BillingIntervalHours: new(24)}, AccessDurationHoursSnapshot: new(24), CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &providerEnd,
-		EntitlementsSnapshot: []string{"premium"}, DunningPolicy: []byte(`{"access_during_dunning":"keep","access_while_renewal_held":"keep"}`)}
+		DunningPolicy: []byte(`{"access_during_dunning":"keep","access_while_renewal_held":"keep"}`)}
 	r := &recordedAccess{}
-	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, start, providerEnd))
 	require.Len(t, r.grants, 1)
-	require.Equal(t, models.EntitlementSourceGrace, r.grants[0].SourceType)
+	require.Equal(t, models.AccessSourceGrace, r.grants[0].SourceType)
 	require.Equal(t, paidEnd, *r.grants[0].NotBefore, "provider date rounding never shortens purchased access")
 	require.True(t, r.grants[0].Indefinite, "existing keep policy is represented by explicit grace")
 	longerProvider := &recordedAccess{}
-	require.NoError(t, pushRenewalGrace(t.Context(), nil, longerProvider, sub, []string{"premium"}, start, start.Add(48*time.Hour)))
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, longerProvider, sub, start, start.Add(48*time.Hour)))
 	require.Equal(t, paidEnd, *longerProvider.grants[0].NotBefore, "a longer provider billing period leaves no gap after matched paid access ends")
 	suspended := &recordedAccess{}
 	svc := &SubscriptionLifecycleService{clock: clockwork.NewFakeClockAt(paidEnd), entitlementServiceFactory: func(*db.DB, clockwork.Clock) lifecycleEntitlementService { return suspended }}
 	sub.DunningPolicy = []byte(`{"access_during_dunning":"suspend","access_while_renewal_held":"keep"}`)
 	require.NoError(t, svc.EnsureRenewalGrace(t.Context(), nil, sub))
 	require.Empty(t, suspended.grants, "importing past-due billing honors its dunning policy, independently of held-renewal policy")
-	require.Equal(t, []models.EntitlementSourceType{models.EntitlementSourceGrace}, suspended.revoked)
+	require.Equal(t, []models.AccessSourceType{models.AccessSourceGrace}, suspended.revoked)
 	sub.AccessDurationHoursSnapshot = new(1)
-	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, start, providerEnd))
 	require.Len(t, r.grants, 1, "deliberately short access never receives recurring grace")
 	sub.AccessDurationHoursSnapshot = new(24)
 	sub.Status = models.StatusCanceled
-	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, []string{"premium"}, start, providerEnd))
+	require.NoError(t, pushRenewalGrace(t.Context(), nil, r, sub, start, providerEnd))
 	require.Len(t, r.grants, 1, "canceled recurrence never regains grace")
 }

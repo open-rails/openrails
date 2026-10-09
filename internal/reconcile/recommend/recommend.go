@@ -31,15 +31,14 @@ const (
 	// amount (decimal string of the payment currency's native unit, optional —
 	// defaults to the payment's full amount).
 	ActionCancelAndRefund = "cancel_and_refund"
-	// ActionRevokeEntitlement revokes one entitlement window as-of a time via
-	// the existing entitlement service.
-	// Params: entitlement_id (uuid, required); as_of (RFC3339, optional = now).
-	ActionRevokeEntitlement = "revoke_entitlement"
-	// ActionRecordAdminGrant records an admin-sourced product-access grant
-	// (makes freeloader access legitimate).
+	// ActionRevokeProductAccess revokes one product-access window as of a time.
+	// Params: access_id (uuid, required); as_of (RFC3339, optional = now).
+	ActionRevokeProductAccess = "revoke_product_access"
+	// ActionGrantProduct grants a product free (makes freeloader access
+	// legitimate).
 	// Params: customer_id (plain UUID, required); product_id (prod_<uuid>,
-	// required); reason (string, optional — recorded in operator notes).
-	ActionRecordAdminGrant = "record_admin_grant"
+	// required); reason (string, optional — recorded as the grant note).
+	ActionGrantProduct = "grant_product"
 	// ActionAckResume is a plain resolution with no side effects; machinery
 	// keyed off the finding STATUS (e.g. the #679 destructive-volume breaker)
 	// re-arms itself when the finding leaves the open states. Params: none.
@@ -129,23 +128,23 @@ func DecodeParams(raw []byte) (map[string]any, error) {
 
 // --- Builders for the #690 detector emissions ---
 
-// RevokeEntitlementRec recommends revoking one window; asOf empty = now at
-// approve time. alternative (usually RecordAdminGrantRec) is informational.
-func RevokeEntitlementRec(entitlementID, asOf string, alternative *Recommendation) Recommendation {
-	params := map[string]any{"entitlement_id": entitlementID}
+// RevokeProductAccessRec recommends revoking one window; asOf empty = now at
+// approve time. alternative (usually GrantProductRec) is informational.
+func RevokeProductAccessRec(accessID, asOf string, alternative *Recommendation) Recommendation {
+	params := map[string]any{"access_id": accessID}
 	if asOf != "" {
 		params["as_of"] = asOf
 	}
-	rec := Recommendation{Action: ActionRevokeEntitlement, Params: params}
+	rec := Recommendation{Action: ActionRevokeProductAccess, Params: params}
 	if alternative != nil {
 		rec.Alternatives = []Recommendation{*alternative}
 	}
 	return rec
 }
 
-// RecordAdminGrantRec recommends legitimizing access with an admin-sourced
-// grant. productID may be zero when the source is gone (operator overrides).
-func RecordAdminGrantRec(customerID billing.CustomerID, productID billing.ProductID, reason string) Recommendation {
+// GrantProductRec recommends legitimizing access with a free product grant.
+// productID may be zero when the source is gone (operator overrides).
+func GrantProductRec(customerID billing.CustomerID, productID billing.ProductID, reason string) Recommendation {
 	params := map[string]any{"customer_id": customerID.String()}
 	if !productID.IsZero() {
 		params["product_id"] = productID.String()
@@ -153,7 +152,7 @@ func RecordAdminGrantRec(customerID billing.CustomerID, productID billing.Produc
 	if reason != "" {
 		params["reason"] = reason
 	}
-	return Recommendation{Action: ActionRecordAdminGrant, Params: params}
+	return Recommendation{Action: ActionGrantProduct, Params: params}
 }
 
 // CancelAndRefundRec recommends cancelling a subscription and/or refunding
@@ -187,7 +186,7 @@ func ApplyOverrides(params, overrides map[string]any) (map[string]any, error) {
 			if _, set := params[k]; set {
 				return nil, fmt.Errorf("override_params cannot change %s", k)
 			}
-		case "entitlement_id", "customer_id", "subscription_id", "refund_payment_id":
+		case "access_id", "customer_id", "subscription_id", "refund_payment_id":
 			if current, set := params[k]; !set || fmt.Sprint(current) != fmt.Sprint(v) {
 				return nil, fmt.Errorf("override_params cannot change %s", k)
 			}

@@ -1,19 +1,56 @@
 -- #514 append-only grant ledger (billing.grants). derive-1 appends events here;
--- derive-2 folds them into projections (entitlement windows, #512 credit deposits;
--- ownership is read directly off this table).
+-- derive-2 folds them into projections (product_access windows, #512 credit
+-- deposits). entitlement and ownership events are history.
 
 -- name: InsertGrant :one
 INSERT INTO billing.grants (
     merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, actor, grant_reason
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.narg(product_id)::uuid,
     sqlc.arg(kind)::text, sqlc.arg(source_type)::text, NULLIF(sqlc.arg(source_id)::text, ''), sqlc.narg(payment_id)::uuid,
     sqlc.arg(event)::text, sqlc.narg(supersedes_id)::uuid, sqlc.narg(spec_snapshot)::jsonb,
     sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
-    sqlc.narg(amount)::bigint, sqlc.narg(currency)::text, sqlc.narg(reason)::text
+    sqlc.narg(amount)::bigint, sqlc.narg(currency)::text, sqlc.narg(reason)::text,
+    sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text
 )
 RETURNING *;
+
+-- name: InsertAccessGrantOnce :one
+-- An access grant at its natural key: a replay returns no row and the caller
+-- reads the recorded grant.
+INSERT INTO billing.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, starts_at, ends_at, reason, actor, grant_reason
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(product_id)::uuid,
+    'access', sqlc.arg(source_type)::text, sqlc.arg(source_id)::text, sqlc.narg(payment_id)::uuid,
+    'grant', sqlc.arg(starts_at)::timestamptz, sqlc.narg(ends_at)::timestamptz,
+    sqlc.narg(reason)::text, sqlc.narg(actor)::text, sqlc.narg(grant_reason)::text
+)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- name: GetAccessGrantByIdempotencyKey :one
+SELECT * FROM billing.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'access' AND event = 'grant'
+  AND source_type = 'grant' AND source_id = sqlc.arg(idempotency_key)::text AND grant_reason <> 'migration';
+
+-- name: GetAccessGrantByPurchase :one
+SELECT * FROM billing.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'access' AND event = 'grant'
+  AND source_type = 'purchase' AND payment_id = sqlc.arg(payment_id)::uuid AND product_id = sqlc.arg(product_id)::uuid;
+
+-- name: ListLiveGrantsBySource :many
+-- The live grants of one source: a subscription's periods and grace, a
+-- purchase. Indexed by source; never the customer's whole history.
+SELECT g.* FROM billing.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND g.kind = sqlc.arg(kind)::text AND g.event = 'grant'
+  AND g.source_type = ANY(sqlc.arg(source_types)::text[]) AND g.source_id = sqlc.arg(source_id)::text
+  AND NOT EXISTS (SELECT 1 FROM billing.grants t
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede'))
+ORDER BY g.id;
 
 -- name: GetGrant :one
 SELECT * FROM billing.grants
@@ -83,15 +120,6 @@ FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant';
 
--- name: EntitlementExistsForGrant :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.entitlements
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND grant_id = sqlc.arg(grant_id)::uuid
-      AND entitlement = sqlc.arg(entitlement)::text
-      AND deleted_at IS NULL
-) AS exists;
-
 -- ListSpendableCreditLots: live (started, unexpired, non-terminated) credit-lot
 -- grants with derived remaining = lot amount − Σ(credit_spend + credit_expire
 -- transfers tagged to the lot). FIFO order: soonest expiry first.
@@ -159,42 +187,22 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.ev
     ), 0)) > 0
 LIMIT sqlc.arg(batch_size)::int;
 
--- name: RevokeEntitlementsByGrant :execrows
-UPDATE billing.entitlements
-SET revoked_at = sqlc.arg(revoked_at)::timestamptz,
-    revoke_reason = sqlc.arg(revoke_reason)::text,
-    updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND grant_id = sqlc.arg(grant_id)::uuid
-  AND revoked_at IS NULL AND deleted_at IS NULL;
-
 -- #511 DERIVE `derive.grant.missing` (grant tier): a customer's completed,
--- positive, one-off (non-subscription) payments for a product that PROMISES
--- grants — a non-empty `entitlements` — yet produced NO
--- grant at all. "Paid for a grantable product, got nothing." Spec-aware (the
--- positive signal is the product's own grant spec via payment→price→product), so
--- empty-spec products / pure fees are never flagged; subscription payments are
--- excluded (their entitlement grant is subscription-sourced, not payment-linked);
--- refund rows are negative-amount (amount > 0 excludes them); a refunded purchase
--- still has its `grant` event (existence, not liveness), so it is not flagged.
--- Surface-only ADMIN: auto-granting re-runs derive-1 (owned by the purchase path).
--- customer_id is nullable (#575): the inline customer-scoped path passes it (fast
--- indexed seek); the merchant-wide convergence sweep passes NULL (one anti-join
--- over the whole merchant instead of one query per grant-holder).
+-- positive, one-off (non-subscription) payments that produced NO grant at all:
+-- every purchase grants its product (or a credit lot). Refund rows are
+-- negative (amount > 0 excludes them); a refunded purchase keeps its grant
+-- event (existence, not liveness), so it is not flagged. Surface-only ADMIN:
+-- auto-granting re-runs derive-1 (owned by the purchase path). customer_id is
+-- nullable (#575): NULL = merchant-wide sweep.
 -- name: ListUngrantedGrantablePayments :many
 SELECT p.id, p.amount, p.currency
 FROM billing.payments p
-JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
   AND p.status = 'completed'
   AND p.amount > 0
   AND p.subscription_id IS NULL
-  AND (
-        (COALESCE(NULLIF(p.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb)
-      )
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
@@ -226,12 +234,9 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY g.id;
 
 -- #511/#575 DERIVE `derive.grant_effect.missing` as a single set query: live
--- (un-terminated) entitlement/credit grants whose derived effect is NOT fully
--- materialized. Mirrors the Go isMaterialized exactly — entitlement: some spec
--- feature has no entitlement row (deleted_at IS NULL, revoked rows still count as
--- materialized); credit: no #512 deposit transfer. ownership has no effect (never
--- flagged). customer_id nullable: NULL = merchant-wide sweep. Repair =
--- MaterializeGrant (idempotent), so re-running converges to empty.
+-- (un-terminated) access/credit grants whose derived effect is missing:
+-- access: no window (revoked windows still count); credit: no #512 deposit.
+-- customer_id nullable: NULL = merchant-wide sweep. Repair = MaterializeGrant.
 -- name: ListLiveGrantsMissingEffects :many
 SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -242,16 +247,9 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
-    (g.kind = 'entitlement' AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements_text(
-                 COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb)) AS feat
-        WHERE NOT EXISTS (
-            SELECT 1 FROM billing.entitlements e
-            WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
-              AND e.entitlement = feat AND e.deleted_at IS NULL)
-
-    ))
-
+    (g.kind = 'access' AND NOT EXISTS (
+        SELECT 1 FROM billing.product_access pa
+        WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id AND pa.deleted_at IS NULL))
     OR
     (g.kind = 'credit' AND NOT EXISTS (
         SELECT 1 FROM billing.ledger_transfers lt
@@ -260,11 +258,9 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY g.created_at;
 
 -- #511/#575 DERIVE `derive.grant_effect.excess` as a single set query: TERMINATED
--- grants whose derived effect is still live (a revoke/expire recorded but its
--- retraction never propagated). Mirrors Go IsGrantTerminated + effectStillLive —
--- entitlement: a non-revoked, non-deleted entitlement row; credit: lot remainder
--- (amount − spend/expire/revoke transfers) > 0. customer_id nullable: NULL =
--- merchant-wide sweep. Repair = MaterializeGrant (retracts) — idempotent.
+-- grants whose derived effect is still live: access: a live window; credit:
+-- lot remainder > 0. customer_id nullable: NULL = merchant-wide sweep.
+-- Repair = MaterializeGrant (retracts) — idempotent.
 -- name: ListUnretractedTerminations :many
 SELECT g.* FROM billing.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -276,10 +272,10 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
         AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
-    (g.kind = 'entitlement' AND EXISTS (
-        SELECT 1 FROM billing.entitlements e
-        WHERE e.merchant_id = g.merchant_id AND e.grant_id = g.id
-          AND e.revoked_at IS NULL AND e.deleted_at IS NULL))
+    (g.kind = 'access' AND EXISTS (
+        SELECT 1 FROM billing.product_access pa
+        WHERE pa.merchant_id = g.merchant_id AND pa.grant_id = g.id
+          AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL))
     OR
     (g.kind = 'credit' AND (
         g.amount - COALESCE((
@@ -288,66 +284,6 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
               AND t.transfer_type IN ('credit_spend', 'owed_repayment', 'credit_expire', 'credit_revoke', 'credit_refund', 'credit_refund_restore')
         ), 0)) > 0)
   )
-ORDER BY g.created_at;
-
--- #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
--- payment, so a refund/chargeback can revoke product access for that payment.
--- RevokeOwnershipGrantByID atomically terminates ownership once, including overlapping
--- provider refund notifications. Other insert errors still fail the transaction.
--- name: RevokeOwnershipGrantByID :execrows
-INSERT INTO billing.grants (
-    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
-)
-SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
-       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
-       g.amount, g.currency, sqlc.arg(reason)::text
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.id = sqlc.arg(id)::uuid
-  AND g.kind = 'ownership' AND g.event = 'grant'
-ORDER BY g.id
-ON CONFLICT (merchant_id, supersedes_id)
-WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
-DO NOTHING;
-
--- RevokeOwnershipGrantsByPayment atomically terminates ownership once, including overlapping
--- provider refund notifications. Other insert errors still fail the transaction.
--- name: RevokeOwnershipGrantsByPayment :execrows
-INSERT INTO billing.grants (
-    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
-    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
-)
-SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
-       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
-       g.amount, g.currency, sqlc.arg(reason)::text
-FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.payment_id = sqlc.arg(payment_id)::uuid
-  AND g.kind = 'ownership' AND g.event = 'grant'
-ORDER BY g.id
-ON CONFLICT (merchant_id, supersedes_id)
-WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
-DO NOTHING;
-
--- #511 ownership-on-grants: every ownership grant-event for a customer with its
--- derived status (the termination event, if any) — so the legacy
--- ProductAccessGrant.{status,revoked_at,revoke_reason} shape can be reconstructed
--- from the append-only ledger in one query.
--- #658: revoked_at is the termination's EFFECTIVE instant (valid time on
--- term.starts_at), not term.created_at (transaction time), so a backdated/grace
--- revocation reports when access actually ended. Historically the two coincided.
--- name: ListOwnershipGrantsWithStatus :many
-SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
-       g.payment_id, g.starts_at, g.ends_at, g.created_at,
-       term.starts_at AS revoked_at, term.reason AS revoke_reason
-FROM billing.grants g
-LEFT JOIN billing.grants term
-  ON term.supersedes_id = g.id AND term.event IN ('revoke', 'expire', 'supersede')
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.kind = 'ownership'
-  AND g.event = 'grant'
 ORDER BY g.created_at;
 
 -- #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
@@ -371,10 +307,8 @@ SELECT s.id, s.customer_id, s.product_id, s.status,
        -- A provider-billed member in the provider's dunning keeps access
        -- through its grace window, as a mirrored decline does.
        GREATEST(s.current_period_ends_at, CASE WHEN s.status = 'past_due' THEN s.grace_ends_at END) AS current_period_ends_at,
-       s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) AS entitlements
+       s.started_at, s.ended_at, s.access_duration_hours_snapshot
 FROM billing.subscriptions s
-JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
@@ -382,7 +316,6 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND (s.status IN ('active', 'canceled', 'unverified', 'awaiting_method') OR (s.status = 'past_due' AND s.collection_policy <> 'engine'))
   AND NOT (s.status = 'canceled' AND s.cancel_type = 'chargeback')
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' >= sqlc.arg(scan_since)::timestamptz)
   AND NOT EXISTS (
@@ -402,11 +335,9 @@ ORDER BY COALESCE(s.current_period_starts_at, s.started_at);
 -- this migrated cohort auto-repairs instead of waiting for an operator.
 -- name: ListUngrantedWalletPayments :many
 SELECT p.id, p.customer_id, p.purchased_at,
-       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at,
-       COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements
+       (p.metadata->>'expiration_rfc3339')::timestamptz AS expires_at, pr.product_id
 FROM billing.payments p
 JOIN billing.prices pr ON pr.id = p.price_id AND pr.merchant_id = p.merchant_id
-JOIN billing.products pd ON pd.id = pr.product_id AND pd.merchant_id = p.merchant_id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
@@ -418,7 +349,6 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.metadata->>'expiration_rfc3339' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
   AND (p.metadata->>'expiration_rfc3339')::timestamptz > p.purchased_at
   AND (p.metadata->>'expiration_rfc3339')::timestamptz >= sqlc.arg(scan_since)::timestamptz
-  AND EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'
@@ -426,31 +356,19 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   )
 ORDER BY p.purchased_at;
 
--- A purchased window is a distinct fact even when it overlaps another paid
+-- An access window is a distinct fact even when it overlaps another paid
 -- window or has no expiry. A replay must not reinstate a revoked grant.
--- name: EntitlementGrantWindowExists :one
+-- name: AccessGrantWindowExists :one
 SELECT EXISTS (
     SELECT 1 FROM billing.grants g
     WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
       AND g.customer_id = sqlc.arg(customer_id)::uuid
-      AND g.kind = 'entitlement' AND g.event = 'grant'
+      AND g.product_id = sqlc.arg(product_id)::uuid
+      AND g.kind = 'access' AND g.event = 'grant'
       AND g.source_type = sqlc.arg(source_type)::text
       AND g.source_id = sqlc.arg(source_id)::text
       AND g.starts_at = sqlc.arg(starts_at)::timestamptz
       AND g.ends_at IS NOT DISTINCT FROM sqlc.narg(ends_at)::timestamptz
-      AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text)
-) AS exists;
-
--- #636 idempotency for admin-grant import: is there already an entitlement grant
--- from this admin source? Lets the host-one migrate hand admin comps over as grants
--- (source_type=admin) and re-run safely — convergence derive-2 projects the
--- entitlement, so host-one never writes entitlements directly.
--- name: AdminGrantExistsForSource :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.grants g
-    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-      AND g.event = 'grant' AND g.kind = 'entitlement'
-      AND g.source_type = 'admin' AND g.source_id = sqlc.arg(source_id)::text
 ) AS exists;
 
 -- CROSS-MERCHANT: merchants holding a past-expiry credit lot that was not
@@ -518,47 +436,12 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
             (i.payload->'renewal'->>'access_duration_hours')::int * interval '1 hour'
           ELSE (i.payload->'renewal'->>'period_end')::timestamptz END);
 
--- CheckProductAccess: one bounded lookup for the page's candidate products.
--- name: HasPermanentProductOwnership :one
-SELECT EXISTS (
- SELECT 1 FROM billing.grants g
- WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-   AND g.customer_id = sqlc.arg(customer_id)::uuid
-   AND g.product_id = sqlc.arg(product_id)::uuid
-   AND g.kind = 'ownership' AND g.event = 'grant'
-   AND g.starts_at <= sqlc.arg(at_time)::timestamptz AND g.ends_at IS NULL
-   AND NOT EXISTS (SELECT 1 FROM billing.grants t
-    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-      AND t.event IN ('revoke','expire','supersede'))
-);
 
--- name: CheckProductAccess :many
-SELECT candidate.product_id, EXISTS (
- SELECT 1 FROM billing.grants g
- WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-   AND g.customer_id = sqlc.arg(customer_id)::uuid
-   AND g.product_id = candidate.product_id
-   AND g.kind = 'ownership' AND g.event = 'grant'
-   AND g.starts_at <= sqlc.arg(at_time)::timestamptz
-   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
-   AND NOT EXISTS (SELECT 1 FROM billing.grants t
-    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-      AND t.event IN ('revoke','expire','supersede'))
-) AS has_access
-FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id);
-
--- ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
--- name: ListActiveOwnershipGrantsPage :many
-SELECT g.* FROM billing.grants g
-WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND g.customer_id = sqlc.arg(customer_id)::uuid
-  AND g.kind = 'ownership' AND g.event = 'grant'
-  AND g.product_id IS NOT NULL
-  AND g.starts_at <= sqlc.arg(at_time)::timestamptz
-  AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
-  AND g.id > sqlc.arg(after_id)::uuid
-  AND NOT EXISTS (SELECT 1 FROM billing.grants t
-   WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-    AND t.event IN ('revoke','expire','supersede'))
-ORDER BY g.id
-LIMIT sqlc.arg(page_limit)::int;
+-- name: ListAccessGrantsAt :many
+-- The access grant of one source period, read back after a concurrent replay.
+SELECT * FROM billing.grants
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND product_id = sqlc.arg(product_id)::uuid AND kind = 'access' AND event = 'grant'
+  AND source_type = sqlc.arg(source_type)::text AND source_id = sqlc.arg(source_id)::text
+  AND starts_at = sqlc.arg(starts_at)::timestamptz
+ORDER BY id;

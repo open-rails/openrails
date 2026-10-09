@@ -43,10 +43,10 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 		Customer:       *customer,
 		Balances:       []billing.Balance{},
 		Subscriptions:  []billing.Subscription{},
-		Entitlements:   []billing.EntitlementRecord{},
+		Entitlements:   billing.ListPage[billing.CustomerEntitlement]{Items: []billing.CustomerEntitlement{}},
 		Payments:       []billing.Payment{},
 		PaymentMethods: []billing.PaymentMethod{},
-		ProductAccess:  []billing.ProductAccessGrant{},
+		ProductAccess:  billing.ListPage[billing.ProductAccessGrant]{Items: []billing.ProductAccessGrant{}},
 	}
 	if r.State.MoneyService != nil {
 		balances, err := r.State.MoneyService.ListBalancesForCustomer(ctx, customerID)
@@ -74,11 +74,16 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 		}
 	}
 	if r.State.EntitlementService != nil {
-		ents, err := r.State.EntitlementService.ListActiveRecords(ctx, subject, now)
-		if err == nil {
-			for i := range ents {
-				profile.Entitlements = append(profile.Entitlements, entitlementRecord(&ents[i]))
-			}
+		keys, more, err := r.State.EntitlementService.ListEntitlementsPage(ctx, customerID.UUID(), "", "", billing.DefaultPageLimit, now)
+		if err != nil {
+			r.InternalError("failed to load entitlements", err)
+			return
+		}
+		for _, key := range keys {
+			profile.Entitlements.Items = append(profile.Entitlements.Items, billing.CustomerEntitlement{Entitlement: key})
+		}
+		if more {
+			profile.Entitlements.Next = pagination.Encode(keys[len(keys)-1])
 		}
 	}
 	if r.State.PaymentService != nil {
@@ -101,8 +106,16 @@ func GetCustomerBillingProfile(r *httprequest.Request) {
 		}
 	}
 	if svc := productAccessService(r); svc != nil {
-		if grants, err := svc.ListAllGrantsByUser(ctx, subject); err == nil && len(grants) > 0 {
-			profile.ProductAccess = productAccessGrants(r, grants)
+		rows, more, err := svc.ListPage(ctx, customerID.UUID(), nil, billing.DefaultPageLimit, false)
+		if err != nil {
+			r.InternalError("failed to load product access", err)
+			return
+		}
+		for _, row := range rows {
+			profile.ProductAccess.Items = append(profile.ProductAccess.Items, productAccessGrant(row, now))
+		}
+		if more {
+			profile.ProductAccess.Next = pagination.Encode(rows[len(rows)-1].ID)
 		}
 	}
 	r.SuccessJSON(profile)

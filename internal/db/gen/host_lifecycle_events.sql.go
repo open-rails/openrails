@@ -82,3 +82,31 @@ func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHost
 	}
 	return result.RowsAffected(), nil
 }
+
+const enqueueProductEntitlementsChanged = `-- name: EnqueueProductEntitlementsChanged :exec
+INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
+SELECT p.merchant_id, 'product.entitlements_changed', 'product', p.id, $1::timestamptz, $2::jsonb,
+       'product.entitlements_changed:' || p.id::text || ':' || p.revision::text
+FROM billing.products p
+WHERE p.merchant_id = $3::uuid AND p.id = $4::uuid
+ON CONFLICT (merchant_id, dedupe_key) DO NOTHING
+`
+
+type EnqueueProductEntitlementsChangedParams struct {
+	OccurredAt time.Time
+	Data       []byte
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+}
+
+// One key edit of a product, keyed by the revision it produced: announcing it
+// again collapses.
+func (q *Queries) EnqueueProductEntitlementsChanged(ctx context.Context, arg EnqueueProductEntitlementsChangedParams) error {
+	_, err := q.db.Exec(ctx, enqueueProductEntitlementsChanged,
+		arg.OccurredAt,
+		arg.Data,
+		arg.MerchantID,
+		arg.ProductID,
+	)
+	return err
+}

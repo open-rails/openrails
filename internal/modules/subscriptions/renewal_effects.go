@@ -48,17 +48,15 @@ func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, 
 	}
 	entitlementsService := s.newLifecycleEntitlementService(d)
 	if !effects.PreserveLifecycle {
-		if err := entitlementsService.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, effects.PeriodStart, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
+		if err := entitlementsService.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, effects.PeriodStart, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
 			return nil, err
 		}
 	}
-	for _, name := range sub.EntitlementsSnapshot {
-		if _, err := entitlementsService.PushNewEntitlement(ctx, subscriptionAccess(sub, name, effects.PeriodStart)); err != nil {
-			return nil, fmt.Errorf("grant renewal entitlement %s: %w", name, err)
-		}
+	if _, err := entitlementsService.PushAccess(ctx, subscriptionAccess(sub, effects.PeriodStart)); err != nil {
+		return nil, fmt.Errorf("grant renewal access %s: %w", sub.ID, err)
 	}
 	if !effects.PreserveLifecycle && effects.PeriodEnd.After(s.now().UTC()) {
-		if err := pushRenewalGrace(ctx, d, entitlementsService, sub, sub.EntitlementsSnapshot, effects.PeriodStart, effects.PeriodEnd); err != nil {
+		if err := pushRenewalGrace(ctx, d, entitlementsService, sub, effects.PeriodStart, effects.PeriodEnd); err != nil {
 			return nil, err
 		}
 	}

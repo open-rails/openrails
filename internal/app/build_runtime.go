@@ -802,11 +802,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	checkoutService.StripeService.StripeClients = stripeClients
 	checkoutService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
-	// Wire durable product-access grants (issue #250) into the one-time purchase
-	// flow. Additive to feature entitlements; nil-safe.
-	if checkoutService.PurchaseService != nil {
-		checkoutService.PurchaseService.SetProductAccessService(productAccessService)
-	}
 	checkoutAttemptService := checkout.NewCheckoutAttemptService(
 		database,
 		priceService,

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -19,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -880,16 +880,13 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 	return nil
 }
 
-// revokeNMIChargedBackPurchase ends the entitlements and product access a
-// charged-back one-time payment funded.
+// revokeNMIChargedBackPurchase ends the product access a charged-back
+// one-time payment funded.
 func (s *NMIWebhookService) revokeNMIChargedBackPurchase(ctx context.Context, paymentID uuid.UUID) error {
 	if s.DB == nil {
 		return errors.New("database unavailable for NMI chargeback revocation")
 	}
-	if err := entitlements.NewEntitlementService(s.DB, s.Clock).EndActiveByPayment(ctx, paymentID, models.EntitlementRevokeChargeback); err != nil {
-		return fmt.Errorf("revoke one-off entitlements after NMI chargeback: %w", err)
-	}
-	if _, err := productaccess.NewService(s.DB, s.Clock).RevokeProductAccessByPayment(ctx, paymentID, models.ProductAccessRevokeChargeback); err != nil {
+	if err := entitlements.NewEntitlementService(s.DB, s.Clock).EndActiveByPayment(ctx, paymentID, models.AccessRevokeChargeback); err != nil {
 		return fmt.Errorf("revoke product access after NMI chargeback: %w", err)
 	}
 	return nil

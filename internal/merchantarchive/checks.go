@@ -50,6 +50,7 @@ var excludedTables = map[string]string{
 	"nmi_history_reads":             "read progress: the destination backfills its own",
 	"solana_pay_references":         "transient Solana Pay watch state; pending references refuse the archive",
 	"solana_pay_receipts":           "Solana transfer receipts; credited transfers are archived as payments, unresolved reviews refuse the archive",
+	"access_cutover_approvals":      "the source deployment's cutover evidence; the archive carries the converted product access",
 
 	"operation_authorization_extensions": "growth of unsupported operation authorizations, refused with them",
 }
@@ -93,6 +94,7 @@ var excludedColumns = map[string]string{
 	"destructive_run_before_images": "id merchant_id destructive_run_id table_name row_id before captured_at restored_at destructive_run_class",
 	"operation_authorizations":      "operation_id merchant_id customer_id record_owner ledger_account_id currency amount claim_reference authorization_body_bytes authorization_body_digest state terminal_reference created_at released_at settled_at settlement_cost_amount settlement_amount settlement_body_bytes settlement_body_digest extended_amount authorized_amount",
 	"cost_qualifications":           "merchant_id operation_id provider provider_resource_id provider_lifetime_starts_at provider_lifetime_ends_at provider_absent_at provider_absence_reference billing_stop_reference windows_closed_at windows_closed_reference lifecycle_evidence_bytes lifecycle_evidence_digest quiescence_seconds state reason baseline_observation_id qualified_observation_id qualified_cost_amount qualified_at created_at updated_at",
+	"access_cutover_approvals":      "id merchant_id customer_id entitlement change approved_by approved_at",
 	"cost_observations":             "merchant_id operation_id observation_id normalized_query query_starts_at query_ends_at raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest cost_amount has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
 
 	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
@@ -109,7 +111,7 @@ var omittedColumns = map[string]string{
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"payments":          "destructive_run_class",
 	"checkout_attempts": "destructive_run_class",
-	"entitlements":      "period destructive_run_class",
+	"product_access":    "destructive_run_class",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
 	"provider_intents":  "destructive_run_class",
 }

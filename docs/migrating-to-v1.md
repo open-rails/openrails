@@ -140,9 +140,9 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 | Before | After |
 |---|---|
 | `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.CheckEntitlements(` with a `billing.CustomerID` and `billing.CheckEntitlementsParams` (`Entitlements`, at most 100, and `At`), answering `billing.EntitlementCheck` |
-| `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `At`), answering `billing.EntitlementLookup` |
+| `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListCustomerEntitlements(` with `billing.CustomerEntitlementListParams` (`Prefix`, `At`, a page), answering the customer's keys |
 | `ListCustomersWithEntitlement` | `client.ListEntitlementCustomers(` |
-| `GrantEntitlement`, `RevokeEntitlement` | `client.CreateEntitlement(`, `client.DeleteEntitlement(` |
+| `GrantEntitlement`, `RevokeEntitlement` | Grant the product that carries the key: `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 | `ResolveEffectiveTier` | `client.GetEffectiveTier(`; `Tier` is nil when the customer holds none |
 | `client.ProductAccess.Check`, `CheckMany`, `List` | `client.CheckProductAccess(`, `client.ListProductAccess(`, `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 
@@ -289,7 +289,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}` |
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/merchant/usage-events`, `GET /v1/merchant/customers/{customer_id}/usage` |
 | `/v1/merchant/users/{user_id}/…` | `/v1/merchant/customers/{customer_id}/product-access` and the checks beneath it |
-| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/merchant/entitlements/lookup`, `/v1/merchant/customers/{customer_id}/tier` |
+| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/merchant/customers/{customer_id}/entitlements/check`, `/v1/merchant/customers/{customer_id}/tier` |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`; the profile is `/v1/merchant/customers/{customer_id}/billing-profile` |
 | `GET /v1/merchant/customers/{id}/payments` | `GET /v1/merchant/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |

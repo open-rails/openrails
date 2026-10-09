@@ -28,25 +28,27 @@ const acceptedPurchaseTermsKey = "accepted_purchase"
 // Stored in the existing checkout attempt, alongside its buyer and PSP. Money
 // stays a decimal string even when rail_state is decoded through map[string]any.
 type acceptedPurchaseTerms struct {
-	LegacyEntitlements  map[string]*int              `json:"legacy_entitlements,omitzero"`
-	PriceID             uuid.UUID                    `json:"price_id"`
-	ProductID           uuid.UUID                    `json:"product_id"`
-	PaymentID           uuid.UUID                    `json:"payment_id"`
-	ProductKey          string                       `json:"product_key"`
-	ProductName         string                       `json:"product_name"`
-	Amount              int64                        `json:"amount,string"`
-	Currency            string                       `json:"currency"`
-	AccessDurationHours *int                         `json:"access_duration_hours"`
-	CreditGrant         *models.CreditGrantSnapshot  `json:"credit_grant"`
-	Entitlements        []string                     `json:"entitlements"`
-	PSPLinks            map[string]map[string]string `json:"psp_links,omitempty"`
-	AcceptedAt          time.Time                    `json:"accepted_at"`
-	EntitlementStart    time.Time                    `json:"entitlement_start"`
+	LegacyEntitlements  map[string]*int             `json:"legacy_entitlements,omitzero"`
+	PriceID             uuid.UUID                   `json:"price_id"`
+	ProductID           uuid.UUID                   `json:"product_id"`
+	PaymentID           uuid.UUID                   `json:"payment_id"`
+	ProductKey          string                      `json:"product_key"`
+	ProductName         string                      `json:"product_name"`
+	Amount              int64                       `json:"amount,string"`
+	Currency            string                      `json:"currency"`
+	AccessDurationHours *int                        `json:"access_duration_hours"`
+	CreditGrant         *models.CreditGrantSnapshot `json:"credit_grant"`
+	// Entitlements is the keys a checkout admitted before product access, kept
+	// only as accepted evidence. Settlement grants ProductID.
+	Entitlements     json.RawMessage              `json:"entitlements,omitempty"`
+	PSPLinks         map[string]map[string]string `json:"psp_links,omitempty"`
+	AcceptedAt       time.Time                    `json:"accepted_at"`
+	EntitlementStart time.Time                    `json:"entitlement_start"`
 }
 
 func (t acceptedPurchaseTerms) catalog(merchantID uuid.UUID) (*models.Price, *models.Product) {
 	return &models.Price{ID: t.PriceID, MerchantID: merchantID, ProductID: t.ProductID, Amount: t.Amount, Currency: t.Currency, AccessDurationHours: t.AccessDurationHours, PSPLinks: t.PSPLinks},
-		&models.Product{ID: t.ProductID, MerchantID: merchantID, Key: t.ProductKey, DisplayName: t.ProductName, Entitlements: models.CloneEntitlements(t.Entitlements)}
+		&models.Product{ID: t.ProductID, MerchantID: merchantID, Key: t.ProductKey, DisplayName: t.ProductName}
 }
 
 func purchaseTerms(session *models.CheckoutAttempt) (*acceptedPurchaseTerms, error) {
@@ -76,11 +78,7 @@ func permanentPurchase(price *models.Price) bool {
 }
 
 func (s *CheckoutPurchaseService) permanentCoverage(ctx context.Context, user string, product *models.Product, pending bool, except uuid.UUID) (*CoverageInfo, error) {
-	keys := product.Entitlements
 	coverage := &CoverageInfo{}
-	if len(keys) == 0 {
-		return coverage, nil
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -89,14 +87,14 @@ func (s *CheckoutPurchaseService) permanentCoverage(ctx context.Context, user st
 	if err != nil {
 		return nil, err
 	}
-	covered, err := s.database.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: mid.UUID(), CustomerID: customer, Entitlements: keys, AtTime: s.now(), IncludePending: pending, ExceptSessionID: except})
+	covered, err := s.database.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: mid.UUID(), CustomerID: customer, ProductID: product.ID, AtTime: s.now(), IncludePending: pending, ExceptSessionID: except})
 	if err != nil {
 		return nil, err
 	}
 	if covered != nil && *covered {
 		coverage.HasCoverage = true
 		coverage.IsIndefinite = true
-		coverage.SourceType = "entitlement"
+		coverage.SourceType = "product"
 	}
 	return coverage, nil
 }
@@ -123,7 +121,7 @@ func (s *CheckoutPurchaseService) checkPermanentOwnership(ctx context.Context, u
 	if err != nil {
 		return err
 	}
-	owned, err := s.database.Gen(ctx).HasPermanentProductOwnership(ctx, gen.HasPermanentProductOwnershipParams{MerchantID: mid.UUID(), CustomerID: customer, ProductID: product.ID, AtTime: s.now()})
+	owned, err := s.database.Gen(ctx).HasPermanentProductAccess(ctx, gen.HasPermanentProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductID: product.ID, AtTime: s.now()})
 	if err != nil {
 		return err
 	}
@@ -209,7 +207,7 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 			}
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
-		terms := acceptedPurchaseTerms{PriceID: price.ID, ProductID: product.ID, PaymentID: uuidutil.NewV7(), ProductKey: product.Key, ProductName: product.DisplayName, Amount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, Entitlements: models.CloneEntitlements(product.Entitlements), PSPLinks: price.PSPLinks, AcceptedAt: now, EntitlementStart: now}
+		terms := acceptedPurchaseTerms{PriceID: price.ID, ProductID: product.ID, PaymentID: uuidutil.NewV7(), ProductKey: product.Key, ProductName: product.DisplayName, Amount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, PSPLinks: price.PSPLinks, AcceptedAt: now, EntitlementStart: now}
 		terms.CreditGrant, err = acceptedCreditGrant(product, price)
 		if err != nil {
 			return err
@@ -273,7 +271,7 @@ func (s *CheckoutPurchaseService) registerSessionPurchase(ctx context.Context, r
 			coverage.HasCoverage = true
 			coverage.EndDate = &terms.EntitlementStart
 		}
-		result, err = bound.applyPurchase(ctx, req, price, product, &EligibilityResult{Status: EligibilityAllowed, Coverage: coverage}, terms.AcceptedAt, terms.PaymentID, terms.CreditGrant, grants.HistoricalEntitlementHours(terms.LegacyEntitlements))
+		result, err = bound.applyPurchase(ctx, req, price, product, &EligibilityResult{Status: EligibilityAllowed, Coverage: coverage}, terms.AcceptedAt, terms.PaymentID, terms.CreditGrant)
 		if err != nil {
 			return err
 		}
@@ -326,16 +324,10 @@ func (s *CheckoutAttemptService) saveInitializedSession(ctx context.Context, ses
 func (p *acceptedPurchaseTerms) UnmarshalJSON(data []byte) error {
 	type plain acceptedPurchaseTerms
 	var decoded plain
-	wire := struct {
-		*plain
-		Entitlements json.RawMessage `json:"entitlements"`
-	}{plain: &decoded}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var err error
-	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
-	if err != nil {
+	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
 		return err
 	}
 	*p = acceptedPurchaseTerms(decoded)

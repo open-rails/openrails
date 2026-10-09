@@ -116,14 +116,12 @@ func TestSecurityRevokedAccessStaysRevoked(t *testing.T) {
 		w := newWorld(t)
 		c := w.newCustomer()
 		hours := 24
-		client := w.client[embedded]
-		_, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: "content:gift", Hours: &hours})
-		require.NoError(t, err)
-		future, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: "content:gift", Hours: &hours})
-		require.NoError(t, err)
+		gift := w.giftProduct("content:gift")
+		c.grant(gift, &hours, nil)
+		future := c.grant(gift, &hours, nil)
 		now := w.clock.Now()
-		require.True(t, c.entitledAt("content:gift", now.Add(30*time.Hour)))
-		require.NoError(t, client.DeleteEntitlement(t.Context(), c.customerID(), future.ID))
+		require.True(t, c.entitledAt("content:gift", now.Add(30*time.Hour)), "hours extend after the live grant")
+		require.NoError(t, w.client[embedded].DeleteProductAccess(t.Context(), c.customerID(), future.ID))
 		for range 2 {
 			require.False(t, c.entitledAt("content:gift", now.Add(30*time.Hour)), "the revoked grant stays revoked")
 			require.True(t, c.entitledAt("content:gift", now.Add(12*time.Hour)))

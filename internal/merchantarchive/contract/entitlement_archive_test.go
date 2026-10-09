@@ -14,16 +14,16 @@ func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
 	const legacy = `{"service:z":null,"article:42":48,"permanent":0}`
 	product := legacyProduct(map[string]string{"merchant_id": testMerchant, "revision": "0", "id": "10000000-0000-0000-0000-000000000002", "created_at": "2026-09-01 00:00:00+00", "entitlements": legacy})
 	_, price := row(t, "prices", map[string]string{"merchant_id": testMerchant, "id": priceID, "revision": "0"})
-	_, payment := row(t, "payments", map[string]string{
+	payment := legacyRow(t, LegacyPayments, map[string]string{
 		"merchant_id": testMerchant, "price_id": priceID, "entitlements_snapshot": legacy,
 		"metadata": `{"legacy_entitlement_hours":{"application-key":24}}`,
 	})
 	// The private historical-evidence column did not exist in this archive.
 	payment = payment[:len(payment)-1]
 	var artifact bytes.Buffer
-	writer, err := archivewire.NewWriter(&artifact, testMerchant)
+	writer, err := archivewire.NewVersionWriter(&artifact, 1, testMerchant)
 	require.NoError(t, err)
-	for _, p := range Profiles {
+	for _, p := range ProfilesFor(1) {
 		if p.Name == "invoice_collection_cadence" || p.Name == "product_entitlements" {
 			continue
 		} // Not present in the historical format.
@@ -51,8 +51,7 @@ func TestReadHistoricalEntitlementMapsKeepsAcceptedHours(t *testing.T) {
 			require.Nil(t, value(p, values, "removed_at"))
 			keys = append(keys, *value(p, values, "entitlement"))
 		case "payments":
-			require.Equal(t, `["article:42","permanent","service:z"]`, *value(p, values, "entitlements_snapshot"))
-			require.JSONEq(t, `{"article:42":48}`, *value(p, values, "legacy_entitlement_hours"))
+			require.Len(t, values, len(namedProfile("payments").Columns), "a payment keeps no keys")
 			require.Equal(t, `{"legacy_entitlement_hours":{"application-key":24}}`, *value(p, values, "metadata"), "application metadata is not accepted duration evidence")
 		}
 		return nil
@@ -78,7 +77,7 @@ func TestStoredEntitlementListsAndPrivateHoursAreValidated(t *testing.T) {
 		require.Error(t, ValidateValues(LegacyProducts, legacyProduct(map[string]string{"entitlements": names})), names)
 	}
 	for _, hours := range []string{`{"a":0}`, `{"a":-1}`, `{"a":2562048}`, `{"a":1.5}`, `{"other":1}`} {
-		p, values := row(t, "payments", map[string]string{"entitlements_snapshot": `["a"]`, "legacy_entitlement_hours": hours})
-		require.Error(t, ValidateValues(p, values), hours)
+		values := legacyRow(t, LegacyPayments, map[string]string{"entitlements_snapshot": `["a"]`, "legacy_entitlement_hours": hours})
+		require.Error(t, ValidateValues(LegacyPayments, values), hours)
 	}
 }

@@ -28,10 +28,10 @@ type NotificationData struct {
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself
 	// (admin_manual, fetch_converge, converge_notify).
-	Source      string     `json:"source,omitempty"`
-	Entitlement string     `json:"entitlement,omitempty"`
-	EndedAt     *time.Time `json:"ended_at,omitempty"`
-	Currency    string     `json:"currency,omitempty"`
+	Source    string     `json:"source,omitempty"`
+	ProductID ProductID  `json:"product_id,omitzero"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	Currency  string     `json:"currency,omitempty"`
 
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).

@@ -63,15 +63,11 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 	if quote.ChargeNow <= 0 {
 		return terms, ErrTierChangeCreditExceedsPrice
 	}
-	benefits := models.CloneEntitlements(product.Entitlements)
-	if benefits == nil {
-		benefits = []string{}
-	}
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(),
 		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: target.ID, PaymentMethodID: *sub.PaymentMethodID,
 		ProductName: product.DisplayName, Amount: quote.ChargeNow, RecurringAmount: target.Amount, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours,
-		AcceptedAt: quote.PeriodStart, PeriodStart: quote.PeriodStart, PeriodEnd: quote.PeriodEnd, Entitlements: benefits,
+		AcceptedAt: quote.PeriodStart, PeriodStart: quote.PeriodStart, PeriodEnd: quote.PeriodEnd,
 		Replaces: &subscriptions.ReplacedMembership{SubscriptionID: sub.ID, PriceID: sub.PriceID, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(), Credit: quote.Credit},
 	}
 	return terms, terms.Validate()

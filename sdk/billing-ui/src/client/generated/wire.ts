@@ -224,24 +224,14 @@ export type CustomerChangeTierParams = {
   signature?: string
 }
 
+export type CustomerEntitlement = {
+  entitlement: string
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
   remote_value: string
-}
-
-export type EntitlementRecord = {
-  id: string
-  customer_id: string
-  entitlement: string
-  starts_at: string
-  ends_at: string | null
-  source_type: "admin" | "grace" | "purchase" | "subscription"
-  source_id: string
-  revoked_at: string | null
-  revoke_reason: string | null
-  created_at: string
-  updated_at: string
 }
 
 export type Health = {
@@ -350,7 +340,7 @@ export type NotificationData = {
   reason?: string
   message?: string
   source?: string
-  entitlement?: string
+  product_id?: string
   ended_at?: string
   currency?: string
   subscription_id?: string
@@ -536,6 +526,27 @@ export type Product = {
   updated_at: string
 }
 
+export type ProductAccessGrant = {
+  id: string
+  customer_id: string
+  product_id: string
+  product_key: string
+  product_name: string
+  source_type: "grace" | "grant" | "purchase" | "subscription"
+  source_id: string
+  payment_id: string | null
+  grant_reason: "comp" | "import" | "migration" | "staff" | null
+  granted_by: string | null
+  note: string | null
+  status: string
+  starts_at: string
+  ends_at: string | null
+  revoked_at: string | null
+  revoke_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type ProductSummary = {
   id: string
   key: string
@@ -658,7 +669,7 @@ export type Subscription = {
 
 export type SubscriptionAccess = {
   kind: string
-  entitlement: string
+  product_id: string
   source_type?: string
   source_id?: string
   subscription_id?: string

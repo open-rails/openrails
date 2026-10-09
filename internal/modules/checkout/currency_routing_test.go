@@ -1,10 +1,11 @@
 package checkout
 
 import (
+	"testing"
+
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestTokenPricesAreNeverOfferedOnCardRails(t *testing.T) {

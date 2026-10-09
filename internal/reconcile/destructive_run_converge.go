@@ -109,7 +109,7 @@ func (r *PGDestructiveRunRecorder) CaptureSubscription(ctx context.Context, runI
 	}); err != nil {
 		return time.Time{}, fmt.Errorf("capture subscription before-image %s: %w", subscriptionID, err)
 	}
-	if _, err := q.CaptureSubscriptionEntitlementBeforeImages(ctx, gen.CaptureSubscriptionEntitlementBeforeImagesParams{
+	if _, err := q.CaptureSubscriptionAccessBeforeImages(ctx, gen.CaptureSubscriptionAccessBeforeImagesParams{
 		RunID: runID, MerchantID: mid, SubscriptionID: subscriptionID, Now: now,
 	}); err != nil {
 		return time.Time{}, fmt.Errorf("capture entitlement before-images for %s: %w", subscriptionID, err)
@@ -169,13 +169,13 @@ type ConvergeRollbackResult struct {
 	RunID uuid.UUID `json:"run_id"`
 	// SubscriptionsRestored is how many rows were re-asserted from before-images.
 	SubscriptionsRestored int64 `json:"subscriptions_restored"`
-	// EntitlementsCaptured is how many entitlement windows the run closed.
-	EntitlementsCaptured int64 `json:"entitlements_captured"`
-	// EntitlementsInvalidated is how many of those the reverse soft-deleted so
+	// AccessCaptured is how many product-access windows the run closed.
+	AccessCaptured int64 `json:"access_captured"`
+	// AccessInvalidated is how many of those the reverse soft-deleted so
 	// Converge REBUILDS them from the grant log. Class D is invalidated and
 	// re-derived, never restored — a restored effect can silently disagree with
 	// its grant, a re-derived one cannot.
-	EntitlementsInvalidated int64 `json:"entitlements_invalidated"`
+	AccessInvalidated int64 `json:"access_invalidated"`
 	// IntentsSuperseded is the unfired provider writes this reverse neutralised.
 	IntentsSuperseded int `json:"intents_superseded"`
 	// IntentsIrreversible already reached the provider. Operator work.
@@ -299,10 +299,10 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 		if e != nil {
 			return fmt.Errorf("count before-images: %w", e)
 		}
-		res.EntitlementsCaptured = counts.Entitlements
+		res.AccessCaptured = counts.ProductAccess
 		// Class D: invalidate, do not restore. The follow-up Converge rebuilds
 		// each window from the grant that justifies it.
-		if res.EntitlementsInvalidated, e = tq.InvalidateEntitlementsFromBeforeImages(ctx, gen.InvalidateEntitlementsFromBeforeImagesParams{
+		if res.AccessInvalidated, e = tq.InvalidateAccessFromBeforeImages(ctx, gen.InvalidateAccessFromBeforeImagesParams{
 			MerchantID: mid, RunID: runID, Now: now,
 		}); e != nil {
 			return fmt.Errorf("invalidate derived entitlements: %w", e)

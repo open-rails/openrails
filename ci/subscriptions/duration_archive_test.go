@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
@@ -40,22 +39,10 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 	// Reproduce the preceding archive profile: auto_renew instead of cadence,
 	// no subscription access snapshot, and a historically open projection.
 	profiles := map[string]contract.Profile{}
-	for _, p := range contract.Profiles {
+	for _, p := range contract.ProfilesFor(1) {
 		profiles[p.Name] = p
 	}
-	var historical bytes.Buffer
-	var writer *archivewire.Writer
-	var table string
-	_, err = archivewire.Read(bytes.NewReader(current.Bytes()), func(h archivewire.Header) error {
-		var err error
-		writer, err = archivewire.NewWriter(&historical, h.MerchantID, h.CatalogRevision)
-		return err
-	}, func(record archivewire.Record) error {
-		if record.Kind == "table" {
-			table = record.Table
-			return writer.Table(table)
-		}
-		values := append([]*string(nil), record.Values...)
+	legacy := legacyArchive(t, current.Bytes(), func(table string, values []*string) []*string {
 		sourceType := ""
 		for i, c := range profiles[table].Columns {
 			if c.Name == "source_type" && values[i] != nil {
@@ -67,16 +54,14 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 			case table == "prices" && c.Name == "billing_interval_hours":
 				values[i] = new(map[bool]string{true: "true", false: "false"}[values[i] != nil])
 			case table == "subscriptions" && c.Name == "access_duration_hours_snapshot":
-				values = append(values[:i], values[i+1:]...)
-				return writer.Row(values)
+				return append(values[:i], values[i+1:]...)
 			case table == "entitlements" && sourceType == "subscription" && c.Name == "ends_at":
 				values[i] = nil
 			}
 		}
-		return writer.Row(values)
+		return values
 	})
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
+	historical := bytes.NewBuffer(legacy)
 
 	schema := "duration_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
@@ -95,11 +80,14 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 	require.Equal(t, 720, cadence)
 	require.Equal(t, 720, access)
 	var finite bool
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT bool_and(ends_at IS NOT NULL) FROM "+quoted+".entitlements WHERE source_type='subscription' AND source_id=$1", e.sub.UUID()).Scan(&finite))
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT bool_and(ends_at IS NOT NULL) FROM "+quoted+".product_access WHERE source_type='subscription' AND source_id=$1", e.sub.UUID().String()).Scan(&finite))
 	require.True(t, finite, "old open projections recover their paid grant bounds")
 	var changed int
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM (SELECT id,starts_at,ends_at FROM "+pgx.Identifier{w.schema}.Sanitize()+".grants EXCEPT SELECT id,starts_at,ends_at FROM "+quoted+".grants) changed").Scan(&changed))
 	require.Zero(t, changed, "the immutable paid ledger is preserved exactly")
+	var windows int
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM (SELECT product_id,source_type,source_id,starts_at,ends_at FROM "+pgx.Identifier{w.schema}.Sanitize()+".product_access EXCEPT SELECT product_id,source_type,source_id,starts_at,ends_at FROM "+quoted+".product_access) changed").Scan(&windows))
+	require.Zero(t, windows, "converted product access matches the source's")
 	replay, err := merchantarchive.Restore(t.Context(), destination, client.MerchantID(), bytes.NewReader(historical.Bytes()))
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)

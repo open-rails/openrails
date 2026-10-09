@@ -91,7 +91,7 @@ type Subscription struct {
 // the source's own wire id (see SourceRef).
 type SubscriptionAccess struct {
 	Kind           string         `json:"kind"`
-	Entitlement    string         `json:"entitlement"`
+	ProductID      ProductID      `json:"product_id"`
 	SourceType     string         `json:"source_type,omitempty"`
 	SourceID       string         `json:"source_id,omitempty"`
 	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`

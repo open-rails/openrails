@@ -42,17 +42,17 @@ func TestReadHistoricalDurationRowsPreservesWireIdentity(t *testing.T) {
 					price[i] = new(map[bool]string{true: "true", false: "false"}[recurring])
 				}
 			}
-			subProfile, sub := row(t, "subscriptions", map[string]string{"merchant_id": testMerchant, "price_id": priceID, "collection_policy": "provider", "rail": "stripe", "rail_subscription_id": "sub_legacy"})
-			for i, c := range subProfile.Columns {
+			sub := legacyRow(t, LegacySubscriptions, map[string]string{"merchant_id": testMerchant, "price_id": priceID, "collection_policy": "provider", "rail": "stripe", "rail_subscription_id": "sub_legacy"})
+			for i, c := range LegacySubscriptions.Columns {
 				if c.Name == "access_duration_hours_snapshot" {
 					sub = append(sub[:i], sub[i+1:]...)
 					break
 				}
 			}
 			var artifact bytes.Buffer
-			writer, err := archivewire.NewWriter(&artifact, testMerchant)
+			writer, err := archivewire.NewVersionWriter(&artifact, 1, testMerchant)
 			require.NoError(t, err)
-			for _, profile := range Profiles {
+			for _, profile := range ProfilesFor(1) {
 				require.NoError(t, writer.Table(profile.Name))
 				switch profile.Name {
 				case "prices":

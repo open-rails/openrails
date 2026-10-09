@@ -24,14 +24,15 @@ func accessEnd(start time.Time, hours *int) *time.Time {
 	return &end
 }
 
-// subscriptionAccess grants exactly the accepted access window. Billing periods
-// schedule charges and never supply an implicit expiry for a new grant.
-func subscriptionAccess(sub *models.Subscription, name string, start time.Time) entitlements.PushNewEntitlementParams {
+// subscriptionAccess grants the subscription's product for exactly the
+// accepted access window. Billing periods schedule charges and never supply an
+// implicit expiry for a new grant.
+func subscriptionAccess(sub *models.Subscription, start time.Time) entitlements.PushAccessParams {
 	end := accessEnd(start, sub.AccessDurationHoursSnapshot)
-	return entitlements.PushNewEntitlementParams{
-		UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start,
+	return entitlements.PushAccessParams{
+		UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start,
 		EndsAt: end, Indefinite: end == nil,
-		SourceType: models.EntitlementSourceSubscription, SourceID: sub.ID,
+		SourceType: models.AccessSourceSubscription, SourceID: sub.ID.String(),
 	}
 }
 

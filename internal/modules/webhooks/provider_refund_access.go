@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -40,10 +39,7 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 	}
 	now := timeutil.FirstClock(p.Clock).Now().UTC()
 	if original.SubscriptionID == nil {
-		if err := entitlements.NewEntitlementService(p.DB, p.Clock).EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund); err != nil {
-			return true, fmt.Errorf("revoke one-off entitlements after provider refund: %w", err)
-		}
-		if _, err := productaccess.NewService(p.DB, p.Clock).RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeRefund); err != nil {
+		if err := entitlements.NewEntitlementService(p.DB, p.Clock).EndActiveByPayment(ctx, original.ID, models.AccessRevokeRefund); err != nil {
 			return true, fmt.Errorf("revoke product access after provider refund: %w", err)
 		}
 		return true, nil
@@ -107,8 +103,8 @@ func (p providerRefundAccess) apply(ctx context.Context, rail models.Rail, origi
 // revoking terminates the grants too, so convergence never re-projects them.
 func (p providerRefundAccess) revokeSubscription(ctx context.Context, d *db.DB, sub *models.Subscription, original *models.Payment, now time.Time) error {
 	ent := entitlements.NewEntitlementService(d, p.Clock)
-	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+	if err := ent.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, models.AccessRevokeRefund, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
 		return err
 	}
-	return ent.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeRefund)
+	return ent.EndActiveByPayment(ctx, original.ID, models.AccessRevokeRefund)
 }

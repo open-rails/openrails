@@ -1072,7 +1072,7 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
 | `CreateCheckoutAttempt` | Either `PriceID` or the pair `ProductKey` + `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
-| `CheckEntitlements` / `ListEntitlements` | Exact grant-backed access; `CheckEntitlements` checks up to 100 keys of one customer, `ListEntitlements` reads up to 500 customers at once |
+| `CheckEntitlements` / `ListCustomerEntitlements` | Keys derived from the products a customer holds; `CheckEntitlements` checks up to 100 keys and 10 prefixes of one customer, `ListCustomerEntitlements` pages their keys |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `GetCheckoutConfig` | `GetCheckoutConfigParams`: `PriceID` or `ProductKey` + `PriceKey` lists the options that can sell it |

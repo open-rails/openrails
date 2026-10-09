@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/grants"
 )
 
@@ -42,9 +41,11 @@ func NewStripeRenewal(p SubscriptionCollectionPayload) (StripeRenewal, error) {
 	// local reprice bookkeeping do not change a provider request.
 	// Field names and normalization persist at the provider: harmless Go
 	// refactors must preserve this representation and already accepted bindings.
-	entitlements := models.CloneEntitlements(p.Renewal.Entitlements)
-	if entitlements == nil {
-		entitlements = []string{}
+	// A renewal admitted before product access hashed its keys; a later one
+	// admits none and its binding omits them.
+	entitlements, err := grants.AcceptedEntitlementsValue(p.Renewal.Entitlements, p.Renewal.LegacyEntitlements)
+	if err != nil {
+		return StripeRenewal{}, err
 	}
 	var independentAccess json.RawMessage
 	if p.Renewal.AccessDurationHours == nil || time.Duration(*p.Renewal.AccessDurationHours)*time.Hour != p.Renewal.PeriodEnd.Sub(p.Renewal.PeriodStart) {
@@ -57,10 +58,10 @@ func NewStripeRenewal(p SubscriptionCollectionPayload) (StripeRenewal, error) {
 		Currency            string          `json:"currency"`
 		StartsAt            string          `json:"starts_at"`
 		EndsAt              string          `json:"ends_at"`
-		Entitlements        any             `json:"entitlements"`
+		Entitlements        any             `json:"entitlements,omitempty"`
 		AccessDurationHours json.RawMessage `json:"access_duration_hours,omitempty"`
 	}{p.Renewal.PriceID, p.Renewal.ProductID, p.Renewal.Amount, p.Renewal.Currency,
-		p.Renewal.PeriodStart.UTC().Format(time.RFC3339Nano), p.Renewal.PeriodEnd.UTC().Format(time.RFC3339Nano), grants.AcceptedEntitlementValue(entitlements, p.Renewal.LegacyEntitlements), independentAccess}
+		p.Renewal.PeriodStart.UTC().Format(time.RFC3339Nano), p.Renewal.PeriodEnd.UTC().Format(time.RFC3339Nano), entitlements, independentAccess}
 	raw, err := json.Marshal(terms)
 	if err != nil {
 		return StripeRenewal{}, err

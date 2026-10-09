@@ -260,15 +260,23 @@ func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, e
 	return strings.TrimSpace(tok), nil
 }
 
-// ListEntitlements returns the active entitlements of up to
-// billing.MaxEntitlementLookupCustomers customers at params.At (zero: now).
-// Every requested customer is present; one with none maps to an empty list.
-func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.EntitlementLookup, error) {
-	if len(params.CustomerIDs) == 0 {
-		return nil, invalidErr("customer_ids is required")
+// ListCustomerEntitlements returns one page of the keys the customer holds at
+// params.At (zero: now), in byte order, optionally only those under
+// params.Prefix: the current keys of the products they hold.
+func (c *Client) ListCustomerEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CustomerEntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
+	path, err := customerIDPath(customerID)
+	if err != nil {
+		return nil, err
 	}
-	var out billing.EntitlementLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/entitlements/lookup", params, &out, requestOptions...); err != nil {
+	query := pageValues(nil, params.PageRequest)
+	if params.Prefix != "" {
+		query.Set("prefix", params.Prefix)
+	}
+	if !params.At.IsZero() {
+		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
+	}
+	var out billing.ListPage[billing.CustomerEntitlement]
+	if err := c.do(ctx, http.MethodGet, path+"/entitlements?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

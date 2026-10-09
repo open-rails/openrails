@@ -45,7 +45,6 @@ import type {
   PSP,
   PSPRoutingPreview,
   RailDefinition,
-  RawEntitlement,
   RawProductAccessGrant,
   RepriceBatch,
   Reprice,
@@ -125,35 +124,32 @@ export const deleteCustomerUsageRateOverride = (
     { method: "DELETE" }
   )
 
-export const grantEntitlement = (
-  customerId: string,
-  entitlement: string,
+export interface ProductGrant {
+  productId: string
   hours?: number
-) =>
-  api<RawEntitlement>(`/merchant/customers/${customerId}/entitlements`, {
-    method: "POST",
-    body: hours ? { entitlement, hours } : { entitlement },
-  })
-
-export const revokeEntitlement = (customerId: string, entitlementId: string) =>
-  api<void>(`/merchant/customers/${customerId}/entitlements/${entitlementId}`, {
-    method: "DELETE",
-  })
-
-export const grantProductAccess = async (
-  customerId: string,
-  productId: string,
   endsAt?: string
-) => {
-  const item = endsAt
-    ? { customer_id: customerId, product_id: productId, ends_at: endsAt }
-    : { customer_id: customerId, product_id: productId }
-  const { items } = await api<{ items: RawProductAccessGrant[] }>(
-    "/merchant/product-access",
-    { method: "POST", body: { items: [item] } }
-  )
-  return items[0]
+  reason?: "comp" | "staff"
+  note?: string
 }
+
+// grantProductAccess grants one product free; the customer holds its keys
+// while the grant is live.
+export const grantProductAccess = (customerId: string, grant: ProductGrant) =>
+  api<{ items: RawProductAccessGrant[] }>(`/merchant/product-access`, {
+    method: "POST",
+    body: {
+      items: [
+        {
+          customer_id: customerId,
+          product_id: grant.productId,
+          ...(grant.hours ? { hours: grant.hours } : {}),
+          ...(grant.endsAt ? { ends_at: grant.endsAt } : {}),
+          ...(grant.reason ? { reason: grant.reason } : {}),
+          ...(grant.note ? { note: grant.note } : {}),
+        },
+      ],
+    },
+  })
 
 export const revokeProductAccess = (customerId: string, grantId: string) =>
   api<void>(`/merchant/customers/${customerId}/product-access/${grantId}`, {

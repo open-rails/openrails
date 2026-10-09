@@ -132,9 +132,8 @@ WITH live_ownership AS (
            pay.purchased_at
     FROM billing.grants g
     LEFT JOIN billing.payments pay ON pay.merchant_id = $1::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
-    WHERE g.merchant_id = $1::uuid AND g.event = 'grant' AND g.kind = 'ownership'
-      AND g.product_id IS NOT NULL
-      AND g.source_type IN ('purchase', 'subscription')
+    WHERE g.merchant_id = $1::uuid AND g.event = 'grant' AND g.kind = 'access'
+      AND g.source_type = 'purchase'
       AND (g.source_id IS NULL OR g.source_id NOT LIKE 'include:%')
       AND g.starts_at <= $2::timestamptz
       AND (g.ends_at IS NULL OR g.ends_at > $2::timestamptz)
@@ -181,7 +180,7 @@ type ConDuplicateOwnershipGrantsRow struct {
 }
 
 // #690 CON `consistency.duplicate.ownership` — more than one LIVE
-// (un-terminated, window covering now) PAID ownership grant for the same
+// (un-terminated, window covering now) PURCHASED access grant for the same
 // (customer, product): the cross-month one-off/lifetime double-purchase the
 // month-scoped duplicate.provider_charge check cannot see. Paid sources only
 // (purchase/subscription — admin/grace grants charge nobody twice) and
@@ -222,43 +221,42 @@ func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplic
 	return items, nil
 }
 
-const conOrphanEntitlementPaymentSource = `-- name: ConOrphanEntitlementPaymentSource :many
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.payments purch ON purch.merchant_id = $1::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
-WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'purchase'
-  AND ent.source_id IS NOT NULL
-  AND ent.deleted_at IS NULL
+const conOrphanAccessPaymentSource = `-- name: ConOrphanAccessPaymentSource :many
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+FROM billing.product_access pa
+LEFT JOIN billing.payments purch ON purch.merchant_id = $1::uuid AND purch.id = pa.payment_id AND purch.deleted_at IS NULL
+WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'purchase'
+  AND pa.deleted_at IS NULL
   AND purch.id IS NULL
-  AND ($2::uuid IS NULL OR ent.customer_id = $2::uuid)
+  AND ($2::uuid IS NULL OR pa.customer_id = $2::uuid)
 `
 
-type ConOrphanEntitlementPaymentSourceParams struct {
+type ConOrphanAccessPaymentSourceParams struct {
 	MerchantID uuid.UUID
 	CustomerID *uuid.UUID
 }
 
-type ConOrphanEntitlementPaymentSourceRow struct {
-	EntID       uuid.UUID
-	UserID      string
-	Entitlement string
-	SourceType  string
-	SourceID    uuid.UUID
+type ConOrphanAccessPaymentSourceRow struct {
+	AccessID   uuid.UUID
+	UserID     string
+	ProductID  uuid.UUID
+	SourceType string
+	SourceID   string
 }
 
-func (q *Queries) ConOrphanEntitlementPaymentSource(ctx context.Context, arg ConOrphanEntitlementPaymentSourceParams) ([]ConOrphanEntitlementPaymentSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanEntitlementPaymentSource, arg.MerchantID, arg.CustomerID)
+func (q *Queries) ConOrphanAccessPaymentSource(ctx context.Context, arg ConOrphanAccessPaymentSourceParams) ([]ConOrphanAccessPaymentSourceRow, error) {
+	rows, err := q.db.Query(ctx, conOrphanAccessPaymentSource, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ConOrphanEntitlementPaymentSourceRow
+	var items []ConOrphanAccessPaymentSourceRow
 	for rows.Next() {
-		var i ConOrphanEntitlementPaymentSourceRow
+		var i ConOrphanAccessPaymentSourceRow
 		if err := rows.Scan(
-			&i.EntID,
+			&i.AccessID,
 			&i.UserID,
-			&i.Entitlement,
+			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
 		); err != nil {
@@ -272,33 +270,32 @@ func (q *Queries) ConOrphanEntitlementPaymentSource(ctx context.Context, arg Con
 	return items, nil
 }
 
-const conOrphanEntitlementSubscriptionSource = `-- name: ConOrphanEntitlementSubscriptionSource :many
+const conOrphanAccessSubscriptionSource = `-- name: ConOrphanAccessSubscriptionSource :many
 
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.subscriptions sub ON sub.merchant_id = $1::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
-WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'subscription'
-  AND ent.source_id IS NOT NULL
-  AND ent.deleted_at IS NULL
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+FROM billing.product_access pa
+LEFT JOIN billing.subscriptions sub ON sub.merchant_id = $1::uuid AND pa.source_id = sub.id::text AND sub.deleted_at IS NULL
+WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'subscription'
+  AND pa.deleted_at IS NULL
   AND sub.id IS NULL
-  AND NOT (ent.revoked_at IS NULL
-           AND ent.starts_at <= $2::timestamptz
-           AND (ent.ends_at IS NULL OR ent.ends_at > $2::timestamptz))
-  AND ($3::uuid IS NULL OR ent.customer_id = $3::uuid)
+  AND NOT (pa.revoked_at IS NULL
+           AND pa.starts_at <= $2::timestamptz
+           AND (pa.ends_at IS NULL OR pa.ends_at > $2::timestamptz))
+  AND ($3::uuid IS NULL OR pa.customer_id = $3::uuid)
 `
 
-type ConOrphanEntitlementSubscriptionSourceParams struct {
+type ConOrphanAccessSubscriptionSourceParams struct {
 	MerchantID uuid.UUID
 	Now        time.Time
 	CustomerID *uuid.UUID
 }
 
-type ConOrphanEntitlementSubscriptionSourceRow struct {
-	EntID       uuid.UUID
-	UserID      string
-	Entitlement string
-	SourceType  string
-	SourceID    uuid.UUID
+type ConOrphanAccessSubscriptionSourceRow struct {
+	AccessID   uuid.UUID
+	UserID     string
+	ProductID  uuid.UUID
+	SourceType string
+	SourceID   string
 }
 
 // #511 CON plane queries (conPass). Each takes an OPTIONAL customer_id: when set
@@ -307,22 +304,22 @@ type ConOrphanEntitlementSubscriptionSourceRow struct {
 // NULL (the merchant-wide sweep) it scans the whole merchant. All are merchant-scoped.
 // These replace the retired internal/audit checks (#511 Phase F hard cut).
 // Partition (#690): a LIVE window with a dangling subscription source is the
-// freeloader case — derive.entitlement.unjustified (severity high, revoke
+// freeloader case — derive.access.unjustified (severity high, revoke
 // recommendation) owns it. This check keeps only NON-LIVE dangling references
 // (revoked/expired history rows): referential hygiene, no access at stake.
-func (q *Queries) ConOrphanEntitlementSubscriptionSource(ctx context.Context, arg ConOrphanEntitlementSubscriptionSourceParams) ([]ConOrphanEntitlementSubscriptionSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanEntitlementSubscriptionSource, arg.MerchantID, arg.Now, arg.CustomerID)
+func (q *Queries) ConOrphanAccessSubscriptionSource(ctx context.Context, arg ConOrphanAccessSubscriptionSourceParams) ([]ConOrphanAccessSubscriptionSourceRow, error) {
+	rows, err := q.db.Query(ctx, conOrphanAccessSubscriptionSource, arg.MerchantID, arg.Now, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ConOrphanEntitlementSubscriptionSourceRow
+	var items []ConOrphanAccessSubscriptionSourceRow
 	for rows.Next() {
-		var i ConOrphanEntitlementSubscriptionSourceRow
+		var i ConOrphanAccessSubscriptionSourceRow
 		if err := rows.Scan(
-			&i.EntID,
+			&i.AccessID,
 			&i.UserID,
-			&i.Entitlement,
+			&i.ProductID,
 			&i.SourceType,
 			&i.SourceID,
 		); err != nil {

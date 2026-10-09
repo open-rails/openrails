@@ -494,6 +494,37 @@ func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg Payment
 	return protected, err
 }
 
+const pruneSoftDeleteAccessBySubscription = `-- name: PruneSoftDeleteAccessBySubscription :execrows
+UPDATE billing.product_access
+SET deleted_at = $1::timestamptz,
+    destructive_run_id = $2::uuid,
+    updated_at = $1::timestamptz
+WHERE merchant_id = $3::uuid
+  AND source_type IN ('subscription', 'grace')
+  AND source_id = $4::uuid::text
+  AND deleted_at IS NULL
+`
+
+type PruneSoftDeleteAccessBySubscriptionParams struct {
+	Now            time.Time
+	RunID          uuid.UUID
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+func (q *Queries) PruneSoftDeleteAccessBySubscription(ctx context.Context, arg PruneSoftDeleteAccessBySubscriptionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneSoftDeleteAccessBySubscription,
+		arg.Now,
+		arg.RunID,
+		arg.MerchantID,
+		arg.SubscriptionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const pruneSoftDeleteCheckoutAttemptsBySubscription = `-- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
 
 UPDATE billing.checkout_attempts
@@ -515,37 +546,6 @@ type PruneSoftDeleteCheckoutAttemptsBySubscriptionParams struct {
 // --- or#858 soft delete ------------------------------------------------------
 func (q *Queries) PruneSoftDeleteCheckoutAttemptsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutAttemptsBySubscriptionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutAttemptsBySubscription,
-		arg.Now,
-		arg.RunID,
-		arg.MerchantID,
-		arg.SubscriptionID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const pruneSoftDeleteEntitlementsBySubscription = `-- name: PruneSoftDeleteEntitlementsBySubscription :execrows
-UPDATE billing.entitlements
-SET deleted_at = $1::timestamptz,
-    destructive_run_id = $2::uuid,
-    updated_at = $1::timestamptz
-WHERE merchant_id = $3::uuid
-  AND source_type = 'subscription'
-  AND source_id = $4::uuid
-  AND deleted_at IS NULL
-`
-
-type PruneSoftDeleteEntitlementsBySubscriptionParams struct {
-	Now            time.Time
-	RunID          uuid.UUID
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-func (q *Queries) PruneSoftDeleteEntitlementsBySubscription(ctx context.Context, arg PruneSoftDeleteEntitlementsBySubscriptionParams) (int64, error) {
-	result, err := q.db.Exec(ctx, pruneSoftDeleteEntitlementsBySubscription,
 		arg.Now,
 		arg.RunID,
 		arg.MerchantID,
@@ -618,6 +618,26 @@ func (q *Queries) PruneSoftDeleteSubscriptionByID(ctx context.Context, arg Prune
 	return result.RowsAffected(), nil
 }
 
+const restoreAccessByDestructiveRun = `-- name: RestoreAccessByDestructiveRun :execrows
+UPDATE billing.product_access
+SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
+`
+
+type RestoreAccessByDestructiveRunParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	RunID      uuid.UUID
+}
+
+func (q *Queries) RestoreAccessByDestructiveRun(ctx context.Context, arg RestoreAccessByDestructiveRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreAccessByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const restoreCheckoutAttemptsByDestructiveRun = `-- name: RestoreCheckoutAttemptsByDestructiveRun :execrows
 UPDATE billing.checkout_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
@@ -632,26 +652,6 @@ type RestoreCheckoutAttemptsByDestructiveRunParams struct {
 
 func (q *Queries) RestoreCheckoutAttemptsByDestructiveRun(ctx context.Context, arg RestoreCheckoutAttemptsByDestructiveRunParams) (int64, error) {
 	result, err := q.db.Exec(ctx, restoreCheckoutAttemptsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const restoreEntitlementsByDestructiveRun = `-- name: RestoreEntitlementsByDestructiveRun :execrows
-UPDATE billing.entitlements
-SET deleted_at = NULL, destructive_run_id = NULL, updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND destructive_run_id = $3::uuid
-`
-
-type RestoreEntitlementsByDestructiveRunParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	RunID      uuid.UUID
-}
-
-func (q *Queries) RestoreEntitlementsByDestructiveRun(ctx context.Context, arg RestoreEntitlementsByDestructiveRunParams) (int64, error) {
-	result, err := q.db.Exec(ctx, restoreEntitlementsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {
 		return 0, err
 	}
@@ -693,7 +693,7 @@ type RestoreSubscriptionsByDestructiveRunParams struct {
 // --- or#858 rollback ---------------------------------------------------------
 // Keyed on the run stamp, so a whole prune reverses as a unit. Restoring only
 // the rows THIS run took means an unrelated soft delete — an ordinary
-// entitlement revocation — is never resurrected by a rollback.
+// access revocation — is never resurrected by a rollback.
 func (q *Queries) RestoreSubscriptionsByDestructiveRun(ctx context.Context, arg RestoreSubscriptionsByDestructiveRunParams) (int64, error) {
 	result, err := q.db.Exec(ctx, restoreSubscriptionsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {

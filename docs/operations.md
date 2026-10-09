@@ -1065,8 +1065,8 @@ SELECT enabled, updated_by, reason, updated_at FROM billing.destructive_action_s
 SELECT count(*) FROM billing.subscriptions
  WHERE canceled_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
--- 3. no entitlement has been revoked since the flip
-SELECT count(*) FROM billing.entitlements
+-- 3. no product access has been revoked since the flip
+SELECT count(*) FROM billing.product_access
  WHERE revoked_at > (SELECT updated_at FROM billing.destructive_action_switch);
 
 -- 4. destructive provider intents are parked, not executing

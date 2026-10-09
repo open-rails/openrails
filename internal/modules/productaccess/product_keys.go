@@ -18,7 +18,7 @@ type KeyDecision struct {
 }
 
 // CheckProductKeys resolves one bounded key batch in the authorized merchant
-// and catalog. Existing ownership survives catalog archival; unknown keys deny.
+// and catalog. Access survives catalog archival; unknown keys deny.
 func (s *Service) CheckProductKeys(ctx context.Context, userID string, keys []string) (map[string]KeyDecision, error) {
 	if len(keys) > 100 {
 		return nil, errors.New("at most 100 products are allowed")
@@ -46,19 +46,16 @@ func (s *Service) CheckProductKeys(ctx context.Context, userID string, keys []st
 	if err != nil {
 		return nil, err
 	}
-	err = s.withTx(ctx, func(ctx context.Context, repo *ProductAccessGrantRepo) error {
-		rows, err := repo.db.Gen(ctx).CheckProductAccessKeys(ctx, gen.CheckProductAccessKeysParams{MerchantID: mid.UUID(), CustomerID: customer, ProductKeys: unique, AtTime: s.now().UTC()})
-		if err != nil {
-			return err
+	rows, err := s.db.Gen(ctx).CheckProductAccessKeys(ctx, gen.CheckProductAccessKeysParams{MerchantID: mid.UUID(), CustomerID: customer, ProductKeys: unique, AtTime: s.now().UTC()})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		decision := KeyDecision{HasAccess: row.HasAccess}
+		if row.ProductID != nil {
+			decision.ProductID = *row.ProductID
 		}
-		for _, row := range rows {
-			decision := KeyDecision{HasAccess: row.HasAccess}
-			if row.ProductID != nil {
-				decision.ProductID = *row.ProductID
-			}
-			out[row.ProductKey] = decision
-		}
-		return nil
-	})
-	return out, err
+		out[row.ProductKey] = decision
+	}
+	return out, nil
 }

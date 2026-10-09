@@ -42,33 +42,25 @@ func TestGenMappingPreservesStoredValues(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, raw, "a nil map is SQL NULL")
 
-	clone := CloneEntitlements(product.Entitlements)
-	clone[0] = "changed"
-	require.Equal(t, "day", product.Entitlements[0], "clone must not alias")
-	require.Nil(t, CloneEntitlements(nil))
-	require.Equal(t, []string{}, CloneEntitlements([]string{}), "accepted empty is not unknown")
-
 }
 
-func TestProductAccessGrantIsActiveAt(t *testing.T) {
+func TestProductAccessIsActiveAt(t *testing.T) {
 	now := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
 	before, after := now.Add(-time.Hour), now.Add(time.Hour)
-	active := ProductAccessStatusActive
 	for name, tc := range map[string]struct {
-		grant ProductAccessGrant
-		want  bool
+		window ProductAccess
+		want   bool
 	}{
-		"indefinite and started": {ProductAccessGrant{Status: active, StartsAt: before}, true},
-		"starts exactly now":     {ProductAccessGrant{Status: active, StartsAt: now}, true},
-		"within window":          {ProductAccessGrant{Status: active, StartsAt: before, EndsAt: &after}, true},
-		"not yet started":        {ProductAccessGrant{Status: active, StartsAt: after}, false},
-		"ends exactly now":       {ProductAccessGrant{Status: active, StartsAt: before, EndsAt: &now}, false},
-		"revoked status":         {ProductAccessGrant{Status: ProductAccessStatusRevoked, StartsAt: before}, false},
-		"revoked_at set":         {ProductAccessGrant{Status: active, StartsAt: before, RevokedAt: &now}, false},
+		"open":             {ProductAccess{StartsAt: before}, true},
+		"bounded":          {ProductAccess{StartsAt: before, EndsAt: &after}, true},
+		"starts later":     {ProductAccess{StartsAt: after}, false},
+		"ends exactly now": {ProductAccess{StartsAt: before, EndsAt: &now}, false},
+		"revoked":          {ProductAccess{StartsAt: before, RevokedAt: &now}, false},
+		"removed":          {ProductAccess{StartsAt: before, DeletedAt: &now}, false},
 	} {
-		require.Equal(t, tc.want, tc.grant.IsActiveAt(now), name)
+		require.Equal(t, tc.want, tc.window.IsActiveAt(now), name)
 	}
-	require.False(t, (*ProductAccessGrant)(nil).IsActiveAt(now))
+	require.False(t, (*ProductAccess)(nil).IsActiveAt(now))
 }
 
 func TestPriceLinksAreAccountKeyed(t *testing.T) {

@@ -10,6 +10,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// Access changes an operator approved before the cutover from per-key entitlement windows to product access: a key a customer loses (their product dropped it after purchase) or gains (their product added it). The cutover refuses any change not listed. Retention: permanent, never pruned.
+type BillingAccessCutoverApproval struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	Change      string
+	ApprovedBy  string
+	ApprovedAt  time.Time
+}
+
 // One batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim. Retention: permanent, never pruned.
 type BillingAccountUpdaterBatch struct {
 	ID          uuid.UUID
@@ -384,27 +395,6 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
-// Entitlement windows projected from grants and their sources. Windows may overlap; reads take their union.
-type BillingEntitlement struct {
-	ID           uuid.UUID
-	Entitlement  string
-	StartsAt     time.Time
-	EndsAt       *time.Time
-	SourceID     uuid.UUID
-	SourceType   string
-	RevokedAt    *time.Time
-	RevokeReason *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
-	MerchantID   uuid.UUID
-	// The customer this entitlement window belongs to.
-	CustomerID          uuid.UUID
-	GrantID             uuid.UUID
-	DestructiveRunID    *uuid.UUID
-	DestructiveRunClass *string
-}
-
 // Merchant roles granted by invitation to users of trusted issuers (#1140): pending (email only) until a user of an issuer trusted for the merchant accepts with that verified email, then bound to (issuer, subject). Grants, not accounts; revoking deletes the row.
 type BillingFederatedGrant struct {
 	MerchantID uuid.UUID
@@ -424,6 +414,7 @@ type BillingGrant struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	ProductID  *uuid.UUID
+	// access: a product for a window, whose keys are read from the product at check time; credit: a credit lot. entitlement and ownership are history from before product access.
 	Kind       string
 	SourceType string
 	SourceID   *string
@@ -439,9 +430,13 @@ type BillingGrant struct {
 	Currency     *string
 	Reason       *string
 	CreatedAt    time.Time
+	// Who granted a free product: the operator or credential. Required on grant-sourced access grants.
+	Actor *string
+	// Why a free product was granted: comp, staff, import or migration. Required on grant-sourced access grants; reason stays a free-text note.
+	GrantReason *string
 }
 
-// Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions and product key changes. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -450,8 +445,8 @@ type BillingHostOutbox struct {
 	PaymentID   *uuid.UUID
 	Amount      *int64
 	SubjectID   uuid.UUID
-	// The transition's currency. NOT NULL: every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
-	Currency    string
+	// The transition's currency; NULL only for a product's key change, which has none.
+	Currency    *string
 	OccurredAt  time.Time
 	Data        []byte
 	DeliveredAt *time.Time
@@ -904,15 +899,13 @@ type BillingPayment struct {
 	DiscountCode      *string
 	DiscountReason    *string
 	DiscountMetadata  []byte
-	// Accepted opaque entitlement names; NULL is unknown historical evidence and [] is an explicitly empty promise.
-	EntitlementsSnapshot []byte
-	Metadata             []byte
-	PurchasedAt          time.Time
-	CreatedAt            time.Time
-	CardBrand            *string
-	CardLast4            *string
-	MerchantID           uuid.UUID
-	CustomerID           uuid.UUID
+	Metadata          []byte
+	PurchasedAt       time.Time
+	CreatedAt         time.Time
+	CardBrand         *string
+	CardLast4         *string
+	MerchantID        uuid.UUID
+	CustomerID        uuid.UUID
 	// PSP that took this charge. Set exactly when channel = rail (payments_channel_psp_check).
 	PspID *uuid.UUID
 	// initial|renewal, stamped at write time by the checkout vs rebill paths; NULL = unknown (imported/pre-instrumentation rows).
@@ -933,8 +926,6 @@ type BillingPayment struct {
 	MoneyMovement string
 	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
 	CreditGrantSnapshot []byte
-	// Private historical positive per-feature durations for previously accepted indefinite one-time purchases; absent for new purchases.
-	LegacyEntitlementHours []byte
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1112,6 +1103,29 @@ type BillingProduct struct {
 	Revision   int64
 	// Purchased currency credit policy; accepted checkouts freeze amount and expiry duration.
 	CreditGrant []byte
+}
+
+// Product access windows projected from access grants: a purchase, a subscription period, a grace allowance or a free grant of one product for [starts_at, ends_at). A customer holds the keys the product grants while a window is live; windows may overlap and reads take their union. Rebuildable from the grant ledger.
+type BillingProductAccess struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+	GrantID    uuid.UUID
+	SourceType string
+	// The source's own id: the payment of a purchase, the subscription of a period or grace allowance, the idempotency key of a free grant.
+	SourceID     string
+	PaymentID    *uuid.UUID
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	RevokedAt    *time.Time
+	RevokeReason *string
+	// A window removed before it started (a canceled future period or a refunded future rental): it never granted access.
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // Immutable product archive receipts; the resolved purchase window and action are fixed at acceptance. Retention: permanent, never pruned.
@@ -1441,11 +1455,9 @@ type BillingSubscription struct {
 	CanceledAt       *time.Time
 	CancelType       *string
 	CancelFeedback   *string
-	// Accepted opaque entitlement names; NULL is unknown historical evidence and [] is an explicitly empty promise.
-	EntitlementsSnapshot []byte
-	GatewayResponse      []byte
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	GatewayResponse  []byte
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time

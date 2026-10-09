@@ -81,7 +81,7 @@ func TestBillingAccessMigrationPreservesPaidTerms(t *testing.T) {
 	exec(`INSERT INTO billing.entitlements(merchant_id,id,customer_id,entitlement,source_type,source_id,grant_id,starts_at)
 		VALUES($1,$2,$3,'read','subscription',$4,$5,$6)`, merchantID, uuid.New(), customerID, subscriptionID, firstGrant, start)
 
-	require.NoError(t, migrator.ApplyMigrations(ctx, migrations))
+	require.NoError(t, migrator.ApplyMigrations(ctx, migrations[:8]))
 	var billingHours, accessHours *int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT billing_interval_hours,access_duration_hours FROM "+schema+".prices WHERE id=$1", recurringID).Scan(&billingHours, &accessHours))
 	require.Equal(t, new(720), billingHours)

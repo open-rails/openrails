@@ -17,7 +17,7 @@ func TestSubscriptionWindow(t *testing.T) {
 	billingEnd, ended := start.Add(720*time.Hour), start.Add(100*time.Hour)
 	for _, hours := range []*int32{new(int32(24)), new(int32(1000)), nil} {
 		row := gen.ListUngrantedSubscriptionsRow{StartedAt: start, CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &billingEnd, EndedAt: &ended, AccessDurationHoursSnapshot: hours}
-		gotStart, gotEnd, ok := subscriptionWindow(row)
+		gotStart, gotEnd, ok := subscriptionWindow(row.StartedAt, row.CurrentPeriodStartsAt, row.AccessDurationHoursSnapshot)
 		require.True(t, ok)
 		require.Equal(t, start, gotStart)
 		if hours == nil {
@@ -26,22 +26,10 @@ func TestSubscriptionWindow(t *testing.T) {
 			require.Equal(t, start.Add(time.Duration(*hours)*time.Hour), *gotEnd)
 		}
 	}
-	_, _, ok := subscriptionWindow(gen.ListUngrantedSubscriptionsRow{})
+	_, _, ok := subscriptionWindow(time.Time{}, nil, nil)
 	require.False(t, ok)
-	_, _, ok = subscriptionWindow(gen.ListUngrantedSubscriptionsRow{StartedAt: start, AccessDurationHoursSnapshot: new(int32(0))})
+	_, _, ok = subscriptionWindow(start, nil, new(int32(0)))
 	require.False(t, ok)
-}
-
-func TestEntitlementKeys(t *testing.T) {
-	for raw, want := range map[string][]string{
-		`["premium","post:101"]`: {"premium", "post:101"},
-		`[]`:                     {},
-		`["  premium  "]`:        {"  premium  "},
-		`not-json`:               nil,
-		``:                       nil,
-	} {
-		require.Equal(t, want, entitlementKeys([]byte(raw)), raw)
-	}
 }
 
 // An empty or inverted wallet window is a no-op that never reaches the database (nil queries).

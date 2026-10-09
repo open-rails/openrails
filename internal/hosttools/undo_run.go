@@ -128,14 +128,14 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 		fmt.Fprintf(w, "  scope   : merchant %s (merchant-wide — the pass was not account-bound)\n", plan.Scope.MerchantID)
 	}
 	fmt.Fprintln(w, "\nwould restore:")
-	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "entitlements"} {
+	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "product_access"} {
 		if n, ok := plan.Restorable[table]; ok {
 			fmt.Fprintf(w, "  %-18s %d\n", table, n)
 		}
 	}
-	if plan.EntitlementsToInvalidate > 0 {
+	if plan.AccessToInvalidate > 0 {
 		fmt.Fprintf(w, "  %-18s %d (INVALIDATED, not restored — Converge rebuilds them from the grant log)\n",
-			"entitlements", plan.EntitlementsToInvalidate)
+			"product_access", plan.AccessToInvalidate)
 	}
 	if plan.SubscriptionsTombstoned > 0 {
 		fmt.Fprintf(w, "  %-18s %d before-image(s) whose row a LATER prune tombstoned — those belong to that run's undo, not this one\n",
@@ -164,13 +164,13 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 
 func printUndoResult(w io.Writer, res reconcile.UndoResult, merchantID billing.MerchantID) {
 	fmt.Fprintf(w, "reversed run %s (kind %s)\n", res.Plan.RunID, res.Plan.Kind)
-	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "entitlements"} {
+	for _, table := range []string{"subscriptions", "payments", "checkout_attempts", "product_access"} {
 		if n, ok := res.Restored[table]; ok {
 			fmt.Fprintf(w, "  restored %-18s %d\n", table, n)
 		}
 	}
-	if res.EntitlementsInvalidated > 0 {
-		fmt.Fprintf(w, "  invalidated for re-derivation: %d entitlement window(s)\n", res.EntitlementsInvalidated)
+	if res.AccessInvalidated > 0 {
+		fmt.Fprintf(w, "  invalidated for re-derivation: %d product access window(s)\n", res.AccessInvalidated)
 	}
 	if res.IntentsSuperseded > 0 {
 		fmt.Fprintf(w, "  unfired provider writes superseded: %d\n", res.IntentsSuperseded)

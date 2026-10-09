@@ -22,7 +22,7 @@ import (
 // EffectOptions is the caller's context for a transition's effects.
 type EffectOptions struct {
 	// RevokeReason labels ended access; empty derives it from the cancel type.
-	RevokeReason models.EntitlementRevokeReason
+	RevokeReason models.AccessRevokeReason
 	// EndedReason is the premium_ended notice's reason.
 	EndedReason PremiumEndReason
 	// Notice is the base data of every customer notice.
@@ -56,23 +56,21 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			// A paid period replaces every prior renewal allowance, including
 			// benefits removed by a scheduled tier change. Purchased grants keep
 			// their own independent expiry.
-			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.Start, models.EntitlementRevokeSuperseded, models.EntitlementSourceGrace); err != nil {
+			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, e.Start, models.AccessRevokeSuperseded, models.AccessSourceGrace); err != nil {
 				return nil, fmt.Errorf("end superseded renewal grace %s: %w", sub.ID, err)
 			}
-			for _, name := range sub.EntitlementsSnapshot {
-				if _, err := ents.PushNewEntitlement(ctx, subscriptionAccess(sub, name, e.Start)); err != nil {
-					return nil, fmt.Errorf("grant period %s %s: %w", sub.ID, name, err)
-				}
+			if _, err := ents.PushAccess(ctx, subscriptionAccess(sub, e.Start)); err != nil {
+				return nil, fmt.Errorf("grant period %s: %w", sub.ID, err)
 			}
-			if err := pushRenewalGrace(ctx, d, ents, sub, sub.EntitlementsSnapshot, e.Start, e.End); err != nil {
+			if err := pushRenewalGrace(ctx, d, ents, sub, e.Start, e.End); err != nil {
 				return nil, err
 			}
 
 		case lifecycle.EndAccess:
 			// Canceling recurrence cannot shorten access already purchased.
-			sources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
+			sources := []models.AccessSourceType{models.AccessSourceGrace}
 			if e.Revoke {
-				sources = append(sources, models.EntitlementSourceSubscription)
+				sources = append(sources, models.AccessSourceSubscription)
 			}
 			if err := ents.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, now, revokeReason(sub, opts), sources...); err != nil {
 				return nil, fmt.Errorf("end access %s: %w", sub.ID, err)
@@ -92,7 +90,7 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 			}
 		case lifecycle.ProbeProvider, lifecycle.ReopenAccess:
 			if sub.CurrentPeriodStartsAt != nil && sub.CurrentPeriodEndsAt != nil {
-				if err := pushRenewalGrace(ctx, d, ents, sub, sub.EntitlementsSnapshot, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt); err != nil {
+				if err := pushRenewalGrace(ctx, d, ents, sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt); err != nil {
 					return nil, err
 				}
 			}
@@ -139,14 +137,14 @@ func (s *SubscriptionLifecycleService) queueProviderCancel(ctx context.Context, 
 	return nil
 }
 
-func revokeReason(sub *models.Subscription, opts EffectOptions) models.EntitlementRevokeReason {
+func revokeReason(sub *models.Subscription, opts EffectOptions) models.AccessRevokeReason {
 	switch {
 	case opts.RevokeReason != "":
 		return opts.RevokeReason
 	case sub.CancelType != nil && *sub.CancelType == models.CancelTypeChargeback:
-		return models.EntitlementRevokeChargeback
+		return models.AccessRevokeChargeback
 	default:
-		return models.EntitlementRevokeDunning
+		return models.AccessRevokeDunning
 	}
 }
 
@@ -204,10 +202,9 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 		return fmt.Errorf("scheduled tier %s: product: %w", sub.ID, err)
 	}
 	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
-	sub.EntitlementsSnapshot = models.CloneEntitlements(product.Entitlements)
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
 	sub.Price = price
-	return nil // The caller grants the newly paid period from this snapshot.
+	return nil // The caller grants the newly paid period of the new product.
 }
 
 // CheckCancellationRecovery keeps automated local revocation and its eventual

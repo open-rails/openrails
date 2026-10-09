@@ -6,81 +6,27 @@ import (
 	"github.com/google/uuid"
 )
 
-// EntitlementID names one entitlement window (ent_).
-type EntitlementID uuid.UUID
-
-// ProductAccessID names one product-access grant (pa_).
+// ProductAccessID names one product-access window (pa_).
 type ProductAccessID uuid.UUID
 
-const (
-	EntitlementIDPrefix   = "ent_"
-	ProductAccessIDPrefix = "pa_"
-)
-
-func ParseEntitlementID(s string) (EntitlementID, error) {
-	u, err := parsePrefixedID("entitlement", EntitlementIDPrefix, s)
-	return EntitlementID(u), err
-}
+const ProductAccessIDPrefix = "pa_"
 
 func ParseProductAccessID(s string) (ProductAccessID, error) {
 	u, err := parsePrefixedID("product access", ProductAccessIDPrefix, s)
 	return ProductAccessID(u), err
 }
 
-func (id EntitlementID) UUID() uuid.UUID   { return uuid.UUID(id) }
-func (id EntitlementID) IsZero() bool      { return uuid.UUID(id) == uuid.Nil }
-func (id EntitlementID) String() string    { return formatPrefixedID(EntitlementIDPrefix, uuid.UUID(id)) }
 func (id ProductAccessID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id ProductAccessID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 func (id ProductAccessID) String() string {
 	return formatPrefixedID(ProductAccessIDPrefix, uuid.UUID(id))
 }
-func (id EntitlementID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
 func (id ProductAccessID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
-func (id *EntitlementID) UnmarshalText(text []byte) error {
-	parsed, err := ParseEntitlementID(string(text))
-	*id = parsed
-	return err
-}
 func (id *ProductAccessID) UnmarshalText(text []byte) error {
 	parsed, err := ParseProductAccessID(string(text))
 	*id = parsed
 	return err
 }
-
-// EntitlementSourceType is what a grant, and the entitlement windows it
-// projects, came from.
-type EntitlementSourceType string
-
-const (
-	EntitlementSourcePurchase     EntitlementSourceType = "purchase"
-	EntitlementSourceSubscription EntitlementSourceType = "subscription"
-	EntitlementSourceAdmin        EntitlementSourceType = "admin"
-	// EntitlementSourceGrace is the access a failed renewal keeps while it
-	// is retried.
-	EntitlementSourceGrace EntitlementSourceType = "grace"
-)
-
-// EntitlementRecord is one entitlement window: the projection of one grant
-// for one entitlement key. SourceID is the source's own wire id (sub_ for a
-// subscription or grace source, pay_ for a purchase, the grant's own id for an
-// admin grant).
-type EntitlementRecord struct {
-	ID           EntitlementID         `json:"id"`
-	CustomerID   CustomerID            `json:"customer_id"`
-	Entitlement  string                `json:"entitlement"`
-	StartsAt     time.Time             `json:"starts_at"`
-	EndsAt       *time.Time            `json:"ends_at"`
-	SourceType   EntitlementSourceType `json:"source_type"`
-	SourceID     string                `json:"source_id"`
-	RevokedAt    *time.Time            `json:"revoked_at"`
-	RevokeReason *string               `json:"revoke_reason"`
-	CreatedAt    time.Time             `json:"created_at"`
-	UpdatedAt    time.Time             `json:"updated_at"`
-}
-
-// MaxEntitlementLookupCustomers bounds one ListEntitlements call.
-const MaxEntitlementLookupCustomers = 500
 
 // MaxEntitlementChecks bounds the keys of one entitlement check.
 const MaxEntitlementChecks = 100
@@ -92,19 +38,6 @@ const (
 	DefaultHeldEntitlements = 1000
 	MaxHeldEntitlements     = 10000
 )
-
-// EntitlementListParams reads the active entitlements of up to
-// MaxEntitlementLookupCustomers customers at At (zero: now).
-type EntitlementListParams struct {
-	CustomerIDs []CustomerID `json:"customer_ids"`
-	At          time.Time    `json:"at,omitzero"`
-}
-
-// EntitlementLookup is the active entitlements of each requested customer;
-// a customer with none maps to an empty list.
-type EntitlementLookup struct {
-	Customers map[CustomerID][]EntitlementRecord `json:"customers"`
-}
 
 // CheckEntitlementsParams asks which of up to MaxEntitlementChecks keys a
 // customer holds at At (zero: now), and which keys they hold under each of up
@@ -140,14 +73,19 @@ type EntitlementCustomerListParams struct {
 	At time.Time
 }
 
-// CreateEntitlementParams grants an admin-sourced entitlement window. Omit
-// both Hours and EndsAt for an indefinite grant (it needs
-// merchant:access:grant-permanent); Hours extends the customer's finite
-// timeline, EndsAt fixes this grant's own end.
-type CreateEntitlementParams struct {
-	Entitlement string     `json:"entitlement"`
-	Hours       *int       `json:"hours"`
-	EndsAt      *time.Time `json:"ends_at"`
+// CustomerEntitlementListParams pages the keys a customer holds at At (zero:
+// now), in byte order, optionally only those under Prefix (bytes, as
+// CheckEntitlementsParams.Prefixes).
+type CustomerEntitlementListParams struct {
+	PageRequest
+	Prefix string
+	At     time.Time
+}
+
+// CustomerEntitlement is one key a customer holds: a key of a product they
+// hold.
+type CustomerEntitlement struct {
+	Entitlement string `json:"entitlement"`
 }
 
 // EffectiveTier is the tier a customer holds in a tier group: the
@@ -168,24 +106,55 @@ type Tier struct {
 	ProductKey  string    `json:"product_key"`
 }
 
-// ProductAccessGrant is one product a customer has access to. SourceID
-// follows the EntitlementRecord rule.
+// ProductAccessSourceType is what a product-access window came from.
+type ProductAccessSourceType string
+
+const (
+	ProductAccessSourcePurchase     ProductAccessSourceType = "purchase"
+	ProductAccessSourceSubscription ProductAccessSourceType = "subscription"
+	// ProductAccessSourceGrace is the access a failed renewal keeps while it
+	// is retried.
+	ProductAccessSourceGrace ProductAccessSourceType = "grace"
+	// ProductAccessSourceGrant is a free grant by staff or an import.
+	ProductAccessSourceGrant ProductAccessSourceType = "grant"
+)
+
+// GrantReason is why a product was granted free.
+type GrantReason string
+
+const (
+	GrantReasonComp   GrantReason = "comp"
+	GrantReasonStaff  GrantReason = "staff"
+	GrantReasonImport GrantReason = "import"
+	// GrantReasonMigration marks access carried over from per-key
+	// entitlement windows.
+	GrantReasonMigration GrantReason = "migration"
+)
+
+// ProductAccessGrant is one window of a product a customer holds: they hold
+// the product's current keys while it is live. SourceID is the source's own
+// wire id (pay_ for a purchase, sub_ for a subscription period or grace, the
+// idempotency key of a free grant). GrantReason, GrantedBy and Note are set
+// for a free grant.
 type ProductAccessGrant struct {
-	ID           ProductAccessID       `json:"id"`
-	CustomerID   CustomerID            `json:"customer_id"`
-	ProductID    ProductID             `json:"product_id"`
-	ProductKey   string                `json:"product_key"`
-	ProductName  string                `json:"product_name"`
-	SourceType   EntitlementSourceType `json:"source_type"`
-	SourceID     string                `json:"source_id"`
-	PaymentID    *PaymentID            `json:"payment_id"`
-	Status       string                `json:"status"`
-	StartsAt     time.Time             `json:"starts_at"`
-	EndsAt       *time.Time            `json:"ends_at"`
-	RevokedAt    *time.Time            `json:"revoked_at"`
-	RevokeReason *string               `json:"revoke_reason"`
-	CreatedAt    time.Time             `json:"created_at"`
-	UpdatedAt    time.Time             `json:"updated_at"`
+	ID           ProductAccessID         `json:"id"`
+	CustomerID   CustomerID              `json:"customer_id"`
+	ProductID    ProductID               `json:"product_id"`
+	ProductKey   string                  `json:"product_key"`
+	ProductName  string                  `json:"product_name"`
+	SourceType   ProductAccessSourceType `json:"source_type"`
+	SourceID     string                  `json:"source_id"`
+	PaymentID    *PaymentID              `json:"payment_id"`
+	GrantReason  *GrantReason            `json:"grant_reason"`
+	GrantedBy    *string                 `json:"granted_by"`
+	Note         *string                 `json:"note"`
+	Status       string                  `json:"status"`
+	StartsAt     time.Time               `json:"starts_at"`
+	EndsAt       *time.Time              `json:"ends_at"`
+	RevokedAt    *time.Time              `json:"revoked_at"`
+	RevokeReason *string                 `json:"revoke_reason"`
+	CreatedAt    time.Time               `json:"created_at"`
+	UpdatedAt    time.Time               `json:"updated_at"`
 }
 
 // MaxProductAccessChecks bounds one product-access check.
@@ -204,23 +173,38 @@ type ProductAccessCheck struct {
 	Access map[string]bool `json:"access"`
 }
 
-// CreateProductAccessParams grants a customer access to a product until
-// EndsAt (nil: indefinitely; it needs merchant:access:grant-permanent). One
-// admin's grant of a product to a customer is made once: a repeat answers the
-// existing grant.
+// CreateProductAccessParams grants a customer a product free. At most one of
+// Hours and EndsAt: Hours extends the customer's access to the product, from
+// the end of their latest live window of it (or now); EndsAt ends this grant
+// at a fixed instant from now; neither grants it indefinitely (it needs
+// merchant:access:grant-permanent). Reason defaults to staff; Note is kept
+// with the grant.
 type CreateProductAccessParams struct {
-	CustomerID CustomerID `json:"customer_id"`
-	ProductID  ProductID  `json:"product_id"`
-	EndsAt     *time.Time `json:"ends_at"`
+	CustomerID CustomerID  `json:"customer_id"`
+	ProductID  ProductID   `json:"product_id"`
+	Hours      *int        `json:"hours"`
+	EndsAt     *time.Time  `json:"ends_at"`
+	Reason     GrantReason `json:"reason,omitempty"`
+	Note       *string     `json:"note"`
 }
 
-// CreateProductAccessBatchParams grants 1 to MaxBatchItems product accesses,
-// across any customers, in one transaction.
+// CreateProductAccessBatchParams grants 1 to MaxBatchItems products, across
+// any customers, in one transaction. IdempotencyKey (the Idempotency-Key
+// header) makes a retry replay the first answer; reusing it for other items
+// is ErrIdempotencyKeyReused.
 type CreateProductAccessBatchParams struct {
-	Items []CreateProductAccessParams `json:"items"`
+	IdempotencyKey string                      `json:"-"`
+	Items          []CreateProductAccessParams `json:"items"`
 }
 
 // CreateProductAccessBatchResult is every grant, in request order.
 type CreateProductAccessBatchResult struct {
 	Items []ProductAccessGrant `json:"items"`
+}
+
+// ProductAccessListParams pages a customer's product-access windows, newest
+// first; LiveOnly keeps those live now.
+type ProductAccessListParams struct {
+	PageRequest
+	LiveOnly bool
 }

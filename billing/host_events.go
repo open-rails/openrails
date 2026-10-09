@@ -34,7 +34,20 @@ const (
 	HostEventDelinquencyGrace   HostEventType = "delinquency.grace"
 	HostEventDelinquencyEntered HostEventType = "delinquency.entered"
 	HostEventDelinquencyCleared HostEventType = "delinquency.cleared"
+	// HostEventProductEntitlementsChanged is a product gaining or losing keys:
+	// every holder's access changed with it.
+	HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
 )
+
+// ProductEntitlementsChangedEvent is one key edit of a product. Holders is how
+// many customers held the product when it changed.
+type ProductEntitlementsChangedEvent struct {
+	ProductID  ProductID `json:"product_id"`
+	ProductKey string    `json:"product_key"`
+	Added      []string  `json:"added"`
+	Removed    []string  `json:"removed"`
+	Holders    int64     `json:"holders"`
+}
 
 // PaymentSettledEvent is one successful rail payment. CustomerID and PriceID
 // come from the authoritative payment row so a host can route the settlement
@@ -70,6 +83,8 @@ type HostEvent struct {
 	AcknowledgedAt *time.Time            `json:"acknowledged_at"`
 	Payment        *PaymentSettledEvent  `json:"payment"`
 	Delinquency    *DelinquencyHostEvent `json:"delinquency"`
+	// ProductEntitlements is set for product.entitlements_changed.
+	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
 }
 
 // AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to

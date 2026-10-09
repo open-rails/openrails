@@ -1,10 +1,12 @@
+// Package entitlements owns product access windows and the keys customers
+// derive from them. A customer holds a key while a live window of theirs
+// covers a product that grants the key; nothing per customer stores keys.
 package entitlements
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,12 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
-
-// grantSourceType is a window's source in the grant ledger: the same
-// vocabulary.
-func grantSourceType(s models.EntitlementSourceType) grants.SourceType {
-	return grants.SourceType(s)
-}
 
 type EntitlementService struct {
 	db    *db.DB
@@ -37,9 +33,6 @@ func (s *EntitlementService) withTx(ctx context.Context, fn func(ctx context.Con
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
-	// Run inside a merchant-scoped transaction (db.MerchantTx sets the
-	// openrails.merchant_id GUC from the context as the first statement). This is
-	// the shared chokepoint for merchant-owned entitlement writes/reads.
 	return s.db.MerchantTx(ctx, fn)
 }
 
@@ -52,7 +45,6 @@ func (s *EntitlementService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// now returns the current time from the service's clock, or time.Now() if no clock is set.
 func (s *EntitlementService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -60,312 +52,159 @@ func (s *EntitlementService) now() time.Time {
 	return time.Now()
 }
 
-// IsEntitled returns true if the user currently has an active entitlement
-func (s *EntitlementService) IsEntitled(ctx context.Context, userID, entitlement string, at time.Time) (bool, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return false, err
-	}
-	return s.IsCustomerEntitled(ctx, tsid, entitlement, at)
+func (s *EntitlementService) ledger(q *gen.Queries, merchantID uuid.UUID) *grants.Ledger {
+	l := grants.New(q, merchantID)
+	l.SetClock(func() time.Time { return s.now().UTC() })
+	return l
 }
 
-func (s *EntitlementService) IsCustomerEntitled(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	// Merchant scoping (issue #223): the merchant is resolved from context and is
-	// required — an absent merchant is an error.
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	return s.db.Gen(ctx).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{
-		MerchantID:  tid.UUID(),
-		CustomerID:  tenantSubjectID,
-		Entitlement: entitlement,
-		At:          at,
-	})
-}
-
-func (s *EntitlementService) HasActiveIndefiniteByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, entitlement string, at time.Time) (bool, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	return s.db.Gen(ctx).EntitlementHasActiveIndefinite(ctx, gen.EntitlementHasActiveIndefiniteParams{
-		MerchantID:  tid.UUID(),
-		CustomerID:  tenantSubjectID,
-		Entitlement: entitlement,
-		At:          at,
-	})
-}
-
-func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return false, scopeErr
-	}
-	return s.db.Gen(ctx).EntitlementExistsBySource(ctx, gen.EntitlementExistsBySourceParams{
-		MerchantID:  scopeMerchantID.UUID(),
-		SourceType:  string(sourceType),
-		SourceID:    sourceID,
-		Entitlement: entitlement,
-	})
-}
-
-// Coverage reports, across keys, whether any grant active at at is
-// indefinite and otherwise the latest end among active finite grants.
-func (s *EntitlementService) Coverage(ctx context.Context, userID string, keys []string, at time.Time) (bool, *time.Time, error) {
-	tsid, err := db.ResolveCustomerID(userID)
+// ProductCoverage reports, across the customer's live windows of the products
+// at at, whether one is indefinite and otherwise the latest end.
+func (s *EntitlementService) ProductCoverage(ctx context.Context, userID string, products []uuid.UUID, at time.Time) (bool, *time.Time, error) {
+	customer, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return false, nil, err
 	}
-	tid, err := merchant.Require(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, nil, err
 	}
-	row, err := s.db.Gen(ctx).EntitlementCoverage(ctx, gen.EntitlementCoverageParams{MerchantID: tid.UUID(), CustomerID: tsid, Entitlements: keys, At: at})
+	row, err := s.db.Gen(ctx).ProductAccessCoverage(ctx, gen.ProductAccessCoverageParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, At: at})
 	if err != nil {
 		return false, nil, err
 	}
-	if row.LatestEndAt.IsZero() {
+	if row.Indefinite || row.LatestEndAt.Year() <= 1 {
 		return row.Indefinite, nil, nil
 	}
-	return row.Indefinite, &row.LatestEndAt, nil
+	return false, &row.LatestEndAt, nil
 }
 
-func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]models.Entitlement, error) {
-	tsid, err := db.ResolveCustomerID(userID)
+// GetAccessByID reads one window.
+func (s *EntitlementService) GetAccessByID(ctx context.Context, id uuid.UUID) (*models.ProductAccess, error) {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	rows, err := s.db.Gen(ctx).ListEntitlementsByCustomer(ctx, gen.ListEntitlementsByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: tsid})
+	row, err := s.db.Gen(ctx).GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: mid.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
-	return models.EntitlementsFromGen(rows), nil
+	return models.ProductAccessFromGen(row), nil
 }
 
-func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID string, at time.Time) ([]models.Entitlement, error) {
-	tsid, err := db.ResolveCustomerID(userID)
+// ListLiveAccessBySubscriptions returns the live windows the subscriptions
+// give at at, longest first per subscription.
+func (s *EntitlementService) ListLiveAccessBySubscriptions(ctx context.Context, subscriptions []uuid.UUID, at time.Time) ([]*models.ProductAccess, error) {
+	if len(subscriptions) == 0 {
+		return nil, nil
+	}
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.ListActiveRecordsByCustomer(ctx, tsid, at)
-}
-
-func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
-	tid, err := merchant.Require(ctx)
+	ids := make([]string, len(subscriptions))
+	for i, id := range subscriptions {
+		ids[i] = id.String()
+	}
+	rows, err := s.db.Gen(ctx).ListLiveAccessBySubscriptions(ctx, gen.ListLiveAccessBySubscriptionsParams{MerchantID: mid.UUID(), SourceIds: ids, AtTime: at})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecordsMerchant(ctx, gen.ListActiveEntitlementRecordsMerchantParams{
-		MerchantID: tid.UUID(),
-		CustomerID: tenantSubjectID,
-		At:         at,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return models.EntitlementsFromGen(rows), nil
-}
-
-// ListActiveRecordsByCustomers is the active windows of many customers in
-// one query, grouped by customer; a customer with none is absent.
-func (s *EntitlementService) ListActiveRecordsByCustomers(ctx context.Context, customerIDs []uuid.UUID, at time.Time) (map[uuid.UUID][]models.Entitlement, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[uuid.UUID][]models.Entitlement, len(customerIDs))
-	if len(customerIDs) == 0 {
-		return out, nil
-	}
-	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecordsByCustomerIDs(ctx, gen.ListActiveEntitlementRecordsByCustomerIDsParams{
-		MerchantID:  tid.UUID(),
-		CustomerIds: customerIDs,
-		At:          at,
-	})
-	if err != nil {
-		return nil, err
-	}
+	out := make([]*models.ProductAccess, 0, len(rows))
 	for _, row := range rows {
-		out[row.CustomerID] = append(out[row.CustomerID], *models.EntitlementFromGen(row))
+		out = append(out, models.ProductAccessFromGen(row))
 	}
 	return out, nil
 }
 
-// Revoke ends one window now. The merchant's own grant is revoked in the
-// grant ledger and its projection follows, so a future window of it does not
-// come back; a purchase or subscription window is revoked on its own (its
-// grant may carry other entitlements).
-func (s *EntitlementService) Revoke(ctx context.Context, ent *models.Entitlement, reason models.EntitlementRevokeReason) error {
-	if ent.SourceType != models.EntitlementSourceAdmin {
-		id := ent.ID
-		return s.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{EntitlementID: &id, Reason: reason})
-	}
-	mID, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if err := LockEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement); err != nil {
-			return err
-		}
-		q := gen.New(tx)
-		g, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mID.UUID(), ID: ent.GrantID})
-		if err != nil {
-			return err
-		}
-		terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: mID.UUID(), GrantID: g.ID})
-		if err != nil {
-			return err
-		}
-		gl := grants.New(q, mID.UUID())
-		gl.SetClock(func() time.Time { return s.now().UTC() })
-		if !terminated {
-			if _, err := gl.Revoke(ctx, g.ID, string(reason)); err != nil {
-				return err
-			}
-		}
-		// The terminated grant's projection revokes every window of it,
-		// including one not started yet.
-		return gl.MaterializeGrant(ctx, g)
-	})
-}
-
-func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	return s.db.Gen(ctx).ListDistinctEntitlementNamesBySource(ctx, gen.ListDistinctEntitlementNamesBySourceParams{
-		MerchantID: scopeMerchantID.UUID(),
-		SourceType: string(sourceType),
-		SourceID:   sourceID,
-	})
-}
-
-// ListActiveEntitlements returns a de-duplicated list of active entitlement names for a user at a point in time.
-func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {
-	tsid, err := db.ResolveCustomerID(userID)
+// FirstLiveAccess returns the customer's newest live window at at, or nil.
+func (s *EntitlementService) FirstLiveAccess(ctx context.Context, customer uuid.UUID, at time.Time) (*models.ProductAccess, error) {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
+	rows, err := s.db.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{MerchantID: mid.UUID(), CustomerID: customer, LiveOnly: true, AtTime: at, FetchLimit: 1})
+	if err != nil || len(rows) == 0 {
+		return nil, err
 	}
-	return s.db.Gen(ctx).ListActiveEntitlementNames(ctx, gen.ListActiveEntitlementNamesParams{
-		MerchantID: scopeMerchantID.UUID(),
-		CustomerID: tsid,
-		At:         at,
+	r := rows[0]
+	return models.ProductAccessFromGen(gen.BillingProductAccess{
+		ID: r.ID, MerchantID: r.MerchantID, CustomerID: r.CustomerID, ProductID: r.ProductID, GrantID: r.GrantID,
+		SourceType: r.SourceType, SourceID: r.SourceID, PaymentID: r.PaymentID, StartsAt: r.StartsAt, EndsAt: r.EndsAt,
+		RevokedAt: r.RevokedAt, RevokeReason: r.RevokeReason, DeletedAt: r.DeletedAt, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}), nil
+}
+
+// AccessExistsBySource reports whether a source already gave the product. A
+// purchase gives it once: a revoked or retracted window is final.
+func (s *EntitlementService) AccessExistsBySource(ctx context.Context, sourceType models.AccessSourceType, sourceID string, product uuid.UUID) (bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.db.Gen(ctx).ProductAccessExistsBySource(ctx, gen.ProductAccessExistsBySourceParams{
+		MerchantID: mid.UUID(), SourceType: string(sourceType), SourceID: sourceID, ProductID: product,
 	})
 }
 
-func (s *EntitlementService) ListActiveEntitlementsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]string, error) {
-	tid, err := merchant.Require(ctx)
+// ListLiveProductsBySource lists the products a source gives now or later.
+func (s *EntitlementService) ListLiveProductsBySource(ctx context.Context, sourceType models.AccessSourceType, sourceID string) ([]uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.db.Gen(ctx).ListActiveEntitlementNamesMerchant(ctx, gen.ListActiveEntitlementNamesMerchantParams{
-		MerchantID: tid.UUID(),
-		CustomerID: tenantSubjectID,
-		At:         at,
-	})
+	return s.db.Gen(ctx).ListLiveProductsBySource(ctx, gen.ListLiveProductsBySourceParams{MerchantID: mid.UUID(), SourceType: string(sourceType), SourceID: sourceID})
 }
 
-// CustomersWithEntitlementMaxPageSize bounds a single reverse-lookup page; the
-// caller keyset-paginates (afterID) to walk larger result sets.
-const CustomersWithEntitlementMaxPageSize = 10000
+// PushAccessParams describes one access window of one product from one source.
+type PushAccessParams struct {
+	UserID     string
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
 
-// ListCustomersWithEntitlement is the REVERSE entitlement lookup (#535): customer
-// ids holding an active window of `entitlement` for the request's merchant,
-// keyset-paginated by customer_id (afterID exclusive; uuid.Nil starts). Backs the
-// host directory's filter-by-entitlement (AuthKit's EntitlementFilterProvider).
-// limit <= 0 defaults to 1000; it is capped at CustomersWithEntitlementMaxPageSize.
-// The query is scoped to the request's merchant.
-func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time, afterID uuid.UUID, limit int) ([]uuid.UUID, error) {
-	if strings.TrimSpace(entitlement) == "" {
-		return nil, fmt.Errorf("entitlement is required")
-	}
-	if limit <= 0 {
-		limit = 1000
-	}
-	if limit > CustomersWithEntitlementMaxPageSize {
-		limit = CustomersWithEntitlementMaxPageSize
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	return s.db.Gen(ctx).ListCustomersWithEntitlement(ctx, gen.ListCustomersWithEntitlementParams{
-		MerchantID:  scopeMerchantID.UUID(),
-		Entitlement: entitlement,
-		At:          at,
-		AfterID:     afterID,
-		Lim:         int32(limit),
-	})
-}
-
-// GetByID retrieves an entitlement by its ID
-func (s *EntitlementService) GetByID(ctx context.Context, id uuid.UUID) (*models.Entitlement, error) {
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	row, err := s.db.Gen(ctx).GetEntitlementByID(ctx, gen.GetEntitlementByIDParams{MerchantID: scopeMerchantID.UUID(), ID: id})
-	if err != nil {
-		return nil, err
-	}
-	return models.EntitlementFromGen(row), nil
-}
-
-type PushNewEntitlementParams struct {
-	UserID      string
-	CustomerID  uuid.UUID
-	Entitlement string
-
-	// NotBefore allows callers to delay the start of the new window.
-	// Duration grants use max(NotBefore, finite tail, now); explicit fixed-end
-	// grants use NotBefore as their source start when supplied.
+	// NotBefore delays the window. Duration windows start at the latest of
+	// NotBefore, the end of the customer's live windows of the product and
+	// now; fixed-end and indefinite windows start at NotBefore when supplied.
 	NotBefore *time.Time
 
-	// Exactly one of (Indefinite, Duration, EndsAt) must be set.
+	// Exactly one of Indefinite, Duration and EndsAt.
 	Indefinite bool
 	Duration   *time.Duration
 	EndsAt     *time.Time
 
-	SourceType models.EntitlementSourceType
-	SourceID   uuid.UUID
+	SourceType models.AccessSourceType
+	// SourceID is the source's id: a payment or subscription id, or a free
+	// grant's idempotency key.
+	SourceID  string
+	PaymentID *uuid.UUID
+
+	// A free grant's attribution.
+	Actor       string
+	GrantReason grants.GrantReason
+	Note        *string
 }
 
-// PushNewEntitlement records a source-owned entitlement window. Duration purchases
-// append to the finite paid timeline; fixed-end and indefinite grants retain their
-// own coverage. Replay only consults the same source, so refunding another source
-// cannot erase this grant's paid access.
-func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEntitlementParams) (*models.Entitlement, error) {
+// PushAccess records a source's window of a product. Duration purchases
+// append to the customer's finite windows of the product; fixed-end and
+// indefinite windows keep their own interval. Replay consults only the same
+// source, so refunding another source cannot erase this one's access.
+func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams) (*models.ProductAccess, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("entitlement service not initialized")
 	}
-	if p.UserID == "" || p.Entitlement == "" {
-		return nil, fmt.Errorf("userID and entitlement are required")
+	if p.UserID == "" || p.ProductID == uuid.Nil {
+		return nil, fmt.Errorf("userID and product are required")
 	}
-	if p.SourceID == uuid.Nil {
+	if p.SourceID == "" {
 		return nil, fmt.Errorf("sourceID is required")
 	}
-	setCount := 0
-	if p.Indefinite {
-		setCount++
+	set := 0
+	for _, v := range []bool{p.Indefinite, p.Duration != nil, p.EndsAt != nil} {
+		if v {
+			set++
+		}
 	}
-	if p.Duration != nil {
-		setCount++
-	}
-	if p.EndsAt != nil {
-		setCount++
-	}
-	if setCount != 1 {
+	if set != 1 {
 		return nil, fmt.Errorf("exactly one of Indefinite, Duration, or EndsAt must be set")
 	}
 	if p.Duration != nil && *p.Duration <= 0 {
@@ -374,57 +213,50 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	if p.EndsAt != nil && p.EndsAt.IsZero() {
 		return nil, fmt.Errorf("endAt must be non-zero")
 	}
-
 	now := s.now().UTC()
-	merchantID, mErr := merchant.Require(ctx)
-	if mErr != nil {
-		return nil, mErr
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
-	var created *models.Entitlement
-
-	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-
-		requestedCustomer, err := db.ResolveCustomerID(p.UserID)
+	var created *models.ProductAccess
+	err = s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		requested, err := db.ResolveCustomerID(p.UserID)
 		if err != nil {
 			return err
 		}
-		if p.CustomerID != uuid.Nil && p.CustomerID != requestedCustomer {
-			return errors.New("entitlement customer contradicts user identity")
+		if p.CustomerID != uuid.Nil && p.CustomerID != requested {
+			return errors.New("access customer contradicts user identity")
 		}
-		// Resolve the payable merchant subject for this entitlement when the caller
-		// did not supply one (#317), so every window carries customer_id
-		// alongside the legacy user_id. Self-service user UUIDs resolve to a
-		// customers row whose id IS that UUID (see db.EnsureCustomerID),
-		// converging with the credits/commerce payable identity.
 		if p.CustomerID == uuid.Nil {
-			tsid, terr := db.EnsureCustomerID(ctx, tx, uuid.Nil, p.UserID)
-			if terr != nil {
-				return terr
+			if p.CustomerID, err = db.EnsureCustomerID(ctx, tx, uuid.Nil, p.UserID); err != nil {
+				return err
 			}
-			p.CustomerID = tsid
 		}
-
-		if err := LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
+		if err := LockAccessTimeline(ctx, tx, p.UserID, p.ProductID); err != nil {
 			return err
 		}
+		q := gen.New(tx)
+		l := s.ledger(q, merchantID.UUID())
 		// A subscription's accepted payment interval is immutable, even when a
 		// longer or indefinite grant already covers it. Exact interval replay
 		// keeps every paid period without stacking or truncating overlap.
-		if p.SourceType == models.EntitlementSourceSubscription && (p.EndsAt != nil || p.Indefinite) {
+		if p.SourceType == models.AccessSourceSubscription && (p.EndsAt != nil || p.Indefinite) {
 			start := now
 			if p.NotBefore != nil {
 				start = p.NotBefore.UTC()
 			}
 			if p.EndsAt != nil && !p.EndsAt.After(start) {
-				return errors.New("endAt must be after entitlement start")
+				return errors.New("endAt must be after access start")
 			}
-			ledger := grants.New(gen.New(tx), merchantID.UUID())
-			ledger.SetClock(func() time.Time { return s.now().UTC() })
-			if _, err := ledger.GrantSubscriptionWindow(ctx, p.CustomerID, p.SourceID, []string{p.Entitlement}, start, p.EndsAt); err != nil {
+			subscription, err := uuid.Parse(p.SourceID)
+			if err != nil {
+				return fmt.Errorf("subscription source: %w", err)
+			}
+			if _, err := l.GrantSubscriptionWindow(ctx, p.CustomerID, subscription, p.ProductID, grants.Subscription, start, p.EndsAt); err != nil {
 				return err
 			}
-			row, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
-				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, Entitlement: p.Entitlement,
+			row, err := q.GetLatestProductAccessBySource(ctx, gen.GetLatestProductAccessBySourceParams{
+				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, ProductID: p.ProductID,
 				SourceType: string(p.SourceType), SourceID: p.SourceID,
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -433,37 +265,32 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			if err != nil {
 				return err
 			}
-			created = models.EntitlementFromGen(row)
+			created = models.ProductAccessFromGen(row)
 			return nil
 		}
-		previous, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
-			MerchantID: merchantID.UUID(), CustomerID: p.CustomerID,
-			Entitlement: p.Entitlement, SourceType: string(p.SourceType), SourceID: p.SourceID,
+		previous, err := q.GetLatestProductAccessBySource(ctx, gen.GetLatestProductAccessBySourceParams{
+			MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, ProductID: p.ProductID,
+			SourceType: string(p.SourceType), SourceID: p.SourceID,
 		})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		// A revoked grace allowance (a canceled engine renewal that was then
-		// resumed) is re-granted, never replayed as its revoked self.
-		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceGrace {
+		// resumed) is granted again, never replayed as its revoked self.
+		if err == nil && previous.RevokedAt != nil && p.SourceType == models.AccessSourceGrace {
 			err = pgx.ErrNoRows
 		}
 		if err == nil && (previous.EndsAt == nil || p.Duration != nil ||
 			(p.EndsAt != nil && !p.EndsAt.After(*previous.EndsAt))) {
-			created = models.EntitlementFromGen(previous)
-
+			created = models.ProductAccessFromGen(previous)
 			return nil
 		}
-		// Duration purchases append paid time; explicit EndsAt/indefinite sources
-		// retain their own coverage and may overlap unrelated sources.
 		var tailEnd *time.Time
 		if p.Duration != nil {
-			tailEnd, err = GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
-			if err != nil {
+			if tailEnd, err = GetAccessTimelineTailEnd(ctx, tx, p.CustomerID, p.ProductID); err != nil {
 				return err
 			}
 		}
-
 		start := now
 		if p.NotBefore != nil {
 			nb := p.NotBefore.UTC()
@@ -474,47 +301,44 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		if tailEnd != nil && tailEnd.After(start) {
 			start = *tailEnd
 		}
-
 		var endAt *time.Time
 		switch {
-		case p.Indefinite:
-			endAt = nil
 		case p.Duration != nil:
 			e := start.Add(*p.Duration)
 			endAt = &e
 		case p.EndsAt != nil:
 			e := p.EndsAt.UTC()
 			if !e.After(start) {
-				return fmt.Errorf("endAt must be after entitlement start")
+				return fmt.Errorf("endAt must be after access start")
 			}
-
 			endAt = &e
 		}
-
-		// #511: the entitlement is a DERIVED effect of a grant — the grant ledger is
-		// the source of truth. Create the entitlement-kind grant for this window,
-		// then derive-2 (MaterializeGrant) projects the entitlement row (carrying
-		// grant_id + its preserved source_type/source_id so existing readers work).
-		// The immutable grant carries the source's computed [start, end).
-		gl := grants.New(gen.New(tx), merchantID.UUID())
-		g, gErr := gl.Grant(ctx, grants.GrantInput{
-			Customer: p.CustomerID, Kind: grants.Entitlement,
-			Source: grantSourceType(p.SourceType), SourceID: p.SourceID.String(),
-			Spec:     &grants.Spec{Entitlements: []string{p.Entitlement}},
-			StartsAt: start, EndsAt: endAt,
-		})
-		if gErr != nil {
-			return gErr
+		product := p.ProductID
+		input := grants.GrantInput{
+			Customer: p.CustomerID, Product: &product, Kind: grants.Access,
+			Source: grants.SourceType(p.SourceType), SourceID: p.SourceID, Payment: p.PaymentID,
+			StartsAt: start, EndsAt: endAt, Reason: p.Note, Actor: p.Actor, GrantReason: p.GrantReason,
 		}
-		if mErr := gl.MaterializeGrant(ctx, g); mErr != nil {
-			return mErr
+		var g gen.BillingGrant
+		if p.SourceType == models.AccessSourceGrace {
+			g, err = l.Grant(ctx, input)
+		} else {
+			g, _, err = l.GrantAccessOnce(ctx, input)
 		}
-		// Return the entitlement window MaterializeGrant just projected for this grant.
-		window, fErr := GetEntitlementByGrant(ctx, tx, merchantID.UUID(), g.ID, p.Entitlement)
-		if fErr != nil {
-			return fErr
+		if err != nil {
+			return err
 		}
-		created = window
+		if err := l.MaterializeGrant(ctx, g); err != nil {
+			return err
+		}
+		window, err := q.GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: merchantID.UUID(), GrantID: g.ID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		created = models.ProductAccessFromGen(window)
 		return nil
 	})
 	if err != nil {
@@ -523,10 +347,10 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	return created, nil
 }
 
-// BoundSubscriptionAccess writes the PROVEN closure for a subscription's access
-// (#691): live subscription-sourced windows get ends_at = endAt — advance-written
-// on disk, so a dead system cannot extend a canceled sub — and scheduled
-// windows starting at/after the closure are removed. Idempotent.
+// BoundSubscriptionAccess writes the PROVEN closure of a subscription's access
+// (#691): live subscription windows end at endAt — advance-written on disk, so
+// a dead system cannot extend a canceled sub — and windows starting at or
+// after it are removed. Idempotent.
 func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
@@ -534,19 +358,17 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 	now := s.now().UTC()
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return scopeErr
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
 		}
-		if err := q.SoftDeleteFutureEntitlementsBySubscription(ctx, gen.SoftDeleteFutureEntitlementsBySubscriptionParams{
-			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   subscriptionID, EndsAt: endAt.UTC(), Now: now,
+		if err := q.SoftDeleteFutureProductAccessBySubscription(ctx, gen.SoftDeleteFutureProductAccessBySubscriptionParams{
+			MerchantID: mid.UUID(), SourceID: subscriptionID.String(), EndsAt: endAt.UTC(), Now: now,
 		}); err != nil {
 			return err
 		}
-		return q.EndActiveEntitlementsBySubscription(ctx, gen.EndActiveEntitlementsBySubscriptionParams{
-			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   subscriptionID, EndsAt: endAt.UTC(), Now: now, SetRevoked: false,
+		return q.EndActiveProductAccessBySubscription(ctx, gen.EndActiveProductAccessBySubscriptionParams{
+			MerchantID: mid.UUID(), SourceID: subscriptionID.String(), EndsAt: endAt.UTC(), Now: now,
 		})
 	})
 }
@@ -558,76 +380,51 @@ func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, sub
 	return s.extendActiveBySubscription(ctx, subscriptionID, endAt.UTC(), s.now().UTC())
 }
 
-// extendActiveBySubscription extends active entitlements for a subscription to endAt.
-// It only updates rows whose ends_at is NULL or before endAt, and will never shorten a window.
+// extendActiveBySubscription extends a subscription's live finite windows to
+// endAt, never shortening one, and moves the customer's later windows of the
+// product by the same extension.
 func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		// Preserve the purchased duration of following scheduled windows when
-		// the subscription's finite period extends.
 		q := gen.New(tx)
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return scopeErr
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
 		}
-		rows, err := q.ListExtendableSubscriptionEntitlements(ctx, gen.ListExtendableSubscriptionEntitlementsParams{
-			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   subscriptionID,
-			EndsAt:     endAt,
+		rows, err := q.ListExtendableSubscriptionAccess(ctx, gen.ListExtendableSubscriptionAccessParams{
+			MerchantID: mid.UUID(), SourceID: subscriptionID.String(), EndsAt: endAt,
 		})
 		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
-			return nil
-		}
-
 		for _, candidate := range rows {
-			if err := LockEntitlementTimeline(ctx, tx, candidate.CustomerID.String(), candidate.Entitlement); err != nil {
+			if err := LockAccessTimeline(ctx, tx, candidate.CustomerID.String(), candidate.ProductID); err != nil {
 				return err
 			}
-			mid, err := merchant.Require(ctx)
-			if err != nil {
-				return err
-			}
-			current, err := q.GetEntitlementByIDForUpdate(ctx, gen.GetEntitlementByIDForUpdateParams{MerchantID: mid.UUID(), ID: candidate.ID})
+			current, err := q.GetProductAccessByIDForUpdate(ctx, gen.GetProductAccessByIDForUpdateParams{MerchantID: mid.UUID(), ID: candidate.ID})
 			if errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}
 			if err != nil {
 				return err
 			}
-			if current.CustomerID != candidate.CustomerID || current.Entitlement != candidate.Entitlement || current.SourceID != subscriptionID || current.SourceType != string(models.EntitlementSourceSubscription) {
-				return errors.New("entitlement target changed during extension")
+			if current.CustomerID != candidate.CustomerID || current.ProductID != candidate.ProductID || current.SourceID != subscriptionID.String() || current.SourceType != string(models.AccessSourceSubscription) {
+				return errors.New("access window changed during extension")
 			}
-			ent := models.EntitlementFromGen(current)
-			if ent.RevokedAt != nil || ent.EndsAt == nil || ent.EndsAt.IsZero() {
+			if current.RevokedAt != nil || current.EndsAt == nil {
 				continue
 			}
-			oldEnd, newEnd := ent.EndsAt.UTC(), endAt.UTC()
-			if !newEnd.After(oldEnd) {
+			oldEnd := current.EndsAt.UTC()
+			if !endAt.After(oldEnd) {
 				continue
 			}
-			if !newEnd.After(ent.StartsAt) {
-				return fmt.Errorf("cannot extend entitlement before its start")
+			if !endAt.After(current.StartsAt) {
+				return fmt.Errorf("cannot extend access before its start")
 			}
-
-			// Shift following scheduled windows by the same extension.
-			delta := newEnd.Sub(oldEnd)
-			if err := ShiftEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
+			if err := ShiftAccessTimeline(ctx, tx, current.CustomerID, current.ProductID, oldEnd, endAt.Sub(oldEnd), now, []uuid.UUID{current.ID}); err != nil {
 				return err
 			}
-
-			// Extend the subscription's entitlement row.
-			scopeMerchantID, scopeErr := merchant.Require(ctx)
-			if scopeErr != nil {
-				return scopeErr
-			}
-			if err := q.UpdateEntitlementEndAtIfMatch(ctx, gen.UpdateEntitlementEndAtIfMatchParams{
-				MerchantID: scopeMerchantID.UUID(),
-				ID:         ent.ID,
-				NewEndAt:   newEnd,
-				Now:        now,
-				OldEndAt:   oldEnd,
+			if err := q.UpdateProductAccessEndAtIfMatch(ctx, gen.UpdateProductAccessEndAtIfMatchParams{
+				MerchantID: mid.UUID(), ID: current.ID, NewEndAt: endAt, Now: now, OldEndAt: oldEnd,
 			}); err != nil {
 				return err
 			}
@@ -636,203 +433,196 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 	})
 }
 
-func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.EntitlementRevokeReason) error {
+// EndActiveByPayment ends a payment's access: started windows are revoked at
+// now and windows not yet started are removed; their grants record it.
+func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID uuid.UUID, reason models.AccessRevokeReason) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	now := s.now().UTC()
-	return s.endActiveByPayment(ctx, paymentID, now, now, &reason)
-}
-
-// endActiveByPayment revokes active one-off entitlements for a payment and removes future windows.
-// The now parameter is used for updated_at and revoked_at timestamps to support mock clocks in tests.
-func (s *EntitlementService) endActiveByPayment(ctx context.Context, paymentID uuid.UUID, endAt time.Time, now time.Time, reason *models.EntitlementRevokeReason) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return scopeErr
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
 		}
-		if err := q.SoftDeleteFutureOneOffEntitlements(ctx, gen.SoftDeleteFutureOneOffEntitlementsParams{
-			MerchantID: scopeMerchantID.UUID(),
-			SourceID:   paymentID,
-			Now:        now,
-			EndsAt:     endAt,
+		if err := q.RetractFutureProductAccessByPayment(ctx, gen.RetractFutureProductAccessByPaymentParams{
+			MerchantID: mid.UUID(), PaymentID: paymentID, Now: now, EndsAt: now,
 		}); err != nil {
 			return err
 		}
-		return q.RevokeActiveOneOffEntitlements(ctx, gen.RevokeActiveOneOffEntitlementsParams{
-			MerchantID:   scopeMerchantID.UUID(),
-			SourceID:     paymentID,
-			EndsAt:       endAt,
-			Now:          now,
-			RevokeReason: models.RevokeReasonPtr(reason),
+		return q.RevokeActiveProductAccessByPayment(ctx, gen.RevokeActiveProductAccessByPaymentParams{
+			MerchantID: mid.UUID(), PaymentID: paymentID, EndsAt: now, Now: now, RevokeReason: string(reason),
 		})
 	})
 }
 
-func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
+func (s *EntitlementService) RevokeSourcesForSubscription(ctx context.Context, userID string, subscriptionID uuid.UUID, reason models.AccessRevokeReason, sourceTypes ...models.AccessSourceType) error {
 	return s.RevokeSourcesForSubscriptionAsOf(ctx, userID, subscriptionID, s.now().UTC(), reason, sourceTypes...)
 }
 
-// RevokeSourcesForSubscriptionAsOf is RevokeSourcesForSubscription with an
-// explicit as-of instant: the LIFE-plane grace_exhausted repair revokes access
-// as-of when grace actually lapsed (converge-not-replay), not at convergence
-// time. Pass s.now() for the normal "revoke now" semantics.
-func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
+// RevokeSourcesForSubscriptionAsOf revokes a subscription's windows of the
+// given sources as of asOf (the LIFE-plane grace_exhausted repair revokes as of
+// when grace lapsed), and terminates their grants so the ledger agrees.
+func (s *EntitlementService) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.AccessRevokeReason, sourceTypes ...models.AccessSourceType) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
 	at := asOf.UTC()
 	for _, sourceType := range sourceTypes {
-		names, err := s.ListDistinctEntitlementNamesBySource(ctx, sourceType, subscriptionID)
+		products, err := s.ListLiveProductsBySource(ctx, sourceType, subscriptionID.String())
 		if err != nil {
-			return fmt.Errorf("list %s entitlements: %w", sourceType, err)
+			return fmt.Errorf("list %s access: %w", sourceType, err)
 		}
-		st := sourceType
-		sid := subscriptionID
-		for _, entName := range names {
-			if err := s.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{
-				UserID:      userID,
-				Entitlement: entName,
-				SourceType:  &st,
-				SourceID:    &sid,
-				Reason:      reason,
-				AsOf:        &at,
+		st, sid := sourceType, subscriptionID.String()
+		for _, product := range products {
+			if err := s.RevokeAccess(ctx, RevokeAccessParams{
+				UserID: userID, ProductID: product, SourceType: &st, SourceID: &sid, Reason: reason, AsOf: &at,
 			}); err != nil {
-				return fmt.Errorf("revoke %s entitlement %s: %w", sourceType, entName, err)
+				return fmt.Errorf("revoke %s access to %s: %w", sourceType, product, err)
 			}
 		}
 	}
-	// #511 write-path unification: the windows above are the EFFECT; terminate the
-	// matching live entitlement grants too, so the grant ledger (the source of
-	// truth) reflects the retraction rather than drifting (a live grant whose
-	// effect is revoked). This keeps the DERIVE grant-tier checks precise — a
-	// properly-canceled subscription leaves no "live grant, dead effect" residue.
-	if err := s.revokeGrantsForSubscriptionSources(ctx, userID, subscriptionID, at, sourceTypes); err != nil {
-		return fmt.Errorf("revoke grants for subscription sources: %w", err)
-	}
-	return nil
-}
-
-// revokeGrantsForSubscriptionSources terminates the live entitlement-kind grants
-// of one subscription for the given entitlement source types (subscription /
-// grace), keeping the grant ledger consistent with a source-keyed effect
-// revocation (#511 write-path unification). The grant's free-text source_id is the
-// subscription UUID string (set by PushNewEntitlement). Best-effort vocabulary
-// bridge via grantSourceType (subscription→subscription, grace→grace).
-func (s *EntitlementService) revokeGrantsForSubscriptionSources(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, sourceTypes []models.EntitlementSourceType) error {
 	if len(sourceTypes) == 0 {
 		return nil
 	}
-	mID, err := merchant.Require(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	customerID, err := db.ResolveCustomerID(userID)
+	customer, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return err
 	}
-	gsources := make([]grants.SourceType, 0, len(sourceTypes))
+	sources := make([]grants.SourceType, 0, len(sourceTypes))
 	for _, st := range sourceTypes {
-		gsources = append(gsources, grantSourceType(st))
+		sources = append(sources, grants.SourceType(st))
 	}
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		gl := grants.New(gen.New(tx), mID.UUID())
-		gl.SetClock(func() time.Time { return s.now().UTC() })
-		return gl.RevokeBySourceAsOf(ctx, customerID, grants.Entitlement, gsources, subscriptionID.String(), "subscription source revoked", asOf)
+		return s.ledger(gen.New(tx), mid.UUID()).RevokeBySourceAsOf(ctx, customer, grants.Access, sources, subscriptionID.String(), "subscription source revoked", at)
 	})
 }
 
-type RevokeExistingEntitlementParams struct {
-	// Exactly one of EntitlementID or (UserID+Entitlement) must be provided.
-	EntitlementID *uuid.UUID
-	UserID        string
-	Entitlement   string
+type RevokeAccessParams struct {
+	// Exactly one of AccessID or (UserID and ProductID).
+	AccessID  *uuid.UUID
+	UserID    string
+	ProductID uuid.UUID
 
-	// Optional filters to only affect windows from a specific source.
-	SourceType *models.EntitlementSourceType
-	SourceID   *uuid.UUID
+	// Optional source filters.
+	SourceType *models.AccessSourceType
+	SourceID   *string
 
-	Reason models.EntitlementRevokeReason
+	Reason models.AccessRevokeReason
 
-	// AsOf is the instant the revocation takes effect (revoked_at value + the
-	// active/future window boundary). Nil = now. The LIFE-plane grace_exhausted
-	// repair sets this to grace-end so access is revoked as-of when it actually
-	// lapsed (converge-not-replay), never re-running the missed dunning charges.
+	// AsOf is when the revocation takes effect; nil is now.
 	AsOf *time.Time
 }
 
-// RevokeExistingEntitlement immediately removes access by:
-// - revoking any active entitlement window(s) at now (revoked_at + revoke_reason)
-// - soft-deleting any future scheduled windows
-//
-// It does not mutate ends_at of existing windows (ends_at is immutable).
-func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p RevokeExistingEntitlementParams) error {
+// RevokeAccess ends access now: started windows are revoked, future ones
+// removed. It never rewrites ends_at.
+func (s *EntitlementService) RevokeAccess(ctx context.Context, p RevokeAccessParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")
 	}
-	if p.EntitlementID == nil && (p.UserID == "" || p.Entitlement == "") {
-		return fmt.Errorf("entitlementID or (userID, entitlement) is required")
+	if p.AccessID == nil && (p.UserID == "" || p.ProductID == uuid.Nil) {
+		return fmt.Errorf("accessID or (userID, product) is required")
 	}
-	if p.EntitlementID != nil && (p.UserID != "" || p.Entitlement != "") {
-		return fmt.Errorf("provide either entitlementID or (userID, entitlement), not both")
+	if p.AccessID != nil && (p.UserID != "" || p.ProductID != uuid.Nil) {
+		return fmt.Errorf("provide either accessID or (userID, product), not both")
 	}
-
 	now := s.now().UTC()
 	if p.AsOf != nil {
 		now = p.AsOf.UTC()
 	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		userID := p.UserID
-		entitlement := p.Entitlement
-		if p.EntitlementID != nil {
-			ent, err := GetEntitlementByIDTx(ctx, tx, *p.EntitlementID)
+		q := gen.New(tx)
+		if p.AccessID != nil {
+			row, err := q.GetProductAccessByID(ctx, gen.GetProductAccessByIDParams{MerchantID: mid.UUID(), ID: *p.AccessID})
 			if err != nil {
 				return err
 			}
-			userID = ent.CustomerID.String()
-			entitlement = ent.Entitlement
-			if err := LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+			if err := LockAccessTimeline(ctx, tx, row.CustomerID.String(), row.ProductID); err != nil {
 				return err
 			}
-			if ent.RevokedAt != nil || ent.DeletedAt != nil {
+			if row.RevokedAt != nil || row.DeletedAt != nil {
 				return nil
 			}
-			if p.SourceType != nil && ent.SourceType != *p.SourceType {
+			if p.SourceType != nil && row.SourceType != string(*p.SourceType) || p.SourceID != nil && row.SourceID != *p.SourceID {
 				return nil
 			}
-			if p.SourceID != nil {
-				if ent.SourceID == nil || *ent.SourceID != *p.SourceID {
-					return nil
-				}
+			if row.StartsAt.After(now) {
+				return q.SoftDeleteProductAccessByID(ctx, gen.SoftDeleteProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now})
 			}
-			if ent.StartsAt.After(now) {
-				return SoftDeleteEntitlementByID(ctx, tx, ent.ID, now)
-			}
-			if ent.EndsAt == nil || ent.EndsAt.After(now) {
-				return RevokeEntitlementByID(ctx, tx, ent.ID, p.Reason, now)
+			if row.EndsAt == nil || row.EndsAt.After(now) {
+				_, err := q.RevokeProductAccessByID(ctx, gen.RevokeProductAccessByIDParams{MerchantID: mid.UUID(), ID: row.ID, Now: now, RevokeReason: string(p.Reason)})
+				return err
 			}
 			return nil
 		}
-
-		if err := LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+		if err := LockAccessTimeline(ctx, tx, p.UserID, p.ProductID); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
 			return err
 		}
-
-		// Filter the entitlement timeline by the payable merchant subject (#317);
-		// the lock above still serializes on the userID string key.
-		tsid, terr := db.ResolveCustomerID(userID)
-		if terr != nil {
-			return terr
-		}
-
-		if err := RevokeActiveTimelineWindows(ctx, tx, tsid, entitlement, p.Reason, p.SourceType, p.SourceID, now); err != nil {
+		customer, err := db.ResolveCustomerID(p.UserID)
+		if err != nil {
 			return err
 		}
-		return SoftDeleteFutureTimelineWindows(ctx, tx, tsid, entitlement, p.SourceType, p.SourceID, now)
+		var st *string
+		if p.SourceType != nil {
+			v := string(*p.SourceType)
+			st = &v
+		}
+		if err := q.RevokeActiveProductTimeline(ctx, gen.RevokeActiveProductTimelineParams{
+			MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
+			RevokeReason: string(p.Reason), SourceType: st, SourceID: p.SourceID,
+		}); err != nil {
+			return err
+		}
+		return q.SoftDeleteFutureProductTimeline(ctx, gen.SoftDeleteFutureProductTimelineParams{
+			MerchantID: mid.UUID(), CustomerID: customer, ProductID: p.ProductID, Now: now,
+			SourceType: st, SourceID: p.SourceID,
+		})
+	})
+}
+
+// RevokeGrantedAccess revokes one window. A free grant is revoked in the
+// grant ledger and its projection follows, so a future window of it does not
+// come back; a purchase or subscription window is revoked on its own.
+func (s *EntitlementService) RevokeGrantedAccess(ctx context.Context, access *models.ProductAccess, reason models.AccessRevokeReason) error {
+	if access.SourceType != models.AccessSourceGrant {
+		id := access.ID
+		return s.RevokeAccess(ctx, RevokeAccessParams{AccessID: &id, Reason: reason})
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := LockAccessTimeline(ctx, tx, access.CustomerID.String(), access.ProductID); err != nil {
+			return err
+		}
+		q := gen.New(tx)
+		g, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: access.GrantID})
+		if err != nil {
+			return err
+		}
+		terminated, err := q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: mid.UUID(), GrantID: g.ID})
+		if err != nil {
+			return err
+		}
+		l := s.ledger(q, mid.UUID())
+		if !terminated {
+			if _, err := l.Revoke(ctx, g.ID, string(reason)); err != nil {
+				return err
+			}
+		}
+		return l.MaterializeGrant(ctx, g)
 	})
 }

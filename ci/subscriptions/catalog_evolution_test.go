@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
@@ -396,27 +395,9 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, merchantarchive.Export(t.Context(), source, merchantID, &archive))
 
 	// The pre-revision row format omitted product and price revisions and
-	// carried each product's keys on the product. Rebuild the footer so the
-	// old shape is an intact archive.
-	var legacy bytes.Buffer
-	var writer *archivewire.Writer
-	table := ""
-	_, err = archivewire.Read(bytes.NewReader(archive.Bytes()), func(header archivewire.Header) error {
-		var err error
-		writer, err = archivewire.NewWriter(&legacy, header.MerchantID, header.CatalogRevision)
-		return err
-	}, func(record archivewire.Record) error {
-		if record.Kind == "table" {
-			table = record.Table
-			if table == "product_entitlements" {
-				return nil
-			}
-			return writer.Table(table)
-		}
-		values := record.Values
+	// carried each product's keys on the product.
+	legacy := legacyArchive(t, archive.Bytes(), func(table string, values []*string) []*string {
 		switch table {
-		case "product_entitlements":
-			return fmt.Errorf("this fixture's products grant no keys")
 		case "products":
 			keys := "[]"
 			values = append(append(append([]*string{}, values[:6]...), &keys), values[6:]...)
@@ -424,17 +405,15 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 		if table == "prices" || table == "products" {
 			values = append(append([]*string{}, values[:1]...), values[2:]...)
 		}
-		return writer.Row(values)
-	})
-	require.NoError(t, err)
-	require.NoError(t, writer.Close())
+		return values
+	}, "product_entitlements")
 
 	for _, tc := range []struct {
 		name string
 		data []byte
 	}{
 		{"current", archive.Bytes()},
-		{"pre-revision", legacy.Bytes()},
+		{"pre-revision", legacy},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := "archive_catalog_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]

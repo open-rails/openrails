@@ -78,7 +78,7 @@ type ListHostEventsRow struct {
 	PaymentID             *uuid.UUID
 	Amount                *int64
 	SubjectID             uuid.UUID
-	Currency              string
+	Currency              *string
 	OccurredAt            time.Time
 	Data                  []byte
 	DeliveredAt           *time.Time

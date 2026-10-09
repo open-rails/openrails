@@ -44,7 +44,9 @@ type NMIUpgradePayload struct {
 	Currency                  string                  `json:"currency"`
 	PeriodStart               time.Time               `json:"period_start"`
 	PeriodEnd                 time.Time               `json:"period_end"`
-	Entitlements              []string                `json:"entitlements"`
+	// Entitlements is the keys a tier change admitted before product access,
+	// kept only as accepted evidence. Access follows ProductID.
+	Entitlements json.RawMessage `json:"entitlements,omitempty"`
 	// TargetPlanID is the named NMI plan the schedule switches to when it is
 	// on a named plan (NMI applies plan_amount only to custom schedules).
 	// Empty means the schedule's amount is set directly.
@@ -101,16 +103,10 @@ func DecodeNMIUpgradePayload(in gen.BillingProviderIntent) (NMIUpgradePayload, e
 func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {
 	type plain NMIUpgradePayload
 	var decoded plain
-	wire := struct {
-		*plain
-		Entitlements json.RawMessage `json:"entitlements"`
-	}{plain: &decoded}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var err error
-	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
-	if err != nil {
+	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

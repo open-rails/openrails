@@ -50,6 +50,17 @@ unindexed-filter ListPricesFiltered              # optional admin filter, keyset
 # wrapped in EXPLAIN by the query auditor.
 unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-correction/report race
 
+# Capped by a caller-supplied list: one row per listed product or a few live
+# windows per listed subscription.
+unbounded-many CountLiveProductHolders       # one row per edited product, counted once per catalog edit
+unbounded-many ListLiveAccessBySubscriptions # live windows of a page of subscriptions
+
+# The cutover to product access: an operator action, once per merchant.
+unbounded-many ListAccessCutoverApprovals              # the changes an operator approved for one merchant
+unplannable function.convert_entitlement_windows.2 # reads the conversion table the function's first statement creates
+unplannable function.convert_entitlement_windows.3 # reads the conversion table the function's first statement creates
+unplannable function.convert_entitlement_windows.4 # reads the conversion table the function's first statement creates
+
 # On-demand integrity diagnostics must return every finding. Pagination would
 # let a partial result be mistaken for a healthy ledger.
 unbounded-many ListLedgerConservationBreaches # operator audit: every breached ledger
@@ -101,7 +112,6 @@ unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all 
 unbounded-many ListActiveSubscriptionsByPriceIDs         # or#837 fan-out per price
 unbounded-many ListSubscriptionsByPaymentMethodIDs       # or#837 fan-out per payment method
 unbounded-many ListLatestChargeByPaymentMethodIDs        # or#837 fan-out per payment method
-unbounded-many ListActiveEntitlementRecordsByCustomerIDs # or#837 fan-out per customer
 unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail
 unbounded-many ListRecordedSubscriptionCharges           # or#837 fan-out per subscription inside the bulk-verify window
 

@@ -102,16 +102,20 @@ func TestListReadsAreBatched(t *testing.T) {
 	var access *billing.ListPage[billing.ProductAccessGrant]
 	got = w.count(func() {
 		var err error
-		access, err = w.client[remote].ListProductAccess(t.Context(), c.customerID(), billing.PageRequest{})
+		access, err = w.client[remote].ListProductAccess(t.Context(), c.customerID(), billing.ProductAccessListParams{})
 		require.NoError(t, err)
 	})
-	requireBatched(t, got, "ListProductsByIDs")
-	require.Len(t, access.Items, 3)
+	requireBatched(t, got, "ListProductAccessPage")
 	names := map[string]string{}
+	purchases := 0
 	for _, grant := range access.Items {
 		names[grant.ProductID.String()] = grant.ProductName
 		require.NotEmpty(t, grant.ProductKey)
+		if grant.SourceType == billing.ProductAccessSourcePurchase {
+			purchases++
+		}
 	}
+	require.Equal(t, 3, purchases, "the page holds the purchases beside the memberships' windows")
 	for _, price := range owned {
 		require.Equal(t, "Post", names[price.ProductID.String()])
 	}
@@ -185,28 +189,30 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	require.NoError(t, err)
 	c := w.newCustomer()
 	now := w.clock.Now()
-	for key, days := range map[string]int{"content:cov-a": 5, "content:cov-c": 10} {
+	for _, days := range []int{5, 10} {
 		end := now.Add(time.Duration(days) * 24 * time.Hour)
-		_, err := client.CreateEntitlement(t.Context(), c.customerID(), billing.CreateEntitlementParams{Entitlement: key, EndsAt: &end})
+		_, err := client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: c.customerID(), ProductID: product.ID, EndsAt: &end}}})
 		require.NoError(t, err)
 	}
 	method := c.saveCard("stripe", visa)
 	got := w.count(func() { c.purchase(billing.OfferFinite, price.ID.String(), "content:cov-b", method) })
-	require.Equal(t, 1, got["EntitlementCoverage"], "one coverage query for every product key: %v", got)
-	require.Zero(t, got["EntitlementHasActiveIndefinite"], "no per-key coverage reads: %v", got)
-	// The rental stacks after the latest finite window across all product keys.
+	require.Equal(t, 1, got["ProductAccessCoverage"], "one coverage query for the product: %v", got)
+	// The rental stacks after the customer's latest window of the product.
 	start := now.Add(10 * 24 * time.Hour)
-	lookup, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{c.customerID()}, At: start.Add(time.Hour)})
+	access, err := client.ListProductAccess(t.Context(), c.customerID(), billing.ProductAccessListParams{})
 	require.NoError(t, err)
-	rented := map[string]bool{}
-	for _, r := range lookup.Customers[c.customerID()] {
-		if r.SourceType == billing.EntitlementSourcePurchase {
-			rented[r.Entitlement] = true
-			require.True(t, start.Equal(r.StartsAt), "%s starts %s", r.Entitlement, r.StartsAt)
-			require.True(t, start.Add(48*time.Hour).Equal(*r.EndsAt), "%s ends %v", r.Entitlement, r.EndsAt)
+	var rented []billing.ProductAccessGrant
+	for _, a := range access.Items {
+		if a.SourceType == billing.ProductAccessSourcePurchase {
+			rented = append(rented, a)
 		}
 	}
-	require.Len(t, rented, 3)
+	require.Len(t, rented, 1)
+	require.True(t, start.Equal(rented[0].StartsAt), "starts %s", rented[0].StartsAt)
+	require.True(t, start.Add(48*time.Hour).Equal(*rented[0].EndsAt), "ends %v", rented[0].EndsAt)
+	held, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys, At: start.Add(time.Hour)})
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"content:cov-a": true, "content:cov-b": true, "content:cov-c": true}, held.Entitlements)
 }
 
 func TestListOffersIsOneRequest(t *testing.T) {

@@ -63,16 +63,18 @@ type CustomerListParams struct {
 }
 
 // CustomerBillingProfile is one customer's billing at a glance: balances in
-// every currency they hold one, recent subscriptions, live entitlements and
-// product access, payments and saved payment methods.
+// every currency they hold one, recent subscriptions, payments and saved
+// payment methods, and the first page of their keys and of their
+// product-access windows (ListCustomerEntitlements and ListProductAccess read
+// on from each page's cursor).
 type CustomerBillingProfile struct {
-	Customer       Customer             `json:"customer"`
-	Balances       []Balance            `json:"balances"`
-	Subscriptions  []Subscription       `json:"subscriptions"`
-	Entitlements   []EntitlementRecord  `json:"entitlements"`
-	Payments       []Payment            `json:"payments"`
-	PaymentMethods []PaymentMethod      `json:"payment_methods"`
-	ProductAccess  []ProductAccessGrant `json:"product_access"`
+	Customer       Customer                      `json:"customer"`
+	Balances       []Balance                     `json:"balances"`
+	Subscriptions  []Subscription                `json:"subscriptions"`
+	Entitlements   ListPage[CustomerEntitlement] `json:"entitlements"`
+	Payments       []Payment                     `json:"payments"`
+	PaymentMethods []PaymentMethod               `json:"payment_methods"`
+	ProductAccess  ListPage[ProductAccessGrant]  `json:"product_access"`
 }
 
 // CustomerBillingPolicy is the billing policy assigned to one customer. A

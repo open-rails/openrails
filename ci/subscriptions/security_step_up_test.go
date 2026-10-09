@@ -52,14 +52,20 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		return e["code"] == "step_up_required"
 	}
 
-	timed := map[string]any{"entitlement": "content:comp", "hours": 24}
-	access := map[string]any{"items": []any{map[string]any{"customer_id": member.id, "product_id": price.ProductID}}}
+	comp, forever, host := w.giftProduct("content:comp"), w.giftProduct("content:forever"), w.giftProduct("content:host")
+	grant := func(product billing.ProductID, hours any) map[string]any {
+		item := map[string]any{"customer_id": member.id, "product_id": product}
+		if hours != nil {
+			item["hours"] = hours
+		}
+		return map[string]any{"items": []any{item}}
+	}
+	timed := grant(comp, 24)
 	for _, op := range []struct {
 		method, path string
 		body         any
 	}{
-		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/entitlements", timed},
-		{http.MethodPost, "/v1/merchant/product-access", access},
+		{http.MethodPost, "/v1/merchant/product-access", timed},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
@@ -85,20 +91,19 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	// A read needs no step-up, and neither does the host's in-process client.
 	status, body := call(stale, http.MethodPost, "/v1/merchant/customers/lookup", map[string]any{"customer_ids": []string{member.id}})
 	require.Equal(t, http.StatusOK, status, "%v", body)
-	_, err := w.client[embedded].CreateEntitlement(t.Context(), member.customerID(), billing.CreateEntitlementParams{Entitlement: "content:host"})
-	require.NoError(t, err)
+	member.grant(host, nil, nil)
 	require.True(t, member.entitled("content:host"))
 
 	// A grant with no end needs merchant:access:grant-permanent, which the
 	// support member lacks; staff hold it. Hours past time.Duration are refused.
-	permanent := map[string]any{"entitlement": "content:forever"}
+	permanent := grant(forever, nil)
 	support := w.auth.token(t, "support")
-	status, body = call(support, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", timed)
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", timed)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
-	status, body = call(support, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", permanent)
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", permanent)
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", access)
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", grant(price.ProductID, nil))
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
 	other := w.newCustomer()
@@ -113,9 +118,9 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, held[price.ProductID.String()], "a refused batch grants nothing")
 	require.False(t, member.entitled("content:forever"))
-	status, body = call(fresh, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", map[string]any{"entitlement": "content:comp", "hours": 2562048})
+	status, body = call(fresh, http.MethodPost, "/v1/merchant/product-access", grant(comp, 2562048))
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	status, body = call(fresh, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", permanent)
+	status, body = call(fresh, http.MethodPost, "/v1/merchant/product-access", permanent)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
 	require.True(t, member.entitled("content:forever"))
 }

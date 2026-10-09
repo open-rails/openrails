@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -32,7 +31,6 @@ func (s *CheckoutPurchaseService) transactionBound(d *db.DB) *CheckoutPurchaseSe
 	if s.SubscriptionService != nil {
 		out.SubscriptionService = subscriptions.NewSubscriptionService(d, out.PriceService, out.ProductService, nil, s.clock)
 	}
-	out.ProductAccessService = productaccess.NewService(d, s.clock)
 	return out
 }
 
@@ -121,11 +119,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 		v := now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
 		end = &v
 	}
-	entitlements := models.CloneEntitlements(product.Entitlements)
-	if entitlements == nil {
-		entitlements = []string{}
-	}
-	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
+	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method, target.Scope.ID), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
 	out.CreditGrant, err = acceptedCreditGrant(product, price)
 	if err != nil {
 		return out, err

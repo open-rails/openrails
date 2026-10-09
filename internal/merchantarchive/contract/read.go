@@ -12,10 +12,12 @@ import (
 )
 
 // ReadInfo keeps the original wire identity while identifying historical rows
-// whose derived entitlement projection needs the same repair as migration 8.
+// whose derived entitlement projection needs the same repair as migration 8,
+// and archives whose per-key windows restore converts to product access.
 type ReadInfo struct {
 	archivewire.Info
 	LegacyDurations bool
+	LegacyAccess    bool
 }
 
 // Read applies the current billing schema and value contracts to the shared
@@ -24,6 +26,15 @@ type ReadInfo struct {
 func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile, []*string) error) (ReadInfo, error) {
 	table := -1
 	legacyDurations := false
+	profiles := Profiles
+	version := 0
+	onHeader := func(h archivewire.Header) error {
+		version, profiles = h.Version, ProfilesFor(h.Version)
+		if header != nil {
+			return header(h)
+		}
+		return nil
+	}
 	priceAccess := map[string]*string{}
 	// Products rows are held until the next table shows their shape: an
 	// archive with product_entitlements carries keys there; an older one
@@ -38,9 +49,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		}
 		return nil
 	}
-	info, err := archivewire.Read(src, header, func(r archivewire.Record) error {
+	info, err := archivewire.Read(src, onHeader, func(r archivewire.Record) error {
+		legacy := version == 1
 		if r.Kind == "table" {
-			if table >= 0 && Profiles[table].Name == "products" {
+			if legacy && table >= 0 && profiles[table].Name == "products" {
 				current := r.Table == "product_entitlements"
 				if err := flushProducts(products, current, emit); err != nil {
 					return err
@@ -52,15 +64,20 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			table++
 			// Archives preceding invoice cadence have no completed scan to retain.
-			if table < len(Profiles) && Profiles[table].Name == "invoice_collection_cadence" && r.Table == "invoices" {
+			if legacy && table < len(profiles) && profiles[table].Name == "invoice_collection_cadence" && r.Table == "invoices" {
 				table++
 			}
-			if table >= len(Profiles) || r.Table != Profiles[table].Name {
+			if table >= len(profiles) || r.Table != profiles[table].Name {
 				return fmt.Errorf("invalid archive table order")
 			}
 			return nil
 		}
-		p := Profiles[table]
+		p := profiles[table]
+		if !legacy {
+			return emit(p, r.Values)
+		}
+		// Version 1: rows of every earlier shape, normalized as the
+		// migrations normalized the database.
 		if p.Name == "products" {
 			products = append(products, r.Values)
 			return nil
@@ -136,12 +153,29 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			}
 			return nil
 		}
+		if p.Name == "subscriptions" || p.Name == "payments" || p.Name == "grants" {
+			if err := ValidateValues(p, r.Values); err != nil {
+				return err
+			}
+			current := namedProfile(p.Name)
+			return emit(current, project(p, current, r.Values))
+		}
 		return emit(p, r.Values)
 	})
-	if err == nil && table != len(Profiles)-1 {
+	if err == nil && table != len(profiles)-1 {
 		err = fmt.Errorf("archive tables incomplete")
 	}
-	return ReadInfo{Info: info, LegacyDurations: legacyDurations}, err
+	return ReadInfo{Info: info, LegacyDurations: legacyDurations, LegacyAccess: version == 1}, err
+}
+
+// project reorders a row into another profile's columns by name; a column the
+// source lacks is null.
+func project(from, to Profile, values []*string) []*string {
+	out := make([]*string, len(to.Columns))
+	for i, c := range to.Columns {
+		out[i] = value(from, values, c.Name)
+	}
+	return out
 }
 
 func insertRevision(values []*string) []*string {

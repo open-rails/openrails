@@ -23,21 +23,21 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
 ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
--- name: CaptureSubscriptionEntitlementBeforeImages :execrows
--- Every LIVE entitlement window the transition is about to revoke or bound.
+-- name: CaptureSubscriptionAccessBeforeImages :execrows
+-- Every LIVE access window the transition is about to revoke or bound.
 -- Captured as EVIDENCE only: the reverse never replays these (or#859 §3.3 —
--- entitlements are Class D, recomputed by Converge from the append-only grant
+-- access windows are Class D, recomputed by Converge from the append-only grant
 -- log, never restored; a restored effect can silently disagree with its grant,
 -- a re-derived one cannot). What they buy is the ability to say exactly which
 -- windows a bad pass closed, and to check the recomputation against them.
 INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
-SELECT e.merchant_id, sqlc.arg(run_id)::uuid, 'entitlements', e.id, to_jsonb(e), sqlc.arg(now)::timestamptz
-FROM billing.entitlements e
+SELECT e.merchant_id, sqlc.arg(run_id)::uuid, 'product_access', e.id, to_jsonb(e), sqlc.arg(now)::timestamptz
+FROM billing.product_access e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.source_type = 'subscription'
-  AND e.source_id = sqlc.arg(subscription_id)::uuid
+  AND e.source_id = sqlc.arg(subscription_id)::uuid::text
   AND e.revoked_at IS NULL
   AND e.deleted_at IS NULL
 ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
@@ -137,10 +137,10 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   -- state of a row prune has since tombstoned.
   AND s.deleted_at IS NULL;
 
--- name: InvalidateEntitlementsFromBeforeImages :execrows
+-- name: InvalidateAccessFromBeforeImages :execrows
 -- Class D is INVALIDATED, never restored (or#859 §3.3, §4).
 --
--- The measured damage to entitlements is not a delete and not always a revoke:
+-- The measured damage to access windows is not a delete and not always a revoke:
 -- a terminal cancel BOUNDS the access window (ends_at pulled back to the
 -- cancellation instant, revoked_at often still NULL). Leaving those rows in
 -- place would defeat the recomputation, because derive-2 treats an existing
@@ -154,20 +154,20 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
 -- restored one can. The stamp keeps the invalidation itself attributable to one
 -- run, and or#858's uniques/exclusion already ignore soft-deleted rows so the
 -- rebuilt window does not collide with the invalidated one.
-UPDATE billing.entitlements e
+UPDATE billing.product_access e
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
 FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND b.destructive_run_id = sqlc.arg(run_id)::uuid
-  AND b.table_name = 'entitlements'
+  AND b.table_name = 'product_access'
   AND e.merchant_id = b.merchant_id
   AND e.id = b.row_id
   AND e.deleted_at IS NULL;
 
 -- name: MarkBeforeImagesRestored :execrows
--- Runs in the same transaction as the restore above. Entitlement images are
+-- Runs in the same transaction as the restore above. Access images are
 -- deliberately excluded: leaving restored_at NULL on them is the durable record
 -- that the reverse saw them and chose recomputation over restoration.
 UPDATE billing.destructive_run_before_images
@@ -180,7 +180,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: CountBeforeImagesForRun :one
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
-    count(*) FILTER (WHERE table_name = 'entitlements')::bigint AS entitlements
+    count(*) FILTER (WHERE table_name = 'product_access')::bigint AS product_access
 FROM billing.destructive_run_before_images
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid;

@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -52,7 +53,6 @@ func TestRenewalTermsBindCoverageWithoutAdmissionNoise(t *testing.T) {
 	changed := p
 	changed.AcceptedAt = boundary.Add(time.Minute)
 	changed.Renewal.ProductName = "renamed display label"
-	changed.Renewal.Entitlements = []string{}
 	changed.Renewal.PeriodStart = boundary.In(time.FixedZone("local", 3600))
 	unchanged, err := NewStripeRenewal(changed)
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestRenewalTermsBindCoverageWithoutAdmissionNoise(t *testing.T) {
 		func(p *SubscriptionCollectionPayload) { p.Renewal.AccessDurationHours = new(48) },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.AccessDurationHours = nil },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.Currency = "EUR" },
-		func(p *SubscriptionCollectionPayload) { p.Renewal.Entitlements = []string{"new_access"} },
+		func(p *SubscriptionCollectionPayload) { p.Renewal.Entitlements = json.RawMessage(`["new_access"]`) },
 		func(p *SubscriptionCollectionPayload) { p.Renewal.PriceID = uuid.New() },
 	} {
 		changed := p
@@ -82,7 +82,7 @@ func TestStripeRenewalTermsCanonicalVector(t *testing.T) {
 	p := SubscriptionCollectionPayload{Renewal: RenewalTerms{
 		PriceID: uuid.MustParse("10000000-0000-0000-0000-000000000002"), ProductID: uuid.MustParse("10000000-0000-0000-0000-000000000003"),
 		Amount: 1_000_000, Currency: "USD", PeriodStart: start, PeriodEnd: start.Add(24 * time.Hour), AccessDurationHours: new(24),
-		Entitlements:       []string{"download", "view"},
+		Entitlements:       json.RawMessage(`["download","view"]`),
 		LegacyEntitlements: map[string]*int{"view": nil, "download": &downloads},
 	}}
 	terms, err := NewStripeRenewal(p)

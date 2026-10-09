@@ -91,7 +91,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	var archive bytes.Buffer
 	err = merchantarchive.Export(t.Context(), source, merchantID, &archive)
 	require.NoError(t, err, "export must preserve application metadata: %v", errors.Unwrap(err))
-	require.Contains(t, archive.String(), `"version":1`)
+	require.Contains(t, archive.String(), `"version":2`)
 
 	destinationSchema := "archive_metadata_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: destinationSchema, RiverSchema: destinationSchema}))
@@ -104,8 +104,8 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	destination, err := db.NewWithPGXPool(w.pool, destinationSchema)
 	require.NoError(t, err)
 
-	// An old positional format is refused, without partially restoring rows.
-	old := bytes.Replace(archive.Bytes(), []byte(`"version":1`), []byte(`"version":3`), 1)
+	// An unknown format version is refused, without partially restoring rows.
+	old := bytes.Replace(archive.Bytes(), []byte(`"version":2`), []byte(`"version":3`), 1)
 	_, err = merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(old))
 	var archiveErr *merchantarchive.Error
 	require.ErrorAs(t, err, &archiveErr)
@@ -132,7 +132,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 		{"usage_events", "id", "metadata,(metadata IS NULL) AS metadata_is_sql_null,amount,currency"},
 		{"admission_operations", "request_id", "capture_terms,captured_amount,state"},
 		{"grants", "id", "customer_id,payment_id,starts_at,ends_at,amount"},
-		{"entitlements", "id", "customer_id,entitlement,starts_at,ends_at,grant_id"},
+		{"product_access", "id", "customer_id,product_id,source_type,source_id,starts_at,ends_at,grant_id"},
 		{"ledger_accounts", "id", "credits_posted,debits_posted,currency"},
 		{"ledger_transfers", "id", "amount,currency,debit_account_id,credit_account_id"},
 	} {

@@ -2,7 +2,6 @@ package payments
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -74,14 +73,6 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
 	}
-	legacyHours, err := models.ToJSONB(p.LegacyEntitlementHours)
-	if err != nil {
-		return gen.CreatePaymentParams{}, err
-	}
-	entSnap, err := json.Marshal(p.EntitlementsSnapshot)
-	if err != nil {
-		return gen.CreatePaymentParams{}, err
-	}
 	movement, err := resolveMoneyMovement(p)
 	if err != nil {
 		return gen.CreatePaymentParams{}, err
@@ -104,36 +95,34 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment channel %q is not a known value", channel)
 	}
 	return gen.CreatePaymentParams{
-		ID:                     p.ID,
-		PriceID:                p.PriceID,
-		Channel:                string(channel),
-		Rail:                   rail,
-		TransactionID:          p.TransactionID,
-		Amount:                 p.Amount,
-		ListAmount:             p.ListAmount,
-		Currency:               currency,
-		Status:                 p.Status,
-		PspID:                  p.PspID,
-		SubscriptionID:         p.SubscriptionID,
-		RefundedPaymentID:      p.RefundedPaymentID,
-		DiscountCode:           p.DiscountCode,
-		DiscountReason:         p.DiscountReason,
-		DiscountMetadata:       discountMeta,
-		EntitlementsSnapshot:   entSnap,
-		LegacyEntitlementHours: legacyHours,
-		CreditGrantSnapshot:    creditSnap,
-		Metadata:               meta,
-		PurchasedAt:            p.PurchasedAt,
-		CreatedAt:              p.CreatedAt,
-		CardBrand:              p.CardBrand,
-		CardLast4:              p.CardLast4,
-		CustomerID:             p.CustomerID,
-		AttemptKind:            p.AttemptKind,
-		FailureCode:            p.FailureCode,
-		FailureReason:          p.FailureReason,
-		ReversalKind:           p.ReversalKind,
-		TokenType:              p.TokenType,
-		MoneyMovement:          string(movement),
+		ID:                  p.ID,
+		PriceID:             p.PriceID,
+		Channel:             string(channel),
+		Rail:                rail,
+		TransactionID:       p.TransactionID,
+		Amount:              p.Amount,
+		ListAmount:          p.ListAmount,
+		Currency:            currency,
+		Status:              p.Status,
+		PspID:               p.PspID,
+		SubscriptionID:      p.SubscriptionID,
+		RefundedPaymentID:   p.RefundedPaymentID,
+		DiscountCode:        p.DiscountCode,
+		DiscountReason:      p.DiscountReason,
+		DiscountMetadata:    discountMeta,
+		CreditGrantSnapshot: creditSnap,
+		Metadata:            meta,
+		PurchasedAt:         p.PurchasedAt,
+		CreatedAt:           p.CreatedAt,
+		CardBrand:           p.CardBrand,
+		CardLast4:           p.CardLast4,
+		CustomerID:          p.CustomerID,
+		AttemptKind:         p.AttemptKind,
+		FailureCode:         p.FailureCode,
+		FailureReason:       p.FailureReason,
+		ReversalKind:        p.ReversalKind,
+		TokenType:           p.TokenType,
+		MoneyMovement:       string(movement),
 	}, nil
 }
 

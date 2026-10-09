@@ -94,7 +94,6 @@ export function CustomerDetailPage() {
           </p>
         </div>
         <div className="ml-auto flex gap-2">
-          <GrantEntitlementDialog customerId={customerId} />
           <GrantProductAccessDialog customerId={customerId} />
           <OffChannelPaymentDialog customerId={customerId} />
         </div>
@@ -299,33 +298,25 @@ export function CustomerDetailPage() {
               <CardTitle className="text-sm">Entitlements</CardTitle>
             </CardHeader>
             <CardContent>
-              {profile.entitlements.length === 0 ? (
+              <p className="mb-3 text-xs text-muted-foreground">
+                The keys of the products this customer holds now.
+              </p>
+              {profile.entitlements.data.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No active entitlements.
+                  No entitlements.
                 </p>
               ) : (
-                <div className="grid gap-4">
-                  {profile.entitlements.map((e) => (
-                    <div key={e.id} className="flex min-w-0 items-start gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {e.entitlement}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {e.source_type}
-                        </p>
-                        <p className="text-xs text-muted-foreground tabular-nums">
-                          {formatDate(e.starts_at)} to{" "}
-                          {e.ends_at ? formatDate(e.ends_at) : "no end date"}
-                        </p>
-                      </div>
-                      <RevokeEntitlementButton
-                        customerId={customerId}
-                        entitlementId={e.id}
-                        label={`Revoke ${e.entitlement}`}
-                      />
-                    </div>
+                <div className="flex flex-wrap gap-2">
+                  {profile.entitlements.data.map((e) => (
+                    <Badge key={e.entitlement} variant="secondary">
+                      {e.entitlement}
+                    </Badge>
                   ))}
+                  {profile.entitlements.next_cursor && (
+                    <span className="text-xs text-muted-foreground">
+                      and more
+                    </span>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -336,23 +327,25 @@ export function CustomerDetailPage() {
               <CardTitle className="text-sm">Product access</CardTitle>
             </CardHeader>
             <CardContent>
-              {profile.product_access.length === 0 ? (
+              {profile.product_access.data.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No product access grants.
+                  No product access.
                 </p>
               ) : (
                 <div className="grid gap-4">
-                  {profile.product_access.map((g) => (
+                  {profile.product_access.data.map((g) => (
                     <div key={g.id} className="flex min-w-0 items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                           <p className="truncate text-sm font-medium">
-                            {shortId(g.product_id, 13)}
+                            {g.product_name || shortId(g.product_id, 13)}
                           </p>
                           <StatusBadge status={g.status} />
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {g.source_type}
+                          {g.source_type === "grant"
+                            ? `Granted (${g.grant_reason ?? "staff"})${g.note ? `: ${g.note}` : ""}`
+                            : g.source_type}
                         </p>
                         <p className="text-xs text-muted-foreground tabular-nums">
                           {g.ends_at
@@ -408,30 +401,6 @@ function RevokeButton({
   )
 }
 
-function RevokeEntitlementButton({
-  customerId,
-  entitlementId,
-  label,
-}: {
-  customerId: string
-  entitlementId: string
-  label: string
-}) {
-  const queryClient = useQueryClient()
-  const revoke = useMutation(
-    adminMutations.revokeCustomerEntitlement(queryClient, customerId)
-  )
-
-  return (
-    <RevokeButton
-      label={label}
-      busy={revoke.isPending}
-      onRevoke={() => revoke.mutateAsync(entitlementId)}
-      successMessage="Entitlement revoked"
-    />
-  )
-}
-
 function RevokeProductAccessButton({
   customerId,
   grantId,
@@ -456,156 +425,6 @@ function RevokeProductAccessButton({
   )
 }
 
-function GrantEntitlementDialog({ customerId }: { customerId: string }) {
-  const [open, setOpen] = React.useState(false)
-  const queryClient = useQueryClient()
-  const grant = useMutation(
-    adminMutations.grantCustomerEntitlement(queryClient, customerId)
-  )
-  const form = useForm({
-    defaultValues: { entitlement: "", hours: "" },
-    onSubmit: async ({ value }) => {
-      try {
-        await grant.mutateAsync({
-          entitlement: value.entitlement.trim(),
-          hours: value.hours ? Number(value.hours) : undefined,
-        })
-        toast.success("Entitlement granted")
-        handleOpenChange(false)
-      } catch (err) {
-        toastApiError(err, "Grant entitlement")
-      }
-    },
-  })
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (!next) {
-      form.reset()
-      grant.reset()
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm">
-            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Entitlement
-          </Button>
-        }
-      />
-      <DialogContent className={DIALOG_FORM}>
-        <DialogHeader>
-          <DialogTitle>Grant entitlement</DialogTitle>
-          <DialogDescription>
-            Give this customer access without a payment. Use it for goodwill,
-            support fixes, and trials.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            void form.handleSubmit()
-          }}
-          className="grid gap-4"
-        >
-          <div className="grid gap-3">
-            <form.Field
-              name="entitlement"
-              validators={{
-                onChange: ({ value }) =>
-                  value.trim() ? undefined : "Enter an entitlement",
-              }}
-            >
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ent-name">Entitlement</Label>
-                  <p className="text-[13px] text-muted-foreground">
-                    The name your product checks before unlocking a feature.
-                  </p>
-                  <Input
-                    id="ent-name"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder="premium"
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </div>
-              )}
-            </form.Field>
-            <form.Field
-              name="hours"
-              validators={{
-                onChange: ({ value }) => {
-                  if (!value) return undefined
-                  const hours = Number(value)
-                  return Number.isFinite(hours) && hours >= 1
-                    ? undefined
-                    : "Enter at least 1 hour"
-                },
-              }}
-            >
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="ent-hours">How long it lasts</Label>
-                  <p className="text-[13px] text-muted-foreground">
-                    In hours. Leave it empty and the access never expires.
-                  </p>
-                  <Input
-                    id="ent-hours"
-                    type="number"
-                    min="1"
-                    placeholder="Never expires"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </div>
-              )}
-            </form.Field>
-          </div>
-          <DialogFooter>
-            <form.Subscribe
-              selector={(state) =>
-                [
-                  state.values.entitlement,
-                  state.canSubmit,
-                  state.isSubmitting,
-                ] as const
-              }
-            >
-              {([entitlement, canSubmit, isSubmitting]) => (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={isSubmitting}
-                    onClick={() => handleOpenChange(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={!entitlement.trim() || !canSubmit || isSubmitting}
-                  >
-                    {isSubmitting ? "Granting…" : "Grant access"}
-                  </Button>
-                </>
-              )}
-            </form.Subscribe>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function GrantProductAccessDialog({ customerId }: { customerId: string }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
@@ -617,14 +436,13 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     enabled: open,
   })
   const form = useForm({
-    defaultValues: { productId: "", endsAt: "" },
+    defaultValues: { productId: "", hours: "", note: "" },
     onSubmit: async ({ value }) => {
       try {
         await grant.mutateAsync({
           productId: value.productId,
-          endsAt: value.endsAt
-            ? new Date(value.endsAt).toISOString()
-            : undefined,
+          hours: value.hours ? Number(value.hours) : undefined,
+          note: value.note.trim() || undefined,
         })
         toast.success("Product access granted")
         handleOpenChange(false)
@@ -655,8 +473,9 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
         <DialogHeader>
           <DialogTitle>Grant product access</DialogTitle>
           <DialogDescription>
-            Give this customer one of your products without a payment. Nothing
-            is charged and no subscription is started.
+            Give this customer one of your products without a payment. They
+            hold its keys while the grant lasts, including keys you add to the
+            product later.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -701,29 +520,49 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
               )}
             </form.Field>
             <form.Field
-              name="endsAt"
+              name="hours"
               validators={{
-                onChange: ({ value }) =>
-                  value && Number.isNaN(new Date(value).getTime())
-                    ? "Enter a valid end date"
-                    : undefined,
+                onChange: ({ value }) => {
+                  if (!value) return undefined
+                  const hours = Number(value)
+                  return Number.isInteger(hours) && hours >= 1
+                    ? undefined
+                    : "Enter at least 1 hour"
+                },
               }}
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="pa-ends">When access ends</Label>
+                  <Label htmlFor="pa-hours">How long it lasts</Label>
                   <p className="text-[13px] text-muted-foreground">
-                    Leave it empty and the access never expires.
+                    In hours, after any access they already have. Leave it
+                    empty and the access never expires.
                   </p>
                   <Input
-                    id="pa-ends"
-                    type="datetime-local"
+                    id="pa-hours"
+                    type="number"
+                    min="1"
+                    placeholder="Never expires"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
                     aria-invalid={field.state.meta.errors.length > 0}
                   />
                   <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="note">
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pa-note">Note</Label>
+                  <Input
+                    id="pa-note"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="Why it was granted"
+                  />
                 </div>
               )}
             </form.Field>

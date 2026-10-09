@@ -1,7 +1,6 @@
 package grants
 
 import (
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -15,68 +14,52 @@ type PurchaseWindow struct {
 	End   *time.Time
 }
 
-func samePurchaseEnd(a, b *time.Time) bool {
-	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
-}
-
-func PurchaseWindows(spec []string, duration *int, accepted, entitlementStart time.Time, historicalHours map[string]int) (map[string]PurchaseWindow, PurchaseWindow) {
-	wanted := make(map[string]PurchaseWindow, len(spec))
-	for _, name := range spec {
-		var end *time.Time
-		if duration != nil && *duration > 0 {
-			v := entitlementStart.Add(time.Duration(*duration) * time.Hour)
-			end = &v
-		} else if hours := historicalHours[name]; duration == nil && hours > 0 {
-			v := entitlementStart.Add(time.Duration(hours) * time.Hour)
-			end = &v
-		}
-		wanted[name] = PurchaseWindow{Start: entitlementStart, End: end}
-	}
-	ownership := PurchaseWindow{Start: accepted}
+// AccessWindow is a purchase's access: from start for duration hours, or
+// indefinitely when the price has no access duration.
+func AccessWindow(duration *int, start time.Time) PurchaseWindow {
+	window := PurchaseWindow{Start: start}
 	if duration != nil && *duration > 0 {
-		v := accepted.Add(time.Duration(*duration) * time.Hour)
-		ownership.End = &v
+		end := start.Add(time.Duration(*duration) * time.Hour)
+		window.End = &end
 	}
-	return wanted, ownership
+	return window
 }
 
-type PurchaseHistory struct {
-	Entitlements map[string]gen.BillingGrant
-	Ownership    *gen.BillingGrant
+// SameWindow reports whether a grant records exactly the window.
+func SameWindow(g gen.BillingGrant, w PurchaseWindow) bool {
+	return g.StartsAt.Equal(w.Start) && (g.EndsAt == nil && w.End == nil || g.EndsAt != nil && w.End != nil && g.EndsAt.Equal(*w.End))
 }
 
-// ValidatePurchaseHistory compares original immutable grant events. A later
-// revoke never changes those facts and must not be mistaken for missing access.
-// Missing effects are returned to the caller; completion can repair them, while
-// an archive requiring a complete terminal purchase refuses them.
-func ValidatePurchaseHistory(merchant, customer, product, payment uuid.UUID, wanted map[string]PurchaseWindow, ownership PurchaseWindow, original []gen.BillingGrant) (PurchaseHistory, error) {
-	out := PurchaseHistory{Entitlements: map[string]gen.BillingGrant{}}
+// RecordedPurchaseAccess finds the purchase's access grant among its original
+// immutable events. A later revoke never changes that fact and is not missing
+// access. Entitlement and ownership events from before product access are
+// superseded history. nil: the purchase has not been granted yet.
+func RecordedPurchaseAccess(merchant, customer, product, payment uuid.UUID, original []gen.BillingGrant) (*gen.BillingGrant, error) {
+	var found *gen.BillingGrant
 	for _, g := range original {
 		if g.MerchantID != merchant || g.CustomerID != customer || g.Event != "grant" || g.SourceType != string(Purchase) || sourceIDOf(g) != payment.String() || g.PaymentID != nil && *g.PaymentID != payment || g.ProductID != nil && *g.ProductID != product {
-			return out, errors.New("original grant belongs to another accepted purchase")
+			return nil, errors.New("original grant belongs to another accepted purchase")
 		}
 		switch g.Kind {
-		case string(Ownership):
-			if out.Ownership != nil || g.ProductID == nil || !g.StartsAt.Equal(ownership.Start) || !samePurchaseEnd(g.EndsAt, ownership.End) {
-				return out, errors.New("original ownership window contradicts accepted purchase")
+		case string(Access):
+			if found != nil {
+				return nil, errors.New("purchase has two access grants")
 			}
 			copy := g
-			out.Ownership = &copy
-		case string(Entitlement):
-			var spec Spec
-			if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil || len(spec.Entitlements) == 0 || spec.Deposit != nil {
-				return out, errors.New("original entitlement spec contradicts accepted purchase")
-			}
-			for _, name := range spec.Entitlements {
-				window, ok := wanted[name]
-				if _, duplicate := out.Entitlements[name]; !ok || duplicate || !g.StartsAt.Equal(window.Start) || !samePurchaseEnd(g.EndsAt, window.End) {
-					return out, errors.New("original entitlement window contradicts accepted purchase")
-				}
-				out.Entitlements[name] = g
-			}
+			found = &copy
+		case string(Entitlement), string(Ownership):
 		default:
-			return out, errors.New("purchase has an unsupported original grant")
+			return nil, errors.New("purchase has an unsupported original grant")
 		}
 	}
-	return out, nil
+	return found, nil
+}
+
+// MigrationReason is the note on grants the product access cutover converted.
+const MigrationReason = "product access migration"
+
+// Migrated reports whether the product access cutover converted the grant
+// from per-key windows or a product ownership grant.
+func Migrated(g gen.BillingGrant) bool {
+	return g.Reason != nil && *g.Reason == MigrationReason
 }

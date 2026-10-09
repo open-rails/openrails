@@ -32,10 +32,10 @@ beforeEach(async () => {
   grants = []
   stepUps = []
   await server({
-    "POST /merchant/customers/cus_1/entitlements": (request) => {
+    "POST /merchant/product-access": (request) => {
       grants.push(request)
       return request.headers.get("Authorization") === `Bearer ${fresh}`
-        ? Response.json({ id: "ent_1" }, { status: 201 })
+        ? Response.json({ items: [{ id: "pa_1" }] }, { status: 201 })
         : stepUpRequired()
     },
     "POST /me/step-up/password": (request) => {
@@ -69,9 +69,9 @@ beforeEach(async () => {
 afterEach(unmount)
 
 const grant = () =>
-  api("/merchant/customers/cus_1/entitlements", {
+  api("/merchant/product-access", {
     method: "POST",
-    body: { entitlement: "premium", hours: 24 },
+    body: { items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 24 }] },
   })
 
 async function dialogOpens() {
@@ -105,13 +105,15 @@ it("re-authenticates in AuthKit's dialog and retries the write", async () => {
   await click("Confirm")
 
   await act(async () => {
-    await expect(write).resolves.toEqual({ id: "ent_1" })
+    await expect(write).resolves.toEqual({ items: [{ id: "pa_1" }] })
   })
   expect(stepUps.map((request) => request.body)).toEqual([
     { password: "Correct-horse-1" },
   ])
   expect(grants).toHaveLength(2)
-  expect(grants[1].body).toEqual({ entitlement: "premium", hours: 24 })
+  expect(grants[1].body).toEqual({
+    items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 24 }],
+  })
   expect(session.getAccessToken()).toBe(fresh)
 })
 

@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -156,10 +155,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 			if err := r.revokeMembershipAccess(ctx, txDB, p.OriginalPaymentID); err != nil {
 				return err
 			}
-			if err := entitlements.NewEntitlementService(txDB, r.Clock).EndActiveByPayment(ctx, p.OriginalPaymentID, models.EntitlementRevokeRefund); err != nil {
-				return err
-			}
-			if _, err := productaccess.NewProductAccessGrantRepo(txDB).RevokeByPayment(ctx, p.OriginalPaymentID, r.now(), models.ProductAccessRevokeRefund); err != nil {
+			if err := entitlements.NewEntitlementService(txDB, r.Clock).EndActiveByPayment(ctx, p.OriginalPaymentID, models.AccessRevokeRefund); err != nil {
 				return err
 			}
 		}
@@ -233,7 +229,7 @@ func (r refundReservations) revokeMembershipAccess(ctx context.Context, d *db.DB
 			return err
 		}
 	}
-	return entitlements.NewEntitlementService(d, r.Clock).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, r.now(), models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace)
+	return entitlements.NewEntitlementService(d, r.Clock).RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, r.now(), models.AccessRevokeRefund, models.AccessSourceSubscription, models.AccessSourceGrace)
 }
 
 func (r refundReservations) now() time.Time {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -145,7 +144,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		if hasGrant {
 			return errors.New("reversed initial payment granted access")
 		}
-		historyTerms.Entitlements = []string{}
+		return nil
 	}
 	if p.Terms.Pending && sub.Status != models.StatusPending {
 		anyGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
@@ -192,11 +191,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	if historyTerms.Pending {
 		before = historyTerms.PeriodStart
 	}
-	limit, err := safecast.Convert[int32](len(p.Terms.Entitlements) + 2)
-	if err != nil {
-		return err
-	}
-	history, err := q.ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: op.MerchantID, SubscriptionID: p.Terms.SubscriptionID, Before: before, RowLimit: limit})
+	history, err := q.ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: op.MerchantID, SubscriptionID: p.Terms.SubscriptionID, Before: before, RowLimit: subscriptions.InitialMembershipGrantLimit})
 	if err != nil {
 		return err
 	}

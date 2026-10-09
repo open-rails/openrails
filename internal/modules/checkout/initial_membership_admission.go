@@ -160,15 +160,11 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		if delayed == nil {
 			startDate = end.Format("20060102")
 		}
-		benefits := models.CloneEntitlements(product.Entitlements)
-		if benefits == nil {
-			benefits = []string{}
-		}
 		paymentID := uuid.Nil
 		if amount > 0 {
 			paymentID = uuidutil.NewV7()
 		}
-		terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyNMISchedule, SubscriptionID: uuidutil.NewV7(), PaymentID: paymentID, CustomerID: customer, PSPID: target.Scope.ID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: saved.ID, ProductName: product.DisplayName, Amount: amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: delayed != nil, Entitlements: benefits}
+		terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyNMISchedule, SubscriptionID: uuidutil.NewV7(), PaymentID: paymentID, CustomerID: customer, PSPID: target.Scope.ID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: saved.ID, ProductName: product.DisplayName, Amount: amount, RecurringAmount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: delayed != nil}
 		email := req.Email
 		if s.Config != nil && config.IsTestMode(s.Config) {
 			email = ""

@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -325,8 +326,8 @@ func (s *StripeConvergeService) markCheckoutAttemptSucceeded(ctx context.Context
 //     (#1089 audit 11).
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
 	var (
-		updatedSub       *models.Subscription
-		oldSpec, newSpec []string
+		updatedSub *models.Subscription
+		oldProduct uuid.UUID
 	)
 	status := strings.ToLower(strings.TrimSpace(rec.Status))
 	remoteAlive := status == "active" || status == "trialing"
@@ -364,12 +365,7 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		if price == nil {
 			return nil
 		}
-		oldSpec = models.CloneEntitlements(sub.EntitlementsSnapshot)
-		if len(oldSpec) == 0 && s.ProductService != nil && sub.ProductID != uuid.Nil {
-			if product, err := s.ProductService.GetByID(ctx, sub.ProductID); err == nil {
-				oldSpec = product.Entitlements
-			}
-		}
+		oldProduct = sub.ProductID
 		sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, price.ProductID, nil
 		scope, err := merchant.Require(ctx)
 		if err != nil {
@@ -381,12 +377,6 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		}); err != nil {
 			return fmt.Errorf("stripe converge: mark scheduled reprice applied: %w", err)
 		}
-		if s.ProductService != nil {
-			if product, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
-				sub.EntitlementsSnapshot = models.CloneEntitlements(product.Entitlements)
-				newSpec = product.Entitlements
-			}
-		}
 		if err := subRepo.UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("stripe converge: write price remap: %w", err)
 		}
@@ -396,9 +386,9 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 		return err
 	}
 
-	// Downgrade revoke: entitlements the old product had that the new one lost.
-	if updatedSub != nil && len(oldSpec) > 0 {
-		return s.revokeDowngradedEntitlements(ctx, updatedSub, oldSpec, newSpec)
+	// A product move ends the old product's grace window.
+	if updatedSub != nil && oldProduct != uuid.Nil && oldProduct != updatedSub.ProductID {
+		return s.revokeMovedGrace(ctx, updatedSub, oldProduct)
 	}
 	return nil
 }
@@ -446,9 +436,9 @@ func (s *StripeConvergeService) mirrorPortalCancel(ctx context.Context, txdb *db
 	return s.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
 		EndedAt:       end,
 		CancelType:    models.CancelTypeUser,
-		RevokeReason:  models.EntitlementRevokeAdmin,
+		RevokeReason:  models.AccessRevokeAdmin,
 		RevokeAsOf:    now,
-		RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceGrace},
+		RevokeSources: []models.AccessSourceType{models.AccessSourceGrace},
 	})
 }
 
@@ -492,25 +482,13 @@ func (s *StripeConvergeService) paidPriceMove(ctx context.Context, sub *models.S
 	return price
 }
 
-func (s *StripeConvergeService) revokeDowngradedEntitlements(ctx context.Context, sub *models.Subscription, oldSpec, newSpec []string) error {
-	entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
-	oldEnts := stripeEntitlementSet(oldSpec)
-	newEnts := stripeEntitlementSet(newSpec)
-	sourceType := models.EntitlementSourceGrace
-	sourceID := sub.ID
-	for entName := range oldEnts {
-		if newEnts[entName] {
-			continue
-		}
-		if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-			UserID:      sub.CustomerID.String(),
-			Entitlement: entName,
-			SourceType:  &sourceType,
-			SourceID:    &sourceID,
-			Reason:      models.EntitlementRevokeDowngrade,
-		}); err != nil {
-			return fmt.Errorf("stripe converge: revoke downgraded entitlement %s: %w", entName, err)
-		}
+func (s *StripeConvergeService) revokeMovedGrace(ctx context.Context, sub *models.Subscription, product uuid.UUID) error {
+	sourceType := models.AccessSourceGrace
+	sourceID := sub.ID.String()
+	if err := entitlements.NewEntitlementService(s.DB, s.Clock).RevokeAccess(ctx, entitlements.RevokeAccessParams{
+		UserID: sub.CustomerID.String(), ProductID: product, SourceType: &sourceType, SourceID: &sourceID, Reason: models.AccessRevokeDowngrade,
+	}); err != nil {
+		return fmt.Errorf("stripe converge: revoke moved grace: %w", err)
 	}
 	return nil
 }

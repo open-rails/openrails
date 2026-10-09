@@ -598,12 +598,6 @@ export type CreateCreditGrantParams = {
   description?: string
 }
 
-export type CreateEntitlementParams = {
-  entitlement?: string
-  hours?: number | null
-  ends_at?: string | null
-}
-
 export type CreateFederatedGrantParams = {
   email?: string
   role?: string
@@ -693,7 +687,10 @@ export type CreateProductAccessBatchResult = {
 export type CreateProductAccessParams = {
   customer_id?: string
   product_id?: string
+  hours?: number | null
   ends_at?: string | null
+  reason?: "comp" | "import" | "migration" | "staff"
+  note?: string | null
 }
 
 export type CreateProductParams = {
@@ -807,10 +804,10 @@ export type CustomerBillingProfile = {
   customer: Customer
   balances: Balance[]
   subscriptions: Subscription[]
-  entitlements: EntitlementRecord[]
+  entitlements: ListPage<CustomerEntitlement>
   payments: Payment[]
   payment_methods: PaymentMethod[]
-  product_access: ProductAccessGrant[]
+  product_access: ListPage<ProductAccessGrant>
 }
 
 export type CustomerCancelSubscriptionParams = {
@@ -821,6 +818,10 @@ export type CustomerCancelSubscriptionParams = {
 export type CustomerChangeTierParams = {
   price_id?: string
   signature?: string
+}
+
+export type CustomerEntitlement = {
+  entitlement: string
 }
 
 export type CustomerLookup = {
@@ -987,34 +988,12 @@ export type EntitlementChange = {
   product_key: string
   added: string[]
   removed: string[]
+  holders: number
 }
 
 export type EntitlementCheck = {
   entitlements: Record<string, boolean> | null
   held: Record<string, HeldEntitlements> | null
-}
-
-export type EntitlementListParams = {
-  customer_ids?: string[]
-  at?: string
-}
-
-export type EntitlementLookup = {
-  customers: Record<string, EntitlementRecord[]> | null
-}
-
-export type EntitlementRecord = {
-  id: string
-  customer_id: string
-  entitlement: string
-  starts_at: string
-  ends_at: string | null
-  source_type: "admin" | "grace" | "purchase" | "subscription"
-  source_id: string
-  revoked_at: string | null
-  revoke_reason: string | null
-  created_at: string
-  updated_at: string
 }
 
 export type EntitlementReplacement = {
@@ -1142,11 +1121,12 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "payment.settled"
+  type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
   delinquency: DelinquencyHostEvent | null
+  product_entitlements: ProductEntitlementsChangedEvent | null
 }
 
 export type HostEventLookup = {
@@ -1482,7 +1462,7 @@ export type NotificationData = {
   reason?: string
   message?: string
   source?: string
-  entitlement?: string
+  product_id?: string
   ended_at?: string
   currency?: string
   subscription_id?: string
@@ -1931,9 +1911,12 @@ export type ProductAccessGrant = {
   product_id: string
   product_key: string
   product_name: string
-  source_type: "admin" | "grace" | "purchase" | "subscription"
+  source_type: "grace" | "grant" | "purchase" | "subscription"
   source_id: string
   payment_id: string | null
+  grant_reason: "comp" | "import" | "migration" | "staff" | null
+  granted_by: string | null
+  note: string | null
   status: string
   starts_at: string
   ends_at: string | null
@@ -1953,6 +1936,14 @@ export type ProductArchive = {
   created_at: string
   complete: boolean
   purchases: ArchivedPurchase[]
+}
+
+export type ProductEntitlementsChangedEvent = {
+  product_id: string
+  product_key: string
+  added: string[]
+  removed: string[]
+  holders: number
 }
 
 export type ProductSummary = {
@@ -2384,7 +2375,7 @@ export type Subscription = {
 
 export type SubscriptionAccess = {
   kind: string
-  entitlement: string
+  product_id: string
   source_type?: string
   source_id?: string
   subscription_id?: string

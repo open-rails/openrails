@@ -3,10 +3,8 @@ package checkout
 import (
 	"context"
 	"errors"
-	"sort"
 	"time"
 
-	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -14,11 +12,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 )
 
-// applyAcceptedPurchaseAccess uses the same grant ledger as ordinary purchases,
-// with exact accepted intervals and validation of original source windows.
-// Ordinary indefinite entitlement insertion can advance a historical NotBefore
-// to now; a delayed accepted purchase must retain its historical start.
-func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, spec []string, duration *int, accepted time.Time, coverage *CoverageInfo, ownership bool, historicalHours map[string]int) error {
+// applyAcceptedPurchaseAccess grants an accepted purchase's product for its
+// exact accepted window: from its accepted start, after any coverage it stacked
+// on, for the price's duration. A delayed settlement keeps that historical
+// start; a replay returns the recorded grant.
+func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Context, user string, product, payment uuid.UUID, duration *int, accepted time.Time, coverage *CoverageInfo) error {
 	if s.transactionDB == nil || s.transactionDB.Pool() != nil {
 		return errors.New("accepted access requires purchase transaction")
 	}
@@ -34,23 +32,12 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	if coverage != nil && coverage.EndDate != nil {
 		start = *coverage.EndDate
 	}
-	wanted, ownershipWindow := grants.PurchaseWindows(spec, duration, accepted, start, historicalHours)
-	names := make([]string, 0, len(wanted))
-	for name := range wanted {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if err := entitlements.LockEntitlementTimeline(ctx, s.transactionDB.Qx(ctx), user, name); err != nil {
-			return err
-		}
-	}
-	q := s.transactionDB.Gen(ctx)
-	limit, err := safecast.Convert[int32](len(names) + 3)
-	if err != nil {
+	window := grants.AccessWindow(duration, start)
+	if err := entitlements.LockAccessTimeline(ctx, s.transactionDB.Qx(ctx), user, product); err != nil {
 		return err
 	}
-	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: mid.UUID(), PaymentID: payment, RowLimit: limit})
+	q := s.transactionDB.Gen(ctx)
+	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: mid.UUID(), PaymentID: payment, RowLimit: 10005})
 	if err != nil {
 		return err
 	}
@@ -62,31 +49,24 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 			access = append(access, event)
 		}
 	}
-	history, err := grants.ValidatePurchaseHistory(mid.UUID(), customer, product, payment, wanted, ownershipWindow, access)
+	recorded, err := grants.RecordedPurchaseAccess(mid.UUID(), customer, product, payment, access)
 	if err != nil {
 		return err
 	}
 	ledger := grants.New(q, mid.UUID())
 	ledger.SetClock(s.now)
-	materialized := map[uuid.UUID]bool{}
-	for _, name := range names {
-		g, found := history.Entitlements[name]
-		if !found {
-			window := wanted[name]
-			g, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, Spec: &grants.Spec{Entitlements: []string{name}}, StartsAt: window.Start, EndsAt: window.End})
-			if err != nil {
-				return err
-			}
+	if recorded != nil {
+		if !grants.Migrated(*recorded) && !grants.SameWindow(*recorded, window) {
+			return errors.New("original access window contradicts accepted purchase")
 		}
-		if !materialized[g.ID] {
-			if err := ledger.MaterializeGrant(ctx, g); err != nil {
-				return err
-			}
-			materialized[g.ID] = true
-		}
+		return ledger.MaterializeGrant(ctx, *recorded)
 	}
-	if ownership && history.Ownership == nil {
-		_, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Product: &product, Kind: grants.Ownership, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, StartsAt: accepted, EndsAt: ownershipWindow.End})
+	g, _, err := ledger.GrantAccessOnce(ctx, grants.GrantInput{
+		Customer: customer, Product: &product, Kind: grants.Access, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment,
+		StartsAt: window.Start, EndsAt: window.End,
+	})
+	if err != nil {
+		return err
 	}
-	return err
+	return ledger.MaterializeGrant(ctx, g)
 }

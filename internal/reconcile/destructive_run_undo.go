@@ -76,10 +76,10 @@ type UndoPlan struct {
 	// Restorable is the per-table count of rows the apply would bring back or
 	// re-assert. Its sum is what `--expect-rows` must match.
 	Restorable map[string]int64 `json:"restorable"`
-	// EntitlementsToInvalidate are Class D rows the reverse will soft-delete so
+	// AccessToInvalidate are Class D rows the reverse will soft-delete so
 	// Converge REBUILDS them from the grant log. Not restorations, so not part
 	// of the expected count — but the operator is told.
-	EntitlementsToInvalidate int64 `json:"entitlements_to_invalidate"`
+	AccessToInvalidate int64 `json:"access_to_invalidate"`
 	// SubscriptionsTombstoned are before-images whose row a LATER prune has since
 	// soft-deleted. They belong to that run's reverse, not this one, so this undo
 	// skips them — loudly, because a silent skip is how a partial recovery gets
@@ -116,14 +116,14 @@ func (p UndoPlan) Complete() bool {
 type UndoResult struct {
 	Plan UndoPlan `json:"plan"`
 	// Restored is the actual per-table count.
-	Restored                map[string]int64   `json:"restored"`
-	EntitlementsInvalidated int64              `json:"entitlements_invalidated"`
-	IntentsSuperseded       int                `json:"intents_superseded"`
-	IntentsIrreversible     []IntentDivergence `json:"intents_irreversible,omitempty"`
-	IntentsAmbiguous        []IntentDivergence `json:"intents_ambiguous,omitempty"`
-	ProvenDomainsReset      int64              `json:"proven_domains_reset"`
-	EnforcementDisarmed     bool               `json:"enforcement_disarmed"`
-	Recomputed              bool               `json:"recomputed"`
+	Restored            map[string]int64   `json:"restored"`
+	AccessInvalidated   int64              `json:"access_invalidated"`
+	IntentsSuperseded   int                `json:"intents_superseded"`
+	IntentsIrreversible []IntentDivergence `json:"intents_irreversible,omitempty"`
+	IntentsAmbiguous    []IntentDivergence `json:"intents_ambiguous,omitempty"`
+	ProvenDomainsReset  int64              `json:"proven_domains_reset"`
+	EnforcementDisarmed bool               `json:"enforcement_disarmed"`
+	Recomputed          bool               `json:"recomputed"`
 }
 
 // Complete mirrors UndoPlan.Complete for the executed reversal.
@@ -182,14 +182,14 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		plan.Restorable["subscriptions"] = c.Subscriptions
 		plan.Restorable["payments"] = c.Payments
 		plan.Restorable["checkout_attempts"] = c.CheckoutAttempts
-		plan.Restorable["entitlements"] = c.Entitlements
+		plan.Restorable["product_access"] = c.ProductAccess
 	case DestructiveRunKindConvergeEnforce:
 		c, err := q.CountConvergeRestorableForRun(ctx, gen.CountConvergeRestorableForRunParams{MerchantID: mid, RunID: runID})
 		if err != nil {
 			return plan, fmt.Errorf("count converge-restorable rows: %w", err)
 		}
 		plan.Restorable["subscriptions"] = c.Subscriptions
-		plan.EntitlementsToInvalidate = c.EntitlementsToInvalidate
+		plan.AccessToInvalidate = c.AccessToInvalidate
 		plan.SubscriptionsTombstoned = c.SubscriptionsTombstoned
 	}
 
@@ -258,14 +258,14 @@ func UndoRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string
 		res.Restored["subscriptions"] = r.Subscriptions
 		res.Restored["payments"] = r.Payments
 		res.Restored["checkout_attempts"] = r.CheckoutAttempts
-		res.Restored["entitlements"] = r.Entitlements
+		res.Restored["product_access"] = r.ProductAccess
 	case DestructiveRunKindConvergeEnforce:
 		r, err := RollbackConvergeEnforceRun(ctx, database, runID, actor, recompute)
 		if err != nil {
 			return res, err
 		}
 		res.Restored["subscriptions"] = r.SubscriptionsRestored
-		res.EntitlementsInvalidated = r.EntitlementsInvalidated
+		res.AccessInvalidated = r.AccessInvalidated
 		res.IntentsSuperseded = r.IntentsSuperseded
 		res.IntentsIrreversible = r.IntentsIrreversible
 		res.IntentsAmbiguous = r.IntentsAmbiguous

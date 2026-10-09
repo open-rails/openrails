@@ -895,6 +895,24 @@ func (c *customer) customerID() billing.CustomerID {
 	return billing.CustomerID(uuid.MustParse(c.id))
 }
 
+// giftProduct is a product that is not for sale (no price) granting keys.
+func (w *world) giftProduct(keys ...string) billing.ProductID {
+	w.t.Helper()
+	product, err := w.client[embedded].CreateProduct(w.t.Context(), billing.CreateProductParams{Key: "gift-" + uuid.NewString()[:8], DisplayName: "Gift", Entitlements: keys})
+	require.NoError(w.t, err)
+	return product.ID
+}
+
+// grant grants the customer a product free through the host's client.
+func (c *customer) grant(product billing.ProductID, hours *int, ends *time.Time) billing.ProductAccessGrant {
+	c.w.t.Helper()
+	granted, err := c.w.client[embedded].CreateProductAccess(c.w.t.Context(), billing.CreateProductAccessBatchParams{
+		Items: []billing.CreateProductAccessParams{{CustomerID: c.customerID(), ProductID: product, Hours: hours, EndsAt: ends}},
+	})
+	require.NoError(c.w.t, err)
+	return granted[0]
+}
+
 // membership creates a monthly auto-renew product and price.
 func (w *world) membership(entitlement string, unitAmount int64) *billing.Price {
 	w.t.Helper()

@@ -849,7 +849,7 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		}
 		evidence["payment_backfilled"] = changed
 		if a.BackfillPayment.Grant != nil {
-			evidence["entitlements_granted_for"] = a.BackfillPayment.Grant.Entitlements
+			evidence["access_granted_for"] = a.BackfillPayment.Grant.ProductID.String()
 		}
 		return evidence, changed, nil
 
@@ -881,7 +881,7 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		evidence["identity_via"] = a.Materialize.IdentityVia
 		evidence["price_id"] = a.Materialize.PriceID.String()
 		evidence["status"] = a.Materialize.Status
-		evidence["entitlements_granted"] = res.EntitlementsGranted
+		evidence["access_granted"] = res.AccessGranted
 		evidence["payment_backfilled"] = res.PaymentBackfilled
 		if a.Materialize.Backfill != nil {
 			evidence["backfill_transaction_id"] = a.Materialize.Backfill.TransactionID

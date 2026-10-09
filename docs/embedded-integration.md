@@ -399,7 +399,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
-| Customers / entitlements | `EnsureCustomers`, `GetCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `CheckEntitlements`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
+| Customers / entitlements | `EnsureCustomers`, `GetCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
 | Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
@@ -421,11 +421,11 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
 receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
-ents, err := client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}})
+held, err := client.CheckEntitlements(ctx, billing.CustomerID(customerID), billing.CheckEntitlementsParams{Entitlements: []string{"premium"}})
 ```
 
-Entitlement lookups address customers by the ids your auth system already holds;
-a customer who never touched billing maps to an empty list, never an error. Deny verdicts are `(Allowed=false, nil
+Entitlement checks address customers by the ids your auth system already holds;
+a customer who never touched billing holds no keys, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
 `openrails.WithTimeout` configures the same call behavior as the remote

@@ -24,12 +24,12 @@ SELECT
         AND s.deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
-       JOIN billing.entitlements e
+       JOIN billing.product_access e
          ON e.merchant_id = b.merchant_id AND e.id = b.row_id
       WHERE b.merchant_id = $1::uuid
         AND b.destructive_run_id = $2::uuid
-        AND b.table_name = 'entitlements'
-        AND e.deleted_at IS NULL)::bigint AS entitlements_to_invalidate,
+        AND b.table_name = 'product_access'
+        AND e.deleted_at IS NULL)::bigint AS access_to_invalidate,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
        JOIN billing.subscriptions s
@@ -47,9 +47,9 @@ type CountConvergeRestorableForRunParams struct {
 }
 
 type CountConvergeRestorableForRunRow struct {
-	Subscriptions            int64
-	EntitlementsToInvalidate int64
-	SubscriptionsTombstoned  int64
+	Subscriptions           int64
+	AccessToInvalidate      int64
+	SubscriptionsTombstoned int64
 }
 
 // What `kind='converge_enforce'` would re-assert, counted through the SAME join
@@ -59,7 +59,7 @@ type CountConvergeRestorableForRunRow struct {
 func (q *Queries) CountConvergeRestorableForRun(ctx context.Context, arg CountConvergeRestorableForRunParams) (CountConvergeRestorableForRunRow, error) {
 	row := q.db.QueryRow(ctx, countConvergeRestorableForRun, arg.MerchantID, arg.RunID)
 	var i CountConvergeRestorableForRunRow
-	err := row.Scan(&i.Subscriptions, &i.EntitlementsToInvalidate, &i.SubscriptionsTombstoned)
+	err := row.Scan(&i.Subscriptions, &i.AccessToInvalidate, &i.SubscriptionsTombstoned)
 	return i, err
 }
 
@@ -78,10 +78,10 @@ SELECT
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
         AND deleted_at IS NOT NULL)::bigint AS checkout_attempts,
-    (SELECT count(*) FROM billing.entitlements
+    (SELECT count(*) FROM billing.product_access
       WHERE merchant_id = $1::uuid
         AND destructive_run_id = $2::uuid
-        AND deleted_at IS NOT NULL)::bigint AS entitlements
+        AND deleted_at IS NOT NULL)::bigint AS product_access
 `
 
 type CountPruneRestorableForRunParams struct {
@@ -93,7 +93,7 @@ type CountPruneRestorableForRunRow struct {
 	Subscriptions    int64
 	Payments         int64
 	CheckoutAttempts int64
-	Entitlements     int64
+	ProductAccess    int64
 }
 
 // or#859 tier 1: the READ side of `openrails undo-run`.
@@ -111,7 +111,7 @@ func (q *Queries) CountPruneRestorableForRun(ctx context.Context, arg CountPrune
 		&i.Subscriptions,
 		&i.Payments,
 		&i.CheckoutAttempts,
-		&i.Entitlements,
+		&i.ProductAccess,
 	)
 	return i, err
 }

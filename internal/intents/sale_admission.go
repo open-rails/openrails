@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -65,18 +64,12 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 			return err
 		}
 		if terms.AccessDurationHours == nil {
-			keys := terms.Entitlements
-			if len(grants.HistoricalEntitlementHours(terms.LegacyEntitlements)) > 0 {
-				keys = nil
+			covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutAttemptID})
+			if err != nil {
+				return err
 			}
-			if len(keys) > 0 {
-				covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, Entitlements: keys, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutAttemptID})
-				if err != nil {
-					return err
-				}
-				if covered != nil && *covered {
-					return apperr.Conflictf("all permanent benefits are already owned or reserved")
-				}
+			if covered != nil && *covered {
+				return apperr.Conflictf("all permanent benefits are already owned or reserved")
 			}
 			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, ExceptSessionID: terms.CheckoutAttemptID})
 			if err != nil {

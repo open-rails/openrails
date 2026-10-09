@@ -68,7 +68,7 @@ func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db
 type ccbillNotice struct {
 	// providerStopped: CCBill itself ended the schedule.
 	providerStopped bool
-	revoke          models.EntitlementRevokeReason
+	revoke          models.AccessRevokeReason
 	ended           subscriptions.PremiumEndReason
 	data            billing.NotificationData
 }

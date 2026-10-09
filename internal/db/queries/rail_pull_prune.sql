@@ -85,14 +85,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND deleted_at IS NULL;
 
--- name: PruneSoftDeleteEntitlementsBySubscription :execrows
-UPDATE billing.entitlements
+-- name: PruneSoftDeleteAccessBySubscription :execrows
+UPDATE billing.product_access
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND source_type = 'subscription'
-  AND source_id = sqlc.arg(subscription_id)::uuid
+  AND source_type IN ('subscription', 'grace')
+  AND source_id = sqlc.arg(subscription_id)::uuid::text
   AND deleted_at IS NULL;
 
 -- name: PruneSoftDeleteSubscriptionByID :execrows
@@ -117,7 +117,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- --- or#858 rollback ---------------------------------------------------------
 -- Keyed on the run stamp, so a whole prune reverses as a unit. Restoring only
 -- the rows THIS run took means an unrelated soft delete — an ordinary
--- entitlement revocation — is never resurrected by a rollback.
+-- access revocation — is never resurrected by a rollback.
 
 -- name: RestoreSubscriptionsByDestructiveRun :execrows
 UPDATE billing.subscriptions
@@ -134,8 +134,8 @@ UPDATE billing.checkout_attempts
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
--- name: RestoreEntitlementsByDestructiveRun :execrows
-UPDATE billing.entitlements
+-- name: RestoreAccessByDestructiveRun :execrows
+UPDATE billing.product_access
 SET deleted_at = NULL, destructive_run_id = NULL, updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.arg(run_id)::uuid;
 

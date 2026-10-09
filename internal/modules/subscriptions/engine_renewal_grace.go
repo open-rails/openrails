@@ -54,13 +54,14 @@ func EngineRenewalGrace(period time.Duration) (time.Duration, error) {
 const EngineAuthenticationWindow = time.Hour
 
 type graceWriter interface {
-	PushNewEntitlement(context.Context, entitlements.PushNewEntitlementParams) (*models.Entitlement, error)
+	PushAccess(context.Context, entitlements.PushAccessParams) (*models.ProductAccess, error)
 }
 
-// pushRenewalGrace appends explicit grace after matched paid access and billing
-// boundaries: open-ended by default, bounded when the merchant suspends held
-// renewals. Paid grants remain finite for both engine and provider schedules.
-func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, names []string, periodStart, periodEnd time.Time) error {
+// pushRenewalGrace appends explicit grace of the subscription's product after
+// matched paid access and billing boundaries: open-ended by default, bounded
+// when the merchant suspends held renewals. Paid grants remain finite for both
+// engine and provider schedules.
+func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *models.Subscription, periodStart, periodEnd time.Time) error {
 	if ent == nil || sub == nil || sub.CanceledAt != nil || !lifecycle.Status(sub.Status).Live() || !accessMatchesBillingPeriod(sub, periodStart, periodEnd) {
 		return nil
 	}
@@ -74,14 +75,12 @@ func pushRenewalGrace(ctx context.Context, d *db.DB, ent graceWriter, sub *model
 	}
 	start := *accessEnd(periodStart, sub.AccessDurationHoursSnapshot)
 	end := start.Add(grace)
-	for _, name := range names {
-		p := entitlements.PushNewEntitlementParams{UserID: sub.CustomerID.String(), Entitlement: name, NotBefore: &start, EndsAt: &end, SourceType: models.EntitlementSourceGrace, SourceID: sub.ID}
-		if !policy.SuspendWhenHeld {
-			p.EndsAt, p.Indefinite = nil, true
-		}
-		if _, err := ent.PushNewEntitlement(ctx, p); err != nil {
-			return fmt.Errorf("grant renewal grace %s: %w", name, err)
-		}
+	p := entitlements.PushAccessParams{UserID: sub.CustomerID.String(), ProductID: sub.ProductID, NotBefore: &start, EndsAt: &end, SourceType: models.AccessSourceGrace, SourceID: sub.ID.String()}
+	if !policy.SuspendWhenHeld {
+		p.EndsAt, p.Indefinite = nil, true
+	}
+	if _, err := ent.PushAccess(ctx, p); err != nil {
+		return fmt.Errorf("grant renewal grace %s: %w", sub.ID, err)
 	}
 	return nil
 }
@@ -96,5 +95,5 @@ func (s *SubscriptionLifecycleService) EnsureRenewalGrace(ctx context.Context, d
 	if sub.Status == models.StatusPastDue || sub.Status == models.StatusAwaitingMethod {
 		return s.dunningAccess(ctx, d, s.newLifecycleEntitlementService(d), sub, s.now())
 	}
-	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, sub.EntitlementsSnapshot, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
+	return pushRenewalGrace(ctx, d, s.newLifecycleEntitlementService(d), sub, *sub.CurrentPeriodStartsAt, *sub.CurrentPeriodEndsAt)
 }

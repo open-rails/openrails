@@ -96,14 +96,6 @@ func IntPtrTo32(v *int) *int32 {
 	return &i
 }
 
-func RevokeReasonPtr(r *EntitlementRevokeReason) *string {
-	if r == nil {
-		return nil
-	}
-	s := string(*r)
-	return &s
-}
-
 func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	m := &Payment{
 		ID:                p.ID,
@@ -135,12 +127,6 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 		return nil, err
 	}
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payments.metadata"); err != nil {
-		return nil, err
-	}
-	if err := FromJSONB(p.LegacyEntitlementHours, &m.LegacyEntitlementHours, "payments.legacy_entitlement_hours"); err != nil {
-		return nil, err
-	}
-	if err := FromJSONB(p.EntitlementsSnapshot, &m.EntitlementsSnapshot, "payments.entitlements_snapshot"); err != nil {
 		return nil, err
 	}
 	if err := FromJSONB(p.CreditGrantSnapshot, &m.CreditGrantSnapshot, "payments.credit_grant_snapshot"); err != nil {
@@ -244,9 +230,6 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		m.CancelType = &ct
 	}
 	m.RememberLifecycle()
-	if err := FromJSONB(s.EntitlementsSnapshot, &m.EntitlementsSnapshot, "subscriptions.entitlements_snapshot"); err != nil {
-		return nil, err
-	}
 	return m, nil
 }
 
@@ -345,38 +328,6 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 		m.RoutingReason = &reason
 	}
 	return m, nil
-}
-
-func EntitlementFromGen(e gen.BillingEntitlement) *Entitlement {
-	sourceID := e.SourceID
-	m := &Entitlement{
-		ID:          e.ID,
-		MerchantID:  e.MerchantID,
-		CustomerID:  e.CustomerID,
-		Entitlement: e.Entitlement,
-		GrantID:     e.GrantID,
-		StartsAt:    e.StartsAt,
-		EndsAt:      e.EndsAt,
-		SourceID:    &sourceID,
-		SourceType:  EntitlementSourceType(e.SourceType),
-		RevokedAt:   e.RevokedAt,
-		CreatedAt:   e.CreatedAt,
-		UpdatedAt:   e.UpdatedAt,
-		DeletedAt:   e.DeletedAt,
-	}
-	if e.RevokeReason != nil {
-		rr := EntitlementRevokeReason(*e.RevokeReason)
-		m.RevokeReason = &rr
-	}
-	return m
-}
-
-func EntitlementsFromGen(rows []gen.BillingEntitlement) []Entitlement {
-	out := make([]Entitlement, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, *EntitlementFromGen(r))
-	}
-	return out
 }
 
 // NotificationFromGen maps a generated notifications row onto the model.

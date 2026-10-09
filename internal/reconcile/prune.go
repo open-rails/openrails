@@ -44,7 +44,7 @@ type PruneResult struct {
 	Payments               int
 	PaymentsSkipped        int // excess but with protected dependents
 	CheckoutAttempts       int // dependents soft-deleted with their subscription
-	Entitlements           int
+	ProductAccess          int
 	SubscriptionIDs        []uuid.UUID
 	SkippedSubscriptionIDs []uuid.UUID
 	PaymentIDs             []uuid.UUID
@@ -278,7 +278,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 			if e != nil {
 				return e
 			}
-			ent, e := tq.PruneSoftDeleteEntitlementsBySubscription(ctx, gen.PruneSoftDeleteEntitlementsBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
+			ent, e := tq.PruneSoftDeleteAccessBySubscription(ctx, gen.PruneSoftDeleteAccessBySubscriptionParams{MerchantID: mid, SubscriptionID: subID, Now: now, RunID: runID})
 			if e != nil {
 				return e
 			}
@@ -286,7 +286,7 @@ func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, p
 				return e
 			}
 			res.CheckoutAttempts += int(cs)
-			res.Entitlements += int(ent)
+			res.ProductAccess += int(ent)
 			return nil
 		}); err != nil {
 			return res, finishRunFailed(ctx, q, mid, runID, res, fmt.Errorf("prune excess subscription %s: %w", subID, err))
@@ -311,7 +311,7 @@ func affectedJSON(res PruneResult) []byte {
 		"subscriptions":     res.Subscriptions,
 		"payments":          res.Payments,
 		"checkout_attempts": res.CheckoutAttempts,
-		"entitlements":      res.Entitlements,
+		"product_access":    res.ProductAccess,
 	})
 	return b
 }
@@ -334,7 +334,7 @@ type RollbackResult struct {
 	Subscriptions    int64
 	Payments         int64
 	CheckoutAttempts int64
-	Entitlements     int64
+	ProductAccess    int64
 }
 
 // RollbackDestructiveRun reverses one prune run by id: every row that run
@@ -394,7 +394,7 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 		if res.CheckoutAttempts, e = tq.RestoreCheckoutAttemptsByDestructiveRun(ctx, gen.RestoreCheckoutAttemptsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
 			return fmt.Errorf("restore checkout attempts: %w", e)
 		}
-		if res.Entitlements, e = tq.RestoreEntitlementsByDestructiveRun(ctx, gen.RestoreEntitlementsByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
+		if res.ProductAccess, e = tq.RestoreAccessByDestructiveRun(ctx, gen.RestoreAccessByDestructiveRunParams{MerchantID: mid, RunID: runID, Now: now}); e != nil {
 			return fmt.Errorf("restore entitlements: %w", e)
 		}
 		if _, e = tq.MarkDestructiveRunReversed(ctx, gen.MarkDestructiveRunReversedParams{MerchantID: mid, ID: runID, Now: now, ReversedBy: actor}); e != nil {

@@ -98,7 +98,9 @@ products:
 	}
 }
 
-func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
+// A purchase is access to the product: its holders follow every edit of the
+// product's keys. The accepted order replays unchanged.
+func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 	w := newWorld(t)
 	for _, topology := range []topology{embedded, remote} {
 		t.Run(string(topology), func(t *testing.T) {
@@ -149,9 +151,9 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			replayed, err := charge.CreateCheckoutAttempt(t.Context(), request)
 			require.NoError(t, err, "an accepted purchase must replay after its live product changes")
 			require.Equal(t, initial.ID, replayed.ID)
-			require.True(t, customer.entitled("post:101"))
-			require.True(t, customer.entitled("premium"))
-			require.False(t, customer.entitled("post:202"), "a product edit cannot rewrite accepted benefits")
+			require.True(t, customer.entitled("post:202"), "a key added to the product reaches its holder")
+			require.False(t, customer.entitled("post:101"), "a key removed from the product leaves its holder")
+			require.False(t, customer.entitled("premium"))
 
 			next := w.newCustomer()
 			nextMethod := next.saveCard("nmi", visa)
@@ -167,23 +169,11 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			require.False(t, next.entitled("premium"))
 			_, err = client.UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{})})
 			require.NoError(t, err)
-			require.True(t, customer.entitled("premium"), "clearing the live catalog does not revoke an earlier purchase")
-			require.True(t, next.entitled("post:202"))
-
-			empty := w.newCustomer()
-			emptyMethod := empty.saveCard("nmi", visa)
-			request.Customer, request.Entitlement = empty.identity(), ""
-			request.IdempotencyKey = "empty-opaque-purchase-" + uuid.NewString()
-			request.PaymentOptions.PaymentMethodID = pmid(emptyMethod)
-			emptyPurchase, err := charge.CreateCheckoutAttempt(t.Context(), request)
+			require.False(t, customer.entitled("post:202"), "a product without keys grants none")
+			require.False(t, next.entitled("post:202"))
+			access, err := client.CheckProductAccess(t.Context(), customer.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
 			require.NoError(t, err)
-			require.Equal(t, billing.CheckoutAttemptSucceeded, emptyPurchase.Status)
-			require.NotNil(t, emptyPurchase.PaymentID)
-			var accepted []byte
-			require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT entitlements_snapshot FROM billing.payments WHERE id=$1`), emptyPurchase.PaymentID.UUID()).Scan(&accepted))
-			require.JSONEq(t, `[]`, string(accepted), "an accepted empty list must not become an unknown snapshot")
-			require.False(t, empty.entitled("post:202"))
-			require.False(t, empty.entitled(product.Key), "an empty list must not imply the product key")
+			require.True(t, access[product.ID.String()], "the customer still holds the product")
 		})
 	}
 }
@@ -197,15 +187,10 @@ func TestCheckEntitlementsAnswersEveryKey(t *testing.T) {
 	staff := w.client[embedded]
 	start := w.clock.Now()
 	day, soon := 24, start.Add(time.Hour)
-	grant := func(params billing.CreateEntitlementParams) billing.EntitlementID {
-		record, err := staff.CreateEntitlement(t.Context(), c.customerID(), params)
-		require.NoError(t, err)
-		return record.ID
-	}
-	grant(billing.CreateEntitlementParams{Entitlement: "check:active", Hours: &day})
-	grant(billing.CreateEntitlementParams{Entitlement: "check:expired", EndsAt: &soon})
-	revoked := grant(billing.CreateEntitlementParams{Entitlement: "check:revoked", Hours: &day})
-	require.NoError(t, staff.DeleteEntitlement(t.Context(), c.customerID(), revoked))
+	c.grant(w.giftProduct("check:active"), &day, nil)
+	c.grant(w.giftProduct("check:expired"), nil, &soon)
+	revoked := c.grant(w.giftProduct("check:revoked"), &day, nil)
+	require.NoError(t, staff.DeleteProductAccess(t.Context(), c.customerID(), revoked.ID))
 	w.advance(2 * time.Hour)
 
 	keys := []string{"check:active", "check:expired", "check:revoked", "check:unknown", "check:active"}
@@ -220,8 +205,8 @@ func TestCheckEntitlementsAnswersEveryKey(t *testing.T) {
 		})
 		require.Equal(t, map[string]bool{"check:active": true, "check:expired": false, "check:revoked": false, "check:unknown": false}, got.Entitlements, tp)
 		require.Empty(t, got.Held, "no prefix was asked")
-		require.Equal(t, 1, queries["CheckResourceEntitlements"], "every key in one query: %v", queries)
-		require.Zero(t, queries["ListHeldEntitlementsByPrefix"], "no prefix, no range read: %v", queries)
+		require.Equal(t, 1, queries["CheckDerivedEntitlements"], "every key in one query: %v", queries)
+		require.Zero(t, queries["ListDerivedEntitlementsByPrefix"], "no prefix, no range read: %v", queries)
 
 		past, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys, At: start.Add(30 * time.Minute)})
 		require.NoError(t, err)

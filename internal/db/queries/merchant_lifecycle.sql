@@ -21,11 +21,11 @@ SELECT count(*) FROM billing.subscriptions WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsSubscriptions :exec
 DELETE FROM billing.subscriptions WHERE merchant_id = $1;
 
--- name: CountMerchantRowsEntitlements :one
-SELECT count(*) FROM billing.entitlements WHERE merchant_id = $1;
+-- name: CountMerchantRowsProductAccess :one
+SELECT count(*) FROM billing.product_access WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsEntitlements :exec
-DELETE FROM billing.entitlements WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsProductAccess :exec
+DELETE FROM billing.product_access WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsPayments :one
 SELECT count(*) FROM billing.payments WHERE merchant_id = $1;

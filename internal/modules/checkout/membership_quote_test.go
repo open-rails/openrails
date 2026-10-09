@@ -37,12 +37,12 @@ func TestInitialMembershipQuote(t *testing.T) {
 	require.NoError(t, json.Unmarshal(encoded, &restored))
 	quoted, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
-	require.Equal(t, []string{"quota"}, quoted.Entitlements)
+	require.Nil(t, quoted.Entitlements, "a quote admits its product, not keys")
 	require.Equal(t, 720*time.Hour, quoted.PeriodEnd.Sub(quoted.PeriodStart))
 
 	view := (&CheckoutAttemptService{}).sessionToResponse(&restored)
 	require.Equal(t, "Quoted membership", view.MembershipQuote.ProductName)
-	view.MembershipQuote.Entitlements[0] = "changed"
+	view.MembershipQuote.ProductName = "changed"
 	again, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
 	require.Equal(t, quoted, again, "the display projection cannot mutate the accepted quote")

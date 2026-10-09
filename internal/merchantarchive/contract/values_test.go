@@ -18,6 +18,24 @@ func profile(t *testing.T, name string) Profile {
 	return Profile{}
 }
 
+// legacyRow fills a full row of a version 1 profile; unnamed columns are SQL
+// NULL.
+func legacyRow(t *testing.T, p Profile, fields map[string]string) []*string {
+	t.Helper()
+	values := make([]*string, len(p.Columns))
+	for i, c := range p.Columns {
+		if v, ok := fields[c.Name]; ok {
+			values[i] = &v
+		}
+	}
+	for f := range fields {
+		if value(p, values, f) == nil {
+			t.Fatalf("%s has no column %s", p.Name, f)
+		}
+	}
+	return values
+}
+
 // row fills a full production profile; unnamed columns are SQL NULL.
 func row(t *testing.T, name string, fields map[string]string) (Profile, []*string) {
 	t.Helper()

@@ -1,40 +1,43 @@
-// Package productaccess implements durable, application-facing product
-// ownership/access grants (issue #250). It is DISTINCT from feature entitlements
-// (billing.entitlements): a product access grant answers "does this user own
-// product X?" and powers purchased-library views, while entitlements model
-// feature windows ("premium", "api_access"). A product may carry Entitlements
-// and produce a grant.
+// Package productaccess grants products for free and reads the products
+// customers hold. A product's keys follow it: a granted holder derives the
+// product's current keys like a buyer.
 package productaccess
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// Service owns the product-access-grant lifecycle.
+// ErrProductNotFound: a grant names no product of the merchant.
+var ErrProductNotFound = apperr.New(http.StatusNotFound, "resource_not_found", "product not found")
+
+// ErrIdempotencyKeyReused: the key already granted another customer or product.
+var ErrIdempotencyKeyReused = apperr.New(http.StatusConflict, "idempotency_key_reused", "idempotency key already granted another product or customer")
+
+// Service owns free product grants and product access reads.
 type Service struct {
 	db    *db.DB
-	repo  *ProductAccessGrantRepo
 	clock clockwork.Clock
 }
 
 func NewService(database *db.DB, clocks ...clockwork.Clock) *Service {
-	return &Service{
-		db:    database,
-		repo:  NewProductAccessGrantRepo(database),
-		clock: timeutil.FirstClock(clocks...),
-	}
+	return &Service{db: database, clock: timeutil.FirstClock(clocks...)}
 }
 
 // SetClock overrides the service clock (tests).
@@ -47,222 +50,97 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// withTx runs fn inside a merchant-scoped transaction (MerchantTx pins the
-// openrails.merchant_id GUC as the first statement). repo calls inside fn use the
-// tx-scoped repo so they ride that transaction.
-func (s *Service) withTx(ctx context.Context, fn func(ctx context.Context, r *ProductAccessGrantRepo) error) error {
+// Grant is one free product grant. Exactly one of EndsAt and Hours, or
+// neither for an indefinite grant. Hours extends after the customer's latest
+// live window of the product.
+type Grant struct {
+	CustomerID     uuid.UUID
+	ProductID      uuid.UUID
+	StartsAt       *time.Time
+	EndsAt         *time.Time
+	Hours          *int
+	Reason         grants.GrantReason
+	Note           *string
+	IdempotencyKey string
+	Actor          string
+}
+
+// GrantProduct records one free grant once per idempotency key. A replay
+// returns the recorded window and created=false.
+func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAccess, bool, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("product access service not initialized")
+		return nil, false, fmt.Errorf("product access service not initialized")
 	}
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		return fn(ctx, NewProductAccessGrantRepo(s.db.NewWithPgxTx(tx)))
-	})
-}
-
-// GrantParams describes a product access grant request.
-type GrantParams struct {
-	UserID     string
-	ProductID  uuid.UUID
-	SourceType models.ProductAccessSourceType
-	// SourceID is the idempotency key component (payment id, admin grant id,
-	// subscription id as text). Re-granting the same SourceID is a no-op.
-	SourceID  string
-	PaymentID *uuid.UUID
-	// StartsAt defaults to the observed grant time; accepted purchases retain their window.
-	StartsAt *time.Time
-	// EndsAt nil => indefinite / durable ownership.
-	EndsAt *time.Time
-}
-
-// GrantProductAccess creates a durable grant. It is IDEMPOTENT: re-granting the
-// same (user, product, source) returns the existing grant unchanged. Returns the
-// grant and whether it was newly created.
-func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*models.ProductAccessGrant, bool, error) {
-	if err := validGrant(params); err != nil {
-		return nil, false, err
-	}
-	var out *models.ProductAccessGrant
-	created := false
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		var err error
-		out, created, err = grantInTx(ctx, r, params, s.now().UTC())
-		return err
-	})
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	return out, created, nil
-}
-
-// GrantProductAccessBatch makes every grant in one transaction, each as
-// GrantProductAccess would: all or none, in request order.
-func (s *Service) GrantProductAccessBatch(ctx context.Context, batch []GrantParams) ([]*models.ProductAccessGrant, error) {
-	for _, params := range batch {
-		if err := validGrant(params); err != nil {
-			return nil, err
+	recorded, err := s.db.Gen(ctx).GetAccessGrantByIdempotencyKey(ctx, gen.GetAccessGrantByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: g.IdempotencyKey})
+	if err == nil {
+		if recorded.CustomerID != g.CustomerID || recorded.ProductID == nil || *recorded.ProductID != g.ProductID {
+			return nil, false, ErrIdempotencyKeyReused
 		}
-	}
-	out := make([]*models.ProductAccessGrant, len(batch))
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		now := s.now().UTC()
-		for i, params := range batch {
-			grant, _, err := grantInTx(ctx, r, params, now)
-			if err != nil {
-				return err
-			}
-			out[i] = grant
+		window, err := s.db.Gen(ctx).GetProductAccessByGrant(ctx, gen.GetProductAccessByGrantParams{MerchantID: mid.UUID(), GrantID: recorded.ID})
+		if err != nil {
+			return nil, false, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		return models.ProductAccessFromGen(window), false, nil
 	}
-	return out, nil
-}
-
-func validGrant(params GrantParams) error {
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, err
+	}
+	if _, err := s.db.Gen(ctx).GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: mid.UUID(), ID: g.ProductID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, ErrProductNotFound
+		}
+		return nil, false, err
+	}
+	if err := db.EnsureCustomerRowQ(ctx, s.db.Gen(ctx), mid.UUID(), g.CustomerID); err != nil {
+		return nil, false, err
+	}
+	p := entitlements.PushAccessParams{
+		UserID: g.CustomerID.String(), CustomerID: g.CustomerID, ProductID: g.ProductID, NotBefore: g.StartsAt,
+		SourceType: models.AccessSourceGrant, SourceID: g.IdempotencyKey,
+		Actor: g.Actor, GrantReason: g.Reason, Note: g.Note,
+	}
 	switch {
-	case params.UserID == "":
-		return errors.New("user_id is required")
-	case params.ProductID == uuid.Nil:
-		return errors.New("product_id is required")
-	case params.SourceType == "":
-		return errors.New("source_type is required")
+	case g.Hours != nil:
+		d := time.Duration(*g.Hours) * time.Hour
+		p.Duration = &d
+	case g.EndsAt != nil:
+		p.EndsAt = g.EndsAt
+	default:
+		p.Indefinite = true
 	}
-	return nil
-}
-
-func grantInTx(ctx context.Context, r *ProductAccessGrantRepo, params GrantParams, now time.Time) (*models.ProductAccessGrant, bool, error) {
-	existing, err := r.GetBySource(ctx, params.UserID, params.ProductID, params.SourceID)
+	ents := entitlements.NewEntitlementService(s.db, s.clock)
+	window, err := ents.PushAccess(ctx, p)
 	if err != nil {
-		return nil, false, fmt.Errorf("check existing grant: %w", err)
+		return nil, false, err
 	}
-	if existing != nil {
-		return existing, false, nil
+	if window == nil || window.SourceID != g.IdempotencyKey || window.CustomerID != g.CustomerID || window.ProductID != g.ProductID {
+		return nil, false, ErrIdempotencyKeyReused
 	}
-	var endsAt *time.Time
-	if params.EndsAt != nil {
-		e := params.EndsAt.UTC()
-		endsAt = &e
-	}
-	start := now
-	if params.StartsAt != nil {
-		start = params.StartsAt.UTC()
-	}
-	grant := &models.ProductAccessGrant{
-		CustomerID: identity.CustomerIDFromString(params.UserID).UUID(),
-		ProductID:  params.ProductID,
-		SourceType: params.SourceType,
-		SourceID:   params.SourceID,
-		PaymentID:  params.PaymentID,
-		Status:     models.ProductAccessStatusActive,
-		StartsAt:   start,
-		EndsAt:     endsAt,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-	if err := r.Insert(ctx, grant); err != nil {
-		return nil, false, fmt.Errorf("insert grant: %w", err)
-	}
-	return grant, true, nil
+	return window, true, nil
 }
 
-// GetGrant returns a single grant by id (merchant-scoped), or nil if not found.
-func (s *Service) GetGrant(ctx context.Context, grantID uuid.UUID) (*models.ProductAccessGrant, error) {
-	var grant *models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		g, e := r.GetByID(ctx, grantID)
-		if e != nil {
-			return e
-		}
-		grant = g
-		return nil
-	})
-	return grant, err
-}
-
-// RevokeProductAccess revokes a single grant by id. Not-found / already-revoked
-// is reported via found=false (not an error) so callers can stay idempotent.
-func (s *Service) RevokeProductAccess(ctx context.Context, grantID uuid.UUID, reason models.ProductAccessRevokeReason) (found bool, err error) {
-	now := s.now().UTC()
-	err = s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		n, e := r.RevokeByID(ctx, grantID, now, reason)
-		if e != nil {
-			return e
-		}
-		found = n > 0
-		return nil
-	})
-	return found, err
-}
-
-// RevokeProductAccessByPayment revokes all active grants tied to a payment.
-// Used by the refund / chargeback reversal path. Returns the number revoked.
-func (s *Service) RevokeProductAccessByPayment(ctx context.Context, paymentID uuid.UUID, reason models.ProductAccessRevokeReason) (int64, error) {
-	now := s.now().UTC()
-	var n int64
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		count, e := r.RevokeByPayment(ctx, paymentID, now, reason)
-		if e != nil {
-			return e
-		}
-		n = count
-		return nil
-	})
-	return n, err
-}
-
-// HasProductAccess reports whether the user currently has active access to the
-// product.
-func (s *Service) HasProductAccess(ctx context.Context, userID string, productID uuid.UUID) (bool, error) {
-	if userID == "" || (productID == uuid.UUID{}) {
+// RevokeProductAccess revokes one of the customer's windows. Not found or
+// already revoked reports found=false so callers stay idempotent.
+func (s *Service) RevokeProductAccess(ctx context.Context, customer, accessID uuid.UUID, reason models.AccessRevokeReason) (found bool, err error) {
+	ents := entitlements.NewEntitlementService(s.db, s.clock)
+	window, err := ents.GetAccessByID(ctx, accessID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	at := s.now().UTC()
-	var ok bool
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		has, e := r.HasActiveAccess(ctx, userID, productID, at)
-		if e != nil {
-			return e
-		}
-		ok = has
-		return nil
-	})
-	return ok, err
+	if err != nil {
+		return false, err
+	}
+	if window.CustomerID != customer || window.RevokedAt != nil {
+		return false, nil
+	}
+	return true, ents.RevokeGrantedAccess(ctx, window, reason)
 }
 
-// ListAccessibleProducts returns the user's currently-active product access
-// grants, most recent first.
-func (s *Service) ListAccessibleProducts(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
-	at := s.now().UTC()
-	var grants []models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		out, e := r.ListActiveByUser(ctx, userID, at)
-		if e != nil {
-			return e
-		}
-		grants = out
-		return nil
-	})
-	return grants, err
-}
-
-// ListAllGrantsByUser returns ALL grants (active + revoked) for a user, most
-// recent first. Used by admin views.
-func (s *Service) ListAllGrantsByUser(ctx context.Context, userID string) ([]models.ProductAccessGrant, error) {
-	var grants []models.ProductAccessGrant
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		out, e := r.ListByUser(ctx, userID)
-		if e != nil {
-			return e
-		}
-		grants = out
-		return nil
-	})
-	return grants, err
-}
-
-// CheckProducts computes one bounded set of current access decisions.
+// CheckProducts answers, for each product, whether the customer holds it now.
 func (s *Service) CheckProducts(ctx context.Context, userID string, products []uuid.UUID) (map[uuid.UUID]bool, error) {
 	if len(products) > 100 {
 		return nil, errors.New("at most 100 product IDs are allowed")
@@ -272,37 +150,99 @@ func (s *Service) CheckProducts(ctx context.Context, userID string, products []u
 			return nil, errors.New("product ID is required")
 		}
 	}
+	result := make(map[uuid.UUID]bool, len(products))
 	if len(products) == 0 {
-		return map[uuid.UUID]bool{}, nil
+		return result, nil
 	}
-	var result map[uuid.UUID]bool
-	at := s.now().UTC()
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		var err error
-		result, err = r.CheckActiveProducts(ctx, userID, products, at)
-		return err
-	})
-	return result, err
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, AtTime: s.now().UTC()})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ProductID] = row.HasAccess
+	}
+	return result, nil
 }
 
-// ListAccessibleProductsPage returns current ownership grants in stable ID order.
-func (s *Service) ListAccessibleProductsPage(ctx context.Context, userID string, after uuid.UUID, limit int) ([]models.ProductAccessGrant, bool, error) {
-	if limit < 1 || limit > 100 {
-		return nil, false, errors.New("limit must be between 1 and 100")
+// HasPermanentAccess reports whether the customer holds the product
+// indefinitely now.
+func (s *Service) HasPermanentAccess(ctx context.Context, customer, product uuid.UUID) (bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
 	}
-	var result []models.ProductAccessGrant
-	at := s.now().UTC()
-	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		var err error
-		result, err = r.ListActivePage(ctx, userID, after, limit+1, at)
-		return err
+	return s.db.Gen(ctx).HasPermanentProductAccess(ctx, gen.HasPermanentProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductID: product, AtTime: s.now().UTC()})
+}
+
+// ListPage returns one page of the customer's windows, newest first: those
+// live now when liveOnly, else every window that was not removed. more:
+// another page follows.
+func (s *Service) ListPage(ctx context.Context, customer uuid.UUID, after *uuid.UUID, limit int, liveOnly bool) ([]gen.ListProductAccessPageRow, bool, error) {
+	if limit < 1 || limit > 500 {
+		return nil, false, errors.New("limit must be between 1 and 500")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := s.db.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{
+		MerchantID: mid.UUID(), CustomerID: customer, LiveOnly: liveOnly, AtTime: s.now().UTC(), AfterID: after, FetchLimit: int32(limit + 1),
 	})
 	if err != nil {
 		return nil, false, err
 	}
-	hasMore := len(result) > limit
-	if hasMore {
-		result = result[:limit]
+	if len(rows) > limit {
+		return rows[:limit], true, nil
 	}
-	return result, hasMore, nil
+	return rows, false, nil
+}
+
+// GrantProducts records free grants all or none, in one transaction, and
+// returns each window with its product and grant attribution, in order.
+func (s *Service) GrantProducts(ctx context.Context, batch []Grant) ([]gen.ListProductAccessPageRow, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("product access service not initialized")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []gen.ListProductAccessPageRow
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		bound := NewService(s.db.NewWithPgxTx(tx), s.clock)
+		ids := make([]uuid.UUID, len(batch))
+		for i, g := range batch {
+			window, _, err := bound.GrantProduct(ctx, g)
+			if err != nil {
+				return err
+			}
+			ids[i] = window.ID
+		}
+		views, err := gen.New(tx).ListProductAccessViews(ctx, gen.ListProductAccessViewsParams{MerchantID: mid.UUID(), Ids: ids})
+		if err != nil {
+			return err
+		}
+		byID := make(map[uuid.UUID]gen.ListProductAccessPageRow, len(views))
+		for _, v := range views {
+			byID[v.ID] = gen.ListProductAccessPageRow(v)
+		}
+		out = make([]gen.ListProductAccessPageRow, len(ids))
+		for i, id := range ids {
+			view, ok := byID[id]
+			if !ok {
+				return fmt.Errorf("granted window %s vanished", id)
+			}
+			out[i] = view
+		}
+		return nil
+	})
+	return out, err
 }

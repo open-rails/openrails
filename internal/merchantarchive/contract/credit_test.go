@@ -17,6 +17,9 @@ func TestReadPreCreditCatalogRows(t *testing.T) {
 				continue
 			}
 			p, values := row(t, table, map[string]string{"merchant_id": testMerchant, "id": "10000000-0000-0000-0000-000000000099"})
+			if table == "payments" {
+				values = legacyRow(t, LegacyPayments, map[string]string{"merchant_id": testMerchant, "id": "10000000-0000-0000-0000-000000000099"})
+			}
 			if table == "products" {
 				// Pre-credit products carried their keys.
 				values = legacyProduct(map[string]string{"merchant_id": testMerchant, "id": "10000000-0000-0000-0000-000000000099", "created_at": "2026-09-01 00:00:00+00"})
@@ -32,9 +35,9 @@ func TestReadPreCreditCatalogRows(t *testing.T) {
 				}
 			}
 			var artifact bytes.Buffer
-			writer, err := archivewire.NewWriter(&artifact, testMerchant)
+			writer, err := archivewire.NewVersionWriter(&artifact, 1, testMerchant)
 			require.NoError(t, err)
-			for _, profile := range Profiles {
+			for _, profile := range ProfilesFor(1) {
 				if table == "products" && profile.Name == "product_entitlements" {
 					continue
 				}

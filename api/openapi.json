@@ -4549,27 +4549,74 @@
         ]
       }
     },
-    "/v1/merchant/entitlements/lookup": {
-      "post": {
+    "/v1/merchant/customers/{customer_id}/entitlements": {
+      "get": {
         "tags": [
           "merchant"
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EntitlementListParams"
-              }
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
-        },
+        ],
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EntitlementLookup"
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CustomerEntitlement"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
                 }
               }
             }
@@ -4586,7 +4633,9 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
+          "invalid_cursor",
           "invalid_param",
+          "invalid_query",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -4875,6 +4924,13 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -4929,117 +4985,19 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/entitlements": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateEntitlementParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitlementRecord"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-operation-limit": "grant",
-        "x-openrails-errors": [
-          "invalid_param",
-          "permanent_grant_forbidden",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/{customer_id}/entitlements/{id}": {
-      "delete": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/merchant/product-access": {
       "post": {
         "tags": [
           "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -5075,8 +5033,10 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "authentication_required",
+          "idempotency_key_reused",
           "invalid_param",
           "permanent_grant_forbidden",
+          "resource_not_found",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
@@ -5146,6 +5106,27 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5159,7 +5140,87 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/EntitlementRecord"
+                        "$ref": "#/components/schemas/CustomerEntitlement"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-customer-scope": "billing_management",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_cursor",
+          "invalid_param",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/me/product-access": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProductAccessGrant"
                       }
                     },
                     "next_cursor": {
@@ -15972,35 +16033,6 @@
           }
         }
       },
-      "CreateEntitlementParams": {
-        "type": "object",
-        "properties": {
-          "entitlement": {
-            "type": "string"
-          },
-          "hours": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "ends_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        }
-      },
       "CreateFederatedGrantParams": {
         "type": "object",
         "properties": {
@@ -16281,11 +16313,40 @@
           "product_id": {
             "type": "string"
           },
+          "hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ends_at": {
             "oneOf": [
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "comp",
+              "import",
+              "migration",
+              "staff"
+            ]
+          },
+          "note": {
+            "oneOf": [
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -16813,10 +16874,25 @@
             }
           },
           "entitlements": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EntitlementRecord"
-            }
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CustomerEntitlement"
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "next_cursor"
+            ]
           },
           "payments": {
             "type": "array",
@@ -16831,10 +16907,25 @@
             }
           },
           "product_access": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProductAccessGrant"
-            }
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProductAccessGrant"
+                }
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "next_cursor"
+            ]
           }
         },
         "required": [
@@ -16868,6 +16959,17 @@
             "type": "string"
           }
         }
+      },
+      "CustomerEntitlement": {
+        "type": "object",
+        "properties": {
+          "entitlement": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entitlement"
+        ]
       },
       "CustomerLookup": {
         "type": "object",
@@ -17455,13 +17557,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "holders": {
+            "type": "integer"
           }
         },
         "required": [
           "product_id",
           "product_key",
           "added",
-          "removed"
+          "removed",
+          "holders"
         ]
       },
       "EntitlementCheck": {
@@ -17497,128 +17603,6 @@
         "required": [
           "entitlements",
           "held"
-        ]
-      },
-      "EntitlementListParams": {
-        "type": "object",
-        "properties": {
-          "customer_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "EntitlementLookup": {
-        "type": "object",
-        "properties": {
-          "customers": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/EntitlementRecord"
-                  }
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "customers"
-        ]
-      },
-      "EntitlementRecord": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "entitlement": {
-            "type": "string"
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "ends_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source_type": {
-            "type": "string",
-            "enum": [
-              "admin",
-              "grace",
-              "purchase",
-              "subscription"
-            ]
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "revoked_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revoke_reason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "customer_id",
-          "entitlement",
-          "starts_at",
-          "ends_at",
-          "source_type",
-          "source_id",
-          "revoked_at",
-          "revoke_reason",
-          "created_at",
-          "updated_at"
         ]
       },
       "EntitlementReplacement": {
@@ -18144,7 +18128,8 @@
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
-              "payment.settled"
+              "payment.settled",
+              "product.entitlements_changed"
             ]
           },
           "occurred_at": {
@@ -18181,6 +18166,16 @@
                 "type": "null"
               }
             ]
+          },
+          "product_entitlements": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProductEntitlementsChangedEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -18190,7 +18185,8 @@
           "occurred_at",
           "acknowledged_at",
           "payment",
-          "delinquency"
+          "delinquency",
+          "product_entitlements"
         ]
       },
       "HostEventLookup": {
@@ -19742,7 +19738,7 @@
           "source": {
             "type": "string"
           },
-          "entitlement": {
+          "product_id": {
             "type": "string"
           },
           "ended_at": {
@@ -21866,8 +21862,8 @@
           "source_type": {
             "type": "string",
             "enum": [
-              "admin",
               "grace",
+              "grant",
               "purchase",
               "subscription"
             ]
@@ -21876,6 +21872,42 @@
             "type": "string"
           },
           "payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "grant_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "comp",
+                  "import",
+                  "migration",
+                  "staff"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "granted_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
             "oneOf": [
               {
                 "type": "string"
@@ -21942,6 +21974,9 @@
           "source_type",
           "source_id",
           "payment_id",
+          "grant_reason",
+          "granted_by",
+          "note",
           "status",
           "starts_at",
           "ends_at",
@@ -22016,6 +22051,39 @@
           "created_at",
           "complete",
           "purchases"
+        ]
+      },
+      "ProductEntitlementsChangedEvent": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "product_key": {
+            "type": "string"
+          },
+          "added": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "holders": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "product_id",
+          "product_key",
+          "added",
+          "removed",
+          "holders"
         ]
       },
       "ProductSummary": {
@@ -23754,7 +23822,7 @@
           "kind": {
             "type": "string"
           },
-          "entitlement": {
+          "product_id": {
             "type": "string"
           },
           "source_type": {
@@ -23780,7 +23848,7 @@
         },
         "required": [
           "kind",
-          "entitlement",
+          "product_id",
           "starts_at"
         ]
       },

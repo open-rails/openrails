@@ -325,11 +325,11 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		// otherwise standing access is bounded to the paid period.
 		entSvc := entitlements.NewEntitlementService(txdb, s.Clock())
 		if revokeAccess {
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceSubscription, models.AccessSourceGrace); err != nil {
 				return fmt.Errorf("revoke access: %w", err)
 			}
 		} else {
-			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.EntitlementRevokeAdmin, models.EntitlementSourceGrace); err != nil {
+			if err := entSvc.RevokeSourcesForSubscription(ctx, subscription.CustomerID.String(), subscription.ID, models.AccessRevokeAdmin, models.AccessSourceGrace); err != nil {
 				return fmt.Errorf("end renewal grace: %w", err)
 			}
 		}

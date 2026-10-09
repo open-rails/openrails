@@ -1,106 +1,71 @@
-# Entitlement Timeline Semantics
+# Entitlements follow the product
 
-OpenRails models each entitlement (a plain string, e.g. `"premium"`) as a **timeline of
-windows per (customer, entitlement)**. The timeline is the single source of truth for
-"does user X have entitlement Y at time T?" — host apps read it for every access decision.
+An entitlement is a plain string key (`"premium"`, `"course:101"`). Keys belong to
+**products**; customers hold **products**. A customer holds a key at instant T when a
+product they hold at T granted that key at T. Nothing stores a customer's keys: they
+are derived at check time.
+
+- **Edit a product, and every holder follows.** Adding a key grants it to every current
+  holder at once; removing one takes it away unless another product they hold grants it.
+- **There are no per-key grants.** Staff grant products, free (see below). A key with no
+  natural product gets a product that is not for sale (one with no live price).
 
 ## The row model
 
-`billing.entitlements`: `entitlement`, `customer_id`, `merchant_id`, `starts_at`,
-`ends_at` (NULL = indefinite), `source_type` + `source_id`, `grant_id`, `revoked_at` +
-`revoke_reason`, `deleted_at`. Windows are half-open `[starts_at, ends_at)`; finite
-windows satisfy `starts_at < ends_at`. The wire uses the same names
-(`EntitlementRecord`).
+- `billing.product_entitlements`: a product's keys with valid-time history
+  (`added_at`, `removed_at`; at most 10,000 live keys per product). A past `at` reads
+  the keys the product had then.
+- `billing.product_access`: the customer's windows of a product, `[starts_at, ends_at)`
+  (`ends_at` NULL = indefinite), with `source_type` (`purchase`, `subscription`, `grace`,
+  `grant`), `source_id`, `revoked_at`. Each window projects one access grant of
+  `billing.grants`, the append-only grant ledger.
 
-A window is **active at T** iff:
+A window is live at T iff `starts_at <= T AND (ends_at IS NULL OR ends_at > T) AND
+revoked_at IS NULL AND deleted_at IS NULL`. An archived product keeps deriving its keys
+for its holders.
 
-```sql
-starts_at <= T AND (ends_at IS NULL OR ends_at > T)
-AND revoked_at IS NULL AND deleted_at IS NULL
-```
+## Reading access
 
-Revoked or soft-deleted windows are inactive and ignored by every active check.
+Merchant API (`merchant:customer-settings:read`):
 
-## Querying access
-
-Merchant API (API key or service token carrying `merchant:customer-settings:read`;
-prefix `/v1` standalone, `/billing/v1` embedded):
-
-- `POST /v1/merchant/entitlements/lookup` body `{"customer_ids": [...], "at": "RFC3339"}` —
-  the primary host read (max 500 customers); `{"customers": {id: [EntitlementRecord]}}`,
-  a customer with none maps to `[]`. Omitted `at` = now.
-- `POST /v1/merchant/customers/{customer_id}/entitlements/check` body
-  `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` —
+- `POST /v1/merchant/customers/{customer_id}/entitlements/check` —
+  `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
   `{"entitlements": {key: bool}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
-  for up to 100 keys and 10 prefixes, both at one instant (Go: `CheckEntitlements`). At
-  least one key or prefix is required.
-- `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — reverse lookup:
-  one page of customer ids holding an active window (`{data, next_cursor}`).
-- `GET /v1/me/entitlements?at=` — the signed-in customer's own active windows.
+  for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
+- `GET /v1/merchant/customers/{customer_id}/entitlements?prefix=&at=&cursor=&limit=` —
+  one page of the customer's keys in byte order (`Client.ListCustomerEntitlements`).
+- `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — one page
+  of the customers holding a key (`Client.ListEntitlementCustomers`).
+- `POST /v1/merchant/customers/{customer_id}/product-access/check` and
+  `GET /v1/merchant/customers/{customer_id}/product-access?live=` — products held, bought,
+  subscribed or granted (`Client.CheckProductAccess`, `Client.ListProductAccess`).
+- `GET /v1/me/entitlements` and `GET /v1/me/product-access` — the signed-in customer's own.
 
-A prefix is a byte prefix, nothing more: OpenRails gives keys and prefixes no grammar,
-and keys stay opaque. `held` lists the distinct keys the customer holds whose bytes start
-with the prefix, in byte order, at most `prefix_limit` of them (default 1,000, at most
-10,000); `truncated` is true when more are held. A prefix's last byte must be printable
-ASCII (`!` to `~`), because the range it reads ends at that byte plus one. Every requested
-prefix is answered, with `"keys": []` when none is held.
+A prefix is bytes OpenRails gives no meaning; its last byte must be printable ASCII. Every
+list is `{data, next_cursor}` with keyset cursors.
 
-Embedded hosts sharing the DB may run the SQL predicate above directly
-(add `customer_id = $1 AND entitlement = $2`); it is exactly what the API executes.
+## Writing access
 
-## Writes
-
-A timeline changes in two ways only: a window is appended at its tail, or active
-windows are revoked (and future scheduled ones removed). A window's end is immutable:
-a renewal appends a new window, never edits one.
-
-Every window derives from a grant. A merchant grants one by hand with
-`POST /v1/merchant/customers/{customer_id}/entitlements` (`Client.CreateEntitlement`)
-and revokes it with `DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}`
-(`Client.DeleteEntitlement`), which revokes the grant behind it.
-
-## Grants vs entitlements
-
-The **grant ledger** (`billing.grants`) is the append-only access-domain sibling of
-the money ledger. Derive-1 appends immutable events (grant / revoke / expire / supersede —
-a revoke is a NEW event referencing the original); derive-2 (`MaterializeGrant`) folds the
-log into projections: **entitlement windows** (rows carry the producing `grant_id`),
-credit lots and product ownership. Grants are provenance and replayable
-truth; entitlement rows are the projection you query. The Convergence Engine's `derive.*`
-pass repairs any drift between the two.
-
-## Sources
-
-`source_type` + `source_id` on each window: `subscription` (paid access from a subscription),
-`purchase` (a one-time purchase), `admin` (granted by the merchant; the source is the grant
-itself), and `grace` (see below).
-
-## Access duration and billing cadence
-
-A recurring price has a positive `billing_interval_hours`, which schedules its
-next payment. Each payment independently grants `access_duration_hours` from that
-paid phase's start. A finite duration creates a bounded window; null creates a
-window with no scheduled expiry. Overlapping paid windows keep their own immutable
-boundaries. Renewal appends a grant; it does not stretch earlier paid windows.
-
-Cancellation stops future billing and removes renewal grace, while purchased
-access remains until its own expiry. Refunds and explicit access revocations can
-remove paid access. A future plan change affects the next grant without shortening
-access already purchased on the previous terms.
-
-Engine memberships whose access and billing windows match may receive the
-existing bounded renewal allowance (`grace`, min(24h, max(5m, period/10))). An
-intentionally shorter access window is not extended through the billing gap;
-longer or indefinite paid access is not capped at the billing boundary. Dunning
-and renewal-held policy govern grace separately from paid grants.
-
-Date-only CCBill values (`YYYY-MM-DD`) are read as end of that UTC day
-(`23:59:59Z`).
+- **Purchases and subscriptions** open windows of the product bought: a purchase for its
+  price's `access_duration_hours` (stacked after the customer's live window of the same
+  product), a subscription period for its accepted duration, renewal grace while a
+  renewal is retried. Accepted orders freeze price and terms, not keys.
+- **Free grants**: `POST /v1/merchant/product-access` (`Client.CreateProductAccess`)
+  grants up to 100 products across customers, all or none, each with `hours` (extends
+  after the customer's latest live window of the product), `ends_at`, or neither
+  (indefinite: needs `merchant:access:grant-permanent`), a `reason` and a `note`. The
+  grant records who granted it. A retry with the same `Idempotency-Key` header answers
+  the first grants.
+- **Revoke** one window with `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}`
+  (`Client.DeleteProductAccess`). Refunds and chargebacks revoke their payment's window.
+- **Catalog edits**: `UpdateProduct` and catalog applications set a product's keys;
+  `POST /v1/merchant/catalog/entitlement-replacements` (`Client.ReplaceEntitlements`) moves a
+  key to another across every product in one edit. Each edit reports, per product, the keys
+  added and removed and how many customers held it, and queues a
+  `product.entitlements_changed` host event.
 
 ## Never infer access from subscription rows
 
-Subscription `status` describes billing lifecycle, not current access. An active
-subscription can have a deliberately expired short access window; a canceled
-subscription can retain long or indefinite purchased access. Read the entitlement
-timeline for access decisions. Grants produce those windows; the windows are the
-answer.
+Subscription `status` is billing lifecycle. An active subscription can have an expired
+short access window; a canceled one can keep long or indefinite access. Read product access
+and the keys it derives.

@@ -7,9 +7,9 @@ import (
 	"slices"
 )
 
-// DecodeAcceptedEntitlements reads immutable admitted payloads. New operations
-// contain opaque names; old operations retain their original object only for
-// reproducing accepted fingerprints and historical one-time access windows.
+// DecodeAcceptedEntitlements reads the keys an operation admitted before
+// product access, retained only to reproduce its accepted fingerprint. New
+// operations admit no keys: settlement grants the product.
 func DecodeAcceptedEntitlements(raw json.RawMessage, retained map[string]*int) ([]string, map[string]*int, error) {
 	raw = bytes.TrimSpace(raw)
 	var names []string
@@ -50,17 +50,22 @@ func AcceptedEntitlementValue(names []string, historical map[string]*int) any {
 	return names
 }
 
-// HistoricalEntitlementHours extracts the old one-time purchase overrides.
-// Subscription grants never used these values to determine access duration.
-func HistoricalEntitlementHours(historical map[string]*int) map[string]int {
-	var hours map[string]int
-	for name, duration := range historical {
-		if duration != nil && *duration > 0 {
-			if hours == nil {
-				hours = map[string]int{}
-			}
-			hours[name] = *duration
-		}
+// AcceptedEntitlementsValue reproduces the keys an operation admitted before
+// product access, in the shape its fingerprint hashed. nil: the operation
+// admitted none, and its fingerprint omits them.
+func AcceptedEntitlementsValue(raw json.RawMessage, legacy map[string]*int) (any, error) {
+	if len(bytes.TrimSpace(raw)) == 0 && legacy == nil {
+		return nil, nil
 	}
-	return hours
+	names, historical, err := DecodeAcceptedEntitlements(raw, legacy)
+	if err != nil {
+		return nil, err
+	}
+	if historical != nil {
+		return historical, nil
+	}
+	if names == nil {
+		names = []string{}
+	}
+	return names, nil
 }

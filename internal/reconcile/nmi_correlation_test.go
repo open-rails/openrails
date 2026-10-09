@@ -29,7 +29,7 @@ func TestNMIPullKeepsNativePaymentsWithTheirOperation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			until := now.Add(time.Hour)
-			local := &LocalState{Subscriptions: []LocalSubscription{{ID: subID, CustomerID: customerID, PriceID: &priceID, Rail: "nmi", CollectionPolicy: tc.policy, Status: "active", RailSubscriptionID: "provider-sub", PaymentMethodID: &methodID, CurrentPeriodEndsAt: &until, EntitlementNames: []string{"members"}, CustomerEmail: "buyer@example.test"}}, PaymentMethods: []LocalPaymentMethod{{ID: methodID, CustomerID: customerID, Rail: "nmi", RailCustomerRef: "vault"}}}
+			local := &LocalState{Subscriptions: []LocalSubscription{{ID: subID, CustomerID: customerID, PriceID: &priceID, Rail: "nmi", CollectionPolicy: tc.policy, Status: "active", RailSubscriptionID: "provider-sub", PaymentMethodID: &methodID, CurrentPeriodEndsAt: &until, CustomerEmail: "buyer@example.test"}}, PaymentMethods: []LocalPaymentMethod{{ID: methodID, CustomerID: customerID, Rail: "nmi", RailCustomerRef: "vault"}}}
 			tx := RemoteTransaction{TransactionID: "sale-1", Type: TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: now, Raw: rawJSON(map[string]any{"order_id": tc.order, "customer_vault_id": "vault", "email": "buyer@example.test", "action": map[string]string{"source": tc.source}})}
 			findings := diffProvider(ProviderNMI, &RemoteSnapshot{Provider: ProviderNMI, Capabilities: Capabilities{Transactions: true}, Subscriptions: []RemoteSubscription{{RailSubscriptionID: "provider-sub", CustomerID: "vault"}}, Transactions: []RemoteTransaction{tx}}, local, nil, now, diffOptions{})
 			require.Len(t, findings, 1)

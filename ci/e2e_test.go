@@ -136,7 +136,7 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	alice := f.runtime(t, "merchant-a-"+uuid.NewString()[:8])
 	bob := f.runtime(t, "merchant-b-"+uuid.NewString()[:8])
 
-	productA, err := alice.CreateProduct(t.Context(), billing.CreateProductParams{Key: "alice-post", DisplayName: "Alice post"})
+	productA, err := alice.CreateProduct(t.Context(), billing.CreateProductParams{Key: "alice-post", DisplayName: "Alice post", Entitlements: []string{"content:alice-post"}})
 	require.NoError(t, err)
 	productB, err := bob.CreateProduct(t.Context(), billing.CreateProductParams{Key: "bob-post", DisplayName: "Bob post"})
 	require.NoError(t, err)
@@ -154,7 +154,7 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	require.NoError(t, err)
 	_, err = bob.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(customerB))}})
 	require.NoError(t, err)
-	_, err = alice.CreateEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.CreateEntitlementParams{Entitlement: "content:" + productA.Key})
+	_, err = alice.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(customerA)), ProductID: productA.ID}}})
 	require.NoError(t, err)
 
 	check := billing.CheckEntitlementsParams{Entitlements: []string{"content:" + productA.Key}}
@@ -285,7 +285,7 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	before, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
 	require.NoError(t, err)
 	require.False(t, before.Entitlements["content:premium"])
-	_, err = client.CreateEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(customer)), billing.CreateEntitlementParams{Entitlement: "content:premium"})
+	_, err = client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(customer)), ProductID: product.ID}}})
 	require.NoError(t, err)
 	after, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
 	require.NoError(t, err)

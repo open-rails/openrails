@@ -123,6 +123,16 @@ by `transaction_ids[]` and index-backed by
 `payments_rail_transaction_id_idx`; a `UNIQUE(merchant_id, rail,
 transaction_id)` would make it provable.
 
+`CountLiveProductHolders` answers one row per product a catalog edit changed;
+`ListLiveAccessBySubscriptions` the few live windows of each subscription on a
+page.
+
+**PERMANENT — the product access cutover.** `ListAccessCutoverApprovals` and the
+statements of `convert_entitlement_windows` that read its temporary conversion
+table run once per merchant, by an operator (the cutover migration, its
+preflight, and restoring a version 1 archive). The auditor cannot plan a
+statement over a table the function creates.
+
 **PERMANENT — optional admin filters.** `($n IS NULL OR col = $n)` on a paged
 listing. The predicate is absent on most calls, so no index serves it
 generically; the merchant index bounds the scan, the page `LIMIT` the result.
@@ -158,7 +168,7 @@ observes; the set is bounded by the merchant's catalog and PSPs.
 - *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
   scans, the reconciliation findings scans, `ListStuckProviderIntents`,
   `ListInvoicePayers` and `ListChargeableOpenInvoices`.
-- *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`,
+- *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`,
   `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The
   caller's list is bounded but each element's row set is not.
 

@@ -64,44 +64,45 @@ export interface RawPrice {
   [k: string]: unknown
 }
 
-export interface RawEntitlement {
-  id: string
-  customer_id?: string
+// A customer's keys are the keys of the products they hold.
+export interface CustomerEntitlement {
   entitlement: string
-  starts_at: string
-  ends_at: string | null
-  source_id: string
-  source_type: string
-  revoked_at: string | null
-  revoke_reason: string | null
-  created_at: string
-  updated_at: string
 }
 
 export interface RawProductAccessGrant {
   id: string
   customer_id?: string
   product_id: string
+  product_key: string
+  product_name: string
   source_type: string
   source_id: string
-  payment_id?: string
+  payment_id?: string | null
+  grant_reason?: string | null
+  granted_by?: string | null
+  note?: string | null
   status: string
   starts_at: string
-  ends_at?: string
-  revoked_at?: string
-  revoke_reason?: string
+  ends_at?: string | null
+  revoked_at?: string | null
+  revoke_reason?: string | null
+}
+
+export interface Page<T> {
+  data: T[]
+  next_cursor: string | null
 }
 
 // CustomerBillingProfile composes the shared Client DTOs each dedicated
-// route serves (subscriptions, payments, entitlements, product access).
+// route serves; keys and product access are each their first page.
 export interface CustomerBillingProfile {
   customer: Customer
   balances: Balance[]
   subscriptions: AdminSubscription[]
-  entitlements: RawEntitlement[]
+  entitlements: Page<CustomerEntitlement>
   payments: Payment[] | null
   payment_methods: PaymentMethod[] | null
-  product_access: RawProductAccessGrant[]
+  product_access: Page<RawProductAccessGrant>
 }
 
 // --- Subscription admin response (list/detail) ---

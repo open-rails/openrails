@@ -55,25 +55,25 @@ func TestCustomerBatches(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", refused)
 }
 
-// Product access is granted in batches across customers, once per admin,
-// customer and product.
+// Product access is granted in batches across customers; a retry under the
+// same idempotency key answers the existing grants.
 func TestProductAccessGrantBatches(t *testing.T) {
 	w := newWorld(t)
 	a, b := w.newCustomer(), w.newCustomer()
 	price := w.permanent("post:batch-access")
 	until := w.clock.Now().Add(72 * time.Hour)
-	items := []billing.CreateProductAccessParams{
+	batch := billing.CreateProductAccessBatchParams{IdempotencyKey: "batch-" + uuid.NewString(), Items: []billing.CreateProductAccessParams{
 		{CustomerID: a.customerID(), ProductID: price.ProductID, EndsAt: &until},
 		{CustomerID: b.customerID(), ProductID: price.ProductID},
-	}
-	granted, err := w.client[embedded].CreateProductAccess(t.Context(), items)
+	}}
+	granted, err := w.client[embedded].CreateProductAccess(t.Context(), batch)
 	require.NoError(t, err)
 	require.Equal(t, []billing.CustomerID{a.customerID(), b.customerID()}, []billing.CustomerID{granted[0].CustomerID, granted[1].CustomerID})
 	require.NotNil(t, granted[0].EndsAt)
 	require.Nil(t, granted[1].EndsAt)
-	again, err := w.client[embedded].CreateProductAccess(t.Context(), items)
+	again, err := w.client[remote].CreateProductAccess(t.Context(), batch)
 	require.NoError(t, err)
-	require.Equal(t, []billing.ProductAccessID{granted[0].ID, granted[1].ID}, []billing.ProductAccessID{again[0].ID, again[1].ID}, "a repeat answers the existing grants")
+	require.Equal(t, []billing.ProductAccessID{granted[0].ID, granted[1].ID}, []billing.ProductAccessID{again[0].ID, again[1].ID}, "a retry answers the existing grants")
 	for _, c := range []*customer{a, b} {
 		access, err := w.client[embedded].CheckProductAccess(t.Context(), c.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{price.ProductID}})
 		require.NoError(t, err)

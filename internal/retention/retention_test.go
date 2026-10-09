@@ -32,6 +32,7 @@ func baseline(t *testing.T) string {
 
 var (
 	createTable  = regexp.MustCompile(`(?m)^CREATE TABLE billing\.(\w+) \(`)
+	dropTable    = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
 	partitionBy  = regexp.MustCompile(`(?m)^\) PARTITION BY RANGE \((\w+)\);$`)
 	tableComment = regexp.MustCompile(`(?m)^COMMENT ON TABLE billing\.(\w+) IS '((?:[^']|'')*)';$`)
 	guardTrigger = regexp.MustCompile(`(?s)BEFORE DELETE ON billing\.(\w+)\s+FOR EACH ROW(?: WHEN \([^)]*\))? EXECUTE FUNCTION billing\.guard_retention_delete\('(\w+)', '(\d+) days'\);`)
@@ -42,8 +43,12 @@ var (
 // A table added to the baseline without a retention class fails here.
 func TestEveryTableHasARetentionClass(t *testing.T) {
 	var tables []string
-	for _, m := range createTable.FindAllStringSubmatch(baseline(t), -1) {
+	sql := baseline(t)
+	for _, m := range createTable.FindAllStringSubmatch(sql, -1) {
 		tables = append(tables, m[1])
+	}
+	for _, m := range dropTable.FindAllStringSubmatch(sql, -1) {
+		tables = slices.DeleteFunc(tables, func(name string) bool { return name == m[1] })
 	}
 	if len(tables) == 0 {
 		t.Fatal("parsed no tables from the migrations")

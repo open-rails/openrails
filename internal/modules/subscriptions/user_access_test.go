@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSubscriptionAccessComesFromLiveEntitlementWindows(t *testing.T) {
+func TestSubscriptionAccessComesFromLiveProductWindows(t *testing.T) {
 	start := time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC)
 	customer, otherCustomer := uuid.New(), uuid.New()
 	newResponse := func(status models.SubscriptionStatus, hours *int) *UserSubscriptionResponse {
@@ -23,21 +23,24 @@ func TestSubscriptionAccessComesFromLiveEntitlementWindows(t *testing.T) {
 	grace := newResponse(models.StatusPastDue, new(720))
 	// A stale response must not retain access when its current windows are gone.
 	short.Access, revoked.Access = &billing.SubscriptionAccess{}, &billing.SubscriptionAccess{}
-	window := func(sub *UserSubscriptionResponse, end *time.Time, source models.EntitlementSourceType) models.Entitlement {
-		return models.Entitlement{CustomerID: customer, Entitlement: "premium", SourceID: &sub.ID, SourceType: source, StartsAt: start, EndsAt: end}
+	product := uuid.New()
+	window := func(owner uuid.UUID, sub *UserSubscriptionResponse, end *time.Time, source models.AccessSourceType) *models.ProductAccess {
+		return &models.ProductAccess{CustomerID: owner, ProductID: product, SourceID: sub.ID.String(), SourceType: source, StartsAt: start, EndsAt: end}
 	}
-	active := map[uuid.UUID][]models.Entitlement{customer: {
-		window(long, new(start.Add(800*time.Hour)), models.EntitlementSourceSubscription),
-		window(long, new(start.Add(1000*time.Hour)), models.EntitlementSourceSubscription),
-		window(perpetual, nil, models.EntitlementSourceSubscription),
-		window(grace, new(start.Add(800*time.Hour)), models.EntitlementSourceGrace),
-	}, otherCustomer: {window(revoked, nil, models.EntitlementSourceSubscription)}}
+	active := []*models.ProductAccess{
+		window(customer, long, new(start.Add(800*time.Hour)), models.AccessSourceSubscription),
+		window(customer, long, new(start.Add(1000*time.Hour)), models.AccessSourceSubscription),
+		window(customer, perpetual, nil, models.AccessSourceSubscription),
+		window(customer, grace, new(start.Add(800*time.Hour)), models.AccessSourceGrace),
+		window(otherCustomer, revoked, nil, models.AccessSourceSubscription),
+	}
 	applySubscriptionAccess([]*UserSubscriptionResponse{short, long, perpetual, revoked, grace}, active)
 	require.Nil(t, short.Access, "expired short access cannot be inferred from active billing")
 	require.Nil(t, revoked.Access, "revoked access cannot be inferred from a perpetual snapshot or another customer")
 	require.Equal(t, start.Add(1000*time.Hour), *long.Access.EndsAt, "normal cancellation retains the longest paid live window")
 	require.NotNil(t, perpetual.Access)
 	require.Nil(t, perpetual.Access.EndsAt)
+	require.Equal(t, billing.ProductID(product), perpetual.Access.ProductID)
 	require.Equal(t, billing.SubscriptionID(grace.ID), grace.Access.SubscriptionID, "explicit renewal grace remains visible")
 	applySubscriptionAccess([]*UserSubscriptionResponse{perpetual}, nil)
 	require.Nil(t, perpetual.Access, "explicit revoke removes the formerly perpetual access response")

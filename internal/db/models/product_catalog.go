@@ -1,7 +1,6 @@
 package models
 
 import (
-	"slices"
 	"strings"
 	"time"
 
@@ -43,9 +42,6 @@ type Product struct {
 // IsPurchasable reports whether the product can be bought by a new customer
 // (shown in the public catalog).
 func (p *Product) IsPurchasable() bool { return !p.Archived }
-
-// CloneEntitlements copies the accepted names, preserving absent and explicitly empty snapshots.
-func CloneEntitlements(names []string) []string { return slices.Clone(names) }
 
 // Price represents a specific pricing option for a product
 // This represents pricing options similar to Stripe's pricing model

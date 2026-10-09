@@ -115,7 +115,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountPaid amount_paid":                                     notHTTPProviderWire,
 	"internal/modules/webhooks/webhook_handler.go:func Normalize.AmountTotal amount_total":                                   notHTTPProviderWire,
 	"internal/reconcile/converge/converge_passes.go:ownershipPurchaseRow.Amount amount":                                      notHTTPQueryRow,
-	"internal/reconcile/destructive_run_converge.go:ConvergeRollbackResult.EntitlementsCaptured entitlements_captured":       notMoneyCount,
+	"internal/reconcile/destructive_run_converge.go:ConvergeRollbackResult.AccessCaptured access_captured":                   notMoneyCount,
 	"internal/reconcile/reconcile.go:RemoteSubscription.AmountCents amount_cents":                                            notHTTPInternalRow,
 	"internal/reconcile/reconcile.go:RemoteTransaction.AmountCents amount_cents":                                             notHTTPInternalRow,
 	"internal/reconcile/stripe.go:func normalizeStripeCharge.Amount amount":                                                  notHTTPProviderWire,

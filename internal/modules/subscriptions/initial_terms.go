@@ -35,7 +35,9 @@ type InitialMembershipTerms struct {
 	PeriodStart         time.Time               `json:"period_start"`
 	PeriodEnd           time.Time               `json:"period_end"`
 	Pending             bool                    `json:"pending"`
-	Entitlements        []string                `json:"entitlements"`
+	// Entitlements is the keys an enrollment admitted before product access,
+	// kept only to reproduce its quote fingerprint. Access follows ProductID.
+	Entitlements json.RawMessage `json:"entitlements,omitempty"`
 	// Replaces is set on an engine tier upgrade: accepting this membership
 	// supersedes that one. Amount is then the prorated charge and
 	// RecurringAmount the new price every renewal bills.
@@ -61,7 +63,7 @@ func (t InitialMembershipTerms) Validate() error {
 	if err := validateAccessDuration(t.AccessDurationHours); err != nil {
 		return err
 	}
-	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 || t.Entitlements == nil {
+	if !t.CollectionPolicy.Valid() || t.SubscriptionID == uuid.Nil || t.CustomerID == uuid.Nil || t.PSPID == uuid.Nil || t.ProductID == uuid.Nil || t.PriceID == uuid.Nil || t.PaymentMethodID == uuid.Nil || t.AcceptedAt.IsZero() || t.PeriodStart.IsZero() || !t.PeriodEnd.After(t.PeriodStart) || t.Amount < 0 || t.RecurringAmount < 0 {
 		return errors.New("initial membership terms are incomplete")
 	}
 	for _, instant := range []time.Time{t.AcceptedAt, t.PeriodStart, t.PeriodEnd} {
@@ -89,16 +91,10 @@ func (t InitialMembershipTerms) Validate() error {
 func (t *InitialMembershipTerms) UnmarshalJSON(data []byte) error {
 	type plain InitialMembershipTerms
 	var decoded plain
-	wire := struct {
-		*plain
-		Entitlements json.RawMessage `json:"entitlements"`
-	}{plain: &decoded}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var err error
-	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
-	if err != nil {
+	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

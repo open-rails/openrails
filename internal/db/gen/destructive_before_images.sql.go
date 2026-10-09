@@ -12,6 +12,46 @@ import (
 	"github.com/google/uuid"
 )
 
+const captureSubscriptionAccessBeforeImages = `-- name: CaptureSubscriptionAccessBeforeImages :execrows
+INSERT INTO billing.destructive_run_before_images (
+    merchant_id, destructive_run_id, table_name, row_id, before, captured_at
+)
+SELECT e.merchant_id, $1::uuid, 'product_access', e.id, to_jsonb(e), $2::timestamptz
+FROM billing.product_access e
+WHERE e.merchant_id = $3::uuid
+  AND e.source_type = 'subscription'
+  AND e.source_id = $4::uuid::text
+  AND e.revoked_at IS NULL
+  AND e.deleted_at IS NULL
+ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING
+`
+
+type CaptureSubscriptionAccessBeforeImagesParams struct {
+	RunID          uuid.UUID
+	Now            time.Time
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Every LIVE access window the transition is about to revoke or bound.
+// Captured as EVIDENCE only: the reverse never replays these (or#859 §3.3 —
+// access windows are Class D, recomputed by Converge from the append-only grant
+// log, never restored; a restored effect can silently disagree with its grant,
+// a re-derived one cannot). What they buy is the ability to say exactly which
+// windows a bad pass closed, and to check the recomputation against them.
+func (q *Queries) CaptureSubscriptionAccessBeforeImages(ctx context.Context, arg CaptureSubscriptionAccessBeforeImagesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, captureSubscriptionAccessBeforeImages,
+		arg.RunID,
+		arg.Now,
+		arg.MerchantID,
+		arg.SubscriptionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const captureSubscriptionBeforeImage = `-- name: CaptureSubscriptionBeforeImage :execrows
 
 
@@ -58,50 +98,10 @@ func (q *Queries) CaptureSubscriptionBeforeImage(ctx context.Context, arg Captur
 	return result.RowsAffected(), nil
 }
 
-const captureSubscriptionEntitlementBeforeImages = `-- name: CaptureSubscriptionEntitlementBeforeImages :execrows
-INSERT INTO billing.destructive_run_before_images (
-    merchant_id, destructive_run_id, table_name, row_id, before, captured_at
-)
-SELECT e.merchant_id, $1::uuid, 'entitlements', e.id, to_jsonb(e), $2::timestamptz
-FROM billing.entitlements e
-WHERE e.merchant_id = $3::uuid
-  AND e.source_type = 'subscription'
-  AND e.source_id = $4::uuid
-  AND e.revoked_at IS NULL
-  AND e.deleted_at IS NULL
-ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING
-`
-
-type CaptureSubscriptionEntitlementBeforeImagesParams struct {
-	RunID          uuid.UUID
-	Now            time.Time
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-// Every LIVE entitlement window the transition is about to revoke or bound.
-// Captured as EVIDENCE only: the reverse never replays these (or#859 §3.3 —
-// entitlements are Class D, recomputed by Converge from the append-only grant
-// log, never restored; a restored effect can silently disagree with its grant,
-// a re-derived one cannot). What they buy is the ability to say exactly which
-// windows a bad pass closed, and to check the recomputation against them.
-func (q *Queries) CaptureSubscriptionEntitlementBeforeImages(ctx context.Context, arg CaptureSubscriptionEntitlementBeforeImagesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, captureSubscriptionEntitlementBeforeImages,
-		arg.RunID,
-		arg.Now,
-		arg.MerchantID,
-		arg.SubscriptionID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const countBeforeImagesForRun = `-- name: CountBeforeImagesForRun :one
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
-    count(*) FILTER (WHERE table_name = 'entitlements')::bigint AS entitlements
+    count(*) FILTER (WHERE table_name = 'product_access')::bigint AS product_access
 FROM billing.destructive_run_before_images
 WHERE merchant_id = $1::uuid
   AND destructive_run_id = $2::uuid
@@ -114,13 +114,13 @@ type CountBeforeImagesForRunParams struct {
 
 type CountBeforeImagesForRunRow struct {
 	Subscriptions int64
-	Entitlements  int64
+	ProductAccess int64
 }
 
 func (q *Queries) CountBeforeImagesForRun(ctx context.Context, arg CountBeforeImagesForRunParams) (CountBeforeImagesForRunRow, error) {
 	row := q.db.QueryRow(ctx, countBeforeImagesForRun, arg.MerchantID, arg.RunID)
 	var i CountBeforeImagesForRunRow
-	err := row.Scan(&i.Subscriptions, &i.Entitlements)
+	err := row.Scan(&i.Subscriptions, &i.ProductAccess)
 	return i, err
 }
 
@@ -151,21 +151,21 @@ func (q *Queries) DisarmMerchantEnforcement(ctx context.Context, arg DisarmMerch
 	return err
 }
 
-const invalidateEntitlementsFromBeforeImages = `-- name: InvalidateEntitlementsFromBeforeImages :execrows
-UPDATE billing.entitlements e
+const invalidateAccessFromBeforeImages = `-- name: InvalidateAccessFromBeforeImages :execrows
+UPDATE billing.product_access e
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
 FROM billing.destructive_run_before_images b
 WHERE b.merchant_id = $3::uuid
   AND b.destructive_run_id = $2::uuid
-  AND b.table_name = 'entitlements'
+  AND b.table_name = 'product_access'
   AND e.merchant_id = b.merchant_id
   AND e.id = b.row_id
   AND e.deleted_at IS NULL
 `
 
-type InvalidateEntitlementsFromBeforeImagesParams struct {
+type InvalidateAccessFromBeforeImagesParams struct {
 	Now        time.Time
 	RunID      uuid.UUID
 	MerchantID uuid.UUID
@@ -173,7 +173,7 @@ type InvalidateEntitlementsFromBeforeImagesParams struct {
 
 // Class D is INVALIDATED, never restored (or#859 §3.3, §4).
 //
-// The measured damage to entitlements is not a delete and not always a revoke:
+// The measured damage to access windows is not a delete and not always a revoke:
 // a terminal cancel BOUNDS the access window (ends_at pulled back to the
 // cancellation instant, revoked_at often still NULL). Leaving those rows in
 // place would defeat the recomputation, because derive-2 treats an existing
@@ -187,8 +187,8 @@ type InvalidateEntitlementsFromBeforeImagesParams struct {
 // restored one can. The stamp keeps the invalidation itself attributable to one
 // run, and or#858's uniques/exclusion already ignore soft-deleted rows so the
 // rebuilt window does not collide with the invalidated one.
-func (q *Queries) InvalidateEntitlementsFromBeforeImages(ctx context.Context, arg InvalidateEntitlementsFromBeforeImagesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, invalidateEntitlementsFromBeforeImages, arg.Now, arg.RunID, arg.MerchantID)
+func (q *Queries) InvalidateAccessFromBeforeImages(ctx context.Context, arg InvalidateAccessFromBeforeImagesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, invalidateAccessFromBeforeImages, arg.Now, arg.RunID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}
@@ -266,7 +266,7 @@ type MarkBeforeImagesRestoredParams struct {
 	TableName  string
 }
 
-// Runs in the same transaction as the restore above. Entitlement images are
+// Runs in the same transaction as the restore above. Access images are
 // deliberately excluded: leaving restored_at NULL on them is the durable record
 // that the reverse saw them and chose recomputation over restoration.
 func (q *Queries) MarkBeforeImagesRestored(ctx context.Context, arg MarkBeforeImagesRestoredParams) (int64, error) {

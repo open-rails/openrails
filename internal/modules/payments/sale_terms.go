@@ -29,30 +29,32 @@ var saleRails = map[string]bool{"nmi": true, "stripe": true}
 // and benefits. Recovery never reloads a current catalog or extends these
 // windows from the time a delayed provider receipt becomes visible.
 type NMISalePayload struct {
-	LegacyEntitlements  map[string]*int             `json:"legacy_entitlements,omitzero"`
-	CheckoutAttemptID   uuid.UUID                   `json:"checkout_attempt_id,omitempty"`
-	RequestFingerprint  string                      `json:"request_fingerprint"`
-	Provider            string                      `json:"provider"`
-	PSP                 string                      `json:"psp"`
-	Amount              int64                       `json:"amount,string"`
-	Currency            string                      `json:"currency"`
-	Description         string                      `json:"description"`
-	UserID              string                      `json:"user_id"`
-	PriceID             uuid.UUID                   `json:"price_id"`
-	E2ERunID            string                      `json:"e2e_run_id,omitempty"`
-	PaymentMethodID     uuid.UUID                   `json:"payment_method_id"`
-	Instrument          charge.FrozenInstrument     `json:"instrument"`
-	PaymentID           uuid.UUID                   `json:"payment_id"`
-	ProductID           uuid.UUID                   `json:"product_id"`
-	ListAmount          int64                       `json:"list_amount,string"`
-	AcceptedAt          time.Time                   `json:"accepted_at"`
-	CreditGrant         *models.CreditGrantSnapshot `json:"credit_grant"`
-	Entitlements        []string                    `json:"entitlements"`
-	AccessDurationHours *int                        `json:"access_duration_hours"`
-	EntitlementStart    time.Time                   `json:"entitlement_start"`
-	OwnershipStart      time.Time                   `json:"ownership_start"`
-	OwnershipEnd        *time.Time                  `json:"ownership_end"`
-	Eligibility         string                      `json:"eligibility"`
+	LegacyEntitlements map[string]*int             `json:"legacy_entitlements,omitzero"`
+	CheckoutAttemptID  uuid.UUID                   `json:"checkout_attempt_id,omitempty"`
+	RequestFingerprint string                      `json:"request_fingerprint"`
+	Provider           string                      `json:"provider"`
+	PSP                string                      `json:"psp"`
+	Amount             int64                       `json:"amount,string"`
+	Currency           string                      `json:"currency"`
+	Description        string                      `json:"description"`
+	UserID             string                      `json:"user_id"`
+	PriceID            uuid.UUID                   `json:"price_id"`
+	E2ERunID           string                      `json:"e2e_run_id,omitempty"`
+	PaymentMethodID    uuid.UUID                   `json:"payment_method_id"`
+	Instrument         charge.FrozenInstrument     `json:"instrument"`
+	PaymentID          uuid.UUID                   `json:"payment_id"`
+	ProductID          uuid.UUID                   `json:"product_id"`
+	ListAmount         int64                       `json:"list_amount,string"`
+	AcceptedAt         time.Time                   `json:"accepted_at"`
+	CreditGrant        *models.CreditGrantSnapshot `json:"credit_grant"`
+	// Entitlements is the keys a sale admitted before product access, kept
+	// only as accepted evidence. Access follows ProductID.
+	Entitlements        json.RawMessage `json:"entitlements,omitempty"`
+	AccessDurationHours *int            `json:"access_duration_hours"`
+	EntitlementStart    time.Time       `json:"entitlement_start"`
+	OwnershipStart      time.Time       `json:"ownership_start"`
+	OwnershipEnd        *time.Time      `json:"ownership_end"`
+	Eligibility         string          `json:"eligibility"`
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -64,7 +66,7 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
-	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() || p.Entitlements == nil {
+	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() {
 		return p, errors.New("sale operation contradicts its accepted purchase")
 	}
 	for _, instant := range []time.Time{p.AcceptedAt, p.EntitlementStart, p.OwnershipStart} {
@@ -116,16 +118,10 @@ func NMISaleOrderReference(id uuid.UUID, runID string) string {
 func (p *NMISalePayload) UnmarshalJSON(data []byte) error {
 	type plain NMISalePayload
 	var decoded plain
-	wire := struct {
-		*plain
-		Entitlements json.RawMessage `json:"entitlements"`
-	}{plain: &decoded}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var err error
-	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
-	if err != nil {
+	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
 		return err
 	}
 	*p = NMISalePayload(decoded)

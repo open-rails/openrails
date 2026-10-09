@@ -238,16 +238,15 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.grant_effect.mismatch (#665, moved from the legacy pull engine's
-	// PS-9) — subscription ↔ entitlement-projection drift, both directions.
-	// Grant direction: an `active` sub in a RUNNING period whose product
-	// promises features that were NEVER projected for this period (revoked
-	// windows are recorded decisions and count as projected, §6; no-grant subs
-	// belong to derive.subscription.missing). Repair = derive-1 for exactly the
-	// missing features — grants stay the sole effect writer.
+	// derive.grant_effect.mismatch — subscription ↔ product-access drift, both
+	// directions. Grant direction: an `active` sub in a running period whose
+	// product was never projected for this period (revoked windows are recorded
+	// decisions and count as projected; no-grant subs belong to
+	// derive.subscription.missing). Repair = derive-1; grants stay the sole
+	// effect writer.
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
-	unprojected, err := q.ListActiveSubsMissingEntitlementProjection(ctx, gen.ListActiveSubsMissingEntitlementProjectionParams{
+	unprojected, err := q.ListActiveSubsMissingAccessProjection(ctx, gen.ListActiveSubsMissingAccessProjectionParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now,
 	})
 	if err != nil {
@@ -266,22 +265,20 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Provider:   "self",
 			Evidence: map[string]any{
 				"subscription_id": billing.SubscriptionID(s.ID).String(), "customer_id": s.CustomerID.String(),
-				"direction": "grant", "missing_features": json.RawMessage(s.Entitlements),
+				"direction": "grant", "product_id": billing.ProductID(s.ProductID).String(),
 			},
 			Repair: func(ctx context.Context) error {
-				// Row shape matches ListUngrantedSubscriptions; Entitlements
-				// carries ONLY the missing features, so derive-1 fills the gap.
 				return gl.DeriveSubscriptionGrant(ctx, gen.ListUngrantedSubscriptionsRow(s))
 			},
 		})
 	}
 
 	// A chargeback closes access; ordinary cancellation keeps purchased grants.
-	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
+	dead, err := q.ListDeadSubsWithLiveAccess(ctx, gen.ListDeadSubsWithLiveAccessParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("derive: scan dead subscriptions with live entitlements: %w", err)
+		return nil, fmt.Errorf("derive: scan dead subscriptions with live access: %w", err)
 	}
 	markTruncated(ctx, len(dead), "derive.grant_effect.mismatch")
 	for i := range dead {
@@ -310,24 +307,21 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.entitlement.unjustified (#690, renamed from derive.entitlement.
-	// orphan in migration 066 — "orphaned" is the paying-without-access
-	// category) — the FREELOADER detector: a LIVE window whose source is
-	// PROVEN absent or reversed (sub row missing; refunded one-off payment) with
-	// no live grant justifying the access. Post-#691 fail-open, stale is NOT
-	// freeloading — standing windows of live/unknown/past_due subs never
-	// surface here. ADMIN surface-only (policy: access removal is an operator
-	// decision, never automatic on a derived conclusion), with the #692
-	// revoke/admin-grant recommendation pair.
-	unjustified, err := q.ListUnjustifiedEntitlementWindows(ctx, gen.ListUnjustifiedEntitlementWindowsParams{
+	// derive.access.unjustified — the FREELOADER detector: a live product-access
+	// window whose source is proven absent or reversed (sub row missing;
+	// refunded one-off payment) with no live grant justifying it. Stale is not
+	// freeloading: standing windows of live/unknown/past_due subs never surface
+	// here. ADMIN surface-only (access removal is an operator decision), with
+	// the revoke/grant recommendation pair.
+	unjustified, err := q.ListUnjustifiedAccessWindows(ctx, gen.ListUnjustifiedAccessWindowsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("derive: scan unjustified entitlement windows: %w", err)
+		return nil, fmt.Errorf("derive: scan unjustified access windows: %w", err)
 	}
-	markTruncated(ctx, len(unjustified), "derive.entitlement.unjustified")
+	markTruncated(ctx, len(unjustified), "derive.access.unjustified")
 	for i := range unjustified {
-		out = append(out, unjustifiedEntitlementFinding(&unjustified[i]))
+		out = append(out, unjustifiedAccessFinding(&unjustified[i]))
 	}
 	return out, nil
 }
@@ -343,20 +337,16 @@ func latestTime(a, b *time.Time) *time.Time {
 	return b
 }
 
-// unjustifiedEntitlementFinding renders one policy-ambiguous freeloader window
-// as an ADMIN finding carrying the #692 recommendation: revoke (default) or
-// record an admin grant instead.
-func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) ConvergeFinding {
-	var productID billing.ProductID
-	if o.PaymentProductID != nil {
-		productID = billing.ProductID(*o.PaymentProductID)
-	}
-	alt := recommend.RecordAdminGrantRec(billing.CustomerID(o.CustomerID), productID, "known-legitimate access")
-	rec := recommend.RevokeEntitlementRec(o.EntitlementID.String(), "", &alt)
+// unjustifiedAccessFinding renders one policy-ambiguous freeloader window as
+// an ADMIN finding recommending revoke (default) or a free product grant.
+func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFinding {
+	product := billing.ProductID(o.ProductID)
+	alt := recommend.GrantProductRec(billing.CustomerID(o.CustomerID), product, "known-legitimate access")
+	rec := recommend.RevokeProductAccessRec(o.AccessID.String(), "", &alt)
 
 	ev := map[string]any{
-		"entitlement_id": o.EntitlementID.String(), "customer_id": o.CustomerID.String(),
-		"entitlement": o.Entitlement, "source_type": o.SourceType, "source_id": billing.SourceRef(o.SourceType, o.SourceID.String()),
+		"access_id": o.AccessID.String(), "customer_id": o.CustomerID.String(),
+		"product_id": product.String(), "source_type": o.SourceType, "source_id": billing.SourceRef(o.SourceType, o.SourceID),
 		"cause":               o.Cause,
 		recommend.EvidenceKey: rec.Map(),
 	}
@@ -367,19 +357,19 @@ func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) 
 	var prose string
 	switch o.Cause {
 	case "missing_subscription":
-		prose = fmt.Sprintf("Live entitlement %q for customer %s references subscription %s, which does not exist — access has no justification. Revoke the window, or record an admin grant if it is known-legitimate.",
-			o.Entitlement, o.CustomerID, o.SourceID)
+		prose = fmt.Sprintf("Live access to product %s for customer %s references subscription %s, which does not exist — access has no justification. Revoke the window, or grant the product if it is known-legitimate.",
+			product, o.CustomerID, o.SourceID)
 	default: // refunded_payment
-		prose = fmt.Sprintf("Live entitlement %q is sourced by refunded payment %s with no live grant justifying the access. Revoke the window, or record an admin grant if it is known-legitimate.",
-			o.Entitlement, o.SourceID)
+		prose = fmt.Sprintf("Live access to product %s is sourced by refunded payment %s with no live grant justifying it. Revoke the window, or grant the product if it is known-legitimate.",
+			product, o.SourceID)
 	}
 
 	return ConvergeFinding{
-		Type:              "derive.entitlement.unjustified",
+		Type:              "derive.access.unjustified",
 		Shape:             ShapeExcess,
 		Class:             ClassAdmin,
 		Severity:          "high",
-		SubjectKey:        "entitlement:" + o.EntitlementID.String(),
+		SubjectKey:        "product_access:" + o.AccessID.String(),
 		Provider:          "self",
 		Evidence:          ev,
 		RecommendedAction: prose,
@@ -786,12 +776,12 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	}
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
-	closed, err := q.ListRecentlyClosedLastEntitlementWindows(ctx, gen.ListRecentlyClosedLastEntitlementWindowsParams{
+	closed, err := q.ListRecentlyClosedLastAccessWindows(ctx, gen.ListRecentlyClosedLastAccessWindowsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer,
 		ClosedAfter: now.Add(-accessEndedLookback), Now: now,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("notify: scan recently closed entitlement windows: %w", err)
+		return nil, fmt.Errorf("notify: scan recently closed access windows: %w", err)
 	}
 	var out []ConvergeFinding
 	repo := subscriptions.NewNotificationQueueRepo(p.e.DB)
@@ -810,7 +800,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 		if already {
 			continue
 		}
-		cust, entName := c.CustomerID, c.Entitlement
+		cust, product := c.CustomerID, billing.ProductID(c.ProductID)
 		out = append(out, ConvergeFinding{
 			Type:       "notify.access_ended.missing",
 			Shape:      ShapeMissing,
@@ -819,8 +809,8 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			SubjectKey: "customer:" + cust.String(),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": cust.String(), "entitlement": entName,
-				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": billing.SourceRef(c.SourceType, c.SourceID.String()),
+				"customer_id": cust.String(), "product_id": product.String(),
+				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": billing.SourceRef(c.SourceType, c.SourceID),
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
@@ -829,10 +819,10 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
 					Data: billing.NotificationData{
-						Reason:      string(subscriptions.PremiumEndReasonAccessEnded),
-						EndedAt:     &closedAt,
-						Entitlement: entName,
-						Source:      "converge_notify",
+						Reason:    string(subscriptions.PremiumEndReasonAccessEnded),
+						EndedAt:   &closedAt,
+						ProductID: product,
+						Source:    "converge_notify",
 					},
 				})
 			},
@@ -874,32 +864,31 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
-	orphanSubs, err := q.ConOrphanEntitlementSubscriptionSource(ctx, gen.ConOrphanEntitlementSubscriptionSourceParams{
+	orphanSubs, err := q.ConOrphanAccessSubscriptionSource(ctx, gen.ConOrphanAccessSubscriptionSourceParams{
 		MerchantID: scopeMerchantID.UUID(),
 		Now:        now, CustomerID: cust,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan subscription sources: %w", err)
 	}
-	orphanPays, err := q.ConOrphanEntitlementPaymentSource(ctx, gen.ConOrphanEntitlementPaymentSourceParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
+	orphanPays, err := q.ConOrphanAccessPaymentSource(ctx, gen.ConOrphanAccessPaymentSourceParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan payment sources: %w", err)
 	}
-	// (No admin-source orphan check: #511 retired entitlement_grants — manually
-	// granted entitlements are now `admin`-sourced grants in the ledger, covered
-	// by DERIVE via grant_id, with no separate provenance row to dangle.)
+	// Free grants have no source row to dangle: the grant ledger is their
+	// provenance.
 
-	emit := func(entID uuid.UUID, userID, entitlement, sourceType string, sourceID uuid.UUID) {
+	emit := func(accessID uuid.UUID, userID string, product uuid.UUID, sourceType, sourceID string) {
 		out = append(out, ConvergeFinding{
 			Type:       "consistency.reference.source_reference",
 			Shape:      ShapeMismatch,
 			Class:      ClassAdmin,
 			Severity:   "medium",
-			SubjectKey: "entitlement:" + entID.String(),
+			SubjectKey: "product_access:" + accessID.String(),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"entitlement_id": entID.String(), "customer_id": userID,
-				"entitlement": entitlement, "source_type": sourceType, "source_id": billing.SourceRef(sourceType, sourceID.String()),
+				"access_id": accessID.String(), "customer_id": userID,
+				"product_id": billing.ProductID(product).String(), "source_type": sourceType, "source_id": billing.SourceRef(sourceType, sourceID),
 			},
 			// surface-only: a dangling source has no safe auto-repair (it may be a
 			// valid historical record or a real corruption) — an admin decides.
@@ -907,11 +896,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	}
 	for i := range orphanSubs {
 		r := orphanSubs[i]
-		emit(r.EntID, r.UserID, r.Entitlement, r.SourceType, r.SourceID)
+		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID)
 	}
 	for i := range orphanPays {
 		r := orphanPays[i]
-		emit(r.EntID, r.UserID, r.Entitlement, r.SourceType, r.SourceID)
+		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID)
 	}
 
 	// consistency.duplicate.provider_charge — more than one captured charge for

@@ -21,10 +21,10 @@ SELECT
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND destructive_run_id = sqlc.arg(run_id)::uuid
         AND deleted_at IS NOT NULL)::bigint AS checkout_attempts,
-    (SELECT count(*) FROM billing.entitlements
+    (SELECT count(*) FROM billing.product_access
       WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         AND destructive_run_id = sqlc.arg(run_id)::uuid
-        AND deleted_at IS NOT NULL)::bigint AS entitlements;
+        AND deleted_at IS NOT NULL)::bigint AS product_access;
 
 -- name: CountConvergeRestorableForRun :one
 -- What `kind='converge_enforce'` would re-assert, counted through the SAME join
@@ -43,12 +43,12 @@ SELECT
         AND s.deleted_at IS NULL)::bigint AS subscriptions,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
-       JOIN billing.entitlements e
+       JOIN billing.product_access e
          ON e.merchant_id = b.merchant_id AND e.id = b.row_id
       WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
         AND b.destructive_run_id = sqlc.arg(run_id)::uuid
-        AND b.table_name = 'entitlements'
-        AND e.deleted_at IS NULL)::bigint AS entitlements_to_invalidate,
+        AND b.table_name = 'product_access'
+        AND e.deleted_at IS NULL)::bigint AS access_to_invalidate,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
        JOIN billing.subscriptions s

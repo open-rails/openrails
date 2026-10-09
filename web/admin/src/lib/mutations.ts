@@ -28,7 +28,6 @@ import {
   getPriceByKey,
   getProduct,
   getTrustLevel,
-  grantEntitlement,
   grantProductAccess,
   inviteTeamMember,
   listCustomers,
@@ -50,7 +49,6 @@ import {
   resolveFinding,
   resumeSubscription,
   revokeApiKey,
-  revokeEntitlement,
   revokeProductAccess,
   revokeTeamInvite,
   setCreditLimit,
@@ -59,6 +57,7 @@ import {
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
   type PaymentFilters,
+  type ProductGrant,
   type ProductRequest,
   type UsageMeterRequest,
   type SubscriptionFilters,
@@ -449,31 +448,6 @@ export const adminMutations = {
         ]),
     })
   },
-  grantCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
-    const keys = merchantQueryKeys()
-    const customerKey = keys.customer(customerId)
-    return mutationOptions({
-      mutationKey: [...customerKey, "entitlements", "grant"],
-      mutationFn: ({
-        entitlement,
-        hours,
-      }: {
-        entitlement: string
-        hours?: number
-      }) => grantEntitlement(customerId, entitlement, hours),
-      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
-    })
-  },
-  revokeCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
-    const keys = merchantQueryKeys()
-    const customerKey = keys.customer(customerId)
-    return mutationOptions({
-      mutationKey: [...customerKey, "entitlements", "revoke"],
-      mutationFn: (entitlementId: string) =>
-        revokeEntitlement(customerId, entitlementId),
-      onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
-    })
-  },
   grantCustomerProductAccess: (
     queryClient: QueryClient,
     customerId: string
@@ -482,13 +456,7 @@ export const adminMutations = {
     const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "product-access", "grant"],
-      mutationFn: ({
-        productId,
-        endsAt,
-      }: {
-        productId: string
-        endsAt?: string
-      }) => grantProductAccess(customerId, productId, endsAt),
+      mutationFn: (grant: ProductGrant) => grantProductAccess(customerId, grant),
       onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
     })
   },

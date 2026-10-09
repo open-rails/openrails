@@ -24,3 +24,13 @@ WHERE ctid IN (
       AND hle.delivered_at < sqlc.arg(cutoff)::timestamptz
     LIMIT sqlc.arg(row_limit)::int
 );
+
+-- name: EnqueueProductEntitlementsChanged :exec
+-- One key edit of a product, keyed by the revision it produced: announcing it
+-- again collapses.
+INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
+SELECT p.merchant_id, 'product.entitlements_changed', 'product', p.id, sqlc.arg(occurred_at)::timestamptz, sqlc.arg(data)::jsonb,
+       'product.entitlements_changed:' || p.id::text || ':' || p.revision::text
+FROM billing.products p
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = sqlc.arg(product_id)::uuid
+ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;

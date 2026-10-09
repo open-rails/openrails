@@ -207,7 +207,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
 		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: charge.FreezeInstrument(methodRow, sub.PspID), PaymentMethodID: methodRow.ID,
 		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
-		Entitlements: models.CloneEntitlements(newProduct.Entitlements), AccessDurationHours: newPrice.AccessDurationHours, TargetPlanID: targetPlan}
+		AccessDurationHours: newPrice.AccessDurationHours, TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"
 	if downgrade {
 		reason = "customer tier downgrade"

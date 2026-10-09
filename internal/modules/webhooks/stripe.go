@@ -6,10 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/alerting"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -849,18 +849,6 @@ func parseCheckoutAttemptID(metadata map[string]string) uuid.UUID {
 	return id.UUID()
 }
 
-func stripeEntitlementSet(spec []string) map[string]bool {
-	out := map[string]bool{}
-	for _, name := range spec {
-		if name != "" {
-			out[name] = true
-		}
-	}
-	// #651: do NOT fabricate a "premium" entitlement when the spec is empty — grant
-	// only what the product declares (possibly nothing).
-	return out
-}
-
 // Stripe invoice amounts are CENTS on the wire; payment rows store micros.
 // Success rows record amount_paid (what actually settled); failed rows record
 // amount_due (what was attempted) — #671 1f. Wire-pinned in
@@ -1030,13 +1018,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 	} else if original.SubscriptionID == nil && s.DB != nil {
 		entSvc := entitlements.NewEntitlementService(s.DB, s.Clock)
-		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.EntitlementRevokeChargeback); err != nil {
-			return fmt.Errorf("revoke one-off entitlements after stripe dispute: %w", err)
-		}
-		// Revoke the durable product access grant tied to this payment (issue #250),
-		// consistent with the entitlement reversal above.
-		paSvc := productaccess.NewService(s.DB, s.Clock)
-		if _, err := paSvc.RevokeProductAccessByPayment(ctx, original.ID, models.ProductAccessRevokeChargeback); err != nil {
+		if err := entSvc.EndActiveByPayment(ctx, original.ID, models.AccessRevokeChargeback); err != nil {
 			return fmt.Errorf("revoke product access after stripe dispute: %w", err)
 		}
 	}

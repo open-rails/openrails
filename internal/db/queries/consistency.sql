@@ -5,35 +5,33 @@
 -- These replace the retired internal/audit checks (#511 Phase F hard cut).
 
 -- Partition (#690): a LIVE window with a dangling subscription source is the
--- freeloader case — derive.entitlement.unjustified (severity high, revoke
+-- freeloader case — derive.access.unjustified (severity high, revoke
 -- recommendation) owns it. This check keeps only NON-LIVE dangling references
 -- (revoked/expired history rows): referential hygiene, no access at stake.
--- name: ConOrphanEntitlementSubscriptionSource :many
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
-WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
-  AND ent.source_id IS NOT NULL
-  AND ent.deleted_at IS NULL
+-- name: ConOrphanAccessSubscriptionSource :many
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+FROM billing.product_access pa
+LEFT JOIN billing.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_id = sub.id::text AND sub.deleted_at IS NULL
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'subscription'
+  AND pa.deleted_at IS NULL
   AND sub.id IS NULL
-  AND NOT (ent.revoked_at IS NULL
-           AND ent.starts_at <= sqlc.arg(now)::timestamptz
-           AND (ent.ends_at IS NULL OR ent.ends_at > sqlc.arg(now)::timestamptz))
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR ent.customer_id = sqlc.narg(customer_id)::uuid);
+  AND NOT (pa.revoked_at IS NULL
+           AND pa.starts_at <= sqlc.arg(now)::timestamptz
+           AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(now)::timestamptz))
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid);
 
--- name: ConOrphanEntitlementPaymentSource :many
-SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
-FROM billing.entitlements ent
-LEFT JOIN billing.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
-WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'purchase'
-  AND ent.source_id IS NOT NULL
-  AND ent.deleted_at IS NULL
+-- name: ConOrphanAccessPaymentSource :many
+SELECT pa.id AS access_id, pa.customer_id::text AS user_id, pa.product_id, pa.source_type, pa.source_id
+FROM billing.product_access pa
+LEFT JOIN billing.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.id = pa.payment_id AND purch.deleted_at IS NULL
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'purchase'
+  AND pa.deleted_at IS NULL
   AND purch.id IS NULL
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR ent.customer_id = sqlc.narg(customer_id)::uuid);
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR pa.customer_id = sqlc.narg(customer_id)::uuid);
 
 
 -- #690 CON `consistency.duplicate.ownership` — more than one LIVE
--- (un-terminated, window covering now) PAID ownership grant for the same
+-- (un-terminated, window covering now) PURCHASED access grant for the same
 -- (customer, product): the cross-month one-off/lifetime double-purchase the
 -- month-scoped duplicate.provider_charge check cannot see. Paid sources only
 -- (purchase/subscription — admin/grace grants charge nobody twice) and
@@ -56,9 +54,8 @@ WITH live_ownership AS (
            pay.purchased_at
     FROM billing.grants g
     LEFT JOIN billing.payments pay ON pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
-    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.event = 'grant' AND g.kind = 'ownership'
-      AND g.product_id IS NOT NULL
-      AND g.source_type IN ('purchase', 'subscription')
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.event = 'grant' AND g.kind = 'access'
+      AND g.source_type = 'purchase'
       AND (g.source_id IS NULL OR g.source_id NOT LIKE 'include:%')
       AND g.starts_at <= sqlc.arg(now)::timestamptz
       AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)

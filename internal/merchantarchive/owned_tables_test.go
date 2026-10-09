@@ -71,6 +71,7 @@ var restoreOccupancyExempt = []string{"federated_grants", "merchant_api_host_cla
 var (
 	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)
 	merchantColumn = regexp.MustCompile(`(?m)^\s*merchant_id uuid\b`)
+	dropTable      = regexp.MustCompile(`(?m)^DROP TABLE billing\.(\w+);`)
 	restoreList    = regexp.MustCompile(`(?s)FUNCTION billing\.guard_billing_restore_receipt\(\).*?AND c\.relname = ANY\(ARRAY\[(.*?)\]::text\[\]\)`)
 	quoted         = regexp.MustCompile(`'(\w+)'`)
 )
@@ -94,6 +95,10 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 			if merchantColumn.MatchString(m[2]) {
 				scoped = append(scoped, m[1])
 			}
+		}
+		for _, m := range dropTable.FindAllStringSubmatch(string(b), -1) {
+			all = slices.DeleteFunc(all, func(name string) bool { return name == m[1] })
+			scoped = slices.DeleteFunc(scoped, func(name string) bool { return name == m[1] })
 		}
 		if m := restoreList.FindStringSubmatch(string(b)); m != nil {
 			guard = nil
@@ -134,7 +139,7 @@ func TestOwnedTablesAndRestoreOccupancyCoverTheSchema(t *testing.T) {
 func TestRestoreSkipsPartitionedRowsPastRetention(t *testing.T) {
 	bounded := map[string]string{"usage_events": "occurred_at", "admission_operations": "admitted_at"}
 	for _, p := range contract.Profiles {
-		query := insertQuery(p)
+		query := insertQuery("billing."+p.Name, p)
 		key, partitioned := bounded[p.Name]
 		if !partitioned {
 			if strings.Contains(query, " WHERE ") {

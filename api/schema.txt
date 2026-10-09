@@ -19,6 +19,24 @@ migration 0015_owed_repayment.up.sql sha256:54ad22cbf5293b6a00f7cbf18822c8c013f3
 migration 0016_identity_facts.up.sql sha256:3ae50466191affffa4e919d8b67f94aac547205e517e7466110e6788e47dbbcb
 migration 0017_entitlement_keyspace_index.up.sql sha256:e7ac741d89b1942109638e7dca67ba964de3ccf8a162905908939804bce142bd
 migration 0018_product_entitlements.up.sql sha256:350b3d0dd394f0ce9089e712635aaa95973482118213cd27610a419ffa289a07
+migration 0019_product_access.up.sql sha256:fee52c1fbafd1af152efd83a5116f1f164e6389eb3748a48bd1b9c5ca7fec4c6
+migration 0020_product_access_cutover.up.sql sha256:7840a26f86166d6fb76936789d2aff19d126969d1fbe3cfab00ce9204b86a3c9
+
+table billing.access_cutover_approvals
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column entitlement text COLLATE "C" NOT NULL
+  column change text NOT NULL
+  column approved_by text NOT NULL
+  column approved_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint access_cutover_approvals_approved_by_check CHECK (((octet_length(approved_by) >= 1) AND (octet_length(approved_by) <= 255)))
+  constraint access_cutover_approvals_change_check CHECK ((change = ANY (ARRAY['lost'::text, 'gained'::text])))
+  constraint access_cutover_approvals_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint access_cutover_approvals_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint access_cutover_approvals_pkey PRIMARY KEY (merchant_id, id)
+  index CREATE UNIQUE INDEX access_cutover_approvals_key ON billing.access_cutover_approvals USING btree (merchant_id, customer_id, entitlement, change)
+  index CREATE UNIQUE INDEX access_cutover_approvals_pkey ON billing.access_cutover_approvals USING btree (merchant_id, id)
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -530,47 +548,10 @@ table billing.destructive_run_before_images
   constraint destructive_run_before_images_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_run_before_images_pkey PRIMARY KEY (merchant_id, id)
   constraint destructive_run_before_images_run_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
-  constraint destructive_run_before_images_table_check CHECK ((table_name = ANY (ARRAY['subscriptions'::text, 'entitlements'::text])))
+  constraint destructive_run_before_images_table_check CHECK ((table_name = ANY (ARRAY['subscriptions'::text, 'entitlements'::text, 'product_access'::text])))
   index CREATE UNIQUE INDEX destructive_run_before_images_identity_key ON billing.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id)
   index CREATE UNIQUE INDEX destructive_run_before_images_pkey ON billing.destructive_run_before_images USING btree (merchant_id, id)
   trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('restored_at', 'destructive_run_class')
-
-table billing.entitlements
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column entitlement text NOT NULL
-  column starts_at timestamp with time zone NOT NULL
-  column ends_at timestamp with time zone
-  column source_id uuid NOT NULL
-  column source_type text NOT NULL
-  column revoked_at timestamp with time zone
-  column revoke_reason text
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  column deleted_at timestamp with time zone
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column grant_id uuid NOT NULL
-  column destructive_run_id uuid
-  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
-  constraint entitlements_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint entitlements_customer_id_grant_id_fkey FOREIGN KEY (merchant_id, customer_id, grant_id) REFERENCES billing.grants(merchant_id, customer_id, id)
-  constraint entitlements_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
-  constraint entitlements_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint entitlements_pkey PRIMARY KEY (merchant_id, id)
-  constraint entitlements_revoke_fields_together_check CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL)))
-  constraint entitlements_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text])))
-  constraint entitlements_valid_time_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
-  index CREATE INDEX entitlements_closed_at_idx ON billing.entitlements USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE ((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL))
-  index CREATE INDEX entitlements_customer_id_entitlement_starts_at_ends_at_idx ON billing.entitlements USING btree (merchant_id, customer_id, entitlement, starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE INDEX entitlements_customer_keyspace_idx ON billing.entitlements USING btree (merchant_id, customer_id, entitlement COLLATE "C") INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE INDEX entitlements_destructive_run_id_idx ON billing.entitlements USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
-  index CREATE INDEX entitlements_entitlement_customer_id_idx ON billing.entitlements USING btree (merchant_id, entitlement, customer_id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE UNIQUE INDEX entitlements_grant_id_entitlement_key ON billing.entitlements USING btree (merchant_id, grant_id, entitlement) WHERE (deleted_at IS NULL)
-  index CREATE INDEX entitlements_id_idx ON billing.entitlements USING btree (id) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE UNIQUE INDEX entitlements_pkey ON billing.entitlements USING btree (merchant_id, id)
-  index CREATE INDEX entitlements_source_id_entitlement_ends_at_idx ON billing.entitlements USING btree (merchant_id, source_id, entitlement, ends_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE INDEX entitlements_source_id_entitlement_idx ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'purchase'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL))
-  index CREATE INDEX entitlements_source_type_source_id_idx ON billing.entitlements USING btree (merchant_id, source_type, source_id)
 
 table billing.federated_grants
   column merchant_id uuid NOT NULL
@@ -615,6 +596,11 @@ table billing.grants
   column currency text
   column reason text
   column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column actor text
+  column grant_reason text
+  constraint grants_access_grant_reason_check CHECK (((NOT ((kind = 'access'::text) AND (source_type = 'grant'::text) AND (event = 'grant'::text))) OR ((grant_reason IS NOT NULL) AND (actor IS NOT NULL))))
+  constraint grants_access_product_check CHECK (((kind <> 'access'::text) OR ((product_id IS NOT NULL) AND (spec_snapshot IS NULL) AND (source_id IS NOT NULL))))
+  constraint grants_actor_check CHECK (((actor IS NULL) OR ((octet_length(actor) >= 1) AND (octet_length(actor) <= 255))))
   constraint grants_amount_positive_check CHECK (((amount IS NULL) OR (amount > 0)))
   constraint grants_credit_amount_check CHECK (((kind <> 'credit'::text) OR ((amount IS NOT NULL) AND (currency IS NOT NULL))))
   constraint grants_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
@@ -624,14 +610,18 @@ table billing.grants
   constraint grants_customer_id_supersedes_id_fkey FOREIGN KEY (merchant_id, customer_id, supersedes_id) REFERENCES billing.grants(merchant_id, customer_id, id)
   constraint grants_event_check CHECK ((event = ANY (ARRAY['grant'::text, 'revoke'::text, 'expire'::text, 'supersede'::text])))
   constraint grants_event_supersedes_check CHECK (((event = 'grant'::text) = (supersedes_id IS NULL)))
-  constraint grants_kind_check CHECK ((kind = ANY (ARRAY['entitlement'::text, 'ownership'::text, 'credit'::text])))
+  constraint grants_grant_reason_check CHECK (((grant_reason IS NULL) OR ((grant_reason = ANY (ARRAY['comp'::text, 'staff'::text, 'import'::text, 'migration'::text])) AND (kind = 'access'::text) AND (source_type = 'grant'::text))))
+  constraint grants_kind_check CHECK ((kind = ANY (ARRAY['entitlement'::text, 'ownership'::text, 'credit'::text, 'access'::text])))
   constraint grants_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint grants_pkey PRIMARY KEY (merchant_id, id)
   constraint grants_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
   constraint grants_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
-  constraint grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text])))
+  constraint grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text, 'grant'::text])))
   constraint grants_termination_no_window_check CHECK (((event = 'grant'::text) OR (ends_at IS NULL)))
   constraint grants_valid_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
+  index CREATE UNIQUE INDEX grants_access_idempotency_key ON billing.grants USING btree (merchant_id, source_id) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'grant'::text) AND (grant_reason <> 'migration'::text))
+  index CREATE UNIQUE INDEX grants_access_once_key ON billing.grants USING btree (merchant_id, customer_id, product_id, source_type, source_id, starts_at) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type <> 'grace'::text))
+  index CREATE UNIQUE INDEX grants_access_purchase_key ON billing.grants USING btree (merchant_id, payment_id, product_id) WHERE ((kind = 'access'::text) AND (event = 'grant'::text) AND (source_type = 'purchase'::text))
   index CREATE INDEX grants_created_at_idx ON billing.grants USING btree (merchant_id, created_at) WHERE (kind = 'credit'::text)
   index CREATE INDEX grants_customer_id_currency_starts_at_ends_at_idx ON billing.grants USING btree (merchant_id, customer_id, currency, starts_at, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text))
   index CREATE UNIQUE INDEX grants_customer_id_id_key ON billing.grants USING btree (merchant_id, customer_id, id)
@@ -656,14 +646,14 @@ table billing.host_outbox
   column payment_id uuid
   column amount bigint
   column subject_id uuid NOT NULL
-  column currency text NOT NULL
+  column currency text
   column occurred_at timestamp with time zone NOT NULL DEFAULT now()
   column data jsonb NOT NULL DEFAULT '{}'::jsonb
   column delivered_at timestamp with time zone
   column dedupe_key text NOT NULL
-  constraint host_outbox_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = 'product.entitlements_changed'::text)) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -1427,7 +1417,6 @@ table billing.payments
   column discount_code text
   column discount_reason text
   column discount_metadata jsonb
-  column entitlements_snapshot jsonb
   column metadata jsonb
   column purchased_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
@@ -1446,7 +1435,6 @@ table billing.payments
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column money_movement text NOT NULL DEFAULT 'none'::text
   column credit_grant_snapshot jsonb
-  column legacy_entitlement_hours jsonb
   constraint payments_attempt_kind_check CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
   constraint payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
   constraint payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
@@ -1457,8 +1445,6 @@ table billing.payments
   constraint payments_customer_id_id_key UNIQUE (merchant_id, customer_id, id)
   constraint payments_customer_id_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id) ON DELETE SET NULL (subscription_id)
   constraint payments_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
-  constraint payments_entitlements_list_check CHECK (((entitlements_snapshot IS NULL) OR (entitlements_snapshot = 'null'::jsonb) OR ((jsonb_typeof(entitlements_snapshot) = 'array'::text) AND (NOT jsonb_path_exists(entitlements_snapshot, '$[*]?(@.type() != "string")'::jsonpath)))))
-  constraint payments_legacy_entitlement_hours_check CHECK (((legacy_entitlement_hours IS NULL) OR ((jsonb_typeof(legacy_entitlement_hours) = 'object'::text) AND (NOT jsonb_path_exists(legacy_entitlement_hours, '$.*?((@.type() != "number" || @ <= 0) || @ > 2562047)'::jsonpath)))))
   constraint payments_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint payments_money_movement_check CHECK ((money_movement = ANY (ARRAY['rail'::text, 'none'::text])))
   constraint payments_not_future_check CHECK ((purchased_at <= (now() + '00:05:00'::interval)))
@@ -1574,6 +1560,45 @@ table billing.prices
   trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
+
+table billing.product_access
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column product_id uuid NOT NULL
+  column grant_id uuid NOT NULL
+  column source_type text NOT NULL
+  column source_id text NOT NULL
+  column payment_id uuid
+  column starts_at timestamp with time zone NOT NULL
+  column ends_at timestamp with time zone
+  column revoked_at timestamp with time zone
+  column revoke_reason text
+  column deleted_at timestamp with time zone
+  column destructive_run_id uuid
+  column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint product_access_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint product_access_destructive_run_id_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
+  constraint product_access_grant_id_fkey FOREIGN KEY (merchant_id, customer_id, grant_id) REFERENCES billing.grants(merchant_id, customer_id, id)
+  constraint product_access_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint product_access_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
+  constraint product_access_pkey PRIMARY KEY (merchant_id, id)
+  constraint product_access_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint product_access_revoke_fields_together_check CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL)))
+  constraint product_access_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
+  constraint product_access_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'grace'::text, 'grant'::text])))
+  constraint product_access_valid_time_window_check CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
+  index CREATE INDEX product_access_closed_at_idx ON billing.product_access USING btree (merchant_id, LEAST(COALESCE(ends_at, 'infinity'::timestamp with time zone), COALESCE(revoked_at, 'infinity'::timestamp with time zone))) WHERE (((ends_at IS NOT NULL) OR (revoked_at IS NOT NULL)) AND (deleted_at IS NULL))
+  index CREATE INDEX product_access_customer_created_idx ON billing.product_access USING btree (merchant_id, customer_id, id)
+  index CREATE INDEX product_access_customer_idx ON billing.product_access USING btree (merchant_id, customer_id, product_id) INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
+  index CREATE INDEX product_access_destructive_run_id_idx ON billing.product_access USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
+  index CREATE UNIQUE INDEX product_access_grant_key ON billing.product_access USING btree (merchant_id, grant_id) WHERE (deleted_at IS NULL)
+  index CREATE INDEX product_access_payment_idx ON billing.product_access USING btree (merchant_id, payment_id) WHERE (payment_id IS NOT NULL)
+  index CREATE UNIQUE INDEX product_access_pkey ON billing.product_access USING btree (merchant_id, id)
+  index CREATE INDEX product_access_product_idx ON billing.product_access USING btree (merchant_id, product_id, customer_id) INCLUDE (starts_at, ends_at) WHERE ((revoked_at IS NULL) AND (deleted_at IS NULL))
+  index CREATE INDEX product_access_source_idx ON billing.product_access USING btree (merchant_id, source_type, source_id)
 
 table billing.product_archive_operations
   column merchant_id uuid NOT NULL
@@ -2110,7 +2135,6 @@ table billing.subscriptions
   column canceled_at timestamp with time zone
   column cancel_type text
   column cancel_feedback text
-  column entitlements_snapshot jsonb
   column gateway_response jsonb
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
@@ -2139,7 +2163,6 @@ table billing.subscriptions
   constraint subscriptions_destructive_run_id_destructive_run_class_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint subscriptions_ended_not_before_canceled_check CHECK (((ended_at IS NULL) OR (canceled_at IS NULL) OR (ended_at >= canceled_at)))
   constraint subscriptions_engine_binding_check CHECK (((collection_policy <> 'engine'::text) OR (((rail = ANY (ARRAY['nmi'::text, 'stripe'::text])) AND (rail_subscription_id IS NULL)) OR (rail = 'solana'::text))))
-  constraint subscriptions_entitlements_list_check CHECK (((entitlements_snapshot IS NULL) OR (entitlements_snapshot = 'null'::jsonb) OR ((jsonb_typeof(entitlements_snapshot) = 'array'::text) AND (NOT jsonb_path_exists(entitlements_snapshot, '$[*]?(@.type() != "string")'::jsonpath)))))
   constraint subscriptions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint subscriptions_nmi_schedule_rail_check CHECK (((collection_policy = 'nmi_schedule'::text) = ((rail = 'nmi'::text) AND (collection_policy <> 'engine'::text))))
   constraint subscriptions_past_due_has_period_end_check CHECK (((status <> 'past_due'::text) OR (current_period_ends_at IS NOT NULL)))
@@ -2463,6 +2486,121 @@ function billing.check_billing_restore_ledger(uuid)
   END;
   $function$
 
+function billing.convert_entitlement_windows(uuid,regclass,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.convert_entitlement_windows(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
+   RETURNS bigint
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE converted bigint;
+  BEGIN
+      DROP TABLE IF EXISTS pg_temp.access_conversion;
+      EXECUTE format($q$
+      CREATE TEMP TABLE access_conversion ON COMMIT DROP AS
+      WITH win AS (
+          SELECT e.customer_id, e.entitlement::text COLLATE "C" AS entitlement, e.starts_at, e.ends_at,
+                 e.revoked_at, e.revoke_reason, e.destructive_run_id::text AS destructive_run_id,
+                 g.source_type, COALESCE(g.source_id, g.id::text) AS source_id,
+                 CASE WHEN g.source_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN g.source_id::uuid END AS source_uuid
+          FROM %1$s e
+          JOIN grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id AND g.id = e.grant_id
+          WHERE e.merchant_id = %2$L AND e.deleted_at IS NULL
+      ), purchases AS (
+          SELECT w.customer_id, pr.product_id, 'purchase'::text AS source_type, w.source_id, pay.id AS payment_id,
+                 min(w.starts_at) AS starts_at,
+                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
+                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
+                 max(w.destructive_run_id) AS destructive_run_id
+          FROM win w
+          JOIN payments pay ON pay.merchant_id = %2$L AND pay.id = w.source_uuid AND pay.customer_id = w.customer_id
+          JOIN prices pr ON pr.merchant_id = %2$L AND pr.id = pay.price_id
+          WHERE w.source_type = 'purchase'
+          GROUP BY w.customer_id, pr.product_id, w.source_id, pay.id
+      ), periods AS (
+          SELECT w.customer_id, w.source_type, w.source_id, w.source_uuid, w.starts_at,
+                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
+                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
+                 max(w.destructive_run_id) AS destructive_run_id, array_agg(DISTINCT w.entitlement) AS keys
+          FROM win w WHERE w.source_type IN ('subscription', 'grace')
+          GROUP BY w.customer_id, w.source_type, w.source_id, w.source_uuid, w.starts_at
+      ), subscription_windows AS (
+          SELECT p.customer_id, best.product_id, p.source_type, p.source_id, NULL::uuid AS payment_id, p.starts_at, p.ends_at,
+                 p.revoked, p.revoked_at, p.revoke_reason, p.destructive_run_id
+          FROM periods p
+          JOIN subscriptions s ON s.merchant_id = %2$L AND s.id = p.source_uuid
+          CROSS JOIN LATERAL (
+              SELECT c.product_id FROM (
+                  SELECT s.product_id
+                  UNION SELECT pr.product_id FROM payments pay
+                  JOIN prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
+                  WHERE pay.merchant_id = %2$L AND pay.subscription_id = s.id
+              ) c
+              ORDER BY (SELECT count(*) FROM product_entitlements pe
+                        WHERE pe.merchant_id = %2$L AND pe.product_id = c.product_id AND pe.removed_at IS NULL
+                          AND pe.entitlement = ANY (p.keys)) DESC,
+                       (c.product_id = s.product_id) DESC, c.product_id
+              LIMIT 1
+          ) best
+      ), admin_groups AS (
+          SELECT w.customer_id, w.source_id, w.starts_at,
+                 CASE WHEN bool_or(w.ends_at IS NULL) THEN NULL ELSE max(w.ends_at) END AS ends_at,
+                 bool_and(w.revoked_at IS NOT NULL) AS revoked, max(w.revoked_at) AS revoked_at, max(w.revoke_reason) AS revoke_reason,
+                 max(w.destructive_run_id) AS destructive_run_id, array_agg(DISTINCT w.entitlement ORDER BY w.entitlement) AS keys
+          FROM win w WHERE w.source_type = 'admin'
+          GROUP BY w.customer_id, w.source_id, w.starts_at
+      ), admin_windows AS (
+          SELECT a.customer_id, match.product_id, 'grant'::text AS source_type, a.source_id, NULL::uuid AS payment_id, a.starts_at, a.ends_at,
+                 a.revoked, a.revoked_at, a.revoke_reason, a.destructive_run_id
+          FROM admin_groups a
+          CROSS JOIN LATERAL (
+              SELECT candidate.product_id
+              FROM product_entitlements candidate
+              JOIN products p ON p.merchant_id = candidate.merchant_id AND p.id = candidate.product_id
+              WHERE candidate.merchant_id = %2$L AND candidate.entitlement = a.keys[1] AND candidate.removed_at IS NULL
+                AND (SELECT array_agg(pe.entitlement ORDER BY pe.entitlement) FROM product_entitlements pe
+                     WHERE pe.merchant_id = candidate.merchant_id AND pe.product_id = candidate.product_id AND pe.removed_at IS NULL) = a.keys
+              ORDER BY p.archived, p.key
+              LIMIT 1
+          ) match
+      ), ownership_windows AS (
+          SELECT g.customer_id, g.product_id, CASE g.source_type WHEN 'admin' THEN 'grant' ELSE g.source_type END AS source_type,
+                 COALESCE(g.source_id, g.id::text) AS source_id, g.payment_id, g.starts_at, g.ends_at,
+                 t.id IS NOT NULL AS revoked, t.starts_at AS revoked_at, COALESCE(t.reason, t.event) AS revoke_reason, NULL::text AS destructive_run_id
+          FROM grants g
+          LEFT JOIN grants t ON t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+          WHERE g.merchant_id = %2$L AND g.kind = 'ownership' AND g.event = 'grant' AND g.product_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM purchases p WHERE p.payment_id = g.payment_id AND p.product_id = g.product_id)
+      )
+      SELECT uuidv7() AS grant_id, uuidv7() AS access_id, c.customer_id, c.product_id, c.source_type, c.source_id, c.payment_id,
+             c.starts_at, c.ends_at, c.revoked AND c.revoked_at IS NOT NULL AS revoked, c.revoked_at,
+             COALESCE(c.revoke_reason, 'revoked') AS revoke_reason, c.destructive_run_id::uuid AS destructive_run_id
+      FROM (
+          SELECT * FROM purchases UNION ALL SELECT * FROM subscription_windows
+          UNION ALL SELECT * FROM admin_windows UNION ALL SELECT * FROM ownership_windows
+      ) c
+      $q$, p_source, p_merchant);
+      INSERT INTO billing.grants (id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, starts_at, ends_at, reason, actor, grant_reason)
+      SELECT c.grant_id, p_merchant, c.customer_id, c.product_id, 'access', c.source_type, c.source_id, c.payment_id, 'grant', c.starts_at, c.ends_at,
+             'product access migration', CASE WHEN c.source_type = 'grant' THEN 'migration' END, CASE WHEN c.source_type = 'grant' THEN 'migration' END
+      FROM access_conversion c;
+      INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, starts_at, reason)
+      SELECT p_merchant, c.customer_id, c.product_id, 'access', c.source_type, c.source_id, c.payment_id, 'revoke', c.grant_id, c.revoked_at, c.revoke_reason
+      FROM access_conversion c WHERE c.revoked;
+      INSERT INTO billing.product_access (id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id,
+                                          starts_at, ends_at, revoked_at, revoke_reason, destructive_run_id)
+      SELECT c.access_id, p_merchant, c.customer_id, c.product_id, c.grant_id, c.source_type, c.source_id, c.payment_id, c.starts_at, c.ends_at,
+             CASE WHEN c.revoked THEN c.revoked_at END, CASE WHEN c.revoked THEN c.revoke_reason END, c.destructive_run_id
+      FROM access_conversion c;
+      GET DIAGNOSTICS converted = ROW_COUNT;
+      INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, reason)
+      SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, 'supersede', g.id, g.spec_snapshot, p_at, 'product access migration'
+      FROM billing.grants g
+      WHERE g.merchant_id = p_merchant AND g.kind IN ('entitlement', 'ownership') AND g.event = 'grant'
+        AND NOT EXISTS (SELECT 1 FROM billing.grants t WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+                          AND t.event IN ('revoke', 'expire', 'supersede'));
+      RETURN converted;
+  END $function$
+
 function billing.current_merchant_id()
   CREATE OR REPLACE FUNCTION billing.current_merchant_id()
    RETURNS uuid
@@ -2629,6 +2767,7 @@ function billing.guard_billing_restore_receipt()
                 -- Every merchant-scoped table but the directory's own identity rows
                 -- (former names, host claims); a test keeps this list complete.
                 AND c.relname = ANY(ARRAY[
+                    'access_cutover_approvals',
                     'account_updater_batches',
                     'admission_denials_hourly',
                     'admission_operations',
@@ -2651,7 +2790,6 @@ function billing.guard_billing_restore_receipt()
                     'customers',
                     'dashboard_configs',
                     'destructive_run_before_images',
-                    'entitlements',
                     'grants',
                     'host_outbox',
                     'idempotency_keys',
@@ -2685,6 +2823,7 @@ function billing.guard_billing_restore_receipt()
                     'price_psp_bindings',
                     'prices',
                     'product_archive_operations',
+                    'product_access',
                     'product_entitlements',
                     'products',
                     'provider_intents',
@@ -2997,6 +3136,75 @@ function billing.preserve_subscription_collection_policy()
    RETURN NEW;
   END;
   $function$
+
+function billing.product_access_changes(uuid,regclass,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.product_access_changes(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
+   RETURNS TABLE(customer_id uuid, entitlement text, change text)
+   LANGUAGE plpgsql
+   STABLE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      RETURN QUERY EXECUTE format($q$
+      WITH old AS (
+          SELECT e.customer_id, e.entitlement::text COLLATE "C" AS entitlement,
+                 range_agg(tstzrange(GREATEST(e.starts_at, %3$L::timestamptz), e.ends_at)) AS r
+          FROM %1$s e
+          WHERE e.merchant_id = %2$L AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+            AND (e.ends_at IS NULL OR e.ends_at > %3$L::timestamptz)
+          GROUP BY 1, 2
+      ), new AS (
+          SELECT pa.customer_id, pe.entitlement::text COLLATE "C" AS entitlement,
+                 range_agg(tstzrange(GREATEST(pa.starts_at, pe.added_at, %3$L::timestamptz), LEAST(pa.ends_at, pe.removed_at))) AS r
+          FROM product_access pa
+          JOIN product_entitlements pe ON pe.merchant_id = pa.merchant_id AND pe.product_id = pa.product_id
+          WHERE pa.merchant_id = %2$L AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+            AND (pa.ends_at IS NULL OR pa.ends_at > %3$L::timestamptz)
+            AND (pe.removed_at IS NULL OR pe.removed_at > %3$L::timestamptz)
+            AND GREATEST(pa.starts_at, pe.added_at, %3$L::timestamptz) < COALESCE(LEAST(pa.ends_at, pe.removed_at), 'infinity'::timestamptz)
+          GROUP BY 1, 2
+      )
+      SELECT COALESCE(o.customer_id, n.customer_id), COALESCE(o.entitlement, n.entitlement)::text, d.change
+      FROM old o FULL JOIN new n ON n.customer_id = o.customer_id AND n.entitlement = o.entitlement
+      CROSS JOIN LATERAL (VALUES
+          ('lost', NOT isempty(COALESCE(o.r, '{}'::tstzmultirange) - COALESCE(n.r, '{}'::tstzmultirange))),
+          ('gained', NOT isempty(COALESCE(n.r, '{}'::tstzmultirange) - COALESCE(o.r, '{}'::tstzmultirange)))
+      ) d(change, changed)
+      WHERE d.changed
+      ORDER BY 1, 2, 3
+      $q$, p_source, p_merchant, p_at);
+  END $function$
+
+function billing.product_access_conversion_notes(uuid,regclass,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.product_access_conversion_notes(p_merchant uuid, p_source regclass, p_at timestamp with time zone)
+   RETURNS TABLE(customer_id uuid, note text, source_type text, source_id text, entitlements text[])
+   LANGUAGE plpgsql
+   STABLE
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      RETURN QUERY EXECUTE format($q$
+      WITH live AS (
+          SELECT e.customer_id, e.entitlement::text AS entitlement, e.ends_at, g.source_type, COALESCE(g.source_id, g.id::text) AS source_id
+          FROM %1$s e
+          JOIN grants g ON g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id AND g.id = e.grant_id
+          WHERE e.merchant_id = %2$L AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+            AND (e.ends_at IS NULL OR e.ends_at > %3$L::timestamptz)
+      )
+      SELECT l.customer_id, 'unmapped'::text, l.source_type, l.source_id, array_agg(DISTINCT l.entitlement ORDER BY l.entitlement)
+      FROM live l
+      WHERE NOT EXISTS (SELECT 1 FROM product_access pa
+          WHERE pa.merchant_id = %2$L AND pa.customer_id = l.customer_id AND pa.source_id = l.source_id
+            AND pa.source_type = CASE l.source_type WHEN 'admin' THEN 'grant' ELSE l.source_type END)
+      GROUP BY 1, 2, 3, 4
+      UNION ALL
+      SELECT l.customer_id, 'mixed_duration'::text, l.source_type, l.source_id, array_agg(DISTINCT l.entitlement ORDER BY l.entitlement)
+      FROM live l WHERE l.source_type = 'purchase'
+      GROUP BY 1, 2, 3, 4
+      HAVING count(DISTINCT COALESCE(l.ends_at, 'infinity'::timestamptz)) > 1
+      ORDER BY 1, 2, 3, 4
+      $q$, p_source, p_merchant, p_at);
+  END $function$
 
 function billing.products_guard_tier_group()
   CREATE OR REPLACE FUNCTION billing.products_guard_tier_group()

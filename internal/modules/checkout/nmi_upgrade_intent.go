@@ -576,7 +576,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.BillingPr
 		if completion.committed {
 			return nil
 		}
-		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, Entitlements: p.Entitlements, AccessDurationHours: p.AccessDurationHours, AccessEndsAt: p.AccessEndsAt, Downgrade: p.Downgrade()}
+		change := subscriptions.InPlaceTierChange{SubscriptionID: p.OldSubscriptionID, FromPriceID: p.OldPriceID, PriceID: p.PriceID, ProductID: p.ProductID, RailSubscriptionID: p.OldProviderSubscriptionID, PeriodEnd: p.PeriodEnd, At: p.PeriodStart, AccessDurationHours: p.AccessDurationHours, AccessEndsAt: p.AccessEndsAt, Downgrade: p.Downgrade()}
 		if err := h.Checkout.Lifecycle.ChangeTierInPlaceTx(ctx, txDB, change); err != nil {
 			return err
 		}
@@ -603,7 +603,7 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 	if err != nil {
 		return err
 	}
-	payment := &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, EntitlementsSnapshot: p.Entitlements, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
+	payment := &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &p.OldSubscriptionID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: receipt.TransactionID(), Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, Metadata: map[string]any{"upgrade_intent_id": in.ID.String(), subscriptions.PaidPeriodKey: p.PeriodStart.UTC().Format(time.RFC3339)}}
 	database := h.Checkout.SubscriptionService.Database()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := database.NewWithPgxTx(tx)

@@ -166,7 +166,9 @@
   "cancel_portal_url": "https://support.ccbill.com/",
   "access": {
     "kind": "subscription",
-    "entitlement": "premium",
+    "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "source_type": "subscription",
+    "source_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     "rail": "nmi",
     "starts_at": "2026-09-16T00:00:00.123456789Z",

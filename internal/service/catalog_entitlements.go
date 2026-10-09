@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -116,10 +117,17 @@ func (s *Service) ReplaceEntitlements(ctx context.Context, params billing.Replac
 				return nil, err
 			}
 		}
+		announced := make([]*billing.EntitlementChange, len(order))
+		for i, id := range order {
+			slices.Sort(changes[id].Added)
+			slices.Sort(changes[id].Removed)
+			announced[i] = changes[id]
+		}
+		if err := announceKeyChanges(ctx, q, mid.UUID(), edit.At, announced); err != nil {
+			return nil, err
+		}
 		for _, id := range order {
 			change := changes[id]
-			slices.Sort(change.Added)
-			slices.Sort(change.Removed)
 			receipt.EntitlementChanges = append(receipt.EntitlementChanges, *change)
 			scoped.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) { s.syncStripeFeatures(ctx, id) })
 		}
@@ -221,4 +229,35 @@ func (s *Service) syncStripeFeatures(ctx context.Context, productID uuid.UUID) {
 	}
 	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, product.Entitlements)
+}
+
+// announceKeyChanges counts each changed product's holders into its change
+// and tells the host, in the edit's transaction.
+func announceKeyChanges(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, at time.Time, changes []*billing.EntitlementChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(changes))
+	for i, c := range changes {
+		ids[i] = c.ProductID.UUID()
+	}
+	rows, err := q.CountLiveProductHolders(ctx, gen.CountLiveProductHoldersParams{MerchantID: merchantID, ProductIds: ids, At: at})
+	if err != nil {
+		return err
+	}
+	holders := make(map[uuid.UUID]int64, len(rows))
+	for _, row := range rows {
+		holders[row.ProductID] = row.Holders
+	}
+	for _, c := range changes {
+		c.Holders = holders[c.ProductID.UUID()]
+		data, err := json.Marshal(billing.ProductEntitlementsChangedEvent{ProductID: c.ProductID, ProductKey: c.ProductKey, Added: nonNil(c.Added), Removed: nonNil(c.Removed), Holders: c.Holders})
+		if err != nil {
+			return err
+		}
+		if err := q.EnqueueProductEntitlementsChanged(ctx, gen.EnqueueProductEntitlementsChangedParams{MerchantID: merchantID, ProductID: c.ProductID.UUID(), OccurredAt: at, Data: data}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

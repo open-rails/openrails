@@ -20,7 +20,7 @@ func invalidHostEventRequest(message string) error {
 
 func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListParams) (billing.ListPage[billing.HostEvent], error) {
 	switch req.Type {
-	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared:
+	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
 	}
@@ -80,7 +80,7 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
 			event.Payment = &billing.PaymentSettledEvent{PaymentID: billing.PaymentID(*row.PaymentID), CustomerID: billing.CustomerID(*row.PaymentCustomerID),
-				PriceID: billing.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: row.Currency}
+				PriceID: billing.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: derefString(row.Currency)}
 			if row.PaymentSubscriptionID != nil {
 				subscriptionID := billing.SubscriptionID(*row.PaymentSubscriptionID)
 				event.Payment.SubscriptionID = &subscriptionID
@@ -98,10 +98,17 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
 			payload.CustomerID = billing.CustomerID(row.SubjectID)
-			payload.Currency = row.Currency
+			payload.Currency = derefString(row.Currency)
 			payload.DelinquencyHostEvent.OverdueAmount = payload.OverdueAmount
 			payload.DelinquencyHostEvent.AmountFloor = payload.AmountFloor
 			event.Delinquency = &payload.DelinquencyHostEvent
+		case billing.HostEventProductEntitlementsChanged:
+			var payload billing.ProductEntitlementsChangedEvent
+			if err := json.Unmarshal(row.Data, &payload); err != nil {
+				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
+			}
+			payload.ProductID = billing.ProductID(row.SubjectID)
+			event.ProductEntitlements = &payload
 		default:
 			return nil, fmt.Errorf("unknown stored host event type %q", row.EventType)
 		}
@@ -146,4 +153,11 @@ func (s *Service) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostE
 		out[events[i].ID] = &events[i]
 	}
 	return out, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

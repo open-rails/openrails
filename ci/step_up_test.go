@@ -37,7 +37,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		body         any
 	}{
 		{http.MethodPost, "/v1/merchant/customers/ensure", map[string]any{"items": []any{map[string]any{"id": customer}}}},
-		{http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements", map[string]any{"entitlement": "content:comp", "hours": 24}},
+		{http.MethodPost, "/v1/merchant/product-access", map[string]any{"items": []any{map[string]any{"customer_id": customer, "product_id": "prod_" + uuid.NewString(), "hours": 24}}}},
 		{http.MethodPost, "/v1/merchant/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + customer + "/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/api-keys", map[string]string{"name": "ci", "role": "viewer"}},

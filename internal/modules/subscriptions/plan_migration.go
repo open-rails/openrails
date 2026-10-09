@@ -544,13 +544,12 @@ func (s *PlanMigrationService) pushStripe(ctx context.Context, req *CreatePlanMi
 	return err
 }
 
-// applyImmediately (#813 Immediate, engine-driven rails): cut the product /
-// entitlement snapshots and price over NOW — entitlement windows re-derive at
-// the next renewal grant; nothing is charged here — and mark the row applied.
+// applyImmediately (#813 Immediate, engine-driven rails): cut the product and
+// price over NOW — the new product's window starts at the next renewal grant;
+// nothing is charged here — and mark the row applied.
 func (s *PlanMigrationService) applyImmediately(ctx context.Context, sub *models.Subscription, target *models.Price, targetProduct *models.Product, row *models.SubscriptionReprice) error {
 	sub.PriceID = target.ID
 	sub.ProductID = target.ProductID
-	sub.EntitlementsSnapshot = models.CloneEntitlements(targetProduct.Entitlements)
 	if err := s.reprice.subscriptions.Update(ctx, sub); err != nil {
 		return fmt.Errorf("apply immediately: %w", err)
 	}

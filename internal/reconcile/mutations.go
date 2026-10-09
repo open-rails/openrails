@@ -84,7 +84,7 @@ func mutationRecordsForFinding(provider Provider, findingID uuid.UUID, f *Findin
 	case a.BackfillPayment != nil:
 		out = add(out, "payments", "insert", "", a.BackfillPayment.TransactionID, "payment_backfilled", 1)
 		if a.BackfillPayment.Grant != nil {
-			out = add(out, "entitlements", "insert", "", a.BackfillPayment.Grant.SubscriptionID.String(), "entitlements_granted_for", len(a.BackfillPayment.Grant.Entitlements))
+			out = add(out, "product_access", "insert", "", a.BackfillPayment.Grant.SubscriptionID.String(), "access_granted_for", 1)
 		}
 	case a.RecordRefund != nil:
 		op := "insert"

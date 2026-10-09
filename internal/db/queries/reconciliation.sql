@@ -326,7 +326,7 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
-       subscriptions.retry_attempts, subscriptions.next_retry_at, subscriptions.entitlements_snapshot,
+       subscriptions.retry_attempts, subscriptions.next_retry_at,
        subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
        (SELECT c.email FROM billing.customers c
         WHERE c.merchant_id = subscriptions.merchant_id AND c.id = subscriptions.customer_id) AS customer_email,
@@ -435,23 +435,21 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) A
 
 -- PS-1 materialization (bootstrap mode, --materialize): create the local
 -- subscription for a rail subscription that resolved unambiguously to an
--- identity and a price. The entitlements/credits specs snapshot from the
--- product exactly like a normal signup, so the subscription-sourced
--- entitlement path works unchanged. Idempotent: a second run inserts nothing
+-- identity and a price. Its access follows the product like a normal signup. Idempotent: a second run inserts nothing
 -- when any subscription already carries the rail subscription id (zero
 -- rows returned = already materialized).
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_snapshot, access_duration_hours_snapshot, customer_id, psp_id, collection_policy
+    access_duration_hours_snapshot, customer_id, psp_id, collection_policy
 )
 SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::text,
        sqlc.arg(rail), NULLIF(sqlc.arg(rail_subscription_id)::text, ''),
        sqlc.narg(period_starts_at)::timestamptz,
        sqlc.narg(period_ends_at)::timestamptz,
        COALESCE(sqlc.narg(started_at)::timestamptz, now()),
-       COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = p.merchant_id AND pe.product_id = p.id AND pe.removed_at IS NULL), '[]'::jsonb), pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
+       pr.access_duration_hours, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid, COALESCE(NULLIF(sqlc.arg(collection_policy)::text,''),'provider')
 FROM billing.prices pr
 JOIN billing.products p ON p.id = pr.product_id
 WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
@@ -465,7 +463,7 @@ WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(
         -- provider subscription id is only unique within a gateway account.
         AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
-RETURNING id, entitlements_snapshot, access_duration_hours_snapshot;
+RETURNING id, product_id, access_duration_hours_snapshot;
 
 -- PS-7: adopt the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
@@ -631,43 +629,20 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY current_period_ends_at;
 
--- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
--- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product
--- promises entitlements, where some promised feature was NEVER projected for
--- this period (no subscription-sourced window — live OR revoked — overlapping
--- it; a recorded revoke is a recorded decision, never re-granted, spec §6).
--- Excludes no-grant subs (owned by derive.subscription.missing) so the two
--- checks never double-fire. Another source's overlapping access does not
--- satisfy this subscription's missing projection.
--- Returns the missing features as a spec blob so the repair
--- (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
--- nullable: NULL = merchant-wide sweep.
--- name: ListActiveSubsMissingEntitlementProjection :many
+-- #665 DERIVE `derive.grant_effect.mismatch` (grant direction): an `active`
+-- sub in a RUNNING period with a subscription grant but NO subscription window
+-- (live OR revoked) of its product overlapping the period; a recorded revoke
+-- is a recorded decision, never re-granted (spec §6). Excludes no-grant subs
+-- (owned by derive.subscription.missing). Another source's overlapping access
+-- does not satisfy this subscription. customer_id nullable: NULL = merchant-wide.
+-- name: ListActiveSubsMissingAccessProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
-       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot,
-       missing.spec AS entitlements
+       s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot
 FROM billing.subscriptions s
-JOIN billing.products pd ON pd.id = s.product_id AND pd.merchant_id = s.merchant_id
-CROSS JOIN LATERAL (
-    SELECT jsonb_agg(feat ORDER BY feat) AS spec
-    FROM jsonb_array_elements_text(COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb))) AS feat
-    WHERE NOT EXISTS (
-        SELECT 1 FROM billing.entitlements e
-        WHERE e.merchant_id = s.merchant_id
-          AND e.source_type = 'subscription' AND e.source_id = s.id
-          AND e.entitlement = feat
-          AND e.deleted_at IS NULL
-          AND (s.access_duration_hours_snapshot IS NULL OR
-               e.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
-          AND (e.ends_at IS NULL OR e.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
-    )
-
-) missing
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
   AND s.status = 'active'
-  AND COALESCE(NULLIF(s.entitlements_snapshot, 'null'::jsonb), COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL), '[]'::jsonb)) <> '[]'::jsonb
   AND (s.access_duration_hours_snapshot IS NULL OR
        COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour' > sqlc.arg(now)::timestamptz)
   AND COALESCE(s.current_period_starts_at, s.started_at) <= sqlc.arg(now)::timestamptz
@@ -676,13 +651,22 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE g.merchant_id = s.merchant_id AND g.event = 'grant'
         AND g.source_type = 'subscription' AND g.source_id = s.id::text
   )
-  AND missing.spec IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM billing.product_access pa
+      WHERE pa.merchant_id = s.merchant_id
+        AND pa.source_type = 'subscription' AND pa.source_id = s.id::text
+        AND pa.product_id = s.product_id
+        AND pa.deleted_at IS NULL
+        AND (s.access_duration_hours_snapshot IS NULL OR
+             pa.starts_at < COALESCE(s.current_period_starts_at, s.started_at) + s.access_duration_hours_snapshot * interval '1 hour')
+        AND (pa.ends_at IS NULL OR pa.ends_at > COALESCE(s.current_period_starts_at, s.started_at))
+  )
 ORDER BY s.current_period_ends_at;
 
 -- A chargeback revokes access. Ordinary cancellation only stops billing and
 -- leaves all previously purchased access windows intact, including indefinite
 -- and longer-than-billing-period terms.
--- name: ListDeadSubsWithLiveEntitlements :many
+-- name: ListDeadSubsWithLiveAccess :many
 SELECT s.id, s.customer_id, s.status,
        NULL::timestamptz AS current_period_ends_at, s.canceled_at AS ended_at
 FROM billing.subscriptions s
@@ -690,16 +674,16 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL AND s.status = 'canceled' AND s.cancel_type = 'chargeback'
   AND EXISTS (
-      SELECT 1 FROM billing.entitlements e
+      SELECT 1 FROM billing.product_access e
       WHERE e.merchant_id = s.merchant_id
-        AND e.source_type = 'subscription' AND e.source_id = s.id
+        AND e.source_type = 'subscription' AND e.source_id = s.id::text
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
         AND (e.ends_at IS NULL OR (e.ends_at > sqlc.arg(now)::timestamptz AND e.ends_at > s.canceled_at))
   )
 ORDER BY s.canceled_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- #690 DERIVE `derive.entitlement.unjustified` — the FREELOADER detector
+-- #690 DERIVE `derive.access.unjustified` — the FREELOADER detector
 -- (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
 -- reserved for the paying-without-access category). A LIVE
 -- window (not revoked/deleted, started, unbounded or ending in the future)
@@ -725,8 +709,8 @@ LIMIT sqlc.arg(row_limit)::int;
 -- grouped by status comparing ends_at against GREATEST(current_period_ends_at,
 -- ended_at). This query is the union of both, restricted to proven-dead
 -- sources. customer_id nullable: NULL = merchant-wide sweep.
--- name: ListUnjustifiedEntitlementWindows :many
-SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
+-- name: ListUnjustifiedAccessWindows :many
+SELECT e.id AS access_id, e.customer_id, e.product_id,
        e.source_type, e.source_id, e.starts_at, e.ends_at,
        pay.id AS payment_id,
        pr.product_id AS payment_product_id,
@@ -734,11 +718,11 @@ SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
            WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
            ELSE 'refunded_payment'
        END::text AS cause
-FROM billing.entitlements e
+FROM billing.product_access e
 LEFT JOIN billing.subscriptions s
-       ON e.source_type = 'subscription' AND s.id = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
+       ON e.source_type = 'subscription' AND s.id::text = e.source_id AND s.merchant_id = e.merchant_id AND s.deleted_at IS NULL
 LEFT JOIN billing.payments pay
-       ON e.source_type = 'purchase' AND pay.id = e.source_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
+       ON e.source_type = 'purchase' AND pay.id = e.payment_id AND pay.merchant_id = e.merchant_id AND pay.deleted_at IS NULL
 LEFT JOIN billing.prices pr
        ON pr.id = pay.price_id AND pr.merchant_id = e.merchant_id
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -747,16 +731,13 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.starts_at <= sqlc.arg(now)::timestamptz
   AND (e.ends_at IS NULL OR e.ends_at > sqlc.arg(now)::timestamptz)
   AND e.source_type IN ('subscription', 'purchase')
-  -- no live un-terminated entitlement grant covering now justifies the window
+  -- no live un-terminated access grant covering now justifies the window
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = e.merchant_id
         AND g.customer_id = e.customer_id
-        AND g.event = 'grant' AND g.kind = 'entitlement'
-        AND (g.id = e.grant_id
-             OR (g.source_id = e.source_id::text
-                 AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                      OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
+        AND g.event = 'grant' AND g.kind = 'access'
+        AND (g.id = e.grant_id OR (g.source_id = e.source_id AND g.source_type = e.source_type))
         AND g.starts_at <= sqlc.arg(now)::timestamptz
         AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(now)::timestamptz)
         AND NOT EXISTS (
@@ -805,7 +786,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 -- uncovered tail is measured.
 -- name: CountErrorEpisodeTotals :one
 WITH win AS (
-    SELECT e.entitlement, e.source_type, e.starts_at,
+    SELECT e.product_id, e.source_type, e.starts_at,
            LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
                  COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
            s.status AS sub_status, s.next_retry_at,
@@ -819,19 +800,16 @@ WITH win AS (
            (SELECT max(COALESCE(g.ends_at, 'infinity'::timestamptz))
               FROM billing.grants g
              WHERE g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id
-               AND g.event = 'grant' AND g.kind = 'entitlement' AND g.starts_at <= now()
-               AND (g.id = e.grant_id
-                    OR (g.source_id = e.source_id::text
-                        AND ((e.source_type = 'subscription' AND g.source_type = 'subscription')
-                             OR (e.source_type = 'purchase' AND g.source_type = 'purchase'))))
+               AND g.event = 'grant' AND g.kind = 'access' AND g.starts_at <= now()
+               AND (g.id = e.grant_id OR (g.source_id = e.source_id AND g.source_type = e.source_type))
                AND NOT EXISTS (SELECT 1 FROM billing.grants t
                                 WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
                                   AND t.event IN ('revoke', 'expire', 'supersede'))) AS grant_covered_until
-      FROM billing.entitlements e
+      FROM billing.product_access e
       LEFT JOIN billing.subscriptions s
-        ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id = e.source_id AND s.deleted_at IS NULL
+        ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id::text = e.source_id AND s.deleted_at IS NULL
       LEFT JOIN billing.payments p
-        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.source_id AND p.deleted_at IS NULL
+        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.payment_id AND p.deleted_at IS NULL
      WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
        AND e.source_type IN ('subscription', 'purchase')
 ), freeloader AS (
@@ -857,30 +835,25 @@ WITH win AS (
            COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
                s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) AS cov_end
       FROM billing.subscriptions s
-      JOIN billing.products pd ON pd.merchant_id = s.merchant_id AND pd.id = s.product_id
      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
        AND s.deleted_at IS NULL AND s.status <> 'pending'
        AND s.cancel_type IS DISTINCT FROM 'chargeback'
-       AND (EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
-            OR (s.entitlements_snapshot IS NOT NULL AND s.entitlements_snapshot <> '[]'::jsonb))
     UNION ALL
     SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
            p.purchased_at + make_interval(hours => pr.access_duration_hours)
       FROM billing.payments p
       JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id
-      JOIN billing.products pd ON pd.merchant_id = p.merchant_id AND pd.id = pr.product_id
      WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
        AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
        AND pr.access_duration_hours IS NOT NULL
-       AND EXISTS (SELECT 1 FROM billing.product_entitlements pe WHERE pe.merchant_id = pd.merchant_id AND pe.product_id = pd.id AND pe.removed_at IS NULL)
 ), orphaned AS (
     SELECT c.cov_end > now() AS open,
            GREATEST(c.cov_start, COALESCE((
                SELECT max(LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
                                 COALESCE(e.ends_at, 'infinity'::timestamptz)))
-                 FROM billing.entitlements e
+                 FROM billing.product_access e
                 WHERE e.merchant_id = c.merchant_id AND e.customer_id = c.customer_id
-                  AND e.source_type = c.source_type AND e.source_id = c.source_id AND e.starts_at <= now()),
+                  AND e.source_type = c.source_type AND e.source_id = c.source_id::text AND e.starts_at <= now()),
                '-infinity'::timestamptz)) AS uncovered_from,
            LEAST(c.cov_end, now()) AS uncovered_until
       FROM coverage c
@@ -901,19 +874,17 @@ SELECT id FROM billing.merchants
 WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id;
 
--- #789 NOTIFY `notify.access_ended` detector: customers whose LAST entitlement
--- window closed inside (closed_after, now] — the close instant is
--- LEAST(ends_at, revoked_at) (NULL = infinity; matches entitlements_closed_at_idx)
--- — with NO other live window for the same (customer, entitlement). One row per
--- customer (latest close) — one email per customer, whatever ended the access
--- (dunning, reconcile-driven cancel, grant lapse). customer_id nullable:
--- NULL = merchant-wide sweep.
--- name: ListRecentlyClosedLastEntitlementWindows :many
+-- #789 NOTIFY `notify.access_ended` detector: customers whose LAST access
+-- window of a product closed inside (closed_after, now] — the close instant is
+-- LEAST(ends_at, revoked_at) — with NO other live window of that product. One
+-- row per customer (latest close): one email per customer, whatever ended the
+-- access. customer_id nullable: NULL = merchant-wide sweep.
+-- name: ListRecentlyClosedLastAccessWindows :many
 SELECT DISTINCT ON (e.customer_id)
-       e.id, e.customer_id, e.entitlement,
+       e.id, e.customer_id, e.product_id,
        LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) AS closed_at,
        e.source_type, e.source_id
-FROM billing.entitlements e
+FROM billing.product_access e
 WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR e.customer_id = sqlc.narg(customer_id)::uuid)
   AND e.deleted_at IS NULL
@@ -921,10 +892,10 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) > sqlc.arg(closed_after)::timestamptz
   AND LEAST(COALESCE(e.ends_at, 'infinity'::timestamptz), COALESCE(e.revoked_at, 'infinity'::timestamptz)) <= sqlc.arg(now)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM billing.entitlements live
+      SELECT 1 FROM billing.product_access live
       WHERE live.merchant_id = e.merchant_id
         AND live.customer_id = e.customer_id
-        AND live.entitlement = e.entitlement
+        AND live.product_id = e.product_id
         AND live.deleted_at IS NULL AND live.revoked_at IS NULL
         AND live.starts_at <= sqlc.arg(now)::timestamptz
         AND (live.ends_at IS NULL OR live.ends_at > sqlc.arg(now)::timestamptz)
@@ -932,7 +903,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   -- A tier change supersedes the replaced tier's window while the customer
   -- holds the new tier's access: that is not access ending.
   AND NOT (e.revoke_reason = 'superseded' AND EXISTS (
-      SELECT 1 FROM billing.entitlements nw
+      SELECT 1 FROM billing.product_access nw
       WHERE nw.merchant_id = e.merchant_id
         AND nw.customer_id = e.customer_id
         AND nw.deleted_at IS NULL AND nw.revoked_at IS NULL

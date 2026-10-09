@@ -62,8 +62,8 @@ func TestArchiveRefusesIncompleteOrAlteredStreams(t *testing.T) {
 	}
 	for name, bad := range map[string][]byte{
 		"data after footer":     append(append([]byte{}, good...), "{}\n"...),
-		"unsupported version":   bytes.Replace(good, []byte(`"version":1`), []byte(`"version":2`), 1),
-		"retired draft version": bytes.Replace(good, []byte(`"version":1`), []byte(`"version":3`), 1),
+		"unsupported version":   bytes.Replace(good, []byte(`"version":2`), []byte(`"version":3`), 1),
+		"retired draft version": bytes.Replace(good, []byte(`"version":2`), []byte(`"version":0`), 1),
 		"weaker consistency":    bytes.Replace(good, []byte(`"consistency":"repeatable_read"`), []byte(`"consistency":"read_committed"`), 1),
 		"row count":             bytes.Replace(good, []byte(`"rows":1`), []byte(`"rows":2`), 1),
 		"duplicate field":       bytes.Replace(good, []byte(`"kind":"header"`), []byte(`"kind":"header","kind":"header"`), 1),

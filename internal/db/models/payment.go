@@ -91,15 +91,12 @@ type Payment struct {
 	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 
-	CreditGrantSnapshot    *CreditGrantSnapshot `json:"credit_grant_snapshot,omitempty"`
-	LegacyEntitlementHours map[string]int       `json:"-"`
-	EntitlementsSnapshot   []string             `json:"entitlements_snapshot"`
+	CreditGrantSnapshot *CreditGrantSnapshot `json:"credit_grant_snapshot,omitempty"`
 
 	PurchasedAt time.Time `json:"purchased_at"`
 	CreatedAt   time.Time `json:"created_at"`
 
 	// Relationships
-	Price        *Price         `json:"price,omitempty"`
-	Subscription *Subscription  `json:"subscription,omitempty"`
-	Entitlements []*Entitlement `json:"entitlements,omitempty"`
+	Price        *Price        `json:"price,omitempty"`
+	Subscription *Subscription `json:"subscription,omitempty"`
 }

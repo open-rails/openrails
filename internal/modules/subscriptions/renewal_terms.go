@@ -37,9 +37,11 @@ type RenewalTerms struct {
 	Currency            string          `json:"currency"`
 	PeriodStart         time.Time       `json:"period_start"`
 	PeriodEnd           time.Time       `json:"period_end"`
-	Entitlements        []string        `json:"entitlements"`
-	RepriceID           *uuid.UUID      `json:"reprice_id,omitempty"`
-	ScheduledPriceID    *uuid.UUID      `json:"scheduled_price_id,omitempty"`
+	// Entitlements is the keys a renewal admitted before product access, kept
+	// only to reproduce its provider binding. Access follows ProductID.
+	Entitlements     json.RawMessage `json:"entitlements,omitempty"`
+	RepriceID        *uuid.UUID      `json:"reprice_id,omitempty"`
+	ScheduledPriceID *uuid.UUID      `json:"scheduled_price_id,omitempty"`
 }
 
 func (t RenewalTerms) Validate() error {
@@ -76,7 +78,6 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	terms = RenewalTerms{
 		PSPID: sub.PspID, SubscriptionID: sub.ID, CustomerID: sub.CustomerID, FromPriceID: sub.PriceID, FromProductID: sub.ProductID,
 		PriceID: sub.PriceID, ProductID: sub.ProductID, PeriodStart: sub.CurrentPeriodEndsAt.UTC(), AccessDurationHours: sub.AccessDurationHoursSnapshot,
-		Entitlements: models.CloneEntitlements(sub.EntitlementsSnapshot),
 	}
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
 		if agreement == nil {
@@ -92,7 +93,6 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		terms.Amount, terms.Currency, terms.ProductName = agreement.Amount, agreement.Currency, agreement.ProductName
 		terms.AccessDurationHours = agreement.AccessDurationHours
 		terms.PeriodEnd = terms.PeriodStart.Add(duration)
-		terms.Entitlements = models.CloneEntitlements(agreement.Entitlements)
 	} else if agreement != nil {
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
 	}
@@ -131,11 +131,6 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, fmt.Errorf("prepare renewal product: %w", err)
 	}
 	terms.ProductName = product.DisplayName
-	if terms.ProductID != sub.ProductID || terms.ScheduledPriceID != nil {
-		terms.Entitlements = models.CloneEntitlements(product.Entitlements)
-	}
-	// Empty is a valid accepted benefit snapshot. Do not turn it into the
-	// product's current benefits during settlement.
 	return terms, terms.Validate()
 }
 
@@ -182,7 +177,6 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 		sub.ScheduledPriceID = nil
 	}
 	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
-	sub.EntitlementsSnapshot = models.CloneEntitlements(terms.Entitlements)
 	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
 	return alreadyAdvanced, nil
 }
@@ -226,16 +220,10 @@ func renewalPaymentCustodian(params *RenewMembershipParams) string {
 func (t *RenewalTerms) UnmarshalJSON(data []byte) error {
 	type plain RenewalTerms
 	var decoded plain
-	wire := struct {
-		*plain
-		Entitlements json.RawMessage `json:"entitlements"`
-	}{plain: &decoded}
-	if err := json.Unmarshal(data, &wire); err != nil {
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var err error
-	decoded.Entitlements, decoded.LegacyEntitlements, err = grants.DecodeAcceptedEntitlements(wire.Entitlements, decoded.LegacyEntitlements)
-	if err != nil {
+	if _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage

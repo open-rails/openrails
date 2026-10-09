@@ -126,7 +126,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 		ScheduledPrice:   &scheduled,
 		ScheduledProduct: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Card:             card,
-		Access:           &billing.SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
+		Access:           &billing.SubscriptionAccess{Kind: "subscription", ProductID: productFixture, SourceType: "subscription", SourceID: subscriptionFixture.String(), SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
 		Payments:         []billing.Payment{paymentFixtureValue(when, price, card)},
 	}
 }

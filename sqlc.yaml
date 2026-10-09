@@ -21,6 +21,8 @@ sql:
       - "internal/migrate/postgres/0016_identity_facts.up.sql"
       - "internal/migrate/postgres/0017_entitlement_keyspace_index.up.sql"
       - "internal/migrate/postgres/0018_product_entitlements.up.sql"
+      - "internal/migrate/postgres/0019_product_access.up.sql"
+      - "internal/migrate/postgres/0020_product_access_cutover.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

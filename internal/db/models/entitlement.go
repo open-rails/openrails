@@ -4,58 +4,70 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// EntitlementSourceType is the source of the grant a window projects; the
-// grant ledger's vocabulary.
-type EntitlementSourceType string
+// AccessSourceType is where a product access window came from; the grant
+// ledger's vocabulary.
+type AccessSourceType string
 
 const (
-	EntitlementSourcePurchase     EntitlementSourceType = "purchase"
-	EntitlementSourceSubscription EntitlementSourceType = "subscription"
-	EntitlementSourceAdmin        EntitlementSourceType = "admin"
-	EntitlementSourceGrace        EntitlementSourceType = "grace"
+	AccessSourcePurchase     AccessSourceType = "purchase"
+	AccessSourceSubscription AccessSourceType = "subscription"
+	AccessSourceGrace        AccessSourceType = "grace"
+	// AccessSourceGrant is a free product grant: a comp, staff access, an
+	// import or a migration.
+	AccessSourceGrant AccessSourceType = "grant"
 )
 
-// EntitlementRevokeReason indicates why an entitlement was revoked
-type EntitlementRevokeReason string
+// AccessRevokeReason says why a product access window was revoked.
+type AccessRevokeReason string
 
 const (
-	EntitlementRevokeAdmin      EntitlementRevokeReason = "admin"
-	EntitlementRevokeDowngrade  EntitlementRevokeReason = "downgrade"
-	EntitlementRevokeChargeback EntitlementRevokeReason = "chargeback"
-	EntitlementRevokeRefund     EntitlementRevokeReason = "refund"
-	EntitlementRevokeFraud      EntitlementRevokeReason = "fraud"
-	EntitlementRevokeDunning    EntitlementRevokeReason = "dunning_failed"
-	EntitlementRevokeSuperseded EntitlementRevokeReason = "superseded"
+	AccessRevokeAdmin      AccessRevokeReason = "admin"
+	AccessRevokeDowngrade  AccessRevokeReason = "downgrade"
+	AccessRevokeChargeback AccessRevokeReason = "chargeback"
+	AccessRevokeRefund     AccessRevokeReason = "refund"
+	AccessRevokeFraud      AccessRevokeReason = "fraud"
+	AccessRevokeDunning    AccessRevokeReason = "dunning_failed"
+	AccessRevokeSuperseded AccessRevokeReason = "superseded"
 )
 
-// Entitlement models a temporal access window to a named entitlement (e.g., "premium")
-// SCD2-style: [StartsAt, EndsAt) with optional soft delete and revoke markers.
-type Entitlement struct {
-	ID uuid.UUID `json:"id"`
+// ProductAccess is one window [StartsAt, EndsAt) in which a customer holds a
+// product, and so the product's keys. It projects one access grant.
+type ProductAccess struct {
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	ProductID    uuid.UUID
+	GrantID      uuid.UUID
+	SourceType   AccessSourceType
+	SourceID     string
+	PaymentID    *uuid.UUID
+	StartsAt     time.Time
+	EndsAt       *time.Time
+	RevokedAt    *time.Time
+	RevokeReason *AccessRevokeReason
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+}
 
-	// MerchantID scopes this row to a merchant / billing namespace (issue #223).
-	// Nullzero + DB default: inserts that leave it zero fall back to the
-	// default-merchant column default, so single-merchant code keeps working.
-	MerchantID uuid.UUID `json:"merchant_id"`
+// IsActiveAt reports whether the window grants access at t.
+func (a *ProductAccess) IsActiveAt(t time.Time) bool {
+	return a != nil && a.RevokedAt == nil && a.DeletedAt == nil && !a.StartsAt.After(t) && (a.EndsAt == nil || a.EndsAt.After(t))
+}
 
-	CustomerID  uuid.UUID `json:"customer_id,omitempty"`
-	Entitlement string    `json:"entitlement"`
-	// GrantID is the grant this window projects.
-	GrantID uuid.UUID `json:"grant_id"`
-
-	StartsAt time.Time  `json:"starts_at"`
-	EndsAt   *time.Time `json:"ends_at,omitempty"`
-
-	// Optional polymorphic source reference (e.g. subscription or one-off payment).
-	SourceID   *uuid.UUID            `json:"source_id,omitempty"`
-	SourceType EntitlementSourceType `json:"source_type"`
-
-	RevokedAt    *time.Time               `json:"revoked_at,omitempty"`
-	RevokeReason *EntitlementRevokeReason `json:"revoke_reason,omitempty"`
-
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+func ProductAccessFromGen(r gen.BillingProductAccess) *ProductAccess {
+	a := &ProductAccess{
+		ID: r.ID, MerchantID: r.MerchantID, CustomerID: r.CustomerID, ProductID: r.ProductID, GrantID: r.GrantID,
+		SourceType: AccessSourceType(r.SourceType), SourceID: r.SourceID, PaymentID: r.PaymentID,
+		StartsAt: r.StartsAt, EndsAt: r.EndsAt, RevokedAt: r.RevokedAt,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
+	}
+	if r.RevokeReason != nil {
+		reason := AccessRevokeReason(*r.RevokeReason)
+		a.RevokeReason = &reason
+	}
+	return a
 }

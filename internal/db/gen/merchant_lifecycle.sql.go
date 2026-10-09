@@ -38,17 +38,6 @@ func (q *Queries) CountMerchantRowsCheckoutAttempts(ctx context.Context, merchan
 	return count, err
 }
 
-const countMerchantRowsEntitlements = `-- name: CountMerchantRowsEntitlements :one
-SELECT count(*) FROM billing.entitlements WHERE merchant_id = $1
-`
-
-func (q *Queries) CountMerchantRowsEntitlements(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsEntitlements, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countMerchantRowsExternalProviderMutationLogs = `-- name: CountMerchantRowsExternalProviderMutationLogs :one
 SELECT count(*) FROM billing.provider_mutation_logs WHERE merchant_id = $1
 `
@@ -132,6 +121,17 @@ SELECT count(*) FROM billing.payments WHERE merchant_id = $1
 
 func (q *Queries) CountMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsPayments, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMerchantRowsProductAccess = `-- name: CountMerchantRowsProductAccess :one
+SELECT count(*) FROM billing.product_access WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsProductAccess(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsProductAccess, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -221,15 +221,6 @@ func (q *Queries) PurgeMerchantRowsCheckoutAttempts(ctx context.Context, merchan
 	return err
 }
 
-const purgeMerchantRowsEntitlements = `-- name: PurgeMerchantRowsEntitlements :exec
-DELETE FROM billing.entitlements WHERE merchant_id = $1
-`
-
-func (q *Queries) PurgeMerchantRowsEntitlements(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsEntitlements, merchantID)
-	return err
-}
-
 const purgeMerchantRowsExternalProviderMutationLogs = `-- name: PurgeMerchantRowsExternalProviderMutationLogs :exec
 DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1
 `
@@ -299,6 +290,15 @@ DELETE FROM billing.payments WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsPayments(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsPayments, merchantID)
+	return err
+}
+
+const purgeMerchantRowsProductAccess = `-- name: PurgeMerchantRowsProductAccess :exec
+DELETE FROM billing.product_access WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsProductAccess(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsProductAccess, merchantID)
 	return err
 }
 

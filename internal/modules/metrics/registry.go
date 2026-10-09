@@ -36,7 +36,7 @@ const (
 	FamTransitions    Family = "transitions"     // flow over subscription_status_transitions (occurred_at)
 	FamDenials        Family = "denials"         // flow over admission_denials_hourly (hour_at)
 	FamSubsSnapshot   Family = "subs_snapshot"   // interval reconstruction over subscriptions
-	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over entitlements
+	FamEntitlSnapshot Family = "entitl_snapshot" // interval reconstruction over product access and product keys
 	FamBalance        Family = "balance"         // cumulative sums over ledger_transfers
 	FamDepletion      Family = "depletion"       // per-customer balance vs trailing-7d burn
 	FamWebhookHealth  Family = "webhook_health"  // snapshot over webhook_health watermarks (#786)
@@ -303,11 +303,14 @@ var families = map[Family]familySpec{
 	},
 	FamEntitlSnapshot: {
 		Kind: "snapshot",
-		From: `billing.entitlements e`,
+		From: `billing.product_access e
+		JOIN billing.product_entitlements pe ON pe.merchant_id = e.merchant_id AND pe.product_id = e.product_id`,
 		BaseWhere: `e.starts_at <= edge.bucket AND (e.ends_at IS NULL OR e.ends_at > edge.bucket)
-		  AND (e.revoked_at IS NULL OR e.revoked_at > edge.bucket) AND e.deleted_at IS NULL`,
+		  AND (e.revoked_at IS NULL OR e.revoked_at > edge.bucket) AND e.deleted_at IS NULL
+		  AND pe.added_at <= edge.bucket AND (pe.removed_at IS NULL OR pe.removed_at > edge.bucket)`,
 		DimExprs: map[string]string{
-			"entitlement": `e.entitlement`,
+			"entitlement": `pe.entitlement`,
+			"product_id":  `'prod_' || e.product_id::text`,
 		},
 	},
 	FamBalance: {
@@ -776,10 +779,10 @@ var Measures = []Measure{
 		Expr:        `COUNT(s.id) FILTER (WHERE pr.billing_interval_hours IS NOT NULL AND s.status IN ('pending','active','past_due','unknown') AND s.canceled_at IS NULL AND s.deletion_scheduled_at IS NULL)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "billing_cycle"}},
 	{Name: "entitled_customers", Class: ClassSnapshot, Family: FamEntitlSnapshot, Unit: "count",
-		Description: "distinct customers holding a live entitlement at t (includes timed/comped access, not just subscribers)",
+		Description: "distinct customers holding a live entitlement at t: a key of a product they hold (includes timed/comped access, not just subscribers)",
 		Formula:     "COUNT(DISTINCT customers) with an entitlement at t",
 		Expr:        `COUNT(DISTINCT e.customer_id)`,
-		Dims:        []string{"entitlement"}},
+		Dims:        []string{"entitlement", "product_id"}},
 	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
 		Formula:     "SUM(customer balances) at t",

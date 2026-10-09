@@ -149,7 +149,7 @@ func TestDecodeNMISalePayload(t *testing.T) {
 			RequestFingerprint: strings.Repeat("ab", 32), Provider: "nmi", PSP: "nmi", Amount: 9_990_000, Currency: "USD",
 			UserID: uuid.NewString(), PriceID: price, PaymentMethodID: uuid.New(), PaymentID: uuid.New(), ProductID: uuid.New(),
 			Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: models.CustodianPSP, RailCustomerRef: "vault"},
-			AcceptedAt: accepted, EntitlementStart: accepted, OwnershipStart: accepted, Entitlements: []string{},
+			AcceptedAt: accepted, EntitlementStart: accepted, OwnershipStart: accepted,
 			AccessDurationHours: &hours, OwnershipEnd: &end, Eligibility: "allowed",
 		}
 	}
@@ -201,7 +201,6 @@ func TestDecodeNMISalePayload(t *testing.T) {
 		},
 		"provider mismatch": func(p *NMISalePayload) { p.Provider = "stripe" },
 		"no customer ref":   func(p *NMISalePayload) { p.Instrument.RailCustomerRef = "" },
-		"nil entitlements":  func(p *NMISalePayload) { p.Entitlements = nil },
 	} {
 		p := valid()
 		mut(&p)

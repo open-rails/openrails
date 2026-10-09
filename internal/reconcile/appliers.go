@@ -26,7 +26,7 @@ type LocalWriter interface {
 	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
 	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
 	AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error)
-	GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error)
+	GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error)
 	MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error)
 }
 
@@ -87,7 +87,7 @@ func (w *PGLocalWriter) BackfillPayment(ctx context.Context, a BackfillPaymentAc
 		return false, err
 	}
 	if a.Grant != nil {
-		if _, err := w.GrantEntitlements(ctx, *a.Grant); err != nil {
+		if _, err := w.GrantAccess(ctx, *a.Grant); err != nil {
 			return n > 0, err
 		}
 	}
@@ -159,16 +159,16 @@ func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMe
 	return n > 0, err
 }
 
-func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlementsAction) (int, error) {
+func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return 0, err
+		return false, err
 	}
-	granted := 0
+	granted := false
 	err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		gl := grants.New(gen.New(tx), tid.UUID())
 		gl.SetClock(w.now)
-		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.Entitlements, a.StartsAt, a.EndsAt)
+		granted, err = gl.GrantSubscriptionWindow(ctx, a.CustomerID, a.SubscriptionID, a.ProductID, grants.Subscription, a.StartsAt, a.EndsAt)
 		return err
 	})
 	return granted, err
@@ -177,9 +177,8 @@ func (w *PGLocalWriter) GrantEntitlements(ctx context.Context, a GrantEntitlemen
 // MaterializeSubscription creates the local subscription for a resolved PS-1
 // (bootstrap mode v1.1). Idempotent: when any local subscription already
 // carries the rail subscription id, the insert returns zero rows and
-// nothing else runs. The created row snapshots the product's entitlements
-// spec, and entitlements are granted through the normal subscription-sourced
-// path when the remote period is still running.
+// nothing else runs. Its product is granted through the normal
+// subscription-sourced path when the remote period is still running.
 func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -224,23 +223,17 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		accessEnd = &end
 	}
 	if accessEnd == nil || accessEnd.After(now) {
-		var names []string
-		if len(rows[0].EntitlementsSnapshot) > 0 {
-			_ = json.Unmarshal(rows[0].EntitlementsSnapshot, &names)
+		granted, err := w.GrantAccess(ctx, GrantAccessAction{
+			SubscriptionID: res.SubscriptionID,
+			CustomerID:     a.CustomerID,
+			ProductID:      rows[0].ProductID,
+			StartsAt:       start,
+			EndsAt:         accessEnd,
+		})
+		if err != nil {
+			return res, err
 		}
-		if len(names) > 0 {
-			granted, err := w.GrantEntitlements(ctx, GrantEntitlementsAction{
-				SubscriptionID: res.SubscriptionID,
-				CustomerID:     a.CustomerID,
-				Entitlements:   names,
-				StartsAt:       start,
-				EndsAt:         accessEnd,
-			})
-			if err != nil {
-				return res, err
-			}
-			res.EntitlementsGranted = granted
-		}
+		res.AccessGranted = granted
 	}
 
 	if a.Backfill != nil {

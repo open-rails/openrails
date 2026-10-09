@@ -411,15 +411,13 @@ func nilIfEmpty(s string) *string {
 	return &s
 }
 
-// importAdminGrants records each comp as a source_type=admin grant and
-// materializes its window, idempotent by SourceID. A product without an
-// entitlement list has nothing to grant and is reported as blocked.
+// importAdminGrants records each comp as a free grant of its product,
+// idempotent by SourceID.
 func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, declared []DeclaredAdminGrant, res *Result) error {
 	if len(declared) == 0 {
 		return nil
 	}
 	ledger := grants.New(q, merchantID)
-	specs := map[uuid.UUID][]string{}
 	for _, g := range declared {
 		if g.Customer.IsZero() || g.Product.IsZero() || strings.TrimSpace(g.SourceID) == "" || g.StartsAt.IsZero() {
 			return apperr.Invalidf("declared admin grant requires customer, product, source_id and starts_at")
@@ -427,34 +425,14 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, g.Customer.UUID()); err != nil {
 			return fmt.Errorf("ensure customer %s: %w", g.Customer, err)
 		}
-		feats, ok := specs[g.Product.UUID()]
-		if !ok {
-			rows, err := q.ListLiveProductEntitlements(ctx, gen.ListLiveProductEntitlementsParams{MerchantID: merchantID, ProductIds: []uuid.UUID{g.Product.UUID()}})
-			if err != nil {
-				return fmt.Errorf("import admin grant %s: load product %s: %w", g.SourceID, g.Product, err)
-			}
-			for _, row := range rows {
-				feats = append(feats, row.Entitlement)
-			}
-			specs[g.Product.UUID()] = feats
-		}
-		if len(feats) == 0 {
-			res.Blocked = append(res.Blocked, g.SourceID)
-			res.Reasons[g.SourceID] = "product has no entitlements"
-			continue
-		}
-		created, alreadyExists, err := ledger.GrantAdmin(ctx, g.Customer.UUID(), g.SourceID, feats, g.StartsAt.UTC(), g.EndsAt)
+		_, created, err := ledger.GrantProduct(ctx, g.Customer.UUID(), g.Product.UUID(), g.SourceID, g.StartsAt.UTC(), g.EndsAt, "import", grants.ReasonImport, nil)
 		if err != nil {
 			return fmt.Errorf("import admin grant %s: %w", g.SourceID, err)
 		}
-		switch {
-		case alreadyExists:
-			res.Skipped = append(res.Skipped, g.SourceID)
-		case created > 0:
+		if created {
 			res.Imported = append(res.Imported, g.SourceID)
-		default:
-			res.Blocked = append(res.Blocked, g.SourceID)
-			res.Reasons[g.SourceID] = "every feature window overlapped a live window"
+		} else {
+			res.Skipped = append(res.Skipped, g.SourceID)
 		}
 	}
 	return nil

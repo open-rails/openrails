@@ -1301,7 +1301,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 			action.Metadata["currency_provenance"] = "inherited_from_subscription_price"
 		}
 		// Restore the paid access promise independently of its billing cadence.
-		if sub.IsLive() && len(sub.EntitlementNames) > 0 {
+		if sub.IsLive() {
 			start := sub.StartedAt
 			if start.IsZero() {
 				start = t.OccurredAt
@@ -1314,14 +1314,14 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 				end := start.Add(time.Duration(*sub.AccessDurationHoursSnapshot) * time.Hour)
 				accessEnd = &end
 			}
-			action.Grant = &GrantEntitlementsAction{
+			action.Grant = &GrantAccessAction{
 				SubscriptionID: sub.ID,
 				CustomerID:     sub.CustomerID,
-				Entitlements:   sub.EntitlementNames,
+				ProductID:      sub.ProductID,
 				StartsAt:       start,
 				EndsAt:         accessEnd,
 			}
-			f.RecommendedAction += "; missing subscription entitlements are restored from the accepted access duration"
+			f.RecommendedAction += "; missing subscription access is restored from the accepted access duration"
 		}
 		f.Apply = &ApplyAction{BackfillPayment: action}
 	}

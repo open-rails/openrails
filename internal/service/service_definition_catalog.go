@@ -215,8 +215,18 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 	if err != nil {
 		return nil, productLookup(err)
 	}
-	if keys.Changed() && s.catalogKeyChanges != nil {
-		*s.catalogKeyChanges = append(*s.catalogKeyChanges, entitlementChange(p, keys))
+	if keys.Changed() {
+		change := entitlementChange(p, keys)
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := announceKeyChanges(ctx, s.catalogDatabase().Gen(ctx), mid.UUID(), s.keyEdit(ctx).At, []*billing.EntitlementChange{&change}); err != nil {
+			return nil, err
+		}
+		if s.catalogKeyChanges != nil {
+			*s.catalogKeyChanges = append(*s.catalogKeyChanges, change)
+		}
 	}
 
 	s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) {

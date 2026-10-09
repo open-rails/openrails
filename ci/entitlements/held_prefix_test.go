@@ -5,6 +5,7 @@ package entitlements_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -117,20 +118,24 @@ func invalidParam(t *testing.T, err error, param string) {
 }
 
 // A check answers exact keys and the keys held under each byte prefix at one
-// instant: windows that ended, were revoked or have not started stay out, the
-// range is bytes (the next byte bounds it), the limit truncates, and the read
-// uses the keyspace index.
+// instant: keys of products whose windows ended, were revoked or have not
+// started stay out, the range is bytes (the next byte bounds it), the limit
+// truncates, and the read walks the customer's products, then their keys.
 func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	customer := billing.CustomerID(uuid.New())
 	_, err := f.client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
-	grant := func(key string, ends *time.Time) billing.EntitlementID {
+	products := 0
+	grant := func(key string, ends *time.Time) billing.ProductAccessID {
 		t.Helper()
-		record, err := f.client.CreateEntitlement(ctx, customer, billing.CreateEntitlementParams{Entitlement: key, EndsAt: ends})
+		products++
+		product, err := f.client.CreateProduct(ctx, billing.CreateProductParams{Key: fmt.Sprintf("key-%d", products), DisplayName: key, Entitlements: []string{key}})
 		require.NoError(t, err)
-		return record.ID
+		access, err := f.client.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: customer, ProductID: product.ID, EndsAt: ends}}})
+		require.NoError(t, err)
+		return access[0].ID
 	}
 	start := f.clock.Now()
 	for _, key := range []string{"content:t:post:3", "content:t:post:1", "content:t:post:2", "members:t:channel:a", "premium",
@@ -139,7 +144,7 @@ func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	}
 	ended := start.Add(30 * time.Minute)
 	grant("content:t:post:expired", &ended)
-	require.NoError(t, f.client.DeleteEntitlement(ctx, customer, grant("content:t:post:revoked", nil)))
+	require.NoError(t, f.client.DeleteProductAccess(ctx, customer, grant("content:t:post:revoked", nil)))
 	f.clock.Advance(time.Hour)
 	grant("content:t:post:future", nil)
 	at := start.Add(45 * time.Minute)
@@ -173,7 +178,10 @@ func TestHeldPrefixesAnswerExactByteRanges(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, billing.HeldEntitlements{Keys: []string{}}, other.Held[posts], "another customer's keys never answer")
 
-	require.Contains(t, f.plan("ListHeldEntitlementsByPrefix"), "entitlements_customer_keyspace_idx")
+	plan := f.plan("ListDerivedEntitlementsByPrefix")
+	require.NotContains(t, plan, "Seq Scan", plan)
+	require.Regexp(t, `Index (Only )?Scan using product_access_\w+ on product_access`, plan)
+	require.Regexp(t, `Index (Only )?Scan using product_entitlements_\w+ on product_entitlements pe[^\n]*\n[^\n]*Index Cond: [^\n]*product_id = o\.product_id`, plan, "one probe of each held product's keys")
 
 	tooMany := make([]string, billing.MaxEntitlementPrefixes+1)
 	for i := range tooMany {

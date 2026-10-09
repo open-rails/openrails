@@ -192,7 +192,6 @@ func ImportDeclaredSubscriptions(
 	}
 
 	priceCache := map[uuid.UUID]gen.BillingPrice{}
-	productCache := map[uuid.UUID]gen.BillingProduct{}
 
 	for i := range facts {
 		f := &facts[i]
@@ -284,7 +283,7 @@ func ImportDeclaredSubscriptions(
 			subID = existing.ID
 		} else {
 			if f.CancelKind != DeclaredCancelNone {
-				subID, err = insertDeclaredCanceled(ctx, q, merchantID, f, price, productCache, periodStart, periodEnd)
+				subID, err = insertDeclaredCanceled(ctx, q, merchantID, f, price, periodStart, periodEnd)
 			} else {
 				subID, err = materializeDeclaredUnknown(ctx, q, merchantID, f, periodStart, periodEnd)
 			}
@@ -399,22 +398,8 @@ func insertDeclaredCanceled(
 	merchantID uuid.UUID,
 	f *DeclaredSubscriptionFact,
 	price gen.BillingPrice,
-	productCache map[uuid.UUID]gen.BillingProduct,
 	periodStart, periodEnd *time.Time,
 ) (uuid.UUID, error) {
-	product, ok := productCache[price.ProductID]
-	if !ok {
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return uuid.UUID{}, scopeErr
-		}
-		p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: scopeMerchantID.UUID(), ID: price.ProductID})
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("load product: %w", err)
-		}
-		product = p
-		productCache[price.ProductID] = p
-	}
 
 	var cancelType string
 	switch f.CancelKind {
@@ -436,10 +421,6 @@ func insertDeclaredCanceled(
 	}
 	feedback := "imported: declared " + string(f.CancelKind)
 
-	keys, err := db.LiveProductEntitlementsJSON(ctx, q, merchantID, product.ID)
-	if err != nil {
-		return uuid.Nil, err
-	}
 	id := uuid.New()
 	priceID := f.PriceID
 	if _, err := q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
@@ -449,7 +430,6 @@ func insertDeclaredCanceled(
 		CustomerID:                  f.Customer,
 		ProductID:                   price.ProductID,
 		PriceID:                     &priceID,
-		EntitlementsSnapshot:        keys,
 		AccessDurationHoursSnapshot: price.AccessDurationHours,
 		Status:                      string(models.StatusCanceled),
 		StartedAt:                   f.StartedAt.UTC(),

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (225), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (224), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -52,7 +52,8 @@ A customer acting on its own account.
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowParams` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` | scope `billing_management` |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | customer | — | `CustomerChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | `Idempotency-Key` |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | customer | — | `ChangeTierParams` | 200 `TierChangePreview` |  |
-| GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<EntitlementRecord>` | scope `billing_management` |
+| GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` | scope `billing_management` |
+| GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` | scope `billing_management` |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` | scope `billing_management` |
 | GET | `/v1/me/balance` | customer | — | — | 200 `Balance` | scope `billing_management` |
 | GET | `/v1/me/transactions` | customer | — | — | 200 `ListPage<CreditTransaction>` | scope `billing_management` |
@@ -134,15 +135,13 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/reprices` | merchant | `merchant:subscriptions:read` | — | 200 `ListPage<Reprice>` |  |
 | GET | `/v1/merchant/reprices/{id}` | merchant | `merchant:subscriptions:read` | — | 200 `Reprice` |  |
 | POST | `/v1/merchant/reprices/{id}/cancel` | merchant | `merchant:subscriptions:update` | — | 200 `Reprice` |  |
-| POST | `/v1/merchant/entitlements/lookup` | merchant | `merchant:customer-settings:read` | `EntitlementListParams` | 200 `EntitlementLookup` |  |
+| GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<string>` |  |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `merchant:customer-settings:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | GET | `/v1/merchant/customers/{customer_id}/tier` | merchant | `merchant:customer-settings:read` | — | 200 `EffectiveTier` |  |
 | POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `merchant:customer-settings:read` | `CheckProductAccessParams` | 200 `ProductAccessCheck` |  |
 | GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
-| POST | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:update` | `CreateEntitlementParams` | 201 `EntitlementRecord` | limit `grant` |
-| DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
-| POST | `/v1/merchant/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant` |
+| POST | `/v1/merchant/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant`; `Idempotency-Key` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
 | GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Customer>` |  |
 | POST | `/v1/merchant/customers/lookup` | merchant | `merchant:customer-settings:read` | `CustomerLookupParams` | 200 `CustomerLookup` |  |

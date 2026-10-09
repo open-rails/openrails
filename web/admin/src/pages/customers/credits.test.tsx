@@ -167,8 +167,8 @@ describe("collection defaults", () => {
     let methods = [method, aPaymentMethod("pm_b")]
     routes["/merchant/customers/cus_a/billing-profile"] = () => ({
       customer: { id: "cus_a", email: null, created_at: "2026-09-16T00:00:00Z", last_seen_at: "2026-09-16T00:00:00Z" },
-      balances: [], subscriptions: [], entitlements: [], payments: [],
-      payment_methods: methods, product_access: [],
+      balances: [], subscriptions: [], entitlements: { data: [], next_cursor: null }, payments: [],
+      payment_methods: methods, product_access: { data: [], next_cursor: null },
     })
     // One method per page: the picker list walks every page.
     routes["/merchant/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
