@@ -867,9 +867,9 @@ in order.
 All these examples preserve omitted entries. `prune: true` is an explicit
 bulk-archive option for omitted products and prices; it never deletes them.
 Changing existing subscribers' accepted prices requires an explicit scheduled
-reprice operation. Changing their accepted benefits uses the
-[planned agreement-change workflow](https://github.com/open-rails/tracker/blob/master/openrails/1132.md).
-Those subscriber migrations are separate from the YAML offer changes above.
+reprice operation. A product's keys are not part of the accepted terms:
+editing a product's `entitlements` changes what every buyer and subscriber of
+it holds, at once (see [Entitlements follow the product](docs/entitlements_timeline.md)).
 
 ### Backing up and restoring a complete catalog
 

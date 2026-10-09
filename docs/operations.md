@@ -11,7 +11,8 @@ Three facts decide every consistency mechanism: **OpenRails owns the
 catalog** (products + prices; providers hold copies); **the provider owns
 money state** (is a subscription alive, what was charged; OpenRails holds
 copies); **OpenRails owns entitlements — but they are derived**,
-deterministically, from catalog + money state + admin grants. So there are
+deterministically, from catalog + money state + free product grants: a
+customer holds the current keys of the products they hold. So there are
 exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
@@ -78,6 +79,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
 | `migrate up` / `migrate pg` | apply all migrations / Postgres-only (River + OpenRails) |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
+| `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so `migrate up` applies exactly that list — see "Cutover to product access" |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
@@ -451,7 +453,7 @@ An apply runs five steps in a fixed order:
 3. **Restore** the rows, in one transaction with step 2 — a reversal that
    superseded the intents but failed to restore the rows would leave the operator
    worse off than before.
-4. **Invalidate and re-derive.** The entitlement windows the run closed are
+4. **Invalidate and re-derive.** The product-access windows the run closed are
    soft-deleted, never replayed, and `Converge` rebuilds them from the
    append-only grant log the rollback never touched. The proven source-domain
    flags are reset to unproven, because the post-rollback book is definitionally
@@ -518,7 +520,7 @@ The continuous internal-repair half of the system (the pull feeds it). One
 idempotent **`Converge(scope)`** — scope-narrowable from a single customer to
 a whole merchant — runs from three places so the system never *holds* an
 inconsistency: **inline** after every source mutation (checkout completes,
-renewal bills, refund webhook lands, dunning transitions, admin grants);
+renewal bills, refund webhook lands, dunning transitions, free product grants);
 **after every mutating `pull-provider` run**; and **on the sweep** — a
 15-minute River job (RunOnStart) over every active merchant, catching drift
 no inline mutation touched.
@@ -721,7 +723,7 @@ Mode gating: Provider Refresh runs under `full` AND `limited`; skipped under
 
 **Access during silence — standing access.** There is no timed grace
 window. An auto-renew
-subscription's entitlement window is **standing (open-ended) from creation**
+subscription's product-access window is **standing (open-ended) from creation**
 and closes only on proven events: terminal dunning failure,
 provider-confirmed death, or an explicit cancel (access then ends at period
 end, as the user expects). A subscription parked `unverified` keeps access —
@@ -858,6 +860,39 @@ What an integrator sees:
 - Usage reports reach back about 26 months, subscription transition metrics 25.
 - A merchant archive restore does not bring back `usage_events` or
   `admission_operations` rows already past their retention.
+
+## Cutover to product access
+
+Before product access, each customer held per-key entitlement windows. The
+cutover migration converts them to windows of the products that grant the keys,
+then drops them. From then on, a customer holds a product's current keys. If
+the products changed their keys after a sale, the customer gains or loses them
+at the cutover, and the migration refuses until an operator approves every such
+change:
+
+1. Deploy the new version without running `migrate up`.
+2. Run `openrails access-cutover preflight`. It applies the migrations before
+   the cutover and dry-runs the conversion for every merchant. It lists each
+   customer and key the conversion **lost** or **gained**, the windows it
+   cannot carry (`unmapped`, e.g. a manual key grant no product matches), and
+   purchases whose keys had different durations (`mixed_duration`: they keep
+   the longest).
+3. Fix what should not change (give a key a product, adjust a product), and
+   rerun the preflight.
+4. Run `openrails access-cutover preflight --approve <your name>` to record
+   the list, then `openrails migrate up`. The migration refuses any change that
+   is not on the approved list.
+
+A billing archive exported before the cutover restores through the same
+conversion. It is refused (`unsupported_state`, table `entitlements`) if the
+conversion would change anyone's access; cut over the source first.
+
+### Heavy buyers
+
+A customer holding at least 500 products gets a cached key set
+(`customer_entitlement_cache`). It is rebuilt when a check finds it stale, and
+it answers only while the merchant's key generation and the customer's access
+version match the ones it was built from. A stale cache is never used.
 
 ## Background worker schedule
 

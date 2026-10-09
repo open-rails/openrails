@@ -322,7 +322,9 @@ fields (`400 unknown_field`), and every error code is in
 - **Product entitlements.** `entitlements_spec` maps are replaced by
   `entitlements: ["course:101", "premium"]`. These are opaque strings with no
   content/service classification or per-key duration. Set access duration on
-  the price. An omitted product update preserves the list; `[]` clears it;
+  the price. A customer holds the product's current keys: editing the list
+  changes what every holder has. An omitted product update preserves the
+  list; `[]` clears it;
   `null`, maps, duplicates and blank keys are refused. Existing paid grants and
   historical accepted purchase durations are preserved by migration.
 - **Prices.** One `Price`: `product_id`, `archived`, `access_duration_hours`

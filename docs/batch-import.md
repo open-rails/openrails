@@ -173,7 +173,7 @@ and [Materialized backlog under mode=limited](operations.md#materialized-backlog
   projecting standing access; Provider Refresh and probes resolve them with
   real provider evidence. Absent evidence never costs a customer access.
 - **Adoption alone never grants access.** An adopted-active row re-anchors
-  its period end only; entitlement windows come from real charges and the
+  its period end only; product-access windows come from real charges and the
   derive pass the import runs. A `past_due` row is never adopted: only a
   verified charge lifts a recorded decline.
 - **Period anchoring**: `current_period_ends_at` = the declared
