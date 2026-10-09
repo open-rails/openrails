@@ -106,6 +106,9 @@ func TestStripeEventMidConvergeIsNotLost(t *testing.T) {
 	w.armDestructive()
 	l := importLegacy(t, w, "stripe", embedded)
 	w.converge()
+	// The imported book's provider coverage completes first: without it the
+	// recovery gate holds the cancellation and River backs the follow-up off.
+	w.settleRefreshes()
 
 	g := newGate(func(r *http.Request) bool {
 		return r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v1/subscriptions/"+l.railSub)
