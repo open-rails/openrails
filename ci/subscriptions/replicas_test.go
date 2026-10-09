@@ -500,17 +500,19 @@ func TestReplicasDunningRetryRace(t *testing.T) {
 }
 
 // Scenario 8: a cancel (or a refund that revokes access) lands on one
-// replica while another renews. Before the submission fence nothing is
-// charged; after it, the one charge already sent is recorded, never lost,
-// and nothing is charged afterwards.
+// replica while another renews. Before the submission fence the cancel wins
+// and nothing is charged; after it, the cancel is refused until the charge
+// already sent settles the period, and then cancels at its end. Nothing is
+// charged afterwards.
 func TestReplicasCancelRacesRenewal(t *testing.T) {
 	t.Parallel()
 	type race struct {
-		name   string
-		rails  []string
-		gate   func(f *fleet, e *engineCase) (func(*http.Request) bool, bool)
-		act    func(t *testing.T, f *fleet, r *world, e *engineCase)
-		charge bool
+		name    string
+		rails   []string
+		gate    func(f *fleet, e *engineCase) (func(*http.Request) bool, bool)
+		act     func(t *testing.T, f *fleet, r *world, e *engineCase)
+		charge  bool
+		refused bool
 	}
 	preFence := func(f *fleet, e *engineCase) (func(*http.Request) bool, bool) {
 		vault := f.providerCustomers(e)[0]
@@ -531,10 +533,14 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 		_, err = r.client[remote].RefundPayment(t.Context(), paid[0].ID, billing.RefundPaymentParams{Full: true, Reason: "requested_by_customer", RevokeAccess: true, IdempotencyKey: "refund-" + paid[0].ID.String()})
 		require.NoError(t, err)
 	}
+	refused := func(t *testing.T, f *fleet, r *world, e *engineCase) {
+		_, err := r.client[remote].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "member left"})
+		requireCode(t, err, http.StatusConflict, "payment_in_progress")
+	}
 	races := []race{
 		{name: "cancel_before_fence", rails: []string{"nmi"}, gate: preFence, act: cancel},
 		{name: "refund_revoke_before_fence", rails: []string{"nmi"}, gate: preFence, act: refund},
-		{name: "cancel_after_fence", rails: rails, gate: afterFence, act: cancel, charge: true},
+		{name: "cancel_after_fence", rails: rails, gate: afterFence, act: refused, charge: true, refused: true},
 	}
 	for _, rc := range races {
 		for _, rail := range rc.rails {
@@ -559,12 +565,19 @@ func TestReplicasCancelRacesRenewal(t *testing.T) {
 					}
 					return true
 				}, "the raced renewal resolves")
+				if rc.refused {
+					cancel(t, f, f.any(), e)
+				}
 				sub := f.subscription(e)
 				require.Equal(t, billing.SubscriptionCanceled, sub.Status)
-				require.True(t, sub.CurrentPeriodEndsAt.Before(end.Add(monthHours*time.Hour)), "a canceled membership is not extended")
+				if rc.refused {
+					require.True(t, sub.CurrentPeriodEndsAt.Equal(end.Add(monthHours*time.Hour)), "the sent charge paid the period the cancel ends with")
+				} else {
+					require.True(t, sub.CurrentPeriodEndsAt.Before(end.Add(monthHours*time.Hour)), "a canceled membership is not extended")
+				}
 				want := 1
 				if rc.charge {
-					want = 2 // sent before the cancel committed; recorded for review, never lost
+					want = 2 // sent before the cancel; it paid the period, never lost
 				}
 				require.Len(t, f.charges(e), want)
 				require.Equal(t, want, f.submissions(e), "nothing is sent after the cancel")

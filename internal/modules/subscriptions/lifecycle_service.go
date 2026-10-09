@@ -1359,12 +1359,11 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
-	// A cancel never races an accepted renewal: the charge it may still land
-	// would buy nothing. Renewal admission and completion take this same lock.
+	// A cancel never races a renewal charge already sent: the charge could land
+	// and buy nothing. An admitted renewal not yet sent is released by its own
+	// fence, which takes this same lock and refuses a canceled membership.
 	if params.RefuseOwnedRenewal && subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status != models.StatusCanceled {
-		if err := RefuseOwnedRebillTerms(ctx, txDB, subscription); errors.Is(err, ErrRebillTermsCommitted) {
-			return nil, ErrRenewalInProgress
-		} else if err != nil {
+		if err := refuseSubmittedRenewal(ctx, txDB, subscription); err != nil {
 			return nil, err
 		}
 	}

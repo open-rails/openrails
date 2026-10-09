@@ -127,8 +127,8 @@ the customer's place in its product and tier group: buying it again answers
 `409 resource_conflict` (resume it instead, or buy once the stop completes). A
 charge the provider still takes after the cancel is refunded in full and
 raises a `life.charge_after_cancel` finding. An OpenRails-billed subscription
-whose renewal payment is unresolved refuses a cancel with
-`409 payment_in_progress`; cancel again once it resolves.
+whose renewal charge was sent and is not yet settled refuses a cancel with
+`409 payment_in_progress`; cancel again once it settles.
 
 ### Tier changes
 
