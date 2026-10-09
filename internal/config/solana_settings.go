@@ -6,6 +6,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
 )
 
 // Solana rail-account `settings` keys (#711). These are the per-merchant home
@@ -22,14 +25,17 @@ const (
 	SolanaSettingRecipientWallet = "recipient_wallet"
 )
 
-// solanaKnownSettingKeys is the strict allowlist for manifest validation: a
-// typo'd key fails the push instead of silently arming nothing.
-var solanaKnownSettingKeys = map[string]bool{
-	SolanaSettingRPCProvider:     true,
-	SolanaSettingRPCAPIKey:       true,
-	SolanaSettingTokens:          true,
-	SolanaSettingRecipientWallet: true,
-}
+// solanaKnownSettingKeys is the strict allowlist for manifest validation, the
+// rail registry's Solana setting keys: a typo'd key fails the push instead of
+// silently arming nothing.
+var solanaKnownSettingKeys = func() map[string]bool {
+	d, _ := rails.Lookup(models.RailSolana)
+	known := make(map[string]bool, len(d.SettingKeys))
+	for _, key := range d.SettingKeys {
+		known[key] = true
+	}
+	return known
+}()
 
 // SolanaAccountSettings is the typed view of a Solana rail-account settings
 // map. Nil/absent fields mean "not declared" (the boot plane or defaults apply).

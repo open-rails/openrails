@@ -189,6 +189,10 @@
       "func (c *Client) VerifyAPIHost(ctx context.Context, options ...RequestOption) (*billing.MerchantAPIHost, error)",
       "func (c *Client) VoidInvoice(ctx context.Context, id billing.InvoiceID, requestOptions ...RequestOption) (*billing.Invoice, error)",
       "func (c *Client) With(opts ...ClientOption) (*Client, error)",
+      "func (p CCBillPSP) PSPConfig() PSPConfig",
+      "func (p NMIPSP) PSPConfig() PSPConfig",
+      "func (p SolanaPSP) PSPConfig() PSPConfig",
+      "func (p StripePSP) PSPConfig() PSPConfig",
       "func ForMerchantID(id billing.MerchantID) RequestOption",
       "func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error",
       "func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error)",
@@ -208,6 +212,7 @@
       "type AuthConfig = config.AuthConfig",
       "type AuthRateLimit = config.AuthRateLimit",
       "type Authority = billingauth.Authority",
+      "type CCBillPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
       "type CaptchaConfig = config.CaptchaConfig",
       "type CheckoutConfig = config.CheckoutConfig",
       "type Client struct {\n}",
@@ -237,6 +242,7 @@
       "type LoggerConfig = config.LoggerConfig",
       "type MerchantCreationConfig = config.MerchantCreationConfig",
       "type MerchantDeclaration = config.MerchantDeclaration",
+      "type NMIPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tCustodian string `psp:\"custodian\"`\n\n\tSecurityKey          string `psp:\"secrets.security_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"settings.webhook_overlap_expires_at\"`\n\n\tTokenizationKey string `psp:\"settings.tokenization_key\"`\n\n\tTokenizationURL string `psp:\"settings.tokenization_url\"`\n\n\tEndpointDeployment string `psp:\"settings.endpoint_deployment\"`\n\n\tCardEntry string `psp:\"settings.card_entry\"`\n}",
       "type NamingConfig = config.NamingConfig",
       "type PSPConfig = config.PSPConfig",
       "type PSPSignerConfig = config.PSPSignerConfig",
@@ -254,7 +260,10 @@
       "type SMSSender = config.SMSSender",
       "type Scope = billingauth.Scope",
       "type SendGridConfig = config.SendGridConfig",
+      "type SolanaPSP struct {\n\tArchived bool `psp:\"archived\"`\n\n\tPrivateKey string `psp:\"secrets.private_key\"`\n\n\tTransitKey string `psp:\"signer.key\"`\n\n\tRPCProvider string `psp:\"settings.rpc_provider\"`\n\n\tRPCAPIKey string `psp:\"settings.rpc_api_key\"`\n\n\tTokens map[string]SolanaToken `psp:\"settings.tokens\"`\n\n\tRecipientWallet string `psp:\"settings.recipient_wallet\"`\n}",
+      "type SolanaToken struct {\n\tMint string\n\tName string\n}",
       "type StartOption func(*startOptions)",
+      "type StripePSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSecretKey            string `psp:\"secrets.secret_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretThin string `psp:\"secrets.webhook_signing_secret_thin\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"settings.webhook_overlap_expires_at\"`\n\n\tPublishableKey string `psp:\"settings.publishable_key\"`\n}",
       "type Target = billingauth.Target",
       "type VaultConfig = config.VaultConfig",
       "type requestOptions struct {\n}",
@@ -4403,6 +4412,10 @@
       "context": "context",
       "http": "net/http",
       "url": "net/url"
+    },
+    "psp_declarations.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "time": "time"
     },
     "psps.go": {
       "billing": "github.com/open-rails/openrails/billing",

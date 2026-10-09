@@ -173,22 +173,23 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 ```
 
 If your app already loads its own configuration (koanf, kong, flags), build the
-same declaration in Go instead of reading `merchant.yaml`. `MerchantDeclaration`
+same declaration in Go instead of reading `merchant.yaml`. Each rail has a typed
+struct (`NMIPSP`, `StripePSP`, `CCBillPSP`, `SolanaPSP`) whose fields are its
+secrets and settings, so a misspelled name fails to compile. `MerchantDeclaration`
 and `PSPConfig` carry `yaml` tags, so they can also sit inside your own YAML
 config:
 
 ```go
 merchant := openrails.MerchantDeclaration{
 	Slug: "onlydemo",
-	PSPs: map[string]openrails.PSPConfig{"mobius": {
-		Rail:      billing.RailNMI,
-		AccountID: conf.NMI.GatewayID,
-		Settings:  map[string]any{"tokenization_key": conf.NMI.TokenizationKey},
-		Secrets: map[string]string{
-			"security_key":           conf.NMI.SecurityKey,
-			"webhook_signing_secret": conf.NMI.WebhookSigningSecret,
-		},
-	}},
+	PSPs: map[string]openrails.PSPConfig{
+		"mobius": openrails.NMIPSP{
+			AccountID:            conf.NMI.GatewayID,
+			TokenizationKey:      conf.NMI.TokenizationKey,
+			SecurityKey:          conf.NMI.SecurityKey,
+			WebhookSigningSecret: conf.NMI.WebhookSigningSecret,
+		}.PSPConfig(),
+	},
 }
 ```
 

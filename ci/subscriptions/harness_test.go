@@ -288,9 +288,9 @@ func (w *world) start() {
 		w.cfg(cfg)
 	}
 	psps := map[string]openrails.PSPConfig{
-		"stripe": {Rail: "stripe", AccountID: stripeAcct, Secrets: map[string]string{"secret_key": "sk_test_e2e", "webhook_signing_secret": whsecStripe}},
-		"nmi":    {Rail: "nmi", AccountID: nmiAcct, Secrets: map[string]string{"security_key": "e2e-nmi-key", "webhook_signing_secret": whsecNMI}, Settings: map[string]any{"tokenization_key": "e2e-tokenization"}},
-		"ccbill": {Rail: "ccbill", AccountID: ccbillAcct, Secrets: map[string]string{"salt": "e2e-ccbill-salt"}},
+		"stripe": openrails.StripePSP{AccountID: stripeAcct, SecretKey: "sk_test_e2e", WebhookSigningSecret: whsecStripe}.PSPConfig(),
+		"nmi":    openrails.NMIPSP{AccountID: nmiAcct, SecurityKey: "e2e-nmi-key", WebhookSigningSecret: whsecNMI, TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+		"ccbill": openrails.CCBillPSP{AccountID: ccbillAcct, Salt: "e2e-ccbill-salt"}.PSPConfig(),
 	}
 	if w.declare != nil {
 		w.declare(psps)

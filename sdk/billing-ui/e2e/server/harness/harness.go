@@ -105,18 +105,17 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 			Slug: MerchantSlug, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting},
 			PSPs: map[string]openrails.PSPConfig{
 				// An armed Solana PSP on devnet: checkout offers it (#1078).
-				SolanaPSPKey: {
-					Rail:     "solana",
-					Signer:   &openrails.PSPSignerConfig{Mode: "local_keypair"},
-					Secrets:  map[string]string{"private_key": signer.String()},
-					Settings: map[string]any{"rpc_provider": "public", "tokens": map[string]any{"SOL": map[string]any{}, "DUSD": map[string]any{}}},
-				},
-				CardPSPKey: {
-					Rail:      "nmi",
-					AccountID: "billing-ui-e2e-cards",
-					Secrets:   map[string]string{"security_key": "e2e-security-key", "webhook_signing_secret": "e2e-webhook-secret"},
-					Settings:  map[string]any{"tokenization_key": CardTokenizationKey},
-				},
+				SolanaPSPKey: openrails.SolanaPSP{
+					PrivateKey:  signer.String(),
+					RPCProvider: "public",
+					Tokens:      map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}},
+				}.PSPConfig(),
+				CardPSPKey: openrails.NMIPSP{
+					AccountID:            "billing-ui-e2e-cards",
+					SecurityKey:          "e2e-security-key",
+					WebhookSigningSecret: "e2e-webhook-secret",
+					TokenizationKey:      CardTokenizationKey,
+				}.PSPConfig(),
 			},
 		},
 		Checkout: checkoutConfig(baseURL, pageURL),

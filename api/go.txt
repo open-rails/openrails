@@ -220,9 +220,13 @@ pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID
 pkg openrails, method (*Client) VerifyAPIHost(context.Context, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) VoidInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) With(...ClientOption) (*Client, error)
+pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
 pkg openrails, method (GateError) Error() string
 pkg openrails, method (InvoiceSweepArgs) InsertOpts() river.InsertOpts
 pkg openrails, method (InvoiceSweepArgs) Kind() string
+pkg openrails, method (NMIPSP) PSPConfig() PSPConfig
+pkg openrails, method (SolanaPSP) PSPConfig() PSPConfig
+pkg openrails, method (StripePSP) PSPConfig() PSPConfig
 pkg openrails, type AdminConsole = config.AdminConsole
 pkg openrails, type AdminConsole struct
 pkg openrails, type AdminConsole struct, AuthBaseURL string
@@ -253,6 +257,12 @@ pkg openrails, type Authority = billingauth.Authority
 pkg openrails, type Authority struct
 pkg openrails, type Authority struct, Permission string
 pkg openrails, type Authority struct, Scope auth.Scope
+pkg openrails, type CCBillPSP struct
+pkg openrails, type CCBillPSP struct, AccountID string `psp:"account_id"`
+pkg openrails, type CCBillPSP struct, Archived bool `psp:"archived"`
+pkg openrails, type CCBillPSP struct, DatalinkPassword string `psp:"secrets.datalink_password"`
+pkg openrails, type CCBillPSP struct, DatalinkUsername string `psp:"secrets.datalink_username"`
+pkg openrails, type CCBillPSP struct, Salt string `psp:"secrets.salt,required"`
 pkg openrails, type CaptchaConfig = config.CaptchaConfig
 pkg openrails, type CaptchaConfig struct
 pkg openrails, type CaptchaConfig struct, Provider string
@@ -460,6 +470,18 @@ pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"displa
 pkg openrails, type MerchantDeclaration struct, PSPs map[string]config.PSPConfig `yaml:"psps,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Settings billing.MerchantSettings `yaml:"settings,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Slug string `yaml:"-"`
+pkg openrails, type NMIPSP struct
+pkg openrails, type NMIPSP struct, AccountID string `psp:"account_id"`
+pkg openrails, type NMIPSP struct, Archived bool `psp:"archived"`
+pkg openrails, type NMIPSP struct, CardEntry string `psp:"settings.card_entry"`
+pkg openrails, type NMIPSP struct, Custodian string `psp:"custodian"`
+pkg openrails, type NMIPSP struct, EndpointDeployment string `psp:"settings.endpoint_deployment"`
+pkg openrails, type NMIPSP struct, SecurityKey string `psp:"secrets.security_key,required"`
+pkg openrails, type NMIPSP struct, TokenizationKey string `psp:"settings.tokenization_key"`
+pkg openrails, type NMIPSP struct, TokenizationURL string `psp:"settings.tokenization_url"`
+pkg openrails, type NMIPSP struct, WebhookOverlapExpiresAt time.Time `psp:"settings.webhook_overlap_expires_at"`
+pkg openrails, type NMIPSP struct, WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
+pkg openrails, type NMIPSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type NamingConfig = config.NamingConfig
 pkg openrails, type NamingConfig struct
 pkg openrails, type NamingConfig struct, Enabled *bool
@@ -532,7 +554,27 @@ pkg openrails, type SendGridConfig = config.SendGridConfig
 pkg openrails, type SendGridConfig struct
 pkg openrails, type SendGridConfig struct, APIKey string
 pkg openrails, type SendGridConfig struct, From config.EmailAddress
+pkg openrails, type SolanaPSP struct
+pkg openrails, type SolanaPSP struct, Archived bool `psp:"archived"`
+pkg openrails, type SolanaPSP struct, PrivateKey string `psp:"secrets.private_key"`
+pkg openrails, type SolanaPSP struct, RPCAPIKey string `psp:"settings.rpc_api_key"`
+pkg openrails, type SolanaPSP struct, RPCProvider string `psp:"settings.rpc_provider"`
+pkg openrails, type SolanaPSP struct, RecipientWallet string `psp:"settings.recipient_wallet"`
+pkg openrails, type SolanaPSP struct, Tokens map[string]SolanaToken `psp:"settings.tokens"`
+pkg openrails, type SolanaPSP struct, TransitKey string `psp:"signer.key"`
+pkg openrails, type SolanaToken struct
+pkg openrails, type SolanaToken struct, Mint string
+pkg openrails, type SolanaToken struct, Name string
 pkg openrails, type StartOption func(*startOptions)
+pkg openrails, type StripePSP struct
+pkg openrails, type StripePSP struct, AccountID string `psp:"account_id"`
+pkg openrails, type StripePSP struct, Archived bool `psp:"archived"`
+pkg openrails, type StripePSP struct, PublishableKey string `psp:"settings.publishable_key"`
+pkg openrails, type StripePSP struct, SecretKey string `psp:"secrets.secret_key,required"`
+pkg openrails, type StripePSP struct, WebhookOverlapExpiresAt time.Time `psp:"settings.webhook_overlap_expires_at"`
+pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.webhook_signing_secret,required"`
+pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
+pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type Target = billingauth.Target
 pkg openrails, type Target struct
 pkg openrails, type Target struct, AuthorityGroupID string

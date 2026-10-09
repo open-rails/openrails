@@ -204,12 +204,12 @@ cfg.Merchant = openrails.MerchantDeclaration{
         InvoiceBillingBoundary: "calendar_month",
     },
     PSPs: map[string]openrails.PSPConfig{ // PSP key -> account
-        "my-nmi-sandbox": {
-            Rail:      billing.RailNMI,
-            AccountID: "000000", // NMI dashboard "Gateway ID"
-            Settings:  map[string]any{"tokenization_key": "placeholder-tokenization-key"},
-            Secrets:   map[string]string{"security_key": "placeholder-security-key", "webhook_signing_secret": "placeholder-webhook-secret"},
-        },
+        "my-nmi-sandbox": openrails.NMIPSP{
+            AccountID:            "000000", // NMI dashboard "Gateway ID"
+            TokenizationKey:      "placeholder-tokenization-key",
+            SecurityKey:          "placeholder-security-key",
+            WebhookSigningSecret: "placeholder-webhook-secret",
+        }.PSPConfig(),
     },
 }
 ```
@@ -222,11 +222,17 @@ set its `Slug`. `MerchantDeclaration` and `PSPConfig` carry `yaml` tags, so they
 can also sit inside the host's own YAML config. The file holds PSP secrets: keep
 it out of version control.
 
+In Go, `openrails.NMIPSP`, `StripePSP`, `CCBillPSP` and `SolanaPSP` name each
+rail's slots as fields, so a misspelled one fails to compile; `PSPConfig()`
+returns the declaration, and an empty field is an omitted key. A PSP missing a
+required secret is declared but not armed, in Go as in YAML.
+
 | Rail | Secrets (required first) | Settings |
 | --- | --- | --- |
-| `stripe` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key` |
-| `nmi` | `security_key`, `webhook_signing_secret` | `tokenization_key`, `tokenization_url`, `endpoint_deployment` |
-| `ccbill` | `salt`, `datalink_username`, `datalink_password` | |
+| `stripe` | `secret_key`, `webhook_signing_secret`; `webhook_signing_secret_thin`, `webhook_signing_secret_previous` | `publishable_key`, `webhook_overlap_expires_at` |
+| `nmi` | `security_key`, `webhook_signing_secret`; `webhook_signing_secret_previous` | `tokenization_key`, `tokenization_url`, `endpoint_deployment`, `card_entry`, `webhook_overlap_expires_at` |
+| `ccbill` | `salt`; `datalink_username`, `datalink_password` | |
+| `solana` | `private_key` (or `signer: {mode: vault_transit, key: …}`) | `rpc_provider`, `rpc_api_key`, `tokens`, `recipient_wallet` |
 
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving

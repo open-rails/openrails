@@ -115,8 +115,9 @@ type Descriptor struct {
 	// order. Nil = the rail holds no PSP secrets.
 	CredentialKeys []CredentialKey
 
-	// SettingKeys are the rail's scalar non-secret psps.settings keys a host
-	// may declare (tokenizer keys, publishable keys, endpoint selection).
+	// SettingKeys are the non-secret psps.settings keys a PSP declaration
+	// may carry. The root package's typed declarations (openrails.NMIPSP, …)
+	// cover exactly these and CredentialKeys.
 	SettingKeys []string
 
 	// OneOffSale: checkout can sell a one-time price on this rail.
@@ -198,7 +199,7 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous: the rotated-out secret, verified
 		// only until webhook_overlap_expires_at (SEC-29).
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
-		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "webhook_overlap_expires_at"},
+		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "card_entry", "webhook_overlap_expires_at"},
 		true,                  // OneOffSale (direct gateway sale, #1055)
 		NewSubscriptionEngine, // saved vault card charged by OpenRails
 		true,                  // ServerCardEntry (Direct Post customer_vault=add_customer)
@@ -258,7 +259,7 @@ var descriptors = []Descriptor{
 		cancelDestructive,
 		"", // CancelPortalURL
 		[]CredentialKey{{"private_key", false, false}}, // operator-only signer
-		nil,                        // structured settings (tokens, RPC) are declared programmatically
+		[]string{"rpc_provider", "rpc_api_key", "tokens", "recipient_wallet"},
 		true,                       // OneOffSale (Solana Pay transfer)
 		NewSubscriptionOnChainPlan, // subscriber signs the price's on-chain plan
 		false,                      // ServerCardEntry (no card)
