@@ -2,99 +2,55 @@ package billingauth
 
 import (
 	"context"
-	"net/http"
 
 	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// Auth is the host's auth, as plain net/http middleware in AuthKit's shape.
-// OpenRails stacks it on each of its own routes by the route's catalog tier:
-// Required on a customer route; RequirePermission on a merchant route, then
+// Auth is the host's auth: helpers/auth's Auth, plain net/http middleware
+// that AuthKit's *authkit.Client implements. OpenRails stacks it on each of
+// its own routes by the route's catalog tier: Required on a customer route;
+// RequirePermission (which authenticates by itself) on a merchant route, then
 // Sensitive on one that moves money or removes access when the subject is a
 // user acting in person (automation has no sign-in to renew). Refusals are
 // the middleware's own responses. After them OpenRails reads Identity and
 // refuses a request it finds no identity on.
-type Auth interface {
-	// Required admits a signed-in request and refuses anyone else. A
-	// provider may admit people only; an application subject then cannot
-	// reach the invoker-scoped customer routes.
-	Required() func(http.Handler) http.Handler
-	// RequirePermission authenticates the request itself and admits a
-	// subject holding exactly permission (one merchant permission, never a
-	// glob) on the mounted merchant, checked live.
-	RequirePermission(permission string) func(http.Handler) http.Handler
-	// Sensitive, stacked after RequirePermission, admits a request whose
-	// sign-in is recent enough to move money or remove access, by the
-	// provider's own policy.
-	Sensitive() func(http.Handler) http.Handler
-	// Identity is who the middleware admitted on ctx. On a customer route
-	// the subject is the customer (a canonical UUID) and the invoker who
-	// acts for it.
-	Identity(ctx context.Context) (Identity, bool)
-}
+type Auth = auth.Auth
 
-// Identity is who Auth admitted, mirroring helpers/auth's provider-neutral
-// Identity so it can become an alias of it. Subject is whose authority and
-// money is used; Invoker who actually acts (the subject itself, or a party
-// acting on its behalf); Credential how it was proven.
-type Identity struct {
-	// Issuer is the authority that vouches for Subject. Balances and
-	// authority are the subject's; limits key on the invoker; audit records
-	// both, and the credential.
-	Issuer string
-	// Subject is a native account: a user, the same whatever credential they
-	// signed in with, or an application.
-	Subject     string
-	SubjectKind SubjectKind
-	// Invoker is the party actually acting: {Issuer, Subject} when the
-	// subject acts itself, else the party acting on its behalf, possibly
-	// another issuer's user spending the subject's balance. Always set.
-	Invoker Invoker
-	// Credential is how Subject proved itself.
-	Credential Credential
-	// Email, Username and EmailVerified are display and prefill only.
-	Email         string
-	Username      string
-	EmailVerified bool
-}
+// Identity is who Auth admitted (helpers/auth): Subject, the native account
+// whose authority and money are used; Invoker, who actually acts (the
+// subject itself, or a party acting on its behalf); Credential, how it was
+// proven. Balances and authority are the subject's, limits key on the
+// invoker, and audit records all three.
+type Identity = auth.Identity
 
 // SubjectKind is a user or an application.
-type SubjectKind string
+type SubjectKind = auth.SubjectKind
 
 const (
-	SubjectUser        SubjectKind = "user"
-	SubjectApplication SubjectKind = "application"
+	SubjectUser        = auth.SubjectUser
+	SubjectApplication = auth.SubjectApplication
 )
 
 // Invoker is the party acting for an Identity's Subject.
-type Invoker struct {
-	Issuer string
-	ID     string
-}
+type Invoker = auth.Invoker
 
 // SelfActing reports a subject acting itself: its invoker is itself.
-func SelfActing(who Identity) bool {
-	return who.Invoker == Invoker{Issuer: who.Issuer, ID: who.Subject}
-}
+func SelfActing(who Identity) bool { return who.SelfInvoked() }
 
 // Credential is the credential a Subject presented.
-type Credential struct {
-	Kind CredentialKind
-	// ID names that session, key or token, for audit.
-	ID string
-}
+type Credential = auth.Credential
 
 // CredentialKind is how a Subject proved itself.
-type CredentialKind string
+type CredentialKind = auth.CredentialKind
 
 const (
-	CredentialSession     CredentialKind = "session"
-	CredentialDeviceKey   CredentialKind = "device_key"
-	CredentialAPIKey      CredentialKind = "api_key"
-	CredentialSignedToken CredentialKind = "signed_token"
-	CredentialAccessToken CredentialKind = "access_token"
+	CredentialSession     = auth.CredentialSession
+	CredentialDeviceKey   = auth.CredentialDeviceKey
+	CredentialAPIKey      = auth.CredentialAPIKey
+	CredentialSignedToken = auth.CredentialSignedToken
+	CredentialAccessToken = auth.CredentialAccessToken
 )
 
 // Interactive reports a user acting in person: not an application, and not

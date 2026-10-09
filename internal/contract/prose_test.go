@@ -167,11 +167,14 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	body, _, _ = strings.Cut(body, "\n}\n")
 	require.Contains(t, program, "func newBilling("+body+"\n}\n", "the README's newBilling")
 
-	// The Auth the README mounts is the program's, method for method.
-	_, auth, ok := strings.Cut(readme, "// billingAuth guards OpenRails")
+	// The README mounts AuthKit itself, with the program's role registration.
+	_, roles, ok := strings.Cut(readme, "merchant := rbac.Persona(\"merchant\")\n")
 	require.True(t, ok)
-	auth, _, _ = strings.Cut(auth, "\n```")
-	require.Contains(t, program, "// billingAuth guards OpenRails"+auth+"\n", "the README's billingAuth")
+	roles, _, _ = strings.Cut(roles, "rbac.Root.Role(")
+	require.Contains(t, program, strings.ReplaceAll(roles, "\n", "\n\t"), "the README's role registration")
+	require.Contains(t, readme, "Auth:         ak,")
+	require.Contains(t, program, "Auth:         ak,")
+	require.NotContains(t, readme+program, "billingAuth", "AuthKit is the Auth; no adapter")
 }
 
 // proseDocs lists the documents, relative to the repository root.

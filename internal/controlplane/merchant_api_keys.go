@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -31,7 +32,7 @@ type MerchantAPIKey = billing.APIKey
 // role. A non-user principal mints as the system, after the caller enforced
 // its no-escalation rule (the route gate plus RoleCoveredBy). The
 // secret is returned once: it is never stored and never retrievable again.
-func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor iam.Actor) (MerchantAPIKey, string, error) {
+func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor helpersauth.Identity) (MerchantAPIKey, string, error) {
 	if !slices.Contains(MerchantRoles(), role) {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
@@ -68,7 +69,7 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid billing.Merc
 // RevokeMerchantAPIKey revokes the merchant's key id as actor (a key is never
 // revoked across merchants). It returns false when the merchant has no key
 // with that id.
-func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error) {
+func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor helpersauth.Identity) (bool, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return false, err

@@ -29,7 +29,7 @@ import (
 // user tokens over the shared AuthKit schema. edit adjusts the configuration.
 func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, *openrails.Deps)) *openrails.Client {
 	t.Helper()
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	cfg := f.config()
 	cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
@@ -95,7 +95,7 @@ func newOwner(t *testing.T, cp *openrails.Client) (string, string) {
 func verifyEmail(t *testing.T, cp *openrails.Client, userID string) {
 	t.Helper()
 	verified := true
-	_, err := cp.AuthKit().UpdateUser(t.Context(), iam.SystemActor(), userID, iam.UserUpdate{EmailVerified: &verified})
+	_, err := cp.AuthKit().UpdateUser(t.Context(), iam.SystemIdentity(), userID, iam.UserUpdate{EmailVerified: &verified})
 	require.NoError(t, err)
 }
 

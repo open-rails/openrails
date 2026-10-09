@@ -510,11 +510,11 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", group.ID(), err)
 	}
 	core := cp.Core()
-	stored, err := core.UpsertRemoteApplication(ctx, iam.SystemActor(), group, ra, opts...)
+	stored, err := core.UpsertRemoteApplication(ctx, iam.SystemIdentity(), group, ra, opts...)
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", group.ID(), err)
 	}
-	if _, err := core.SetGroupRole(ctx, iam.SystemActor(), group, iam.RemoteApplicationSubject(stored.ID), controlplane.MerchantOwner, opts...); err != nil {
+	if _, err := core.SetGroupRole(ctx, iam.SystemIdentity(), group, iam.RemoteApplicationSubject(stored.ID), controlplane.MerchantOwner, opts...); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", group.ID(), err)
 	}
 	return nil

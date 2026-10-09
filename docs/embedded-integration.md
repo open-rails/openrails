@@ -328,9 +328,10 @@ nothing admits no one. Each handler checks the identity again before it runs.
 Hosts register the merchant permissions (`openrails.Permissions()`) in their
 RBAC and grant them to staff roles. `openrails.MachinePermissions()`
 (`merchant:checkout:create`) are never a person's: OpenRails refuses them to a
-user acting in person whatever the roles say. AuthKit will implement `Auth` on
-its client; the README shows the adapter until then, and a host with its own
-sessions implements the four methods directly. `openrailstest.CheckAuth`
+user acting in person whatever the roles say. `Auth` is helpers/auth's, and
+AuthKit's `*authkit.Client` implements it (set `authkit.Config.Merchant` to the
+group your staff roles apply in); a host with its own sessions implements the
+four methods directly. `openrailstest.CheckAuth`
 checks an implementation in your CI: it fires anonymous, refused, wrong
 permission, other merchant, stale sign-in and machine requests through it and
 fails on any acceptance.

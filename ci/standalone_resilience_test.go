@@ -29,7 +29,7 @@ import (
 func TestStandaloneBootNeverWaitsOnVaultAndFailsClosedOnKeyChange(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "standalone-" + uuid.NewString()[:8]

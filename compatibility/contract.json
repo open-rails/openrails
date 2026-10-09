@@ -1043,12 +1043,12 @@
       "type TieredPrice struct {\n\tMode  TierMode   `json:\"mode,omitempty\"`\n\tTiers []RateTier `json:\"tiers,omitempty\"`\n}"
     ],
     "internal/billingauth": [
-      "type Auth interface {\n\tRequired() func(http.Handler) http.Handler\n\n\tRequirePermission(permission string) func(http.Handler) http.Handler\n\n\tSensitive() func(http.Handler) http.Handler\n\n\tIdentity(ctx context.Context) (Identity, bool)\n}",
-      "type Credential struct {\n\tKind CredentialKind\n\n\tID string\n}",
-      "type CredentialKind string",
-      "type Identity struct {\n\tIssuer string\n\n\tSubject     string\n\tSubjectKind SubjectKind\n\n\tInvoker Invoker\n\n\tCredential Credential\n\n\tEmail         string\n\tUsername      string\n\tEmailVerified bool\n}",
-      "type Invoker struct {\n\tIssuer string\n\tID     string\n}",
-      "type SubjectKind string"
+      "type Auth = auth.Auth",
+      "type Credential = auth.Credential",
+      "type CredentialKind = auth.CredentialKind",
+      "type Identity = auth.Identity",
+      "type Invoker = auth.Invoker",
+      "type SubjectKind = auth.SubjectKind"
     ],
     "internal/cardguard": [
       "func (Card) Format(f fmt.State, _ rune)",
@@ -1964,8 +1964,7 @@
       "helpersauth": "github.com/open-rails/helpers/auth",
       "http": "net/http",
       "iam": "github.com/open-rails/authkit/iam",
-      "operator": "github.com/open-rails/openrails/internal/operator",
-      "verify": "github.com/open-rails/authkit/verify"
+      "operator": "github.com/open-rails/openrails/internal/operator"
     },
     "credits.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -2030,8 +2029,7 @@
     "internal/billingauth/contract.go": {
       "auth": "github.com/open-rails/helpers/auth",
       "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http"
+      "context": "context"
     },
     "internal/cardguard/card.go": {
       "context": "context",

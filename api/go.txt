@@ -1,8 +1,8 @@
-pkg openrails, const CredentialAPIKey billingauth.CredentialKind = "api_key"
-pkg openrails, const CredentialAccessToken billingauth.CredentialKind = "access_token"
-pkg openrails, const CredentialDeviceKey billingauth.CredentialKind = "device_key"
-pkg openrails, const CredentialSession billingauth.CredentialKind = "session"
-pkg openrails, const CredentialSignedToken billingauth.CredentialKind = "signed_token"
+pkg openrails, const CredentialAPIKey auth.CredentialKind = "api_key"
+pkg openrails, const CredentialAccessToken auth.CredentialKind = "access_token"
+pkg openrails, const CredentialDeviceKey auth.CredentialKind = "device_key"
+pkg openrails, const CredentialSession auth.CredentialKind = "session"
+pkg openrails, const CredentialSignedToken auth.CredentialKind = "signed_token"
 pkg openrails, const CustomerBillingManagement config.CustomerHTTPScope = 3
 pkg openrails, const CustomerSelfService config.CustomerHTTPScope = 1
 pkg openrails, const CustomerSubscriptionManagement config.CustomerHTTPScope = 2
@@ -19,8 +19,8 @@ pkg openrails, const Sandbox config.CredentialPosture = "sandbox"
 pkg openrails, const SecretBackendDB untyped string = "db"
 pkg openrails, const SecretBackendSnapshot untyped string = "snapshot"
 pkg openrails, const SecretBackendVault untyped string = "vault"
-pkg openrails, const SubjectApplication billingauth.SubjectKind = "application"
-pkg openrails, const SubjectUser billingauth.SubjectKind = "user"
+pkg openrails, const SubjectApplication auth.SubjectKind = "application"
+pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func ForMerchantID(billing.MerchantID) RequestOption
 pkg openrails, func MachinePermissions() []string
 pkg openrails, func Migrate(context.Context, *pgxpool.Pool, Config) error
@@ -237,11 +237,6 @@ pkg openrails, type AdminConsole struct, Extensions map[string]any
 pkg openrails, type AdminConsole struct, Issuer *config.ConsoleIssuer
 pkg openrails, type AdminConsole struct, Path string
 pkg openrails, type Auth = billingauth.Auth
-pkg openrails, type Auth interface
-pkg openrails, type Auth interface, Identity(context.Context) (billingauth.Identity, bool)
-pkg openrails, type Auth interface, RequirePermission(string) func(http.Handler) http.Handler
-pkg openrails, type Auth interface, Required() func(http.Handler) http.Handler
-pkg openrails, type Auth interface, Sensitive() func(http.Handler) http.Handler
 pkg openrails, type AuthConfig = config.AuthConfig
 pkg openrails, type AuthConfig struct
 pkg openrails, type AuthConfig struct, ActiveKeyID string
@@ -337,11 +332,7 @@ pkg openrails, type ControlPlaneConfig struct, Registration iam.RegistrationMode
 pkg openrails, type ControlPlaneConfig struct, ResourceServer *config.ResourceServerConfig
 pkg openrails, type ControlPlaneConfig struct, TrustedProxies []string
 pkg openrails, type Credential = billingauth.Credential
-pkg openrails, type Credential struct
-pkg openrails, type Credential struct, ID string
-pkg openrails, type Credential struct, Kind billingauth.CredentialKind
 pkg openrails, type CredentialKind = billingauth.CredentialKind
-pkg openrails, type CredentialKind string
 pkg openrails, type CredentialPosture = config.CredentialPosture
 pkg openrails, type CredentialPosture string
 pkg openrails, type CredentialTarget struct
@@ -416,24 +407,12 @@ pkg openrails, type HyperSwitchConfig struct, APIBaseURL string
 pkg openrails, type HyperSwitchConfig struct, AllowLoopbackHTTP bool
 pkg openrails, type HyperSwitchConfig struct, SDKURL string
 pkg openrails, type Identity = billingauth.Identity
-pkg openrails, type Identity struct
-pkg openrails, type Identity struct, Credential billingauth.Credential
-pkg openrails, type Identity struct, Email string
-pkg openrails, type Identity struct, EmailVerified bool
-pkg openrails, type Identity struct, Invoker billingauth.Invoker
-pkg openrails, type Identity struct, Issuer string
-pkg openrails, type Identity struct, Subject string
-pkg openrails, type Identity struct, SubjectKind billingauth.SubjectKind
-pkg openrails, type Identity struct, Username string
 pkg openrails, type InvoiceSweepArgs struct
 pkg openrails, type InvoiceSweepArgs struct, Collect bool `json:"collect,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, MerchantID *billing.MerchantID `json:"merchant_id,omitempty"`
 pkg openrails, type InvoiceSweepArgs struct, UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
 pkg openrails, type Invoker = billingauth.Invoker
-pkg openrails, type Invoker struct
-pkg openrails, type Invoker struct, ID string
-pkg openrails, type Invoker struct, Issuer string
 pkg openrails, type LLMConfig = config.LLMConfig
 pkg openrails, type LLMConfig struct
 pkg openrails, type LLMConfig struct, APIKey string
@@ -560,7 +539,6 @@ pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.
 pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type SubjectKind = billingauth.SubjectKind
-pkg openrails, type SubjectKind string
 pkg openrails, type TrustedIssuerConfig = config.TrustedIssuerConfig
 pkg openrails, type TrustedIssuerConfig struct
 pkg openrails, type TrustedIssuerConfig struct, AllowedOrigins []string

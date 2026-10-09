@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -26,13 +27,13 @@ import (
 // Implemented by *controlplane.ControlPlane; nil (an embedded host without a
 // control plane) omits these routes at registration.
 type MerchantTeamManager interface {
-	RequestActor
+	RequestIdentity
 	ListMerchantTeam(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamMember, error)
-	InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor iam.Actor) (controlplane.MerchantTeamInviteResult, error)
+	InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor helpersauth.Identity) (controlplane.MerchantTeamInviteResult, error)
 	ListMerchantTeamInvites(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantTeamInvite, error)
-	RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error)
-	ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor iam.Actor) error
-	RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor iam.Actor) error
+	RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor helpersauth.Identity) (bool, error)
+	ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor helpersauth.Identity) error
+	RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor helpersauth.Identity) error
 }
 
 func teamMerchantScope(r *httprequest.Request) (billing.MerchantID, bool) {
@@ -85,7 +86,7 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 		if !ok {
 			return
 		}
-		actor, ok := mutationActor(r, svc, &role, "members_manage_required")
+		actor, ok := mutationIdentity(r, svc, &role, "members_manage_required")
 		if !ok {
 			return
 		}
@@ -134,7 +135,7 @@ func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request
 			return
 		}
 		id := strings.TrimSpace(r.Param("id"))
-		actor, ok := mutationActor(r, svc, nil, "members_manage_required")
+		actor, ok := mutationIdentity(r, svc, nil, "members_manage_required")
 		if !ok {
 			return
 		}
@@ -174,7 +175,7 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 		if !ok {
 			return
 		}
-		actor, ok := mutationActor(r, svc, &role, "members_manage_required")
+		actor, ok := mutationIdentity(r, svc, &role, "members_manage_required")
 		if !ok {
 			return
 		}
@@ -213,7 +214,7 @@ func MerchantRemoveTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 		}
 		// Removal grants no role: the members:manage route gate suffices for a
 		// non-user principal.
-		actor, ok := mutationActor(r, svc, nil, "members_manage_required")
+		actor, ok := mutationIdentity(r, svc, nil, "members_manage_required")
 		if !ok {
 			return
 		}

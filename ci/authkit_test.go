@@ -68,7 +68,7 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@e2e.test", "role": "viewer"})
 	require.Equal(t, http.StatusConflict, w.Code, "self-hosted registration is closed: %s", w.Body.String())
 
-	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserActor(owner.ID), owner.ID)
+	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserIdentity(owner.ID), owner.ID)
 	require.NoError(t, err)
 	w = call(t, handler, session, http.MethodGet, "/v1/merchant/team", shop, nil)
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())

@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/authkit/verify"
 	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
@@ -119,11 +118,10 @@ func (c *Client) ListUserMerchants(ctx context.Context, r *http.Request) ([]bill
 	if err != nil {
 		return nil, err
 	}
-	actor, ok := verify.ActorFromClaims(claims)
-	if !ok || actor.Kind() != iam.ActorUser {
+	if !claims.IsUser() || claims.IsResourceToken() {
 		return nil, ErrUnauthenticated
 	}
-	// Listing memberships takes a user ID, unlike Can's session-bound actor.
+	// Listing memberships takes a user ID, unlike Can's session-bound identity.
 	// Check the verified session explicitly before crossing that boundary.
 	if err := cp.Core().CheckSession(ctx, claims); err != nil {
 		if errors.Is(err, iam.ErrSessionRevoked) {
@@ -131,7 +129,7 @@ func (c *Client) ListUserMerchants(ctx context.Context, r *http.Request) ([]bill
 		}
 		return nil, err
 	}
-	return cp.ListUserMerchants(ctx, actor.ID())
+	return cp.ListUserMerchants(ctx, claims.UserID)
 }
 
 // ListActiveMerchantIDs pages the live merchants, newest first, for host

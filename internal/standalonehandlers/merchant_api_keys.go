@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/iam"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -28,47 +29,47 @@ import (
 // API-key routes. Implemented by *controlplane.ControlPlane; nil (an embedded
 // host without a control plane) omits these routes at registration.
 type MerchantAPIKeyManager interface {
-	RequestActor
-	MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor iam.Actor) (controlplane.MerchantAPIKey, string, error)
+	RequestIdentity
+	MintMerchantAPIKey(ctx context.Context, mid billing.MerchantID, name string, role iam.Role, actor helpersauth.Identity) (controlplane.MerchantAPIKey, string, error)
 	ListMerchantAPIKeys(ctx context.Context, mid billing.MerchantID) ([]controlplane.MerchantAPIKey, error)
-	RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error)
+	RevokeMerchantAPIKey(ctx context.Context, mid billing.MerchantID, id string, actor helpersauth.Identity) (bool, error)
 }
 
-// RequestActor derives who performs a merchant mutation: the AuthKit actor of
+// RequestIdentity derives who performs a merchant mutation: the AuthKit actor of
 // a request's user token (verify.ActorFromClaims), bound to its session, or,
 // for a non-user credential, whether its grants cover a role.
-type RequestActor interface {
-	RequestActor(r *http.Request) (iam.Actor, error)
+type RequestIdentity interface {
+	RequestIdentity(r *http.Request) (helpersauth.Identity, error)
 	RoleCoveredBy(role iam.Role, grants []string) (bool, error)
 }
 
-// mutationActor is who performs a merchant credential or membership mutation.
+// mutationIdentity is who performs a merchant credential or membership mutation.
 // A user session acts as itself: AuthKit checks its authority and session
 // live. A non-user credential (API key, service JWT, in-process host,
 // delegated token) carries its resolved grants, which must cover role here
 // (when set); it then acts as the system. It writes a 403 with code when
 // neither applies or coverage fails.
-func mutationActor(r *httprequest.Request, svc RequestActor, role *iam.Role, code string) (iam.Actor, bool) {
+func mutationIdentity(r *httprequest.Request, svc RequestIdentity, role *iam.Role, code string) (helpersauth.Identity, bool) {
 	if principal, ok := merchantRoutePrincipal(r); ok && len(principal.Permissions) > 0 {
 		if role != nil {
 			covered, err := svc.RoleCoveredBy(*role, principal.Permissions)
 			if err != nil {
 				r.InternalError("resolve role permissions", err)
-				return iam.Actor{}, false
+				return helpersauth.Identity{}, false
 			}
 			if !covered {
 				r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "role_escalation",
 					"cannot grant authority beyond your own credential's"))
-				return iam.Actor{}, false
+				return helpersauth.Identity{}, false
 			}
 		}
-		return iam.SystemActor(), true
+		return iam.SystemIdentity(), true
 	}
-	actor, err := svc.RequestActor(r.Request)
+	actor, err := svc.RequestIdentity(r.Request)
 	if err != nil {
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, code,
 			"caller identity does not support this operation"))
-		return iam.Actor{}, false
+		return helpersauth.Identity{}, false
 	}
 	return actor, true
 }
@@ -135,7 +136,7 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 		if !ok {
 			return
 		}
-		actor, ok := mutationActor(r, svc, &role, "credentials_manage_required")
+		actor, ok := mutationIdentity(r, svc, &role, "credentials_manage_required")
 		if !ok {
 			return
 		}
@@ -198,7 +199,7 @@ func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 				"no live API key with that id in this merchant"))
 			return
 		}
-		actor, ok := mutationActor(r, svc, nil, "credentials_manage_required")
+		actor, ok := mutationIdentity(r, svc, nil, "credentials_manage_required")
 		if !ok {
 			return
 		}

@@ -35,7 +35,7 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 	support := newAccount(t, cp)
 	role, err := cp.AuthKit().Role("merchant:support")
 	require.NoError(t, err)
-	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemActor(), iam.GroupByID(mid.String()), iam.UserSubject(support.ID), role)
+	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.UserSubject(support.ID), role)
 	require.NoError(t, err)
 	supportSession := authtest.SignIn(t, cp.AuthKit(), support).AccessToken
 

@@ -11,10 +11,11 @@ import (
 )
 
 // ApplyAuthKit migrates the control plane's AuthKit schema (the default,
-// profiles) as the role the server runs as. OpenRails owns the River fleet, so
-// River's tables are not AuthKit's.
-func ApplyAuthKit(ctx context.Context, pool *pgxpool.Pool) error {
-	cfg := authkit.Config{River: authkit.RiverConfig{HostOwned: true}}
+// profiles) as the role the server runs as, and River's tables in
+// riverSchema, the fleet AuthKit's jobs run on (idempotent beside
+// OpenRails' own River migrations).
+func ApplyAuthKit(ctx context.Context, pool *pgxpool.Pool, riverSchema string) error {
+	cfg := authkit.Config{RiverSchema: riverSchema}
 	if err := authkit.Migrate(ctx, pool, cfg, authkit.MigrateOptions{}); err != nil {
 		return fmt.Errorf("standalone AuthKit migrations: %w", err)
 	}

@@ -23,15 +23,15 @@ var ErrNoControlPlane = errors.New("controlplane: not configured")
 // merchant groups are present in the user's live memberships.
 var ErrMerchantAmbiguous = credential.ErrMerchantAmbiguous
 
-// RequestActor is the actor r's control-plane user token acts as
-// (verify.ActorFromClaims): bound to its session, so every permission check
-// refuses it once that sign-in is revoked. billingauth.ErrUnauthenticated
+// RequestIdentity is the identity r's control-plane user token acts as:
+// bound to its session, so every permission check refuses it once that
+// sign-in is revoked. billingauth.ErrUnauthenticated
 // when r carries no user token.
-func (c *ControlPlane) RequestActor(r *http.Request) (iam.Actor, error) {
+func (c *ControlPlane) RequestIdentity(r *http.Request) (helpersauth.Identity, error) {
 	if c == nil || c.users == nil {
-		return iam.Actor{}, ErrNoControlPlane
+		return helpersauth.Identity{}, ErrNoControlPlane
 	}
-	return c.users.Actor(r)
+	return c.users.Identity(r)
 }
 
 // ResolveAuthorizedMerchant resolves merchantRef (a current or former name)
@@ -42,20 +42,20 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Re
 	if c == nil || c.Core() == nil {
 		return billing.MerchantID{}, "", ErrNoControlPlane
 	}
-	actor, err := c.RequestActor(r)
+	who, err := c.RequestIdentity(r)
 	if err != nil {
 		return billing.MerchantID{}, "", err
 	}
 	var groupID string
 	if ref := strings.TrimSpace(merchantRef); ref == "" {
-		groupID, err = c.merchantGroupForUser(ctx, actor.ID())
+		groupID, err = c.merchantGroupForUser(ctx, who.Subject)
 	} else {
 		groupID, err = c.merchantGroupByName(ctx, ref)
 	}
 	if err != nil {
 		return billing.MerchantID{}, "", err
 	}
-	allowed, err := c.can(ctx, actor, iam.GroupByID(groupID), perm)
+	allowed, err := c.can(ctx, who, iam.GroupByID(groupID), perm)
 	if err != nil {
 		return billing.MerchantID{}, "", err
 	}
@@ -85,21 +85,21 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, r *http.Request, p
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	actor, err := c.RequestActor(r)
+	who, err := c.RequestIdentity(r)
 	if err != nil {
 		return false, err
 	}
-	return c.can(ctx, actor, iam.RootGroup(), perm)
+	return c.can(ctx, who, iam.RootGroup(), perm)
 }
 
-// can checks perm live for actor in ref. A revoked session is joined with
+// can checks perm live for who in ref. A revoked session is joined with
 // helpers/auth ErrRevoked, a credential failure rather than an outage.
-func (c *ControlPlane) can(ctx context.Context, actor iam.Actor, ref iam.GroupRef, perm string) (bool, error) {
+func (c *ControlPlane) can(ctx context.Context, who helpersauth.Identity, ref iam.GroupRef, perm string) (bool, error) {
 	p, err := c.client.Permission(strings.TrimSpace(perm))
 	if err != nil {
 		return false, err
 	}
-	allowed, err := c.client.Can(ctx, actor, ref, p)
+	allowed, err := c.client.Can(ctx, who, ref, p)
 	if errors.Is(err, iam.ErrSessionRevoked) {
 		return false, errors.Join(err, helpersauth.ErrRevoked)
 	}

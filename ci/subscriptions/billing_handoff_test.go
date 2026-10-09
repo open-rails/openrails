@@ -223,7 +223,7 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	mid := source.client[embedded].MerchantID()
 	source.stop()
 	target := handoffTarget(t, source)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), target.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), target.pool, target.schema))
 	client, err := openrails.New(t.Context(), openrails.Config{
 		Schema: target.schema, RiverSchema: target.schema,
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,

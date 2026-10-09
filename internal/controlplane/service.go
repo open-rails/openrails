@@ -274,9 +274,11 @@ func usernames(p config.NamingPolicy) authkit.UsernameConfig {
 	return u
 }
 
-// authConfig is the AuthKit configuration of the control plane.
-func authConfig(auth *config.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig) authkit.Config {
+// authConfig is the AuthKit configuration of the control plane. Its jobs run
+// on OpenRails' River fleet, in riverSchema.
+func authConfig(auth *config.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig, riverSchema string) authkit.Config {
 	return authkit.Config{
+		RiverSchema: riverSchema,
 		Token: authkit.TokenConfig{
 			Issuer:                  strings.TrimSpace(auth.Issuer),
 			IssuedAudiences:         []string{billingauth.TokenAudience},
@@ -292,7 +294,6 @@ func authConfig(auth *config.AuthConfig, options options, naming config.NamingPo
 		Username:     usernames(naming),
 		APIKeys:      authkit.APIKeysConfig{Prefix: APIKeyPrefix},
 		Roles:        Roles,
-		River:        authkit.RiverConfig{HostOwned: true},
 		HTTP:         httpCfg,
 	}
 }
@@ -376,7 +377,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	case !auth.AllowMemory:
 		return nil, errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
 	}
-	client, err := authkit.New(ctx, authConfig(auth, options, naming, &httpCfg), deps)
+	client, err := authkit.New(ctx, authConfig(auth, options, naming, &httpCfg, config.RiverSchemaName(cfg)), deps)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit (declare auth.mint_disabled=true if verify-only is intentional, #748): %w", err)
 	}
@@ -384,7 +385,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	cp.users = userauth.NewAuthenticator(client)
 	if options.resourceServer != nil {
 		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
-			client.Close()
+			_ = client.Close(context.WithoutCancel(ctx))
 			return nil, err
 		}
 	}
@@ -395,7 +396,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 // owned by the caller.
 func (c *ControlPlane) Close() {
 	if c != nil && c.client != nil {
-		c.client.Close()
+		_ = c.client.Close(context.Background())
 	}
 }
 

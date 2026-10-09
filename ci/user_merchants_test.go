@@ -85,7 +85,7 @@ func TestHostUserMerchantListingUsesLiveSessionAndMembership(t *testing.T) {
 	require.NoError(t, err)
 	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
 	require.NoError(t, err)
-	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemActor(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member), controlplane.MerchantViewer)
+	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemIdentity(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member), controlplane.MerchantViewer)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/me/accounts?user_id="+owner, nil)
@@ -104,10 +104,10 @@ func TestHostUserMerchantListingUsesLiveSessionAndMembership(t *testing.T) {
 	require.Equal(t, viewed.MerchantID, initial[1].ID)
 	require.Equal(t, "viewer", initial[1].Role)
 
-	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemActor(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member), controlplane.MerchantSupport)
+	_, err = cp.AuthKit().SetGroupRole(ctx, iam.SystemIdentity(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member), controlplane.MerchantSupport)
 	require.NoError(t, err)
 	require.Equal(t, "support", list()[1].Role, "the same token/request sees the current role")
-	require.NoError(t, cp.AuthKit().RemoveGroupMember(ctx, iam.SystemActor(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member)))
+	require.NoError(t, cp.AuthKit().RemoveGroupMember(ctx, iam.SystemIdentity(), iam.GroupByID(viewed.GroupID), iam.UserSubject(member)))
 	require.Len(t, list(), 1, "removed memberships are not cached in token claims")
 
 	renamed := uniqueName("a-renamed")
@@ -129,7 +129,7 @@ func TestHostUserMerchantListingUsesLiveSessionAndMembership(t *testing.T) {
 	_, err = cp.ListUserMerchants(ctx, bad)
 	require.ErrorIs(t, err, helpersauth.ErrRevoked, "a valid JWT without a live sign-in does not borrow host authority")
 
-	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserActor(member), member)
+	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserIdentity(member), member)
 	require.NoError(t, err)
 	_, err = cp.ListUserMerchants(ctx, req)
 	require.ErrorIs(t, err, helpersauth.ErrRevoked, "revocation is checked again even on the same request")

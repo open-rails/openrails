@@ -32,7 +32,7 @@ func bearer(authorization string) *http.Request {
 }
 
 func TestUserAuthenticator(t *testing.T) {
-	claims := verify.Claims{Kind: iam.ActorUser, UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", RootRole: "root:admin", Entitlements: []string{"premium"}}
+	claims := verify.Claims{Kind: verify.TokenUser, UserID: userID, Email: "e@x", Username: "u", SessionID: "sid", RootRole: "root:admin", Entitlements: []string{"premium"}}
 	uc, err := NewAuthenticator(&countingVerifier{claims: claims}).Authenticate(t.Context(), bearer("Bearer x"))
 	require.NoError(t, err)
 	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", SessionID: "sid"}, uc, "token role snapshots are never carried")
@@ -50,14 +50,17 @@ func TestUserAuthenticator(t *testing.T) {
 		_, err = user.Authenticate(r.Context(), r)
 		require.NoError(t, err)
 	}
-	actor, err := user.Actor(r)
+	who, err := user.Identity(r)
 	require.NoError(t, err)
 	require.Equal(t, 1, v.calls)
-	require.Equal(t, userID, actor.ID())
-	session, bound := actor.Session()
-	require.True(t, bound, "the actor carries the token's session, so a revoked sign-in is refused")
+	require.Equal(t, userID, who.Subject)
+	state, ok := iam.StateOf(who)
+	require.True(t, ok)
+	require.True(t, state.IsUser())
+	session, bound := state.Session()
+	require.True(t, bound, "the identity carries the token's session, so a revoked sign-in is refused")
 	require.Equal(t, "sid", session.SessionID)
 
-	_, err = NewAuthenticator(&countingVerifier{claims: verify.Claims{Kind: iam.ActorAPIKey, APIKeyID: "k"}}).Actor(bearer("Bearer x"))
-	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "only a user token has a user actor")
+	_, err = NewAuthenticator(&countingVerifier{claims: verify.Claims{Kind: verify.TokenAPIKey, APIKeyID: "k"}}).Identity(bearer("Bearer x"))
+	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "only a user token has a user identity")
 }

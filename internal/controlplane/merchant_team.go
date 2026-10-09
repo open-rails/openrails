@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
+	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -82,7 +83,7 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid billing.Merchan
 // account has verified the email, it is assigned role immediately (Added).
 // Otherwise a single-use register+join link is minted and returned (URL) —
 // unless the deployment runs registration closed (ErrTeamInvitesDisabled).
-func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor iam.Actor) (MerchantTeamInviteResult, error) {
+func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor helpersauth.Identity) (MerchantTeamInviteResult, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: invite email is required")
@@ -148,7 +149,7 @@ func (c *ControlPlane) InvitesEnabled() bool {
 
 // RevokeMerchantTeamInvite revokes an invite link of the merchant as actor.
 // It returns false when the merchant has no invite with that id.
-func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor iam.Actor) (bool, error) {
+func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid billing.MerchantID, id string, actor helpersauth.Identity) (bool, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {
 		return false, err
@@ -162,7 +163,7 @@ func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid billing
 
 // ChangeMerchantTeamRole makes targetUserID hold newRole, as actor. Demoting
 // the last human owner is ErrCannotRemoveLastOwner.
-func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor iam.Actor) error {
+func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid billing.MerchantID, targetUserID string, newRole iam.Role, actor helpersauth.Identity) error {
 	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
 	if err != nil || current == newRole.Name() {
 		return err
@@ -176,7 +177,7 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid billing.M
 
 // RemoveMerchantTeamMember removes targetUserID from the merchant team, as
 // actor. Removing the last human owner is ErrCannotRemoveLastOwner.
-func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor iam.Actor) error {
+func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid billing.MerchantID, targetUserID string, actor helpersauth.Identity) error {
 	group, current, owners, err := c.teamMember(ctx, mid, targetUserID)
 	if err != nil {
 		return err

@@ -107,7 +107,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	res.BootstrapMerchantGroupID = m.PermissionGroupID
 	group := iam.GroupByID(m.PermissionGroupID)
 	if admin != "" {
-		if _, err := c.client.SetGroupRole(ctx, iam.SystemActor(), group, iam.UserSubject(admin), MerchantOwner); err != nil {
+		if _, err := c.client.SetGroupRole(ctx, iam.SystemIdentity(), group, iam.UserSubject(admin), MerchantOwner); err != nil {
 			return nil, fmt.Errorf("controlplane: assign merchant owner to initial admin: %w", err)
 		}
 	}
@@ -125,7 +125,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 			return nil, fmt.Errorf("controlplane: list admin API keys: %w", err)
 		}
 		if len(existing.Items) == 0 {
-			created, err := c.client.CreateAPIKey(ctx, iam.SystemActor(), group, iam.NewAPIKey{Name: BootstrapAdminAPIKeyName, Role: MerchantOwner})
+			created, err := c.client.CreateAPIKey(ctx, iam.SystemIdentity(), group, iam.NewAPIKey{Name: BootstrapAdminAPIKeyName, Role: MerchantOwner})
 			if err != nil {
 				return nil, fmt.Errorf("controlplane: mint initial admin API key: %w", err)
 			}

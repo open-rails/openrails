@@ -118,13 +118,13 @@ type (
 	// text messages.
 	SMSSender = config.SMSSender
 
-	// Auth is Routes.Auth: the host's auth as net/http middleware in
-	// AuthKit's shape (Required, RequirePermission, Sensitive and Identity).
-	// OpenRails stacks it on its own routes by tier.
+	// Auth is Routes.Auth: helpers/auth's Auth, the host's auth as net/http
+	// middleware (Required, RequirePermission, Sensitive and Identity), which
+	// *authkit.Client implements. OpenRails stacks it on its own routes by tier.
 	Auth = billingauth.Auth
-	// Identity is who Auth admitted: the Subject whose authority and money is
-	// used, the Invoker acting for it when that is someone else, and the
-	// Credential it was proven with.
+	// Identity is who Auth admitted (helpers/auth's Identity): the Subject
+	// whose authority and money is used, the Invoker acting for it when that
+	// is someone else, and the Credential it was proven with.
 	Identity = billingauth.Identity
 	// SubjectKind is Identity.SubjectKind: SubjectUser or SubjectApplication.
 	SubjectKind = billingauth.SubjectKind

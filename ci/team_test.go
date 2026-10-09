@@ -31,7 +31,7 @@ import (
 // where registration mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeClosed, iam.RegistrationModeOpen} {
 		registers := mode != iam.RegistrationModeClosed
 		t.Run(string(mode), func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 
 			for what, u := range map[string]iam.User{"unverified": account(false), "deleted": account(true)} {
 				if what == "deleted" {
-					results, err := core.DeleteUsers(ctx, iam.SystemActor(), []string{u.ID})
+					results, err := core.DeleteUsers(ctx, iam.SystemIdentity(), []string{u.ID})
 					require.NoError(t, err)
 					require.NoError(t, results[0].Err)
 				}

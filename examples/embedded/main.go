@@ -1,7 +1,7 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
 // creator site where users sign in with AuthKit, buy courses individually or
-// as a bundle, and buy a monthly or yearly channel membership. newBilling,
-// billingAuth and run are the README's code; newAuth is a development AuthKit.
+// as a bundle, and buy a monthly or yearly channel membership. newBilling and
+// run are the README's code; newAuth is a development AuthKit.
 //
 // Run it from this directory with DATABASE_URL. It reads catalog.yaml and
 // merchant.yaml: copy merchant.example.yaml to merchant.yaml and fill in your
@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -26,7 +25,6 @@ import (
 	"github.com/open-rails/authkit"
 	authkitgin "github.com/open-rails/authkit/adapters/gin"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
@@ -41,20 +39,15 @@ import (
 func newAuth(ctx context.Context, db *pgxpool.Pool) (*authkit.Client, error) {
 	rbac := authkit.NewRoles()
 	merchant := rbac.Persona("merchant")
-	declare := func(p string) iam.Perm { // merchant:<resource>:<action>
-		parts := strings.SplitN(p, ":", 3)
-		return merchant.Permission(parts[1], parts[2])
-	}
 	var staff []iam.Grant
-	for _, p := range openrails.Permissions() {
-		staff = append(staff, declare(p))
+	for _, p := range merchant.Declare(openrails.Permissions()...) {
+		staff = append(staff, p)
 	}
-	for _, p := range openrails.MachinePermissions() {
-		declare(p) // automation's API keys, never a person's
-	}
+	merchant.Declare(openrails.MachinePermissions()...) // your automation's API keys, never a person's
 	rbac.Root.Role("billing-staff", staff...)
 	cfg := authkit.Config{
 		Roles:        rbac,
+		Merchant:     authkit.MerchantConfig{Root: true}, // staff hold merchant permissions on the root group
 		Schema:       "profiles",
 		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
@@ -100,45 +93,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
 }
 
-// billingAuth guards OpenRails' routes with AuthKit's own middleware: each
-// signed-in user is their own customer, and staff hold OpenRails' merchant
-// permissions on the site's root group.
-type billingAuth struct{ ak *authkit.Client }
-
-func (a billingAuth) Required() func(http.Handler) http.Handler {
-	return verify.RequireSession(a.ak) // a banned, deleted or signed-out user is refused at once
-}
-
-func (a billingAuth) RequirePermission(p string) func(http.Handler) http.Handler {
-	perm, err := a.ak.Permission(p)
-	if err != nil {
-		panic(err) // a merchant permission your Roles did not register
-	}
-	return verify.RequirePermissionOn(a.ak, iam.RootGroup(), perm)
-}
-
-func (a billingAuth) Sensitive() func(http.Handler) http.Handler {
-	return verify.Sensitive(a.ak) // signed in within 15 minutes, with the second factor
-}
-
-// Identity says who signed in: each user is their own subject and invoker,
-// whether in a browser session or on a device key.
-func (a billingAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
-	cl, ok := verify.ClaimsFromContext(ctx)
-	if !ok || cl.Kind != iam.ActorUser || cl.UserID == "" {
-		return openrails.Identity{}, false
-	}
-	credential := openrails.Credential{Kind: openrails.CredentialSession, ID: cl.SessionID}
-	if cl.DeviceKeyID != "" {
-		credential = openrails.Credential{Kind: openrails.CredentialDeviceKey, ID: cl.DeviceKeyID}
-	}
-	return openrails.Identity{
-		Issuer: cl.Issuer, Subject: cl.UserID, SubjectKind: openrails.SubjectUser,
-		Invoker: openrails.Invoker{Issuer: cl.Issuer, ID: cl.UserID}, Credential: credential,
-		Email: cl.Email, Username: cl.Username, EmailVerified: cl.EmailVerified,
-	}, true
-}
-
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -158,7 +112,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer ak.Close()
+	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
 	bill, err := newBilling(ctx, db)
 	if err != nil {
 		return err
@@ -179,9 +133,8 @@ func run(ctx context.Context) error {
 		return err
 	}
 	// Billing. Processor webhooks are always mounted; pick the rest.
-	auth := billingAuth{ak}
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:         auth,                          // who may call each route: OpenRails asks it, by route
+		Auth:         ak,                            // AuthKit guards each route: OpenRails asks it, by route
 		Prefix:       "/billing",                    // the API is served at /billing/v1/*
 		Storefront:   true,                          // anyone can browse products and prices, and pay a checkout
 		Customers:    openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me

@@ -37,22 +37,25 @@ func (p *Authenticator) Authenticate(ctx context.Context, r *http.Request) (bill
 	}, nil
 }
 
-// Actor is the actor r's user token acts as (verify.ActorFromClaims), from the
-// same verification Authenticate makes: bound to the token's session, so a
-// permission check refuses it once that sign-in is revoked.
-func (p *Authenticator) Actor(r *http.Request) (iam.Actor, error) {
+// Identity is the identity r's user token acts as, from the same
+// verification Authenticate makes: bound to the token's session or device
+// key, so a permission check refuses it once that sign-in is revoked.
+func (p *Authenticator) Identity(r *http.Request) (helpersauth.Identity, error) {
 	if r == nil {
-		return iam.Actor{}, billingauth.ErrUnauthenticated
+		return helpersauth.Identity{}, billingauth.ErrUnauthenticated
 	}
 	cl, err := p.claims(r.Context(), r)
 	if err != nil {
-		return iam.Actor{}, err
+		return helpersauth.Identity{}, err
 	}
-	actor, ok := verify.ActorFromClaims(cl)
-	if !ok || actor.Kind() != iam.ActorUser {
-		return iam.Actor{}, billingauth.ErrUnauthenticated
+	if !cl.IsUser() || cl.IsResourceToken() {
+		return helpersauth.Identity{}, billingauth.ErrUnauthenticated
 	}
-	return actor, nil
+	id := iam.InSession(iam.UserIdentity(cl.UserID), iam.SessionRef{SessionID: cl.SessionID, DeviceKeyID: cl.DeviceKeyID})
+	if id.Subject == "" {
+		return helpersauth.Identity{}, billingauth.ErrUnauthenticated
+	}
+	return id, nil
 }
 
 // CheckRecentSignIn is AuthKit's Sensitive check for r's user token, with

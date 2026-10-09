@@ -30,7 +30,7 @@ import (
 // enrollments.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	attach := func(auth openrails.AuthConfig) (*openrails.Client, error) {
 		t.Helper()
 		auth.Issuer = "http://127.0.0.1/" + f.schema

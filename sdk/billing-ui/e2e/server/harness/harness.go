@@ -92,7 +92,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 	}
 	defer func() {
 		if err != nil {
-			auth.Close()
+			_ = auth.Close(context.Background())
 		}
 	}()
 	cfg := openrails.Config{
@@ -177,7 +177,7 @@ func authConfig(issuer string) authkit.Config {
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
-		River:        authkit.RiverConfig{Schema: AuthSchema},
+		RiverSchema:  AuthSchema,
 	}
 }
 
@@ -199,37 +199,12 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 	return openrailshttp.Mount(mux, r.Client, routes)
 }
 
-// customerAuth is AuthKit's verify middleware as OpenRails' Auth: each
-// user is their own customer. Its users hold tokens minted outside a sign-in
-// (CreateUser), so Required verifies the token without a session. The
-// harness mounts no merchant API.
-type customerAuth struct{ ak *authkit.Client }
+// customerAuth is AuthKit as OpenRails' Auth. Its users hold tokens minted
+// outside a sign-in (CreateUser), so Required verifies the token without a
+// session; the rest is AuthKit's own.
+type customerAuth struct{ *authkit.Client }
 
-func (a customerAuth) Required() func(http.Handler) http.Handler { return verify.Required(a.ak) }
-
-func (customerAuth) RequirePermission(string) func(http.Handler) http.Handler { return refuse }
-
-func (customerAuth) Sensitive() func(http.Handler) http.Handler { return refuse }
-
-func refuse(http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) })
-}
-
-func (customerAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
-	cl, ok := verify.ClaimsFromContext(ctx)
-	if !ok || cl.Kind != iam.ActorUser || cl.UserID == "" {
-		return openrails.Identity{}, false
-	}
-	credential := openrails.Credential{Kind: openrails.CredentialSession, ID: cl.SessionID}
-	if cl.DeviceKeyID != "" {
-		credential = openrails.Credential{Kind: openrails.CredentialDeviceKey, ID: cl.DeviceKeyID}
-	}
-	return openrails.Identity{
-		Issuer: cl.Issuer, Subject: cl.UserID, SubjectKind: openrails.SubjectUser,
-		Invoker: openrails.Invoker{Issuer: cl.Issuer, ID: cl.UserID}, Credential: credential,
-		Email: cl.Email, Username: cl.Username, EmailVerified: cl.EmailVerified,
-	}, true
-}
+func (a customerAuth) Required() func(http.Handler) http.Handler { return verify.Required(a.Client) }
 
 // PaymentPage wraps the handler serving the hosted checkout page.
 func (r *Runtime) PaymentPage(page http.Handler) http.Handler {
@@ -238,7 +213,7 @@ func (r *Runtime) PaymentPage(page http.Handler) http.Handler {
 
 func (r *Runtime) Close() {
 	_ = r.Client.Close(context.Background())
-	r.Auth.Close()
+	_ = r.Auth.Close(context.Background())
 	r.Solana.Close()
 	r.NMI.Close()
 }

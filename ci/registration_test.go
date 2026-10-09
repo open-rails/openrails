@@ -24,7 +24,7 @@ import (
 // registration without a sender, refuses to boot.
 func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
+	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool, f.schema))
 	for _, tc := range []struct {
 		mode     iam.RegistrationMode
 		register int

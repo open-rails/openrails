@@ -51,7 +51,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 		}
 	}
 	if cfg.ControlPlane != nil {
-		return standalonedb.ApplyAuthKit(ctx, pool)
+		return standalonedb.ApplyAuthKit(ctx, pool, riverSchema)
 	}
 	return nil
 }

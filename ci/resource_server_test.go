@@ -563,10 +563,10 @@ merchants:
 	// the application, is disabled.
 	registered, err := cp.AuthKit().RemoteApplication(t.Context(), iam.AppByIssuer(app.iss))
 	require.NoError(t, err)
-	_, err = cp.AuthKit().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(registered.GroupID), iam.UserSubject(newAccount(t, cp).ID), operator.MerchantType.OwnerRole())
+	_, err = cp.AuthKit().SetGroupRole(t.Context(), iam.SystemIdentity(), iam.GroupByID(registered.GroupID), iam.UserSubject(newAccount(t, cp).ID), operator.MerchantType.OwnerRole())
 	require.NoError(t, err)
 	registered.Enabled = false
-	_, err = cp.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(registered.GroupID), registered)
+	_, err = cp.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemIdentity(), iam.GroupByID(registered.GroupID), registered)
 	require.NoError(t, err)
 	w = call(app.mint(t, nil))
 	require.Equal(t, http.StatusUnauthorized, w.Code)

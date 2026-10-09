@@ -177,7 +177,7 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		return nil, err
 	}
 	return &credential.ResolvedResourceAccess{
-		Machine:       cl.Kind == iam.ActorOAuthClient,
+		Machine:       cl.Kind == verify.TokenOAuthClient,
 		Issuer:        strings.TrimSpace(cl.Issuer),
 		Subject:       strings.TrimSpace(cl.Subject),
 		ClientID:      cl.ClientID,
@@ -234,7 +234,7 @@ func (c *ControlPlane) ResolveResourceUser(r *http.Request) (*credential.Resourc
 		return nil, err
 	}
 	user := &credential.ResourceUser{
-		Machine: cl.Kind == iam.ActorOAuthClient, Issuer: strings.TrimSpace(cl.Issuer), Subject: strings.TrimSpace(cl.Subject),
+		Machine: cl.Kind == verify.TokenOAuthClient, Issuer: strings.TrimSpace(cl.Issuer), Subject: strings.TrimSpace(cl.Subject),
 		Email: cl.Email, EmailVerified: cl.EmailVerified, Username: cl.Username,
 		Merchants: []billing.UserMerchant{}, Ceiling: is.ceiling,
 	}
@@ -259,7 +259,7 @@ func (c *ControlPlane) ResolveResourceUser(r *http.Request) (*credential.Resourc
 // grantsOf are the federated grants cl's user accepted on merchants; a
 // client acting for itself holds none.
 func (c *ControlPlane) grantsOf(ctx context.Context, cl verify.Claims, merchants []billing.MerchantID) (map[billing.MerchantID][]string, error) {
-	if cl.Kind == iam.ActorOAuthClient || len(merchants) == 0 {
+	if cl.Kind == verify.TokenOAuthClient || len(merchants) == 0 {
 		return nil, nil
 	}
 	granted, err := c.subjectGrants(ctx, strings.TrimSpace(cl.Issuer), strings.TrimSpace(cl.Subject), merchants)
@@ -285,7 +285,7 @@ func (c *ControlPlane) ResolveResourceCustomer(r *http.Request) (*credential.Res
 	if err != nil {
 		return nil, err
 	}
-	if cl.Kind == iam.ActorOAuthClient {
+	if cl.Kind == verify.TokenOAuthClient {
 		return nil, credential.ErrResourceTokenInvalid
 	}
 	if cl.JWKThumbprint == "" && cl.CertificateThumbprint == "" {
