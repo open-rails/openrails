@@ -14,7 +14,7 @@ const (
 
 // The resource groups: a guard on one overrides its routes' level group.
 const (
-	// Access covers ListCustomerEntitlements, ListEntitlementCustomers, CheckEntitlements, GetEffectiveTier, CheckProductAccess, ListProductAccess, CreateProductAccess, DeleteProductAccess.
+	// Access covers ListCustomerEntitlements, ListEntitlementCustomers, CheckEntitlements, GetEffectiveTiers, CheckProductAccess, ListProductAccess, CreateProductAccess, DeleteProductAccess.
 	Access RouteSet = "resource:access"
 	// BillingData covers ExportBillingArchive, ImportBillingArchive, ImportBilling.
 	BillingData RouteSet = "resource:billing_data"
@@ -24,11 +24,11 @@ const (
 	Checkout RouteSet = "resource:checkout"
 	// CheckoutSessions covers CreateCheckoutSession.
 	CheckoutSessions RouteSet = "resource:checkout_sessions"
-	// Credits covers CreateCreditGrant, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, SetSpendDelegation, DeleteSpendDelegation.
+	// Credits covers CreateCreditGrants, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, DeleteSpendDelegation.
 	Credits RouteSet = "resource:credits"
 	// CustomerSettings covers ListCustomerSettings, UpdateCustomerSettings.
 	CustomerSettings RouteSet = "resource:customer_settings"
-	// Customers covers ListCustomers, GetCustomers, EnsureCustomers, GetCustomerBillingProfile, ListCustomerDelinquency, ListDelinquency, ListPaymentMethods, DeletePaymentMethod.
+	// Customers covers ListCustomers, EnsureCustomers, GetCustomerBillingProfile, ListCustomerDelinquency, ListDelinquency, ListPaymentMethods, DeletePaymentMethod.
 	Customers RouteSet = "resource:customers"
 	// Dashboard covers SetDashboard, GenerateDashboardWidget.
 	Dashboard RouteSet = "resource:dashboard"
@@ -52,7 +52,7 @@ const (
 	Settings RouteSet = "resource:settings"
 	// Subscriptions covers ListSubscriptions, GetSubscription, CancelSubscription, ResumeSubscription, ChangeTier, PreviewTierChange, SetSubscriptionPaymentMethod, CreateRepriceBatch, PreviewRepriceBatch, ListRepriceBatches, GetRepriceBatch, CancelRepriceBatch, CreatePlanMigration, PreviewPlanMigration, ListReprices, GetReprice, CancelReprice.
 	Subscriptions RouteSet = "resource:subscriptions"
-	// Usage covers Admit, GetAdmission, CaptureAdmission, ReleaseAdmission, ExtendAdmission, ReportWastedSpend, RecordUsage, GetUsage, OpenOperationAuthorization, GetOperationAuthorization, ExtendOperationAuthorization, ReleaseOperationAuthorization, RecordProviderBillingObservation, GetProviderBillingQualification, ResolveProviderBillingQualification, ListProviderBillingQualifications.
+	// Usage covers Admit, GetAdmission, CaptureAdmission, ReleaseAdmissions, ExtendAdmissions, ReportWastedSpend, RecordUsage, GetUsage, OpenOperationAuthorization, GetOperationAuthorization, ExtendOperationAuthorization, ReleaseOperationAuthorization, RecordProviderBillingObservation, GetProviderBillingQualification, ResolveProviderBillingQualification, ListProviderBillingQualifications.
 	Usage RouteSet = "resource:usage"
 )
 
@@ -92,8 +92,8 @@ const (
 	CreateAlertWebhook RouteSet = "route:CreateAlertWebhook"
 	// CreateCheckoutSession is POST /v1/merchant/checkout-sessions.
 	CreateCheckoutSession RouteSet = "route:CreateCheckoutSession"
-	// CreateCreditGrant is POST /v1/merchant/customers/{customer_id}/credit-grants.
-	CreateCreditGrant RouteSet = "route:CreateCreditGrant"
+	// CreateCreditGrants is POST /v1/merchant/credit-grants.
+	CreateCreditGrants RouteSet = "route:CreateCreditGrants"
 	// CreateInvoicePayment is POST /v1/merchant/invoices/{id}/payments.
 	CreateInvoicePayment RouteSet = "route:CreateInvoicePayment"
 	// CreateOffChannelPayment is POST /v1/merchant/customers/{customer_id}/payments/off-channel.
@@ -128,8 +128,8 @@ const (
 	EnsureProduct RouteSet = "route:EnsureProduct"
 	// ExportBillingArchive is GET /v1/merchant/billing-archive.
 	ExportBillingArchive RouteSet = "route:ExportBillingArchive"
-	// ExtendAdmission is POST /v1/merchant/admissions/{request_id}/extend.
-	ExtendAdmission RouteSet = "route:ExtendAdmission"
+	// ExtendAdmissions is POST /v1/merchant/admissions/extend.
+	ExtendAdmissions RouteSet = "route:ExtendAdmissions"
 	// ExtendOperationAuthorization is POST /v1/merchant/provider-operations/{operation_id}/extend.
 	ExtendOperationAuthorization RouteSet = "route:ExtendOperationAuthorization"
 	// GenerateDashboardWidget is POST /v1/merchant/dashboard/widgets/generate.
@@ -148,12 +148,10 @@ const (
 	GetCreditGrant RouteSet = "route:GetCreditGrant"
 	// GetCustomerBillingProfile is GET /v1/merchant/customers/{customer_id}/billing-profile.
 	GetCustomerBillingProfile RouteSet = "route:GetCustomerBillingProfile"
-	// GetCustomers is POST /v1/merchant/customers/lookup.
-	GetCustomers RouteSet = "route:GetCustomers"
 	// GetDashboard is GET /v1/merchant/dashboard.
 	GetDashboard RouteSet = "route:GetDashboard"
-	// GetEffectiveTier is GET /v1/merchant/customers/{customer_id}/tier.
-	GetEffectiveTier RouteSet = "route:GetEffectiveTier"
+	// GetEffectiveTiers is POST /v1/merchant/tiers/lookup.
+	GetEffectiveTiers RouteSet = "route:GetEffectiveTiers"
 	// GetFinding is GET /v1/merchant/findings/{id}.
 	GetFinding RouteSet = "route:GetFinding"
 	// GetFindingSummary is GET /v1/merchant/findings/summary.
@@ -300,8 +298,8 @@ const (
 	RefreshPSPs RouteSet = "route:RefreshPSPs"
 	// RefundPayment is POST /v1/merchant/payments/{id}/refunds.
 	RefundPayment RouteSet = "route:RefundPayment"
-	// ReleaseAdmission is POST /v1/merchant/admissions/{request_id}/release.
-	ReleaseAdmission RouteSet = "route:ReleaseAdmission"
+	// ReleaseAdmissions is POST /v1/merchant/admissions/release.
+	ReleaseAdmissions RouteSet = "route:ReleaseAdmissions"
 	// ReleaseOperationAuthorization is POST /v1/merchant/provider-operations/{operation_id}/release.
 	ReleaseOperationAuthorization RouteSet = "route:ReleaseOperationAuthorization"
 	// ReplaceEntitlements is POST /v1/merchant/catalog/entitlement-replacements.
@@ -330,8 +328,6 @@ const (
 	SetMeterRateCard RouteSet = "route:SetMeterRateCard"
 	// SetRateOverride is PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}.
 	SetRateOverride RouteSet = "route:SetRateOverride"
-	// SetSpendDelegation is PUT /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}.
-	SetSpendDelegation RouteSet = "route:SetSpendDelegation"
 	// SetSpendDelegations is PUT /v1/merchant/customers/{customer_id}/spend-delegations.
 	SetSpendDelegations RouteSet = "route:SetSpendDelegations"
 	// SetSubscriptionPaymentMethod is PUT /v1/merchant/subscriptions/{id}/payment-method.

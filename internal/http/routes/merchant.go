@@ -27,7 +27,7 @@ var merchantRoutes = []Route{
 
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListAlertWebhooks", Level: LevelAdmin, Resources: res(ResSettings),
-		Responses: []Reply{{200, billing.ListPage[billing.AlertWebhook]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListAlertWebhooks)},
+		Query: params(idsParam), Responses: []Reply{{200, billing.ListPage[billing.AlertWebhook]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListAlertWebhooks)},
 	{Method: POST, Path: "/v1/merchant/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreateAlertWebhook", Level: LevelAdmin, Resources: res(ResSettings), Sensitive: true,
 		Request: billing.CreateAlertWebhookParams{}, Responses: []Reply{{201, billing.AlertWebhook{}}}, Errors: codes("service_unavailable", "webhook_invalid"), Handler: h(handlers.CreateAlertWebhook)},
 	{Method: DELETE, Path: "/v1/merchant/alert-webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "DeleteAlertWebhook", Level: LevelAdmin, Resources: res(ResSettings), Sensitive: true,

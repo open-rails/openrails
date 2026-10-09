@@ -30,11 +30,10 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: other}})
 	require.NoError(t, err)
 	missing := billing.CustomerID(uuid.New())
-	read, err := client.GetCustomers(ctx, []billing.CustomerID{customer, missing, customer})
+	read, err := client.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{customer, missing, customer}})
 	require.NoError(t, err)
-	require.Len(t, read, 2, "every requested customer is answered once")
-	require.Equal(t, &email, read[customer].Email)
-	require.Nil(t, read[missing], "an undeclared customer is null")
+	require.Len(t, read.Items, 1, "a named customer is answered once; an undeclared one is absent")
+	require.Equal(t, &email, read.Items[0].Email)
 
 	found, err := client.ListCustomers(ctx, billing.CustomerListParams{Query: "buyer@"})
 	require.NoError(t, err)
@@ -51,17 +50,17 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.ElementsMatch(t, []billing.CustomerID{customer, other}, []billing.CustomerID{first.Items[0].ID, second.Items[0].ID})
 
 	grantParams := billing.CreateCreditGrantParams{Currency: "usd", Amount: 1_000_000, Source: "support", SourceID: "grant-1"}
-	grant, err := client.CreateCreditGrant(ctx, customer, grantParams)
+	grant, err := createCreditGrant(ctx, client, customer, grantParams)
 	require.NoError(t, err)
 	require.False(t, grant.Replayed)
 	require.Equal(t, billing.CreditGrantActive, grant.State)
 	require.EqualValues(t, 1_000_000, grant.RemainingAmount)
-	replay, err := client.CreateCreditGrant(ctx, customer, grantParams)
+	replay, err := createCreditGrant(ctx, client, customer, grantParams)
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
 	require.Equal(t, grant.ID, replay.ID)
 	grantParams.Amount = 2_000_000
-	_, err = client.CreateCreditGrant(ctx, customer, grantParams)
+	_, err = createCreditGrant(ctx, client, customer, grantParams)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	byKey, err := client.ListCreditGrants(ctx, customer, billing.CreditGrantListParams{SourceID: "grant-1"})
 	require.NoError(t, err)
@@ -101,7 +100,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, billing.AdmissionCaptured, *captured.State)
 	require.EqualValues(t, 250_000, *captured.CapturedAmount)
-	_, err = client.ReleaseAdmission(ctx, requestID)
+	_, err = releaseAdmission(ctx, client, requestID)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
 	event, err := recordUsage(ctx, client, billing.RecordUsageParams{

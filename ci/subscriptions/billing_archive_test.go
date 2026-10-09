@@ -32,7 +32,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "nmi", embedded)
 	client := w.client[embedded]
-	grant, err := client.CreateCreditGrant(t.Context(), e.c.cid(), billing.CreateCreditGrantParams{
+	grant, err := createCreditGrant(t.Context(), client, e.c.cid(), billing.CreateCreditGrantParams{
 		Currency: "USD", Amount: 2_500_000, Source: "archive-test", SourceID: "retained-credit",
 	})
 	require.NoError(t, err)

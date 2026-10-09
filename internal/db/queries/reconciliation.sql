@@ -256,6 +256,14 @@ ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium'
          f.created_at, f.id
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListReconciliationFindingsByIDs :many
+-- Named findings, open or resolved, in the work list's order.
+SELECT f.*
+FROM billing.reconciliation_findings f
+WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id;
+
 -- Gauge input (#690): open-finding counts per (type, severity). The Go layer
 -- folds these into the named gauges (freeloaders, duplicate_coverage,
 -- open-by-severity) — the findings ledger IS the metric store.

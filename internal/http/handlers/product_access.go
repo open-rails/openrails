@@ -78,13 +78,36 @@ func productAccessCustomer(r *httprequest.Request) (billing.CustomerID, bool) {
 }
 
 // ListProductAccess is one page of a customer's product-access windows,
-// newest first; ?live=true keeps those live now.
+// newest first; ?live=true keeps those live now, ?ids reads named ones.
 func ListProductAccess(r *httprequest.Request) {
 	customer, ok := productAccessCustomer(r)
 	if !ok {
 		return
 	}
-	listProductAccess(r, customer.UUID())
+	ids, ok := listIDs(r, billing.ParseProductAccessID)
+	if !ok {
+		return
+	}
+	if ids == nil {
+		listProductAccess(r, customer.UUID())
+		return
+	}
+	svc := productAccessService(r)
+	if svc == nil {
+		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
+		return
+	}
+	rows, err := svc.ListByIDs(r.Request.Context(), customer.UUID(), uuidutil.Of(ids))
+	if err != nil {
+		r.InternalError("failed to list product access", err)
+		return
+	}
+	now := r.Clock.Now()
+	out := billing.ListPage[billing.ProductAccessGrant]{Items: make([]billing.ProductAccessGrant, len(rows))}
+	for i, row := range rows {
+		out.Items[i] = productAccessGrant(row, now)
+	}
+	r.SuccessJSON(out)
 }
 
 // SelfListProductAccess is one page of the customer's own product-access

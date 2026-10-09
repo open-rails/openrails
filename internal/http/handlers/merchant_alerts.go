@@ -58,11 +58,15 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 
 // ListAlertWebhooks handles GET /v1/merchant/alert-webhooks.
 func ListAlertWebhooks(r *httprequest.Request) {
+	ids, ok := listIDs(r, billing.ParseAlertWebhookID)
+	if !ok {
+		return
+	}
 	svc, ok := alertService(r)
 	if !ok {
 		return
 	}
-	hooks, err := svc.ListWebhooks(r.Request.Context())
+	hooks, err := svc.ListWebhooks(r.Request.Context(), billing.AlertWebhookListParams{IDs: ids})
 	if err != nil {
 		r.InternalError("list alert webhooks failed", err)
 		return
@@ -152,7 +156,11 @@ func ListMerchantNotifications(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	notes, err := svc.ListNotifications(r.Request.Context(), billing.MerchantNotificationListParams{PageRequest: page, UnreadOnly: q.Unread})
+	ids, ok := listIDs(r, billing.ParseNotificationID)
+	if !ok {
+		return
+	}
+	notes, err := svc.ListNotifications(r.Request.Context(), billing.MerchantNotificationListParams{PageRequest: page, IDs: ids, UnreadOnly: q.Unread})
 	if err != nil {
 		writeRefusal(r, err, "list notifications failed")
 		return

@@ -117,6 +117,12 @@ SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY pm.created_at DESC;
 
+-- name: ListCustomerPaymentMethodsByIDs :many
+SELECT * FROM billing.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+  AND customer_id = sqlc.arg(customer_id)::uuid
+ORDER BY created_at DESC, id DESC;
+
 -- name: ListPaymentMethodsByCustomerRails :many
 SELECT * FROM billing.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = $1

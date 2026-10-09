@@ -57,6 +57,7 @@ func (id *CreditTransactionID) UnmarshalText(text []byte) error {
 // expiry differs is ErrIdempotencyKeyReused. Source labels where the money
 // came from; Invoker records who granted it (default: the customer).
 type CreateCreditGrantParams struct {
+	CustomerID  CustomerID `json:"customer_id"`
 	Currency    string     `json:"currency"`
 	Amount      int64      `json:"amount,string"`
 	SourceID    string     `json:"source_id"`
@@ -108,7 +109,21 @@ type CreditGrant struct {
 type CreditGrantListParams struct {
 	Currency string `form:"currency"`
 	SourceID string `form:"source_id"`
+	// IDs instead reads 1 to MaxBatchItems of the customer's named grants in
+	// one page, whatever their state; unknown ones are absent.
+	IDs []CreditGrantID `form:"-"`
 	PageRequest
+}
+
+// CreateCreditGrantBatchParams grants 1 to MaxBatchItems credits, across any
+// customers, all or none.
+type CreateCreditGrantBatchParams struct {
+	Items []CreateCreditGrantParams `json:"items"`
+}
+
+// CreateCreditGrantBatchResult is every grant, in request order.
+type CreateCreditGrantBatchResult struct {
+	Items []CreditGrant `json:"items"`
 }
 
 // RevokeCreditGrantParams revokes a grant's unspent remainder. Revoking a
@@ -152,9 +167,11 @@ type CreditTransaction struct {
 }
 
 // CreditTransactionListParams selects a customer's ledger in one currency,
-// newest first.
+// newest first. IDs instead reads 1 to MaxBatchItems of the customer's named
+// transactions in one page, in any currency; unknown ones are absent.
 type CreditTransactionListParams struct {
-	Currency string `form:"currency"`
+	Currency string                `form:"currency"`
+	IDs      []CreditTransactionID `form:"-"`
 	PageRequest
 }
 
@@ -211,12 +228,6 @@ type SpendDelegation struct {
 // SetSpendDelegationsParams replaces a customer's spend delegations.
 type SetSpendDelegationsParams struct {
 	Delegations []SpendDelegation `json:"delegations"`
-}
-
-// SetSpendDelegationParams sets the delegation at a scope and key.
-type SetSpendDelegationParams struct {
-	Windows    []BudgetWindow `json:"windows"`
-	Provenance string         `json:"provenance,omitempty"`
 }
 
 // SpendWindow is one window an invoker spends under, with its live metering.

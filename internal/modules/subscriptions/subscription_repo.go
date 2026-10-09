@@ -665,6 +665,19 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	return r.manyWithDetails(ctx, rows)
 }
 
+// ListByIDs reads the named subscriptions, newest first.
+func (r *SubscriptionRepo) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]*models.Subscription, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListSubscriptionsByIDs(ctx, gen.ListSubscriptionsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	return r.manyWithDetails(ctx, rows)
+}
+
 // Count is how many of the merchant's subscriptions match f.
 func (r *SubscriptionRepo) Count(ctx context.Context, f SubscriptionFilters) (int64, error) {
 	mid, err := merchant.Require(ctx)

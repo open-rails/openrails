@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // ListInvoices is one page of invoices, newest period first.
@@ -22,6 +23,23 @@ func (s *MoneyService) ListInvoices(ctx context.Context, p billing.InvoiceListPa
 	var out billing.ListPage[models.Invoice]
 	mid, err := merchant.Require(ctx)
 	if err != nil {
+		return out, err
+	}
+	if p.IDs != nil {
+		err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			rows, err := s.db.Gen(ctx).ListInvoicesByIDs(ctx, gen.ListInvoicesByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(p.IDs)})
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				inv, err := invoiceFromGen(row)
+				if err != nil {
+					return err
+				}
+				out.Items = append(out.Items, *inv)
+			}
+			return nil
+		})
 		return out, err
 	}
 	limit, err := pagination.Limit(p.PageRequest)

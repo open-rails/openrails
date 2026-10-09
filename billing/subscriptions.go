@@ -20,6 +20,9 @@ const (
 // newest first.
 type SubscriptionListParams struct {
 	PageRequest
+	// IDs instead reads 1 to MaxBatchItems named subscriptions in one page,
+	// whatever their state; unknown ones are absent.
+	IDs        []SubscriptionID
 	CustomerID CustomerID
 	Status     SubscriptionStatus
 	Rail       string

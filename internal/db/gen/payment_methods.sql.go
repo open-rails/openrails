@@ -831,6 +831,66 @@ func (q *Queries) ListCustodianRoutePSPs(ctx context.Context, arg ListCustodianR
 	return items, nil
 }
 
+const listCustomerPaymentMethodsByIDs = `-- name: ListCustomerPaymentMethodsByIDs :many
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+  AND customer_id = $3::uuid
+ORDER BY created_at DESC, id DESC
+`
+
+type ListCustomerPaymentMethodsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) ListCustomerPaymentMethodsByIDs(ctx context.Context, arg ListCustomerPaymentMethodsByIDsParams) ([]BillingPaymentMethod, error) {
+	rows, err := q.db.Query(ctx, listCustomerPaymentMethodsByIDs, arg.MerchantID, arg.Ids, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPaymentMethod
+	for rows.Next() {
+		var i BillingPaymentMethod
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Rail,
+			&i.PspID,
+			&i.Custodian,
+			&i.CustodianID,
+			&i.RailCustomerRef,
+			&i.RailMethodRef,
+			&i.StoredCredentialRecurringRef,
+			&i.StoredCredentialUnscheduledRef,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.CardExpMonth,
+			&i.CardExpYear,
+			&i.Metadata,
+			&i.Fingerprint,
+			&i.NetworkTokenID,
+			&i.NetworkTokenStatus,
+			&i.NetworkTokenPar,
+			&i.ChargeVia,
+			&i.ParkReason,
+			&i.ParkedAt,
+			&i.AccountUpdaterCheckedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (a.payment_method_id)
     a.payment_method_id, a.attempted_at, a.category

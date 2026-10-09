@@ -132,7 +132,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	request, deadline := "job-"+uuid.NewString(), now.Add(time.Hour)
 	verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
@@ -263,7 +263,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	for _, c := range []billing.CustomerID{customer, other} {
 		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: c}})
 		require.NoError(t, err)
-		_, err = client.CreateCreditGrant(ctx, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+		_, err = createCreditGrant(ctx, client, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 		require.NoError(t, err)
 	}
 
@@ -292,9 +292,9 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	require.NotNil(t, tooFar.Error, "%+v", tooFar)
 	require.Equal(t, billing.CodeInvalidParam, tooFar.Error.Code)
 	require.Equal(t, "expires_at", *tooFar.Error.Param)
-	_, err := client.ExtendAdmission(ctx, request, billing.ExtendAdmissionParams{ExpiresAt: time.Now().Add(retention.AdmissionMaxHold + time.Hour)})
+	_, err := extendAdmission(ctx, client, request, time.Now().Add(retention.AdmissionMaxHold+time.Hour))
 	require.ErrorIs(t, err, billing.ErrInvalid)
-	_, err = client.ExtendAdmission(ctx, request, billing.ExtendAdmissionParams{ExpiresAt: time.Now().Add(retention.AdmissionMaxHold - time.Hour)})
+	_, err = extendAdmission(ctx, client, request, time.Now().Add(retention.AdmissionMaxHold-time.Hour))
 	require.NoError(t, err)
 
 	// A usage coordinate is recorded once, whatever time each attempt reports.
@@ -420,7 +420,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	requireRefused(t, err)
 
 	// Money that must survive everything below.
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
 	require.NoError(t, err)
@@ -504,7 +504,7 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
-	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
+	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	var psp, account uuid.UUID
 	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, account_id, key, environment) VALUES ($1, 'stripe', 'acct_retention', 'stripe', 'live') RETURNING id`), w.merchant).Scan(&psp))

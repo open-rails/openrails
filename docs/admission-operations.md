@@ -2,7 +2,9 @@
 
 How admissions and their holds behave. The routes are `/v1/merchant/admissions`
 ([routes](api/routes.md)); the Go methods are `Admit`, `GetAdmission`,
-`CaptureAdmission`, `ReleaseAdmission` and `ExtendAdmission`.
+`CaptureAdmission`, `ReleaseAdmissions` and `ExtendAdmissions`. Admit,
+release and extend take up to 1,000 items and answer one result per item, each
+decided on its own; capture settles one request.
 
 Malformed request IDs (empty or over 255 UTF-8 bytes), negative estimates and negative prospective rates return structured 400 errors before account creation or money locking.
 

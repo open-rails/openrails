@@ -199,6 +199,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
 SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
 `
 
 type ListProductsByIDsParams struct {

@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 var (
@@ -111,6 +112,18 @@ func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params bi
 	if s == nil || s.pool == nil {
 		return billing.ListPage[billing.PSP]{}, errors.New("merchants: pgx pool is required")
 	}
+	if params.IDs != nil {
+		var rows []gen.BillingPsp
+		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			rows, err = gen.New(tx).ListPSPsByIDs(ctx, gen.ListPSPsByIDsParams{MerchantID: id.UUID(), Ids: uuidutil.Of(params.IDs)})
+			return err
+		})
+		if err != nil {
+			return billing.ListPage[billing.PSP]{}, err
+		}
+		return s.pspPage(ctx, id, billing.ListPage[gen.BillingPsp]{Items: rows})
+	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.PSP]{}, err
@@ -139,9 +152,13 @@ func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params bi
 	if err != nil {
 		return billing.ListPage[billing.PSP]{}, err
 	}
-	page := pagination.Cut(rows, limit, func(row gen.BillingPsp) any {
+	return s.pspPage(ctx, id, pagination.Cut(rows, limit, func(row gen.BillingPsp) any {
 		return pagination.TimeID{At: row.CreatedAt, ID: row.ID}
-	})
+	}))
+}
+
+// pspPage answers a page of PSP rows with their open obligations.
+func (s *Service) pspPage(ctx context.Context, id billing.MerchantID, page billing.ListPage[gen.BillingPsp]) (billing.ListPage[billing.PSP], error) {
 	out := billing.ListPage[billing.PSP]{Items: make([]billing.PSP, 0, len(page.Items)), Next: page.Next}
 	ids := make([]uuid.UUID, 0, len(page.Items))
 	for _, row := range page.Items {

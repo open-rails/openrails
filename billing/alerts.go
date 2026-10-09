@@ -82,6 +82,12 @@ type AlertWebhook struct {
 	UpdatedAt       time.Time          `json:"updated_at"`
 }
 
+// AlertWebhookListParams lists every alert webhook, or reads the 1 to
+// MaxBatchItems IDs names; unknown ones are absent.
+type AlertWebhookListParams struct {
+	IDs []AlertWebhookID
+}
+
 // CreateAlertWebhookParams adds an alert webhook. Format defaults to
 // generic; Enabled to true.
 type CreateAlertWebhookParams struct {
@@ -120,8 +126,11 @@ type NotificationLookup struct {
 }
 
 // MerchantNotificationListParams pages the merchant's inbox, newest first.
+// IDs instead reads 1 to MaxBatchItems named notifications in one page, read
+// or not; unknown ones are absent.
 type MerchantNotificationListParams struct {
 	PageRequest
+	IDs []NotificationID
 	// UnreadOnly leaves out read notifications.
 	UnreadOnly bool
 }

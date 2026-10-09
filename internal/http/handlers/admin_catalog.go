@@ -102,11 +102,15 @@ func ListProducts(r *httprequest.Request) {
 	if !r.BindQuery(&query) {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseProductID)
+	if !ok {
+		return
+	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup),
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, IDs: ids, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup),
 		Entitlement: query.Entitlement, ForSale: query.ForSale})
 	if err != nil {
 		writeCatalogError(r, err)
@@ -217,11 +221,15 @@ func ListPrices(r *httprequest.Request) {
 	if !r.BindQuery(&query) {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParsePriceID)
+	if !ok {
+		return
+	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, ProductID: query.ProductID,
+	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, IDs: ids, ProductID: query.ProductID,
 		Currency: query.Currency, Recurring: query.Recurring, Archived: query.Archived})
 	if err != nil {
 		writeCatalogError(r, err)

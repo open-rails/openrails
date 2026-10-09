@@ -205,6 +205,23 @@ func (s *Service) ListPage(ctx context.Context, customer uuid.UUID, after *uuid.
 	return rows, false, nil
 }
 
+// ListByIDs reads a customer's named windows, newest first.
+func (s *Service) ListByIDs(ctx context.Context, customer uuid.UUID, ids []uuid.UUID) ([]gen.ListProductAccessPageRow, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListCustomerProductAccessByIDs(ctx, gen.ListCustomerProductAccessByIDsParams{MerchantID: mid.UUID(), CustomerID: customer, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gen.ListProductAccessPageRow, len(rows))
+	for i, row := range rows {
+		out[i] = gen.ListProductAccessPageRow(row)
+	}
+	return out, nil
+}
+
 // GrantProducts records free grants all or none, in one transaction, and
 // returns each window with its product and grant attribution, in order.
 func (s *Service) GrantProducts(ctx context.Context, batch []Grant) ([]gen.ListProductAccessPageRow, error) {

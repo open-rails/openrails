@@ -24,6 +24,11 @@ SELECT * FROM billing.merchant_webhooks
 WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id;
 
+-- name: ListMerchantWebhooksByIDs :many
+SELECT * FROM billing.merchant_webhooks
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id;
+
 -- name: DeleteMerchantWebhook :execrows
 DELETE FROM billing.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
@@ -44,6 +49,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant'
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListMerchantNotificationsByIDs :many
+SELECT * FROM billing.notifications
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND recipient_kind = 'merchant'
+ORDER BY created_at DESC, id DESC;
 
 -- name: MarkMerchantNotificationsRead :many
 UPDATE billing.notifications

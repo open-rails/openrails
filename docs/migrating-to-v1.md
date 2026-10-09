@@ -149,7 +149,7 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 | `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListCustomerEntitlements(` with `billing.CustomerEntitlementListParams` (`Prefix`, `At`, a page), answering the customer's keys |
 | `ListCustomersWithEntitlement` | `client.ListEntitlementCustomers(` |
 | `GrantEntitlement`, `RevokeEntitlement` | Grant the product that carries the key: `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
-| `ResolveEffectiveTier` | `client.GetEffectiveTier(`; `Tier` is nil when the customer holds none |
+| `ResolveEffectiveTier` | `client.GetEffectiveTiers(` with `billing.GetEffectiveTiersParams` (`Group`, up to 100 `CustomerIDs`); a customer's tier is nil when they hold none |
 | `client.ProductAccess.Check`, `CheckMany`, `List` | `client.CheckProductAccess(`, `client.ListProductAccess(`, `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 
 Every entitlement now derives from a grant; `source_type` is `purchase`,
@@ -203,12 +203,12 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `DepositCredits`, `GetDeposit` | `client.CreateCreditGrant(` with `billing.CreateCreditGrantParams`; `client.ListCreditGrants(` by `source_id` answers what a key did |
+| `DepositCredits`, `GetDeposit` | `client.CreateCreditGrants(` with up to 100 `billing.CreateCreditGrantParams`, all or none; `client.ListCreditGrants(` by `source_id` answers what a key did |
 | Revoke with a body on `DELETE` | `client.RevokeCreditGrant(` |
 | `GetCreditAccount` | `client.GetBalance(` answers `billing.Balance` (`balance_amount`, `held_amount`, `available_amount`, `owed_amount`) |
-| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmission(`, `client.ExtendAdmission(`. The caller's `request_id` is the id |
+| `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
 | `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; `client.GetUsage(`. Resource revenue is removed |
-| `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(`, `client.SetSpendDelegation(`, `client.DeleteSpendDelegation(` |
+| `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(` (the whole set), `client.DeleteSpendDelegation(` |
 | `InvokerTypePayer` (`invoker_type: "payer"`) | `billing.InvokerTypeCustomer` (`"customer"`) |
 | `DeclaredTransaction.AmountCents` | `Amount`, in native units (micros for USD) |
 | `DeclaredSubscription.UserEmail`; `DeclaredPaymentMethod.LastFour`, `CardType`, `ExpiryDate`, `InitialTransactionID` | `DeclaredCustomer.Email`; `DeclaredPaymentMethod.Card` (`billing.CardDetails`); `InitialTransactionID` is removed |
@@ -288,14 +288,14 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`), `/v1/merchant/psps/{id}/archive`, `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; `/v1/merchant/rails` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/merchant/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
-| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
+| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/merchant/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/merchant/customers/settings` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/transactions` |
-| `PUT …/spend-delegations:upsert` | `/v1/merchant/customers/{customer_id}/spend-delegations` and `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
-| `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}` |
+| `PUT …/spend-delegations:upsert` | `PUT /v1/merchant/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
+| `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}`, `POST /v1/merchant/admissions/release`, `POST /v1/merchant/admissions/extend` |
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/merchant/usage-events`, `GET /v1/merchant/customers/{customer_id}/usage` |
 | `/v1/merchant/users/{user_id}/…` | `/v1/merchant/customers/{customer_id}/product-access` and the checks beneath it |
-| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/merchant/customers/{customer_id}/entitlements/check`, `/v1/merchant/customers/{customer_id}/tier` |
+| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/merchant/customers/{customer_id}/entitlements/check`, `POST /v1/merchant/tiers/lookup` |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`; the profile is `/v1/merchant/customers/{customer_id}/billing-profile` |
 | `GET /v1/merchant/customers/{id}/payments` | `GET /v1/merchant/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |

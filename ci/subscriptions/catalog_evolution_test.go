@@ -379,7 +379,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, versions.Items, 3)
 	buyer := w.newCustomer()
-	_, err = c.CreateCreditGrant(t.Context(), buyer.cid(), billing.CreateCreditGrantParams{Amount: 2_000_000, Currency: "USD", Source: "archive-catalog", SourceID: "retained-credit"})
+	_, err = createCreditGrant(t.Context(), c, buyer.cid(), billing.CreateCreditGrantParams{Amount: 2_000_000, Currency: "USD", Source: "archive-catalog", SourceID: "retained-credit"})
 	require.NoError(t, err)
 	w.settle()
 	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{})

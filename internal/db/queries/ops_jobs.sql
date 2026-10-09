@@ -68,6 +68,12 @@ WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(fetch_limit)::int;
 
+-- name: ListCatalogDriftByIDs :many
+-- Named drift findings, open or resolved, newest first.
+SELECT * FROM billing.reconciliation_findings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND finding_type LIKE 'catalog.%'
+ORDER BY created_at DESC, id DESC;
+
 -- name: ResolveCatalogDriftForResource :execrows
 -- A per-price reconcile verified this PSP account in sync for the resource.
 UPDATE billing.reconciliation_findings

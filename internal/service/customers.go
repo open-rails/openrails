@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // ErrCustomerNotFound is a customer the merchant never declared or billed.
@@ -84,35 +85,6 @@ func (s *Service) EnsureCustomers(ctx context.Context, items []billing.EnsureCus
 	return out, nil
 }
 
-// GetCustomers reads the requested customers; one the merchant never
-// declared or billed maps to nil.
-func (s *Service) GetCustomers(ctx context.Context, ids []billing.CustomerID) (map[billing.CustomerID]*billing.Customer, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	keys := make([]uuid.UUID, len(ids))
-	out := make(map[billing.CustomerID]*billing.Customer, len(ids))
-	for i, id := range ids {
-		keys[i] = id.UUID()
-		out[id] = nil
-	}
-	rows, err := s.rt.DB.Gen(ctx).GetCustomersByIDs(ctx, gen.GetCustomersByIDsParams{MerchantID: mid.UUID(), Ids: keys})
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		customer := customerFromRow(row)
-		out[customer.ID] = &customer
-	}
-	return out, nil
-}
-
 // GetCustomer reads one customer.
 func (s *Service) GetCustomer(ctx context.Context, id identity.CustomerID) (*billing.Customer, error) {
 	ctx, release, err := s.pin(ctx)
@@ -146,6 +118,16 @@ func (s *Service) ListCustomers(ctx context.Context, params billing.CustomerList
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return page, err
+	}
+	if params.IDs != nil {
+		rows, err := s.rt.DB.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
+		if err != nil {
+			return page, err
+		}
+		for _, row := range rows {
+			page.Items = append(page.Items, customerFromRow(row))
+		}
+		return page, nil
 	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 )
 
 // ListHostEvents pages the merchant's host events, oldest first. Process each
-// idempotently, AcknowledgeHostEvent it, and list again.
+// idempotently, AcknowledgeHostEvents it, and list again.
 func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListParams, options ...RequestOption) (*billing.ListPage[billing.HostEvent], error) {
 	q := cursorQuery(req.PageRequest)
 	if req.Type != "" {
@@ -19,6 +19,9 @@ func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListPa
 	}
 	if !req.PaymentID.IsZero() {
 		q.Set("payment_id", req.PaymentID.String())
+	}
+	if err := setIDs(q, req.IDs); err != nil {
+		return nil, err
 	}
 	var out billing.ListPage[billing.HostEvent]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+q.Encode(), nil, &out, options...); err != nil {

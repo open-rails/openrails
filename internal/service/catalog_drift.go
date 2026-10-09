@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Catalog reconciliation (issue #209) runs the shared catalog.RunDriftPass:
@@ -128,6 +129,17 @@ func (s *Service) ListCatalogDrift(ctx context.Context, params billing.CatalogDr
 	dbi, err := s.requireDB()
 	if err != nil {
 		return billing.ListPage[billing.CatalogDrift]{}, err
+	}
+	if params.IDs != nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return billing.ListPage[billing.CatalogDrift]{}, err
+		}
+		rows, err := dbi.Gen(ctx).ListCatalogDriftByIDs(ctx, gen.ListCatalogDriftByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
+		if err != nil {
+			return billing.ListPage[billing.CatalogDrift]{}, fmt.Errorf("list drift findings: %w", err)
+		}
+		return pagination.Map(billing.ListPage[gen.BillingReconciliationFinding]{Items: rows}, catalogDrift), nil
 	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {

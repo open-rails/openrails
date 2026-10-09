@@ -339,6 +339,16 @@ JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = ANY(sqlc.arg(ids)::uuid[]) AND pa.deleted_at IS NULL;
 
+-- name: ListCustomerProductAccessByIDs :many
+-- A customer's named windows, newest first.
+SELECT pa.*, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
+FROM billing.product_access pa
+JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
+JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = ANY(sqlc.arg(ids)::uuid[])
+  AND pa.customer_id = sqlc.arg(customer_id)::uuid AND pa.deleted_at IS NULL
+ORDER BY pa.id DESC;
+
 -- name: GetLatestLiveProductEnd :one
 -- The latest end of the customer's live windows of a product (NULL:
 -- indefinite), for a grant that extends after them.

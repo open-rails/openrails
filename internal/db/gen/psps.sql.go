@@ -847,6 +847,60 @@ func (q *Queries) ListPSPs(ctx context.Context, arg ListPSPsParams) ([]BillingPs
 	return items, nil
 }
 
+const listPSPsByIDs = `-- name: ListPSPsByIDs :many
+SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at FROM billing.psps
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
+`
+
+type ListPSPsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([]BillingPsp, error) {
+	rows, err := q.db.Query(ctx, listPSPsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPsp
+	for rows.Next() {
+		var i BillingPsp
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Key,
+			&i.Rail,
+			&i.Environment,
+			&i.AccountID,
+			&i.CustodianID,
+			&i.Settings,
+			&i.Signer,
+			&i.CredentialCustody,
+			&i.CredentialRefs,
+			&i.CredentialVersions,
+			&i.RetiredCredentials,
+			&i.CredentialsValidatedAt,
+			&i.WebhookEndpointID,
+			&i.WebhookOverlapExpiresAt,
+			&i.PendingSignerPublicKey,
+			&i.Revision,
+			&i.Archived,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
 SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at FROM billing.psps
 WHERE merchant_id = $1::uuid

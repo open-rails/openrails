@@ -14,25 +14,14 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 	if params.Query != "" {
 		q.Set("q", params.Query)
 	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Customer]
 	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/customers", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
-}
-
-// GetCustomers reads up to billing.MaxCustomerLookup customers. Every
-// requested customer is in the answer; one the merchant never declared or
-// billed is nil.
-func (c *Client) GetCustomers(ctx context.Context, ids []billing.CustomerID, requestOptions ...RequestOption) (map[billing.CustomerID]*billing.Customer, error) {
-	if err := batchIDs("customer_ids", ids, billing.MaxCustomerLookup); err != nil {
-		return nil, err
-	}
-	var out billing.CustomerLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/lookup", billing.CustomerLookupParams{CustomerIDs: ids}, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out.Customers, nil
 }
 
 // EnsureCustomers creates 1 to billing.MaxBatchItems distinct customers under

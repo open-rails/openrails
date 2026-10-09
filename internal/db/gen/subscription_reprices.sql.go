@@ -415,6 +415,52 @@ func (q *Queries) ListScheduledBatchReprices(ctx context.Context, arg ListSchedu
 	return items, nil
 }
 
+const listSubscriptionRepricesByIDs = `-- name: ListSubscriptionRepricesByIDs :many
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
+`
+
+type ListSubscriptionRepricesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListSubscriptionRepricesByIDs(ctx context.Context, arg ListSubscriptionRepricesByIDsParams) ([]BillingSubscriptionReprice, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionRepricesByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingSubscriptionReprice
+	for rows.Next() {
+		var i BillingSubscriptionReprice
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.SubscriptionID,
+			&i.FromPriceID,
+			&i.ToPriceID,
+			&i.EffectiveAt,
+			&i.Status,
+			&i.RepriceBatchID,
+			&i.CreatedAt,
+			&i.AppliedAt,
+			&i.CanceledAt,
+			&i.AcknowledgedShortNotice,
+			&i.Kind,
+			&i.BlockedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubscriptionRepricesPage = `-- name: ListSubscriptionRepricesPage :many
 SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM billing.subscription_reprices
 WHERE merchant_id = $1::uuid

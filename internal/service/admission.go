@@ -266,31 +266,6 @@ func invokerSpendLimitRow(in billing.SpendDelegation) admission.InvokerSpendLimi
 	}
 }
 
-// SetInvokerSpendLimit sets one customer-owned spend delegation, leaving the
-// others untouched.
-func (s *Service) SetInvokerSpendLimit(ctx context.Context, payer identity.CustomerID, in billing.SpendDelegation) (*billing.SpendDelegation, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	next, err := ValidateSpendDelegations([]billing.SpendDelegation{in})
-	if err != nil {
-		return nil, err
-	}
-	if err := admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, invokerSpendLimitRow(next[0])); err != nil {
-		return nil, err
-	}
-	return &next[0], nil
-}
-
 // InvokerSpendWindowsInput names the invoker whose live spend windows to read.
 // The caller supplies the identity from its AUTH seam, never from the wire —
 // this read answers "what am I metered against", so an invoker the caller could

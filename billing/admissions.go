@@ -50,6 +50,10 @@ type AdmitParams struct {
 	Roles []uuid.UUID `json:"roles,omitempty"`
 }
 
+// MaxAdmissionBatchItems bounds one Admit, ReleaseAdmissions or
+// ExtendAdmissions call.
+const MaxAdmissionBatchItems = 1000
+
 // AdmitBatchParams is the body of POST /v1/merchant/admissions.
 type AdmitBatchParams struct {
 	Items []AdmitParams `json:"items"`
@@ -172,10 +176,44 @@ type CaptureReceipt struct {
 	Replayed            bool                 `json:"replayed"`
 }
 
+// ReleaseAdmissionBatchParams releases the holds of 1 to
+// MaxAdmissionBatchItems admitted requests.
+type ReleaseAdmissionBatchParams struct {
+	RequestIDs []string `json:"request_ids"`
+}
+
 // ExtendAdmissionParams moves an open hold's deadline later, to at most 30
 // days past its admission.
 type ExtendAdmissionParams struct {
+	RequestID string    `json:"request_id"`
 	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// ExtendAdmissionBatchParams extends 1 to MaxAdmissionBatchItems holds.
+type ExtendAdmissionBatchParams struct {
+	Items []ExtendAdmissionParams `json:"items"`
+}
+
+// AdmissionResult is one item of a release or extend batch: Status is what
+// the operation on that item alone answers, with Admission or Error.
+type AdmissionResult struct {
+	Status    int           `json:"status"`
+	Admission *Admission    `json:"admission"`
+	Error     *ErrorDetails `json:"error"`
+}
+
+// Err is the item's refusal as the error the operation alone would return,
+// nil when it succeeded.
+func (r AdmissionResult) Err() error {
+	if r.Error == nil {
+		return nil
+	}
+	return &StatusError{Status: r.Status, ErrorDetails: *r.Error}
+}
+
+// AdmissionBatchResult is one result per item, in request order.
+type AdmissionBatchResult struct {
+	Items []AdmissionResult `json:"items"`
 }
 
 // ReportWastedSpendParams reports spend a customer's invoker wasted (failed or
@@ -190,6 +228,33 @@ type ReportWastedSpendParams struct {
 	Source      string      `json:"source"`
 	SourceID    string      `json:"source_id"`
 	Reason      string      `json:"reason,omitempty"`
+}
+
+// ReportWastedSpendBatchParams reports 1 to MaxBatchItems wasted spends.
+type ReportWastedSpendBatchParams struct {
+	Items []ReportWastedSpendParams `json:"items"`
+}
+
+// WastedSpendResult is one report's outcome: Status is what reporting it
+// alone answers, with Report or Error.
+type WastedSpendResult struct {
+	Status int                `json:"status"`
+	Report *WastedSpendReport `json:"report"`
+	Error  *ErrorDetails      `json:"error"`
+}
+
+// Err is the item's refusal as the error reporting it alone would return, nil
+// when it was handled.
+func (r WastedSpendResult) Err() error {
+	if r.Error == nil {
+		return nil
+	}
+	return &StatusError{Status: r.Status, ErrorDetails: *r.Error}
+}
+
+// ReportWastedSpendBatchResult is one result per item, in request order.
+type ReportWastedSpendBatchResult struct {
+	Items []WastedSpendResult `json:"items"`
 }
 
 // WastedSpendAction is what OpenRails did with a wasted-spend report.

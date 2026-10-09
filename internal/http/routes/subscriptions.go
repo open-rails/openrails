@@ -12,7 +12,7 @@ import (
 // merchant's bulk moves (reprices, plan migrations).
 var subscriptionsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/subscriptions", Group: Merchant, Auth: AuthMerchant, Name: "ListSubscriptions", Level: LevelRead, Resources: res(ResSubscriptions),
-		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
+		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
 	{Method: GET, Path: "/v1/merchant/subscriptions/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetSubscription", Level: LevelRead, Resources: res(ResSubscriptions),
 		Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("invalid_param", "subscription_not_found"), Handler: h(handlers.GetAdminSubscription)},
 	{Method: POST, Path: "/v1/merchant/subscriptions/{id}/cancel", Group: Merchant, Auth: AuthMerchant, Name: "CancelSubscription", Level: LevelWrite, Resources: res(ResSubscriptions), Sensitive: true, Limit: middleware.AdminOperationDestructive,
@@ -30,7 +30,7 @@ var subscriptionsRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/reprice-batches/preview", Group: Merchant, Auth: AuthMerchant, Name: "PreviewRepriceBatch", Level: LevelRead, Resources: res(ResSubscriptions),
 		Request: billing.PreviewRepriceBatchParams{}, Responses: []Reply{{200, billing.RepriceBatchPreview{}}}, Errors: codes("invalid_param", "reprice_price_key_not_found"), Handler: h(handlers.PreviewRepriceBatch)},
 	{Method: GET, Path: "/v1/merchant/reprice-batches", Group: Merchant, Auth: AuthMerchant, Name: "ListRepriceBatches", Level: LevelRead, Resources: res(ResSubscriptions),
-		Query: params(queryOf(handlers.RepriceBatchQuery{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.RepriceBatch]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListRepriceBatches)},
+		Query: params(queryOf(handlers.RepriceBatchQuery{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.RepriceBatch]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListRepriceBatches)},
 	{Method: GET, Path: "/v1/merchant/reprice-batches/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetRepriceBatch", Level: LevelRead, Resources: res(ResSubscriptions),
 		Responses: []Reply{{200, billing.RepriceBatch{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.GetRepriceBatch)},
 	{Method: POST, Path: "/v1/merchant/reprice-batches/{id}/cancel", Group: Merchant, Auth: AuthMerchant, Name: "CancelRepriceBatch", Level: LevelWrite, Resources: res(ResSubscriptions), Sensitive: true,
@@ -40,7 +40,7 @@ var subscriptionsRoutes = []Route{
 	{Method: POST, Path: "/v1/merchant/plan-migrations/preview", Group: Merchant, Auth: AuthMerchant, Name: "PreviewPlanMigration", Level: LevelRead, Resources: res(ResSubscriptions),
 		Request: billing.CreatePlanMigrationParams{}, Responses: []Reply{{200, billing.PlanMigrationResult{}}}, Errors: codes("invalid_param", "reprice_already_scheduled", "reprice_cross_currency", "reprice_inactive_price", "reprice_notice_window_violation", "resource_not_found"), Handler: h(handlers.PreviewPlanMigration)},
 	{Method: GET, Path: "/v1/merchant/reprices", Group: Merchant, Auth: AuthMerchant, Name: "ListReprices", Level: LevelRead, Resources: res(ResSubscriptions),
-		Query: params(queryOf(handlers.RepriceQuery{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Reprice]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListReprices)},
+		Query: params(queryOf(handlers.RepriceQuery{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Reprice]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListReprices)},
 	{Method: GET, Path: "/v1/merchant/reprices/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetReprice", Level: LevelRead, Resources: res(ResSubscriptions),
 		Responses: []Reply{{200, billing.Reprice{}}}, Errors: codes("invalid_param", "reprice_not_found"), Handler: h(handlers.GetReprice)},
 	{Method: POST, Path: "/v1/merchant/reprices/{id}/cancel", Group: Merchant, Auth: AuthMerchant, Name: "CancelReprice", Level: LevelWrite, Resources: res(ResSubscriptions), Sensitive: true,

@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/httpx"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Deps wires the alerting service.
@@ -157,8 +158,8 @@ func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebho
 }
 
 // ListWebhooks returns the merchant's webhook sinks.
-func (s *Service) ListWebhooks(ctx context.Context) ([]billing.AlertWebhook, error) {
-	hooks, err := s.store.listWebhooks(ctx)
+func (s *Service) ListWebhooks(ctx context.Context, params billing.AlertWebhookListParams) ([]billing.AlertWebhook, error) {
+	hooks, err := s.store.listWebhooks(ctx, uuidutil.Of(params.IDs))
 	out := make([]billing.AlertWebhook, 0, len(hooks))
 	for _, h := range hooks {
 		out = append(out, h.API())
@@ -247,6 +248,10 @@ func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebh
 
 // ListNotifications pages the merchant's inbox, newest first.
 func (s *Service) ListNotifications(ctx context.Context, req billing.MerchantNotificationListParams) (billing.ListPage[billing.MerchantNotification], error) {
+	if req.IDs != nil {
+		rows, err := s.store.notificationsByIDs(ctx, uuidutil.Of(req.IDs))
+		return pagination.Map(billing.ListPage[gen.BillingNotification]{Items: rows}, notificationFromRow), err
+	}
 	limit, err := pagination.Limit(req.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.MerchantNotification]{}, err

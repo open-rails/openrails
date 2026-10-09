@@ -22,9 +22,13 @@ func cursorQuery(page billing.PageRequest) url.Values {
 }
 
 // ListAlertWebhooks returns where the merchant's operational alerts are posted.
-func (c *Client) ListAlertWebhooks(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error) {
+func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error) {
+	q := url.Values{}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.AlertWebhook]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/alert-webhooks", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/alert-webhooks", q), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -64,6 +68,9 @@ func (c *Client) ListMerchantNotifications(ctx context.Context, req billing.Merc
 	q := cursorQuery(req.PageRequest)
 	if req.UnreadOnly {
 		q.Set("unread", "true")
+	}
+	if err := setIDs(q, req.IDs); err != nil {
+		return nil, err
 	}
 	var out billing.ListPage[billing.MerchantNotification]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/notifications?"+q.Encode(), nil, &out, options...); err != nil {

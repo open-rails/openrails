@@ -1718,6 +1718,7 @@ func (q *Queries) ListSubscriptionsByCustomerPaged(ctx context.Context, arg List
 const listSubscriptionsByIDs = `-- name: ListSubscriptionsByIDs :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy, access_duration_hours_snapshot FROM billing.subscriptions WHERE subscriptions.merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
 `
 
 type ListSubscriptionsByIDsParams struct {

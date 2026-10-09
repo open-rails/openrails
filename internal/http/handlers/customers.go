@@ -15,6 +15,9 @@ func ListCustomers(r *httprequest.Request) {
 	if params.PageRequest, ok = r.Page(); !ok {
 		return
 	}
+	if params.IDs, ok = listIDs(r, billing.ParseCustomerID); !ok {
+		return
+	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
@@ -25,35 +28,6 @@ func ListCustomers(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(page)
-}
-
-// GetCustomers reads up to billing.MaxCustomerLookup customers; one that
-// does not exist is null. A credential scoped to some customers may name only
-// those.
-func GetCustomers(r *httprequest.Request) {
-	var req billing.CustomerLookupParams
-	if !r.BindJSON(&req) {
-		return
-	}
-	ids, ok := batchIDs(r, req.CustomerIDs, billing.MaxCustomerLookup, "customer_ids")
-	if !ok {
-		return
-	}
-	for _, id := range ids {
-		if !requireServiceCustomerScope(r, id) {
-			return
-		}
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.GetCustomers(r.Request.Context(), ids)
-	if err != nil {
-		writeRefusal(r, err, "customer read failed")
-		return
-	}
-	r.SuccessJSON(billing.CustomerLookup{Customers: out})
 }
 
 // EnsureCustomers creates customers or replaces their declared fields, all

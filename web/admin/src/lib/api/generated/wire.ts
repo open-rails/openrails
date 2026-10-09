@@ -49,6 +49,16 @@ export type Admission = {
   replayed: boolean
 }
 
+export type AdmissionBatchResult = {
+  items: AdmissionResult[]
+}
+
+export type AdmissionResult = {
+  status: number
+  admission: Admission | null
+  error: ErrorDetails | null
+}
+
 export type AdmissionVerdict = {
   status: number
   admission: Admission | null
@@ -539,7 +549,16 @@ export type CreateCheckoutSessionParams = {
   success_url?: string
 }
 
+export type CreateCreditGrantBatchParams = {
+  items?: CreateCreditGrantParams[]
+}
+
+export type CreateCreditGrantBatchResult = {
+  items: CreditGrant[]
+}
+
 export type CreateCreditGrantParams = {
+  customer_id?: string
   currency?: string
   amount?: string
   source_id?: string
@@ -769,12 +788,8 @@ export type CustomerEntitlement = {
   entitlement: string
 }
 
-export type CustomerLookup = {
-  customers: Record<string, Customer | null> | null
-}
-
-export type CustomerLookupParams = {
-  customer_ids?: string[]
+export type CustomerNotificationLookup = {
+  notifications: Record<string, Notification | null> | null
 }
 
 export type CustomerSettings = {
@@ -920,9 +935,8 @@ export type DunningTier = {
   retry_after_hours?: number[]
 }
 
-export type EffectiveTier = {
-  group: string
-  tier: Tier | null
+export type EffectiveTierLookup = {
+  tiers: Record<string, Tier | null> | null
 }
 
 export type EnsureCustomerBatchParams = {
@@ -978,7 +992,12 @@ export type ErrorDetails = {
   metadata?: Record<string, unknown>
 }
 
+export type ExtendAdmissionBatchParams = {
+  items?: ExtendAdmissionParams[]
+}
+
 export type ExtendAdmissionParams = {
+  request_id?: string
   expires_at?: string
 }
 
@@ -1065,6 +1084,11 @@ export type GeneratedWidget = {
   query: MetricsQuery
   title: string
   viz: string
+}
+
+export type GetEffectiveTiersParams = {
+  group?: string
+  customer_ids?: string[]
 }
 
 export type Health = {
@@ -2068,6 +2092,10 @@ export type RefundPaymentParams = {
   revoke_access?: boolean
 }
 
+export type ReleaseAdmissionBatchParams = {
+  request_ids?: string[]
+}
+
 export type ReleaseOperationAuthorizationParams = {
   release_reference?: string
 }
@@ -2084,6 +2112,14 @@ export type ReplacePaymentMethodCardParams = {
   payment_token?: string
   card?: CardEntry
   billing_details?: BillingDetails
+}
+
+export type ReportWastedSpendBatchParams = {
+  items?: ReportWastedSpendParams[]
+}
+
+export type ReportWastedSpendBatchResult = {
+  items: WastedSpendResult[]
 }
 
 export type ReportWastedSpendParams = {
@@ -2214,11 +2250,6 @@ export type SetMeterRateCardParams = {
 export type SetRateOverrideParams = {
   price?: RatePrice
   allowance?: Allowance
-}
-
-export type SetSpendDelegationParams = {
-  windows?: BudgetWindow[]
-  provenance?: string
 }
 
 export type SetSpendDelegationsParams = {
@@ -2558,6 +2589,12 @@ export type WastedSpendReport = {
   charged_amount: string
   policy_charged_amount: string | null
   action: "charged" | "duplicate" | "forgiven" | "ignored" | "invoker_cutoff_tracked"
+}
+
+export type WastedSpendResult = {
+  status: number
+  report: WastedSpendReport | null
+  error: ErrorDetails | null
 }
 
 export type WebhookReceipt = {

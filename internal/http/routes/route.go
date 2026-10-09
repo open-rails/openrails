@@ -187,7 +187,7 @@ type Stream struct{ ContentType string }
 // Param is one query parameter.
 type Param struct {
 	Name string
-	// Kind is string, integer, boolean or date-time.
+	// Kind is string, integer, boolean, date-time or ids.
 	Kind string
 	// Checked: the mount refuses a value that is not a non-negative integer
 	// (400 invalid_query) before the handler reads it.

@@ -94,7 +94,7 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 			}
 			before, err := w.client[remote].GetInvoice(t.Context(), invoice)
 			require.NoError(t, err)
-			beforePayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.PageRequest{})
+			beforePayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			beforeWrites := len(w.nmi.Attempts())
 			psp := w.psp["nmi"].UUID()
@@ -109,7 +109,7 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 			after, err := w.client[remote].GetInvoice(t.Context(), invoice)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			afterPayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.PageRequest{})
+			afterPayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			require.Equal(t, beforePayments, afterPayments)
 			var allocations int
@@ -150,7 +150,7 @@ func TestObservedInvoiceRecoveryRefusesExistingSubscriptionAllocation(t *testing
 	stillDue, err := w.client[remote].GetInvoice(t.Context(), invoice)
 	require.NoError(t, err)
 	require.Equal(t, int64(50_000_000), stillDue.AmountDue)
-	payments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.PageRequest{})
+	payments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
 	require.NoError(t, err)
 	require.Empty(t, payments.Items)
 	require.Empty(t, w.nmi.Attempts())
@@ -282,7 +282,7 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			require.Equal(t, billing.InvoicePaid, paid.Status)
 			require.Zero(t, paid.AmountDue)
 			require.Equal(t, tc.amount, paid.AmountPaid)
-			payments, err := target.client[remote].ListInvoicePayments(t.Context(), invoice, billing.PageRequest{})
+			payments, err := target.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			wantPayments := 1
 			if tc.manual > 0 {

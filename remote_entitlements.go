@@ -47,6 +47,9 @@ func (c *Client) ListProductAccess(ctx context.Context, customerID billing.Custo
 	if params.LiveOnly {
 		query.Set("live", "true")
 	}
+	if err := setIDs(query, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.ProductAccessGrant]
 	if err := c.do(ctx, http.MethodGet, path+"/product-access?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

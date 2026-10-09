@@ -29,6 +29,8 @@ type GetSubscriptionsFilters struct {
 	CanceledAfter  *time.Time         `form:"canceled_after" time_format:"2006-01-02"`
 	CanceledBefore *time.Time         `form:"canceled_before" time_format:"2006-01-02"`
 	ExpiresBefore  *time.Time         `form:"expires_before" time_format:"2006-01-02"`
+	// IDs, when not nil, reads those subscriptions instead, in one page.
+	IDs []uuid.UUID `form:"-"`
 }
 
 type SubscriptionService struct {
@@ -218,6 +220,10 @@ func (f GetSubscriptionsFilters) repo() SubscriptionFilters {
 // ListSubscribers is one page of the merchant's subscriptions matching f,
 // newest first.
 func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*models.Subscription], error) {
+	if f.IDs != nil {
+		rows, err := s.subscriptionRepo.ListByIDs(ctx, f.IDs)
+		return billing.ListPage[*models.Subscription]{Items: rows}, err
+	}
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err

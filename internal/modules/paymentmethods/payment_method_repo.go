@@ -283,6 +283,23 @@ func (r *PaymentMethodRepo) ListPage(ctx context.Context, customerID uuid.UUID, 
 	return out, nil
 }
 
+// ListByIDs reads a customer's named methods, newest first.
+func (r *PaymentMethodRepo) ListByIDs(ctx context.Context, customerID uuid.UUID, ids []uuid.UUID) ([]*models.PaymentMethod, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListCustomerPaymentMethodsByIDs(ctx, gen.ListCustomerPaymentMethodsByIDsParams{MerchantID: mid.UUID(), CustomerID: customerID, Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	methods, err := models.PaymentMethodsFromGen(rows)
+	if err != nil {
+		return nil, err
+	}
+	return methods, r.attachPaymentMethodSubscriptions(ctx, methods)
+}
+
 // CountSharingCustomerRef reports how many OTHER payment methods share this
 // rail customer-scope handle (#682 shared-vault guard — e.g. an imported
 // multi-card NMI vault whose sibling cards a whole-vault delete would destroy).

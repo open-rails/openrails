@@ -673,7 +673,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/spend-limits` | spending limits |
 | `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
 | `GET /billing/v1/me/notifications/unread-count` | how many are unread |
-| `POST /billing/v1/me/notifications/{id}/read` | mark one read |
+| `POST /billing/v1/me/notifications/read` | mark up to 100 read |
 
 **Payment processors** (always mounted)
 

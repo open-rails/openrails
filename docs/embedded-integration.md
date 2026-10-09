@@ -396,12 +396,12 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmission`, `ExtendAdmission`, `ReportWastedSpend` |
+| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions`, `ReportWastedSpend` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
-| Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation` |
-| Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
-| Customers / entitlements | `EnsureCustomers`, `GetCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `ListCustomerSettings`, `UpdateCustomerSettings` (credit limits, trust levels, billing policy, invoice profile), `ListCustomerDelinquency`, `ListDelinquency`, `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
+| Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
+| Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
+| Customers / entitlements | `EnsureCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `ListCustomerSettings`, `UpdateCustomerSettings` (credit limits, trust levels, billing policy, invoice profile), `ListCustomerDelinquency`, `ListDelinquency`, `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
 | Checkout | `CreateCheckoutSession`, `GetCheckoutConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |

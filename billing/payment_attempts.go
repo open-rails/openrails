@@ -57,8 +57,12 @@ type PaymentAttempt struct {
 // PaymentAttemptListParams selects attempts, newest first; every field is
 // optional, and a list matches any of its values. Since and Until bound
 // attempted_at to [Since, Until).
+//
+// IDs instead reads 1 to MaxBatchItems named attempts in one page; unknown
+// ones are absent.
 type PaymentAttemptListParams struct {
 	PageRequest
+	IDs                                                    []PaymentAttemptID
 	Kind, Owner, Category, Reason, ResponseCode, CardEntry []string
 	Source, ObservedVia, AVSResult, CVVResult              []string
 	PSPID                                                  PSPID
@@ -102,8 +106,12 @@ type RebillCycle struct {
 // RebillCycleListParams selects cycles, latest due first; every field is
 // optional, and a list matches any of its values. DueSince and DueUntil bound
 // due_at to [DueSince, DueUntil).
+//
+// IDs instead reads 1 to MaxBatchItems named cycles in one page; unknown ones
+// are absent.
 type RebillCycleListParams struct {
 	PageRequest
+	IDs                                      []RebillCycleID
 	Owner, FirstOutcome, MissReason, Outcome []string
 	PSPID                                    PSPID
 	SubscriptionID                           SubscriptionID

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // convergeAfterMutation runs the inline Convergence Engine for one customer after
@@ -147,27 +148,40 @@ func ServiceCheckEntitlements(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
-// ServiceGetEffectiveTier answers the tier the customer holds in ?group=.
-func ServiceGetEffectiveTier(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
+// GetEffectiveTiers answers the tier each requested customer holds in a
+// group; one holding none is null.
+func GetEffectiveTiers(r *httprequest.Request) {
+	var req billing.GetEffectiveTiersParams
+	if !r.BindJSON(&req) {
 		return
 	}
-	group := strings.TrimSpace(r.Query("group"))
+	group := strings.TrimSpace(req.Group)
 	if group == "" {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "group is required").WithParam("group"))
 		return
 	}
-	tier, err := r.State.EntitlementService.ResolveEffectiveTierByCustomer(r.Request.Context(), customer.UUID(), group, r.Clock.Now())
+	ids, ok := batchIDs(r, req.CustomerIDs, billing.MaxBatchItems, "customer_ids")
+	if !ok {
+		return
+	}
+	for _, id := range ids {
+		if !requireServiceCustomerScope(r, id) {
+			return
+		}
+	}
+	tiers, err := r.State.EntitlementService.ResolveEffectiveTiers(r.Request.Context(), uuidutil.Of(ids), group, r.Clock.Now())
 	if err != nil {
 		r.InternalError("effective tier lookup failed", err)
 		return
 	}
-	out := billing.EffectiveTier{Group: group}
-	if tier != nil {
-		out.Tier = &billing.Tier{
-			Entitlement: tier.Entitlement, DisplayName: tier.ProductDisplayName, TierRank: tier.TierRank,
-			ProductID: billing.ProductID(tier.ProductID), ProductKey: tier.ProductKey,
+	out := billing.EffectiveTierLookup{Tiers: make(map[billing.CustomerID]*billing.Tier, len(ids))}
+	for _, id := range ids {
+		out.Tiers[id] = nil
+		if tier, ok := tiers[id.UUID()]; ok {
+			out.Tiers[id] = &billing.Tier{
+				Entitlement: tier.Entitlement, DisplayName: tier.ProductDisplayName, TierRank: tier.TierRank,
+				ProductID: billing.ProductID(tier.ProductID), ProductKey: tier.ProductKey,
+			}
 		}
 	}
 	r.SuccessJSON(out)

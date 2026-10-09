@@ -14,7 +14,7 @@ func pspWriteErrors(own ...string) []string {
 // armed on, and the callbacks providers send.
 var pspsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListPSPs", Level: LevelAdmin, Resources: res(ResPSPs),
-		Query: params(queryOf(handlers.PSPListQuery{}), integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
+		Query: params(queryOf(handlers.PSPListQuery{}), idsParam, integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
 	{Method: POST, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", Level: LevelAdmin, Resources: res(ResPSPs), Sensitive: true,
 		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
 	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetPSP", Level: LevelAdmin, Resources: res(ResPSPs),

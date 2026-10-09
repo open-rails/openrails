@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Customers are declared and read in batches: a declaration is all or none,
-// a read answers every requested id with null for the unknown.
+// Customers are declared in batches, all or none, and read by the list's ids
+// filter, unknown ones absent.
 func TestCustomerBatches(t *testing.T) {
 	w := newWorld(t)
 	a, b, missing := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
@@ -27,12 +27,16 @@ func TestCustomerBatches(t *testing.T) {
 		require.Equal(t, &email, declared[0].Email)
 		require.Nil(t, declared[1].Email)
 
-		read, err := client.GetCustomers(t.Context(), []billing.CustomerID{b, missing, a, b})
+		read, err := client.ListCustomers(t.Context(), billing.CustomerListParams{IDs: []billing.CustomerID{b, missing, a, b}})
 		require.NoError(t, err)
-		require.Len(t, read, 3)
-		require.Equal(t, &email, read[a].Email)
-		require.Equal(t, b, read[b].ID)
-		require.Nil(t, read[missing])
+		require.Len(t, read.Items, 2)
+		require.Empty(t, read.Next)
+		byID := map[billing.CustomerID]billing.Customer{}
+		for _, c := range read.Items {
+			byID[c.ID] = c
+		}
+		require.Equal(t, &email, byID[a].Email)
+		require.Contains(t, byID, b)
 	}
 
 	late := billing.CustomerID(uuid.New())
@@ -48,11 +52,9 @@ func TestCustomerBatches(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
 		require.Equal(t, body.param, refused["error"].(map[string]any)["param"])
 	}
-	read, err := w.client[remote].GetCustomers(t.Context(), []billing.CustomerID{late})
+	read, err := w.client[remote].ListCustomers(t.Context(), billing.CustomerListParams{IDs: []billing.CustomerID{late}})
 	require.NoError(t, err)
-	require.Nil(t, read[late], "a refused declaration declares nothing")
-	status, refused := w.staffJSON(http.MethodPost, "/v1/merchant/customers/lookup", map[string]any{"customer_ids": []string{}})
-	require.Equal(t, http.StatusBadRequest, status, "%v", refused)
+	require.Empty(t, read.Items, "a refused declaration declares nothing")
 }
 
 // Product access is granted in batches across customers; a retry under the
@@ -88,7 +90,7 @@ func TestProductAccessGrantBatches(t *testing.T) {
 func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
-	_, err := w.client[embedded].CreateCreditGrant(t.Context(), c.customerID(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err := createCreditGrant(t.Context(), w.client[embedded], c.customerID(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	event := func(source string, amount int64) billing.RecordUsageParams {
 		return billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "usd", EventType: "batch", Amount: amount, Source: "test", SourceID: source}

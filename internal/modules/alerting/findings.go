@@ -59,7 +59,7 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 	}
 	channels := defaultChannels(sev)
 	if rec.Severity != reconcile.SeverityLow {
-		hooks, err := s.store.listWebhooks(ctx)
+		hooks, err := s.store.listWebhooks(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("list finding webhook destinations: %w", err)
 		}

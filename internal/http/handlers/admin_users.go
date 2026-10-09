@@ -5,6 +5,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -132,6 +133,11 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseSubscriptionID)
+	if !ok {
+		return
+	}
+	filters.IDs = uuidutil.Of(ids)
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
 		r.ErrorCode(billing.CodeInternalError, "admin subscription service unavailable")

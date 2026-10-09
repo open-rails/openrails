@@ -31,7 +31,8 @@ SELECT * FROM billing.prices WHERE prices.merchant_id = sqlc.arg(merchant_id)::u
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
-WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = ANY(sqlc.arg(ids)::uuid[]);
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY price.created_at DESC, price.id DESC;
 
 -- All prices for a product, archived included — the catalog converge needs
 -- archived rows to reconcile legacy_import prices instead of re-creating them

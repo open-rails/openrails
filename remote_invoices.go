@@ -18,6 +18,9 @@ func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListPar
 	if params.PeriodStartsBefore != nil {
 		q.Set("period_starts_before", params.PeriodStartsBefore.UTC().Format(time.RFC3339Nano))
 	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Invoice]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/invoices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -71,8 +74,12 @@ func (c *Client) CreateInvoicePayment(ctx context.Context, id billing.InvoiceID,
 }
 
 // ListInvoicePayments is one page of an invoice's payments, newest first.
-func (c *Client) ListInvoicePayments(ctx context.Context, id billing.InvoiceID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.InvoicePayment], error) {
-	return invoiceCall[billing.ListPage[billing.InvoicePayment]](ctx, c, http.MethodGet, id, "/payments?"+pageValues(nil, page).Encode(), nil, nil, requestOptions)
+func (c *Client) ListInvoicePayments(ctx context.Context, id billing.InvoiceID, params billing.InvoicePaymentListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.InvoicePayment], error) {
+	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
+	return invoiceCall[billing.ListPage[billing.InvoicePayment]](ctx, c, http.MethodGet, id, "/payments?"+q.Encode(), nil, nil, requestOptions)
 }
 
 // RetryInvoiceCollection charges an open invoice to one of its customer's

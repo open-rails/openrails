@@ -59,6 +59,9 @@ func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDri
 			q.Set(name, value)
 		}
 	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.CatalogDrift]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/drift?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

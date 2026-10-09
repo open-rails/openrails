@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // #692 operator findings queue. The reconciliation_findings ledger IS the
@@ -89,8 +90,12 @@ func AdminListFindings(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseFindingID)
+	if !ok {
+		return
+	}
 	items, err := store.ListQueueFindings(r.Request.Context(), reconcile.QueueFilter{
-		Severity: strings.TrimSpace(q.Severity), Type: strings.TrimSpace(q.Type), Status: strings.TrimSpace(q.Status), Page: page,
+		IDs: uuidutil.Of(ids), Severity: strings.TrimSpace(q.Severity), Type: strings.TrimSpace(q.Type), Status: strings.TrimSpace(q.Status), Page: page,
 	})
 	if err != nil {
 		writeRefusal(r, err, "list findings failed")

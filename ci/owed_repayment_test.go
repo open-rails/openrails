@@ -46,7 +46,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		return customer
 	}
 	grant := func(customer billing.CustomerID, amount int64, sourceID string) *billing.CreditGrant {
-		g, err := client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: sourceID})
+		g, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: sourceID})
 		require.NoError(t, err)
 		return g
 	}
@@ -151,7 +151,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		}
 		require.False(t, admit("od-cap-admit-over", 500_001).Allowed())
 		require.True(t, admit("od-cap-admit", 500_000).Allowed())
-		_, err = client.ReleaseAdmission(ctx, "od-cap-admit")
+		_, err = releaseAdmission(ctx, client, "od-cap-admit")
 		require.NoError(t, err)
 
 		require.ErrorIs(t, open(customer, "od-cap-over", 500_001), billing.ErrInsufficientCredits)
@@ -195,7 +195,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.Equal(t, billing.InvoiceStatus("paid"), paid.Status)
 		require.EqualValues(t, 0, paid.AmountDue)
 		require.EqualValues(t, 300_000, paid.AmountPaid)
-		history, err := client.ListInvoicePayments(ctx, billing.InvoiceID(inv.ID), billing.PageRequest{})
+		history, err := client.ListInvoicePayments(ctx, billing.InvoiceID(inv.ID), billing.InvoicePaymentListParams{})
 		require.NoError(t, err)
 		require.Len(t, history.Items, 1)
 		require.EqualValues(t, 300_000, history.Items[0].Amount)

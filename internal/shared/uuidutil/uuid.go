@@ -44,3 +44,15 @@ func DeterministicID(namespace uuid.UUID, parts ...string) uuid.UUID {
 	}
 	return uuid.NewSHA1(namespace, buf)
 }
+
+// Of is typed ids as their UUIDs; nil stays nil.
+func Of[T interface{ UUID() uuid.UUID }](ids []T) []uuid.UUID {
+	if ids == nil {
+		return nil
+	}
+	out := make([]uuid.UUID, len(ids))
+	for i, id := range ids {
+		out[i] = id.UUID()
+	}
+	return out
+}

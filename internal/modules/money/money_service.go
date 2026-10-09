@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -329,6 +330,20 @@ func (s *MoneyService) ListCreditTransactions(ctx context.Context, payer identit
 	if s == nil || s.db == nil {
 		return page, fmt.Errorf("money service not initialized")
 	}
+	if params.IDs != nil {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return page, err
+		}
+		rows, err := s.db.Gen(ctx).ListLedgerTransfersByIDs(ctx, gen.ListLedgerTransfersByIDsParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Ids: uuidutil.Of(params.IDs)})
+		if err != nil {
+			return page, err
+		}
+		for _, r := range rows {
+			page.Items = append(page.Items, creditTransactionFromTransfer(r))
+		}
+		return page, nil
+	}
 	cur := normalizeCurrency(params.Currency)
 	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return page, err
@@ -460,6 +475,56 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 		return nil, err
 	}
 	return trx, nil
+}
+
+// DepositItemError is a batch deposit refused at Index; the batch wrote
+// nothing.
+type DepositItemError struct {
+	Index int
+	Err   error
+}
+
+func (e *DepositItemError) Error() string { return fmt.Sprintf("item %d: %v", e.Index, e.Err) }
+func (e *DepositItemError) Unwrap() error { return e.Err }
+
+// DepositBatch records deposits all or none in one transaction, answering
+// them in order. Balances lock in (customer, currency) order, so concurrent
+// batches never deadlock.
+func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) ([]*models.MoneyTransaction, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	order := make([]int, len(items))
+	for i, item := range items {
+		if item.Amount <= 0 {
+			return nil, &DepositItemError{Index: i, Err: fmt.Errorf("amount must be positive")}
+		}
+		order[i] = i
+	}
+	lockKey := func(i int) string {
+		customer := ""
+		if items[i].CustomerID != nil {
+			customer = items[i].CustomerID.String()
+		}
+		return customer + "\x00" + normalizeCurrency(items[i].Currency)
+	}
+	sort.SliceStable(order, func(a, b int) bool { return lockKey(order[a]) < lockKey(order[b]) })
+	out := make([]*models.MoneyTransaction, len(items))
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		for _, i := range order {
+			trx, err := s.depositTx(ctx, q, items[i])
+			if err != nil {
+				return &DepositItemError{Index: i, Err: err}
+			}
+			out[i] = trx
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ensureCustomer upserts the billing.customers row for a payable customer id

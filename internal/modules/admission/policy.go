@@ -410,14 +410,6 @@ func (s *InvokerSpendLimitStore) withPayerWriteTx(ctx context.Context, payer ide
 	})
 }
 
-// Upsert writes one invoker spend limit (payer-set) under the same serialized
-// transaction boundary used by Replace.
-func (s *InvokerSpendLimitStore) Upsert(ctx context.Context, payer identity.CustomerID, p InvokerSpendLimit) error {
-	return s.withPayerWriteTx(ctx, payer, func(ctx context.Context, txStore *InvokerSpendLimitStore, tenantID uuid.UUID) error {
-		return txStore.upsert(ctx, tenantID, payer, p)
-	})
-}
-
 func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID, payer identity.CustomerID, p InvokerSpendLimit) error {
 	now := time.Now().UTC()
 	windowsJSON, err := json.Marshal(p.Windows)

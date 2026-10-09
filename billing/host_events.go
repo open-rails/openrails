@@ -104,8 +104,12 @@ type HostEventLookup struct {
 // event type so unrelated pending events cannot starve its work. Acknowledge
 // processed events and list again from the start; a cursor is for reading
 // history, never a high-water mark.
+//
+// IDs instead reads 1 to MaxBatchItems named events in one page, acknowledged
+// or not; unknown ones are absent.
 type HostEventListParams struct {
 	PageRequest
+	IDs                 []HostEventID
 	Type                HostEventType
 	IncludeAcknowledged bool
 	PaymentID           PaymentID

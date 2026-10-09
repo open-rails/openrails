@@ -15,7 +15,7 @@ import (
 // as the Client lists them.
 func (c *customer) collects(tp topology) map[string][]string {
 	c.w.t.Helper()
-	page, err := c.w.client[tp].ListPaymentMethods(c.w.t.Context(), c.cid(), billing.PageRequest{Limit: 100})
+	page, err := c.w.client[tp].ListPaymentMethods(c.w.t.Context(), c.cid(), billing.PaymentMethodListParams{PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(c.w.t, err)
 	out := map[string][]string{}
 	for _, m := range page.Items {

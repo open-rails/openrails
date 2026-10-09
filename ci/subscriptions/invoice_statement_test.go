@@ -98,7 +98,7 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 	// plain: arrears usage below the threshold; prepaid: usage paid from
 	// credit as it happens. Neither has a threshold invoice.
 	covered, split, plain, prepaid := payer(true), payer(true), payer(true), payer(false)
-	_, err = client.CreateCreditGrant(ctx, prepaid.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 2 * tail, Source: "test", SourceID: uuid.NewString()})
+	_, err = createCreditGrant(ctx, client, prepaid.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 2 * tail, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	use(covered, threshold)
 	use(split, threshold)
@@ -139,7 +139,7 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 	// threshold invoices; funding repays the oldest; a card pays the last.
 	pay(statement.ID, tail)
 	requireStatement(split, billing.InvoiceOpen, 2*threshold+tail, tail, 0)
-	_, err = client.CreateCreditGrant(ctx, split.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: threshold, Source: "test", SourceID: uuid.NewString()})
+	_, err = createCreditGrant(ctx, client, split.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: threshold, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.Equal(t, billing.InvoicePaid, invoice(splitBy[0]).Status)
 	requireStatement(split, billing.InvoiceOpen, 2*threshold+tail, threshold+tail, 0)
@@ -163,7 +163,7 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 		}
 		var received int64
 		for _, id := range ids {
-			payments, err := client.ListInvoicePayments(ctx, id, billing.PageRequest{})
+			payments, err := client.ListInvoicePayments(ctx, id, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			for _, p := range payments.Items {
 				if p.Status == billing.InvoicePaymentSettled {

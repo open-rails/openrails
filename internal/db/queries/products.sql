@@ -22,7 +22,8 @@ SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id
 SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND key = $1;
 
 -- name: ListProductsByIDs :many
-SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
 
 -- name: ListActiveProducts :many
 SELECT * FROM billing.products WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived;

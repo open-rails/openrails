@@ -69,6 +69,77 @@ func (q *Queries) GetMerchantInvoice(ctx context.Context, arg GetMerchantInvoice
 	return i, err
 }
 
+const listInvoicesByIDs = `-- name: ListInvoicesByIDs :many
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY period_starts_at DESC, id DESC
+`
+
+type ListInvoicesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListInvoicesByIDs(ctx context.Context, arg ListInvoicesByIDsParams) ([]BillingInvoice, error) {
+	rows, err := q.db.Query(ctx, listInvoicesByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingInvoice
+	for rows.Next() {
+		var i BillingInvoice
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.InvoiceNumber,
+			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
+			&i.UsageTotal,
+			&i.DepositsTotal,
+			&i.OwedAccrued,
+			&i.OwedPaid,
+			&i.ClosingBalance,
+			&i.SubtotalAmount,
+			&i.TotalAmount,
+			&i.AmountPaid,
+			&i.AmountDue,
+			&i.LineItems,
+			&i.MoneyMovements,
+			&i.Status,
+			&i.CollectionMethod,
+			&i.IssuedAt,
+			&i.DueAt,
+			&i.PaidAt,
+			&i.VoidedAt,
+			&i.UncollectibleAt,
+			&i.FinalizedAt,
+			&i.ExternalInvoiceID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PoNumber,
+			&i.Tax,
+			&i.BillingContacts,
+			&i.Memo,
+			&i.CollectionFailureCount,
+			&i.CollectionFailedAt,
+			&i.NextCollectionAttemptAt,
+			&i.LastCollectionFailureCode,
+			&i.LastCollectionFailureMessage,
+			&i.CollectionIntentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInvoicesPage = `-- name: ListInvoicesPage :many
 SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1::uuid

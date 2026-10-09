@@ -36,3 +36,17 @@ func TestDeterministicIDIsStableAndInjective(t *testing.T) {
 		t.Fatal("NewV7 must mint distinct v7 ids")
 	}
 }
+
+// A nil list stays nil: callers read nil as "no ids named".
+func TestOfKeepsNil(t *testing.T) {
+	if Of[typed](nil) != nil {
+		t.Fatal("nil ids became a list")
+	}
+	if got := Of([]typed{typed(uuid.Nil)}); len(got) != 1 {
+		t.Fatalf("ids lost: %v", got)
+	}
+}
+
+type typed uuid.UUID
+
+func (t typed) UUID() uuid.UUID { return uuid.UUID(t) }

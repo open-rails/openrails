@@ -101,14 +101,14 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 
 	description := "prepaid balance"
-	grant, err := client.CreateCreditGrant(ctx, payer, billing.CreateCreditGrantParams{
-		Invoker: invoker, Currency: in.Currency, Amount: 100_000,
+	grants, err := client.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{
+		CustomerID: payer, Invoker: invoker, Currency: in.Currency, Amount: 100_000,
 		Source: "billingapp", SourceID: in.Run + ":deposit", Description: &description,
-	})
+	}})
 	if err != nil {
 		return r, fmt.Errorf("credit grant: %w", err)
 	}
-	r.Deposited = grant.Amount
+	r.Deposited = grants[0].Amount
 
 	expires := time.Now().Add(time.Hour)
 	job := in.Run + ":job"
@@ -137,8 +137,11 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if blocked := denied[0].Admission.BlockedBy; blocked != nil {
 		r.DeniedBy = string(*blocked)
 	}
-	_, releaseErr := client.ReleaseAdmission(ctx, uuid.NewString())
-	r.UnknownRelease = errors.Is(releaseErr, billing.ErrNotFound)
+	released, err := client.ReleaseAdmissions(ctx, []string{uuid.NewString()})
+	if err != nil {
+		return r, fmt.Errorf("release: %w", err)
+	}
+	r.UnknownRelease = errors.Is(released[0].Err(), billing.ErrNotFound)
 	balance, err := client.GetBalance(ctx, payer, in.Currency)
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)

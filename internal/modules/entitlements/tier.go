@@ -2,14 +2,11 @@ package entitlements
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -27,19 +24,10 @@ type EffectiveTier struct {
 	TierRank           int
 }
 
-// ResolveEffectiveTier resolves the effective tier for a user (self-service
-// identity) in tier group `group` at `at`. (nil, nil) is "no tier".
-func (s *EntitlementService) ResolveEffectiveTier(ctx context.Context, userID, group string, at time.Time) (*EffectiveTier, error) {
-	customer, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	return s.ResolveEffectiveTierByCustomer(ctx, customer, group, at)
-}
-
-// ResolveEffectiveTierByCustomer is ResolveEffectiveTier keyed by customer.
+// ResolveEffectiveTiers resolves each customer's effective tier in tier group
+// `group` at `at`; a customer with none is absent.
 // Archived products of the group still count: their holders keep them.
-func (s *EntitlementService) ResolveEffectiveTierByCustomer(ctx context.Context, customer uuid.UUID, group string, at time.Time) (*EffectiveTier, error) {
+func (s *EntitlementService) ResolveEffectiveTiers(ctx context.Context, customers []uuid.UUID, group string, at time.Time) (map[uuid.UUID]EffectiveTier, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("entitlement service not initialized")
 	}
@@ -51,13 +39,14 @@ func (s *EntitlementService) ResolveEffectiveTierByCustomer(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.db.Gen(ctx).ResolveEffectiveTier(ctx, gen.ResolveEffectiveTierParams{MerchantID: mid.UUID(), CustomerID: customer, TierGroup: group, At: at})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+	rows, err := s.db.Gen(ctx).ResolveEffectiveTiers(ctx, gen.ResolveEffectiveTiersParams{MerchantID: mid.UUID(), CustomerIds: customers, TierGroup: group, At: at})
 	if err != nil {
 		return nil, err
 	}
-	return &EffectiveTier{TierGroup: group, Entitlement: row.Entitlement, ProductID: row.ProductID, ProductKey: row.ProductKey,
-		ProductDisplayName: row.ProductDisplayName, TierRank: int(row.TierRank)}, nil
+	out := make(map[uuid.UUID]EffectiveTier, len(rows))
+	for _, row := range rows {
+		out[row.CustomerID] = EffectiveTier{TierGroup: group, Entitlement: row.Entitlement, ProductID: row.ProductID, ProductKey: row.ProductKey,
+			ProductDisplayName: row.ProductDisplayName, TierRank: int(row.TierRank)}
+	}
+	return out, nil
 }

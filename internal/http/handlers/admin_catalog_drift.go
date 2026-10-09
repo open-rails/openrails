@@ -25,11 +25,15 @@ func ListCatalogDrift(r *httprequest.Request) {
 	if !r.BindQuery(&query) {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseFindingID)
+	if !ok {
+		return
+	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.ListCatalogDrift(r.Request.Context(), billing.CatalogDriftListParams{PageRequest: page, Rail: query.Rail, Kind: query.Kind, ResourceType: query.ResourceType})
+	out, err := svc.ListCatalogDrift(r.Request.Context(), billing.CatalogDriftListParams{PageRequest: page, IDs: ids, Rail: query.Rail, Kind: query.Kind, ResourceType: query.ResourceType})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

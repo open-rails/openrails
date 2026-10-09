@@ -13,6 +13,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY period_starts_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListInvoicesByIDs :many
+SELECT * FROM billing.invoices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY period_starts_at DESC, id DESC;
+
 -- name: GetMerchantInvoice :one
 SELECT * FROM billing.invoices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;

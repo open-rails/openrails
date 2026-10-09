@@ -225,7 +225,9 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 }
 
 // PriceFilter contains optional filters for listing prices
+// IDs, when not nil, reads those prices instead, in one page.
 type PriceFilter struct {
+	IDs       []uuid.UUID
 	Archived  *bool
 	Currency  string
 	ProductID *uuid.UUID
@@ -237,6 +239,21 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return billing.ListPage[*models.Price]{}, queryScopeErr
+	}
+	if filter.IDs != nil {
+		rows, err := s.db.Gen(ctx).ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: filter.IDs})
+		if err != nil {
+			return billing.ListPage[*models.Price]{}, err
+		}
+		out := make([]*models.Price, 0, len(rows))
+		for _, row := range rows {
+			price, err := s.priceWithProduct(ctx, row.BillingPrice, row.BillingProduct)
+			if err != nil {
+				return billing.ListPage[*models.Price]{}, err
+			}
+			out = append(out, price)
+		}
+		return billing.ListPage[*models.Price]{Items: out}, s.db.LoadPricePSPBindings(ctx, out, nil)
 	}
 	limit, err := pagination.Limit(page)
 	if err != nil {

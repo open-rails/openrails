@@ -457,6 +457,8 @@ var (
 // QueueFilter narrows the operator work list. Empty Status = open findings
 // only (reconcile_required | requires_review).
 type QueueFilter struct {
+	// IDs, when not nil, reads those findings instead, in one page.
+	IDs      []uuid.UUID
 	Severity string
 	Type     string
 	Status   string
@@ -469,6 +471,17 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) (bi
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.ListPage[FindingRecord]{}, err
+	}
+	if filter.IDs != nil {
+		rows, err := s.DB.Gen(ctx).ListReconciliationFindingsByIDs(ctx, gen.ListReconciliationFindingsByIDsParams{MerchantID: tid.UUID(), Ids: filter.IDs})
+		if err != nil {
+			return billing.ListPage[FindingRecord]{}, err
+		}
+		var page billing.ListPage[FindingRecord]
+		for _, row := range rows {
+			page.Items = append(page.Items, FindingRecordFromRow(row))
+		}
+		return page, nil
 	}
 	limit, err := pagination.Limit(filter.Page)
 	if err != nil {

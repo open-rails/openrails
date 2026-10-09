@@ -195,8 +195,10 @@ func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) 
 // ProductFilter selects products. Archived nil lists every product; false
 // lists live products only; true lists archived products only. Entitlement
 // lists the products granting that key now. ForSale true lists products a
-// live price sells; false, products only granted.
+// live price sells; false, products only granted. IDs, when not nil, reads
+// those products instead, in one page.
 type ProductFilter struct {
+	IDs         []uuid.UUID
 	Archived    *bool
 	TierGroup   string
 	Entitlement string
@@ -208,6 +210,14 @@ func (s *ProductService) List(ctx context.Context, filter ProductFilter, page bi
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return billing.ListPage[*models.Product]{}, queryScopeErr
+	}
+	if filter.IDs != nil {
+		rows, err := s.db.Gen(ctx).ListProductsByIDs(ctx, gen.ListProductsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: filter.IDs})
+		if err != nil {
+			return billing.ListPage[*models.Product]{}, err
+		}
+		products, err := s.db.ProductsFromGen(ctx, rows)
+		return billing.ListPage[*models.Product]{Items: products}, err
 	}
 	limit, err := pagination.Limit(page)
 	if err != nil {

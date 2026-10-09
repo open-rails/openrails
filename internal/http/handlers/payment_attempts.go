@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
@@ -28,6 +29,19 @@ import (
 func ListPaymentAttempts(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
+		return
+	}
+	ids, ok := listIDs(r, billing.ParsePaymentAttemptID)
+	if !ok {
+		return
+	}
+	if ids != nil {
+		rows, err := r.State.DB.Gen(r.Request.Context()).ListPaymentAttemptsByIDs(r.Request.Context(), gen.ListPaymentAttemptsByIDsParams{MerchantID: mid, Ids: uuidutil.Of(ids)})
+		if err != nil {
+			r.InternalError("payment attempts could not be listed", err)
+			return
+		}
+		r.SuccessJSON(pagination.Map(billing.ListPage[gen.BillingPaymentAttempt]{Items: rows}, paymentAttemptToAPI))
 		return
 	}
 	q := queryReader{r: r}
@@ -93,6 +107,22 @@ func ListRebillCycles(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseRebillCycleID)
+	if !ok {
+		return
+	}
+	if ids != nil {
+		now := r.Clock.Now()
+		rows, err := r.State.DB.Gen(r.Request.Context()).ListRebillCyclesByIDs(r.Request.Context(), gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: uuidutil.Of(ids)})
+		if err != nil {
+			r.InternalError("rebill cycles could not be listed", err)
+			return
+		}
+		r.SuccessJSON(pagination.Map(billing.ListPage[gen.ListRebillCyclesByIDsRow]{Items: rows}, func(c gen.ListRebillCyclesByIDsRow) billing.RebillCycle {
+			return rebillCycleToAPI(gen.ListRebillCyclesRow(c), now)
+		}))
+		return
+	}
 	q := queryReader{r: r}
 	outcomes := q.list("outcome")
 	for _, o := range outcomes {
@@ -139,8 +169,7 @@ func GetRebillCycle(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	q := r.State.DB.Gen(ctx)
 	now := r.Clock.Now()
-	cycleID := id.UUID()
-	rows, err := q.ListRebillCycles(ctx, gen.ListRebillCyclesParams{MerchantID: mid, ID: &cycleID, Now: now, RowLimit: 1})
+	rows, err := q.ListRebillCyclesByIDs(ctx, gen.ListRebillCyclesByIDsParams{MerchantID: mid, Ids: []uuid.UUID{id.UUID()}})
 	if err != nil {
 		r.InternalError("rebill cycle could not be read", err)
 		return
@@ -154,7 +183,7 @@ func GetRebillCycle(r *httprequest.Request) {
 		r.InternalError("rebill cycle attempts could not be read", err)
 		return
 	}
-	out := rebillCycleToAPI(rows[0], now)
+	out := rebillCycleToAPI(gen.ListRebillCyclesRow(rows[0]), now)
 	out.Attempts = make([]billing.PaymentAttempt, 0, len(attempts))
 	for _, a := range attempts {
 		out.Attempts = append(out.Attempts, paymentAttemptToAPI(a))

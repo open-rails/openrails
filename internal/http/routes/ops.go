@@ -9,7 +9,7 @@ import (
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/host-events", Group: Merchant, Auth: AuthMerchant, Name: "ListHostEvents", Level: LevelRead, Resources: res(ResHostEvents),
-		Query: params(queryOf(handlers.HostEventsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
+		Query: params(queryOf(handlers.HostEventsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
 	{Method: POST, Path: "/v1/merchant/host-events/acknowledge", Group: Merchant, Auth: AuthMerchant, Name: "AcknowledgeHostEvents", Level: LevelWrite, Resources: res(ResHostEvents),
 		Request: billing.AcknowledgeHostEventsParams{}, Responses: []Reply{{200, billing.HostEventLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceAcknowledgeHostEvents)},
 	{Method: POST, Path: "/v1/merchant/metrics/query", Group: Merchant, Auth: AuthMerchant, Name: "QueryMetrics", Level: LevelRead, Resources: res(ResMetrics),
@@ -21,7 +21,7 @@ var opsRoutes = []Route{
 	{Method: PUT, Path: "/v1/merchant/dashboard", Group: MerchantConfig, Auth: AuthMerchant, Name: "SetDashboard", Level: LevelAdmin, Resources: res(ResDashboard),
 		Request: billing.SetDashboardParams{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
 	{Method: GET, Path: "/v1/merchant/notifications", Group: Merchant, Auth: AuthMerchant, Name: "ListMerchantNotifications", Level: LevelRead, Resources: res(ResOperations),
-		Query: params(queryOf(handlers.ListMerchantNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.MerchantNotification]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMerchantNotifications)},
+		Query: params(queryOf(handlers.ListMerchantNotificationsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.MerchantNotification]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMerchantNotifications)},
 	{Method: GET, Path: "/v1/merchant/notifications/unread-count", Group: Merchant, Auth: AuthMerchant, Name: "GetUnreadNotificationCount", Level: LevelRead, Resources: res(ResOperations),
 		Responses: []Reply{{200, billing.UnreadCount{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.MerchantNotificationsUnreadCount)},
 	// Reading notifications needs only the permission that lists them.
@@ -30,7 +30,7 @@ var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/worker-health", Group: Merchant, Auth: AuthMerchant, Name: "ListWorkerHealth", Level: LevelRead, Resources: res(ResOperations),
 		Responses: []Reply{{200, billing.ListPage[billing.WorkerHealth]{}}}, Handler: h(handlers.GetAdminWorkerHealth)},
 	{Method: GET, Path: "/v1/merchant/findings", Group: Merchant, Auth: AuthMerchant, Name: "ListFindings", Level: LevelRead, Resources: res(ResFindings),
-		Query: params(queryOf(handlers.FindingsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.AdminListFindings)},
+		Query: params(queryOf(handlers.FindingsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.AdminListFindings)},
 	{Method: GET, Path: "/v1/merchant/findings/summary", Group: Merchant, Auth: AuthMerchant, Name: "GetFindingSummary", Level: LevelRead, Resources: res(ResFindings),
 		Responses: []Reply{{200, billing.FindingSummary{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetFindingSummary)},
 	{Method: GET, Path: "/v1/merchant/findings/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetFinding", Level: LevelRead, Resources: res(ResFindings),
@@ -41,8 +41,8 @@ var opsRoutes = []Route{
 		Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Notification]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.GetNotifications)},
 	{Method: GET, Path: "/v1/me/notifications/unread-count", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
 		Responses: []Reply{{200, billing.UnreadCount{}}}, Handler: h(handlers.GetUnreadNotificationCount)},
-	{Method: POST, Path: "/v1/me/notifications/{id}/read", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
-		Responses: []Reply{{200, billing.Notification{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.MarkNotificationRead)},
+	{Method: POST, Path: "/v1/me/notifications/read", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement,
+		Request: billing.MarkNotificationsReadParams{}, Responses: []Reply{{200, billing.CustomerNotificationLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.MarkMyNotificationsRead)},
 
 	// #756 metrics Q&A and #741 widget generation send aggregate results to
 	// the LLM provider: mounted only with llm.api_key (and, for ask, the

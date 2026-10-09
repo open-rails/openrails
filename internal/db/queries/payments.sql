@@ -231,6 +231,11 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListPaymentsByIDs :many
+SELECT * FROM billing.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC;
+
 -- name: MatchChargebackPayments :many
 -- NMI chargeback reconciliation (webhooks/nmi.go): candidate charges
 -- (subscription or one-time) matched by amount + card last4 within ±7d of the

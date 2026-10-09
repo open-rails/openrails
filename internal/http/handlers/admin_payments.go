@@ -436,6 +436,9 @@ func ListPayments(r *httprequest.Request) {
 		}
 		params.CustomerID = id
 	}
+	if params.IDs, ok = listIDs(r, billing.ParsePaymentID); !ok {
+		return
+	}
 	writePaymentPage(r, params)
 }
 

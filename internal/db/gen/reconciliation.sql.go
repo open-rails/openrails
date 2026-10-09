@@ -1605,6 +1605,69 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 	return items, nil
 }
 
+const listReconciliationFindingsByIDs = `-- name: ListReconciliationFindingsByIDs :many
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class
+FROM billing.reconciliation_findings f
+WHERE f.merchant_id = $1::uuid AND f.id = ANY($2::uuid[])
+ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         f.created_at, f.id
+`
+
+type ListReconciliationFindingsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+// Named findings, open or resolved, in the work list's order.
+func (q *Queries) ListReconciliationFindingsByIDs(ctx context.Context, arg ListReconciliationFindingsByIDsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listReconciliationFindingsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingReconciliationFinding
+	for rows.Next() {
+		var i BillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
 SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_starts_at, window_ends_at, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM billing.maintenance_runs
 WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()

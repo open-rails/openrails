@@ -527,6 +527,75 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 	return items, nil
 }
 
+const listPaymentAttemptsByIDs = `-- name: ListPaymentAttemptsByIDs :many
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY attempted_at DESC, id DESC
+`
+
+type ListPaymentAttemptsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPaymentAttemptsByIDs(ctx context.Context, arg ListPaymentAttemptsByIDsParams) ([]BillingPaymentAttempt, error) {
+	rows, err := q.db.Query(ctx, listPaymentAttemptsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPaymentAttempt
+	for rows.Next() {
+		var i BillingPaymentAttempt
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.Rail,
+			&i.Kind,
+			&i.Owner,
+			&i.CardEntry,
+			&i.Source,
+			&i.ObservedVia,
+			&i.Category,
+			&i.Reason,
+			&i.Action,
+			&i.ResponseCode,
+			&i.ResponseText,
+			&i.TransactionID,
+			&i.AvsResult,
+			&i.CvvResult,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.TokenType,
+			&i.Amount,
+			&i.Currency,
+			&i.AttemptedAt,
+			&i.CheckoutID,
+			&i.CheckoutTarget,
+			&i.SubscriptionID,
+			&i.PaymentMethodID,
+			&i.PaymentID,
+			&i.ProviderIntentID,
+			&i.Step,
+			&i.CreatedAt,
+			&i.CycleID,
+			&i.CardBin,
+			&i.IssuerCode,
+			&i.IssuerText,
+			&i.EnrichedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnenrichedAttemptMerchants = `-- name: ListUnenrichedAttemptMerchants :many
 SELECT a.merchant_id
 FROM billing.payment_attempts a

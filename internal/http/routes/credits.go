@@ -15,11 +15,11 @@ func withCustomer(list ...string) []string { return codes(append(list, customerE
 // balances, the credit limit and trust level, and the delegations that let
 // invokers spend a customer's balance.
 var creditsRoutes = []Route{
-	{Method: POST, Path: "/v1/merchant/customers/{customer_id}/credit-grants", Group: Merchant, Auth: AuthMerchant, Name: "CreateCreditGrant", Level: LevelWrite, Resources: res(ResCredits), Sensitive: true, Limit: middleware.AdminOperationGrant,
-		Request: billing.CreateCreditGrantParams{}, Responses: []Reply{{201, billing.CreditGrant{}}, {200, billing.CreditGrant{}}},
-		Errors: withCustomer("currency_unsupported", "idempotency_key_reused", "invalid_param"), Handler: h(handlers.CreateCreditGrant)},
+	{Method: POST, Path: "/v1/merchant/credit-grants", Group: Merchant, Auth: AuthMerchant, Name: "CreateCreditGrants", Level: LevelWrite, Resources: res(ResCredits), Sensitive: true, Limit: middleware.AdminOperationGrant,
+		Request: billing.CreateCreditGrantBatchParams{}, Responses: []Reply{{201, billing.CreateCreditGrantBatchResult{}}, {200, billing.CreateCreditGrantBatchResult{}}},
+		Errors: codes("currency_unsupported", "idempotency_key_reused", "invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.CreateCreditGrants)},
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/credit-grants", Group: Merchant, Auth: AuthMerchant, Name: "ListCreditGrants", Level: LevelRead, Resources: res(ResCredits),
-		Query: params(queryOf(billing.CreditGrantListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.CreditGrant]{}}},
+		Query: params(queryOf(billing.CreditGrantListParams{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.CreditGrant]{}}},
 		Errors: withCustomer("invalid_cursor"), Handler: h(handlers.ListCreditGrants)},
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/credit-grants/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetCreditGrant", Level: LevelRead, Resources: res(ResCredits),
 		Responses: []Reply{{200, billing.CreditGrant{}}}, Errors: withCustomer("credit_grant_not_found", "invalid_param"), Handler: h(handlers.GetCreditGrant)},
@@ -27,7 +27,7 @@ var creditsRoutes = []Route{
 		Request: billing.RevokeCreditGrantParams{}, Responses: []Reply{{200, billing.CreditGrant{}}},
 		Errors: withCustomer("credit_grant_held", "credit_grant_not_found", "credit_grant_unavailable", "invalid_param"), Handler: h(handlers.RevokeCreditGrant)},
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/transactions", Group: Merchant, Auth: AuthMerchant, Name: "ListCreditTransactions", Level: LevelRead, Resources: res(ResCredits),
-		Query: params(queryOf(billing.CreditTransactionListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.CreditTransaction]{}}},
+		Query: params(queryOf(billing.CreditTransactionListParams{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.CreditTransaction]{}}},
 		Errors: withCustomer("currency_unsupported", "invalid_cursor"), Handler: h(handlers.ListCreditTransactions)},
 	{Method: GET, Path: "/v1/merchant/customers/{customer_id}/balance", Group: Merchant, Auth: AuthMerchant, Name: "GetBalance", Level: LevelRead, Resources: res(ResCredits),
 		Query: params(text("currency")), Responses: []Reply{{200, billing.Balance{}}}, Errors: withCustomer("currency_unsupported"), Handler: h(handlers.GetBalance)},
@@ -35,8 +35,6 @@ var creditsRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.SpendDelegation]{}}}, Errors: withCustomer(), Handler: h(handlers.ListSpendDelegations)},
 	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/spend-delegations", Group: Merchant, Auth: AuthMerchant, Name: "SetSpendDelegations", Level: LevelWrite, Resources: res(ResCredits), Sensitive: true,
 		Request: billing.SetSpendDelegationsParams{}, Responses: []Reply{{200, billing.ListPage[billing.SpendDelegation]{}}}, Errors: withCustomer(), Handler: h(handlers.SetSpendDelegations)},
-	{Method: PUT, Path: "/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}", Group: Merchant, Auth: AuthMerchant, Name: "SetSpendDelegation", Level: LevelWrite, Resources: res(ResCredits), Sensitive: true,
-		Request: billing.SetSpendDelegationParams{}, Responses: []Reply{{200, billing.SpendDelegation{}}}, Errors: withCustomer(), Handler: h(handlers.SetSpendDelegation)},
 	{Method: DELETE, Path: "/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}", Group: Merchant, Auth: AuthMerchant, Name: "DeleteSpendDelegation", Level: LevelWrite, Resources: res(ResCredits), Sensitive: true,
 		Responses: []Reply{{204, nil}}, Errors: withCustomer("spend_delegation_not_found"), Handler: h(handlers.DeleteSpendDelegation)},
 	{Method: GET, Path: "/v1/me/spend-limits", Group: Customer, Auth: AuthCustomer, Scope: ScopeBillingManagement, InvokerScoped: true,

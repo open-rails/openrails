@@ -41,24 +41,12 @@ type EnsureCustomerBatchResult struct {
 	Items []Customer `json:"items"`
 }
 
-// MaxCustomerLookup bounds one GetCustomers call.
-const MaxCustomerLookup = 500
-
-// CustomerLookupParams names up to MaxCustomerLookup customers.
-type CustomerLookupParams struct {
-	CustomerIDs []CustomerID `json:"customer_ids"`
-}
-
-// CustomerLookup answers every requested customer; one that does not exist
-// is null.
-type CustomerLookup struct {
-	Customers map[CustomerID]*Customer `json:"customers"`
-}
-
 // CustomerListParams lists customers, newest first. Query matches an id
-// prefix or an email substring.
+// prefix or an email substring. IDs instead reads 1 to MaxBatchItems named
+// customers in one page; unknown ones are absent.
 type CustomerListParams struct {
-	Query string `form:"q"`
+	Query string       `form:"q"`
+	IDs   []CustomerID `form:"-"`
 	PageRequest
 }
 

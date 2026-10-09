@@ -228,6 +228,10 @@ export type CustomerEntitlement = {
   entitlement: string
 }
 
+export type CustomerNotificationLookup = {
+  notifications: Record<string, Notification | null> | null
+}
+
 export type DriftField = {
   field: string
   openrails_value: string
@@ -310,6 +314,10 @@ export type InvoicePayment = {
   failure_reason: string | null
   attempted_at: string
   settled_at: string | null
+}
+
+export type MarkNotificationsReadParams = {
+  notification_ids?: string[]
 }
 
 export type MintCheckoutSessionParams = {

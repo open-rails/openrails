@@ -78,6 +78,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListLedgerTransfersByIDs :many
+-- A customer's named movements, newest first.
+SELECT * FROM billing.ledger_transfers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+  AND customer_id = sqlc.arg(customer_id)::uuid
+ORDER BY created_at DESC, id DESC;
+
 -- GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
 -- coordinate (merchant, customer, currency, transfer_type, operation, source,
 -- source_id). `operation` is the or#894 discriminator: without it a capture and

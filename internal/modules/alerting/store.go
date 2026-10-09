@@ -66,13 +66,18 @@ func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
 	return webhookFromRow(row), nil
 }
 
-func (s *store) listWebhooks(ctx context.Context) ([]Webhook, error) {
+func (s *store) listWebhooks(ctx context.Context, ids []uuid.UUID) ([]Webhook, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
 	}
-
-	rows, err := s.db.Gen(ctx).ListMerchantWebhooks(ctx, queryMerchant.UUID())
+	var rows []gen.BillingMerchantWebhook
+	var err error
+	if ids != nil {
+		rows, err = s.db.Gen(ctx).ListMerchantWebhooksByIDs(ctx, gen.ListMerchantWebhooksByIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
+	} else {
+		rows, err = s.db.Gen(ctx).ListMerchantWebhooks(ctx, queryMerchant.UUID())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +135,14 @@ func (s *store) listNotifications(ctx context.Context, unreadOnly bool, afterAt 
 	return s.db.Gen(ctx).ListMerchantNotifications(ctx, gen.ListMerchantNotificationsParams{
 		MerchantID: mid.UUID(), UnreadOnly: unreadOnly, AfterAt: afterAt, AfterID: afterID, RowLimit: limit,
 	})
+}
+
+func (s *store) notificationsByIDs(ctx context.Context, ids []uuid.UUID) ([]gen.BillingNotification, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.db.Gen(ctx).ListMerchantNotificationsByIDs(ctx, gen.ListMerchantNotificationsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
 }
 
 func (s *store) markNotificationsRead(ctx context.Context, ids []uuid.UUID) ([]gen.BillingNotification, error) {

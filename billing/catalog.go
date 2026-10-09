@@ -63,9 +63,11 @@ type UpdateProductParams struct {
 // ProductListParams filters ListProducts. A nil Archived lists both live and
 // archived products. Entitlement lists the products granting that key now.
 // ForSale true lists products some live price sells; false lists products
-// that are only granted.
+// that are only granted. IDs instead reads 1 to MaxBatchItems named products
+// in one page, whatever their state; unknown ones are absent.
 type ProductListParams struct {
 	PageRequest
+	IDs         []ProductID
 	Archived    *bool
 	TierGroup   string
 	Entitlement string
@@ -220,8 +222,11 @@ type GetPriceParams struct {
 }
 
 // PriceListParams filters ListPrices. Nil Archived and Recurring list both.
+// IDs instead reads 1 to MaxBatchItems named prices in one page, whatever
+// their state; unknown ones are absent.
 type PriceListParams struct {
 	PageRequest
+	IDs       []PriceID
 	ProductID ProductID
 	Currency  string
 	Recurring *bool

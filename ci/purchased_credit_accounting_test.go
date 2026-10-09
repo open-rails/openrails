@@ -180,7 +180,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, admitted[0].Allowed())
 	require.ErrorIs(t, svc.ValidateRefund(ctx, second.ID, 100_000_000), billing.ErrConflict, "voluntary refunds cannot consume previously authorized work")
-	_, err = client.ReleaseAdmission(ctx, requestID)
+	_, err = releaseAdmission(ctx, client, requestID)
 	require.NoError(t, err)
 	// Every maintained account counter still matches immutable transfers.
 	require.NoError(t, database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

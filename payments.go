@@ -26,6 +26,9 @@ func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListPar
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "subscription_id": params.SubscriptionID.String(), "price_id": params.PriceID.String(),
 		"rail": params.Rail, "kind": string(params.Kind), "transaction_id": params.TransactionID})
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Payment]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

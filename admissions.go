@@ -62,47 +62,57 @@ func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params 
 	return &out, nil
 }
 
-// ReleaseAdmission frees the hold of an admission whose work failed.
-// Releasing a released admission returns it.
-func (c *Client) ReleaseAdmission(ctx context.Context, requestID string, requestOptions ...RequestOption) (*billing.Admission, error) {
-	path, err := admissionPath(requestID)
-	if err != nil {
+// ReleaseAdmissions frees the holds of 1 to billing.MaxAdmissionBatchItems
+// admissions whose work failed, one result per request id in order: each is
+// released or refused on its own. Releasing a released admission answers it.
+func (c *Client) ReleaseAdmissions(ctx context.Context, requestIDs []string, requestOptions ...RequestOption) ([]billing.AdmissionResult, error) {
+	if err := batchSize(len(requestIDs), billing.MaxAdmissionBatchItems); err != nil {
 		return nil, err
 	}
-	var out billing.Admission
-	if err := c.do(ctx, http.MethodPost, path+"/release", nil, &out, requestOptions...); err != nil {
+	var out billing.AdmissionBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions/release", billing.ReleaseAdmissionBatchParams{RequestIDs: requestIDs}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Items, nil
 }
 
-// ExtendAdmission moves an open hold's deadline later. billing.ErrNotFound
-// means the hold was captured, released or lapsed; admit again instead.
-func (c *Client) ExtendAdmission(ctx context.Context, requestID string, params billing.ExtendAdmissionParams, requestOptions ...RequestOption) (*billing.Admission, error) {
-	path, err := admissionPath(requestID)
-	if err != nil {
+// ExtendAdmissions moves 1 to billing.MaxAdmissionBatchItems open holds'
+// deadlines later, one result per item in order. An item refused with
+// hold_not_found was captured, released or lapsed; admit it again instead.
+func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error) {
+	if err := batchSize(len(items), billing.MaxAdmissionBatchItems); err != nil {
 		return nil, err
 	}
-	if params.ExpiresAt.IsZero() {
-		return nil, invalidErr("expires_at is required")
+	body := billing.ExtendAdmissionBatchParams{Items: make([]billing.ExtendAdmissionParams, len(items))}
+	for i, item := range items {
+		item.ExpiresAt = item.ExpiresAt.UTC()
+		body.Items[i] = item
 	}
-	params.ExpiresAt = params.ExpiresAt.UTC()
-	var out billing.Admission
-	if err := c.do(ctx, http.MethodPost, path+"/extend", params, &out, requestOptions...); err != nil {
+	var out billing.AdmissionBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions/extend", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Items, nil
 }
 
-// ReportWastedSpend records spend a customer's invoker wasted (failed or
-// abusive work). Source and SourceID identify the report.
-func (c *Client) ReportWastedSpend(ctx context.Context, params billing.ReportWastedSpendParams, requestOptions ...RequestOption) (*billing.WastedSpendReport, error) {
-	params.Currency = normalizeCurrency(params.Currency)
-	var out billing.WastedSpendReport
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", params, &out, requestOptions...); err != nil {
+// ReportWastedSpend records 1 to billing.MaxBatchItems reports of spend a
+// customer's invoker wasted (failed or abusive work), one result per report in
+// order: each is handled or refused on its own. Source and SourceID identify a
+// report; a retry is handled once (action duplicate).
+func (c *Client) ReportWastedSpend(ctx context.Context, items []billing.ReportWastedSpendParams, requestOptions ...RequestOption) ([]billing.WastedSpendResult, error) {
+	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	body := billing.ReportWastedSpendBatchParams{Items: make([]billing.ReportWastedSpendParams, len(items))}
+	for i, item := range items {
+		item.Currency = normalizeCurrency(item.Currency)
+		body.Items[i] = item
+	}
+	var out billing.ReportWastedSpendBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", body, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
 }
 
 // RecordUsage records 1 to billing.MaxUsageBatchItems usage events, one

@@ -1015,6 +1015,70 @@ func (q *Queries) ListPaymentsByCustomer(ctx context.Context, arg ListPaymentsBy
 	return items, nil
 }
 
+const listPaymentsByIDs = `-- name: ListPaymentsByIDs :many
+SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot FROM billing.payments
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC
+`
+
+type ListPaymentsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPaymentsByIDs(ctx context.Context, arg ListPaymentsByIDsParams) ([]BillingPayment, error) {
+	rows, err := q.db.Query(ctx, listPaymentsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingPayment
+	for rows.Next() {
+		var i BillingPayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.Channel,
+			&i.Rail,
+			&i.TransactionID,
+			&i.Amount,
+			&i.ListAmount,
+			&i.Currency,
+			&i.Status,
+			&i.SubscriptionID,
+			&i.RefundedPaymentID,
+			&i.DiscountCode,
+			&i.DiscountReason,
+			&i.DiscountMetadata,
+			&i.Metadata,
+			&i.PurchasedAt,
+			&i.CreatedAt,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.AttemptKind,
+			&i.FailureCode,
+			&i.FailureReason,
+			&i.ReversalKind,
+			&i.TokenType,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.MoneyMovement,
+			&i.CreditGrantSnapshot,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaymentsPage = `-- name: ListPaymentsPage :many
 SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot FROM billing.payments p
 WHERE p.merchant_id = $1::uuid

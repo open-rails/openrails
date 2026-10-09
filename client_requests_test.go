@@ -127,12 +127,23 @@ func TestClientRequestShapes(t *testing.T) {
 		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
 			require.Len(t, b["delegations"], 1)
 		}},
-		{"delegation set at its address", func() error {
-			_, err := client.SetSpendDelegation(t.Context(), typedCustomer, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "issuer:subject", Windows: window})
+		{"list ids are one comma list beside nothing else", func() error {
+			_, err := client.ListPayments(t.Context(), billing.PaymentListParams{IDs: []billing.PaymentID{billing.PaymentID(uuid.MustParse(customer)), billing.PaymentID(uuid.MustParse(customer))}})
 			return err
-		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/issuer:subject", "", func(t *testing.T, b map[string]any) {
-			require.NotContains(t, b, "scope_key", "the address carries scope and key")
-			require.Len(t, b["windows"], 1)
+		}, http.MethodGet, "/v1/merchant/payments", "ids=pay_" + customer + "%2Cpay_" + customer, nil},
+		{"credit grants batch across customers", func() error {
+			_, err := client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: typedCustomer, Currency: " usd ", Amount: 1, Source: "s", SourceID: "1"}})
+			return err
+		}, http.MethodPost, "/v1/merchant/credit-grants", "", func(t *testing.T, b map[string]any) {
+			item := b["items"].([]any)[0].(map[string]any)
+			require.Equal(t, customer, item["customer_id"])
+			require.Equal(t, "USD", item["currency"])
+		}},
+		{"admission releases name request ids", func() error {
+			_, err := client.ReleaseAdmissions(t.Context(), []string{"../a", "b"})
+			return err
+		}, http.MethodPost, "/v1/merchant/admissions/release", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, []any{"../a", "b"}, b["request_ids"])
 		}},
 		{"delegation delete escapes one segment per key", func() error {
 			return client.DeleteSpendDelegation(t.Context(), typedCustomer, " invoker ", "a/b:c")
@@ -256,11 +267,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CaptureAdmission(ctx, id, billing.CaptureAdmissionParams{Amount: 1})
 			return err
 		},
-		"release": func(id string) error { _, err := c.ReleaseAdmission(ctx, id); return err },
-		"extend hold": func(id string) error {
-			_, err := c.ExtendAdmission(ctx, id, billing.ExtendAdmissionParams{ExpiresAt: now})
-			return err
-		},
 		"admission": func(id string) error { _, err := c.GetAdmission(ctx, id); return err },
 		"entitlement check key": func(id string) error {
 			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", id}, At: now})
@@ -284,7 +290,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"invoice payments": func() error {
-			_, err := c.ListInvoicePayments(ctx, billing.InvoiceID{}, billing.PageRequest{})
+			_, err := c.ListInvoicePayments(ctx, billing.InvoiceID{}, billing.InvoicePaymentListParams{})
 			return err
 		},
 		"retry invoice": func() error {
@@ -292,7 +298,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"payment methods customer": func() error {
-			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PageRequest{})
+			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PaymentMethodListParams{})
 			return err
 		},
 		"settings customer": func() error {
@@ -391,12 +397,48 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.RecordUsage(ctx, make([]billing.RecordUsageParams, billing.MaxUsageBatchItems+1))
 			return err
 		},
-		"customers empty": func() error {
-			_, err := c.GetCustomers(ctx, nil)
+		"list ids empty": func() error {
+			_, err := c.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{}})
 			return err
 		},
-		"customers over bound": func() error {
-			_, err := c.GetCustomers(ctx, make([]billing.CustomerID, billing.MaxCustomerLookup+1))
+		"list ids over bound": func() error {
+			ids := make([]billing.PaymentID, billing.MaxBatchItems+1)
+			for i := range ids {
+				ids[i] = billing.PaymentID(uuid.New())
+			}
+			_, err := c.ListPayments(ctx, billing.PaymentListParams{IDs: ids})
+			return err
+		},
+		"list ids zero": func() error {
+			_, err := c.ListInvoices(ctx, billing.InvoiceListParams{IDs: []billing.InvoiceID{{}}})
+			return err
+		},
+		"release empty": func() error {
+			_, err := c.ReleaseAdmissions(ctx, nil)
+			return err
+		},
+		"extend empty": func() error {
+			_, err := c.ExtendAdmissions(ctx, nil)
+			return err
+		},
+		"extend over bound": func() error {
+			_, err := c.ExtendAdmissions(ctx, make([]billing.ExtendAdmissionParams, billing.MaxAdmissionBatchItems+1))
+			return err
+		},
+		"wasted spend empty": func() error {
+			_, err := c.ReportWastedSpend(ctx, nil)
+			return err
+		},
+		"credit grants empty": func() error {
+			_, err := c.CreateCreditGrants(ctx, nil)
+			return err
+		},
+		"tiers empty": func() error {
+			_, err := c.GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{Group: "group"})
+			return err
+		},
+		"tiers group": func() error {
+			_, err := c.GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{CustomerIDs: []billing.CustomerID{customerID}})
 			return err
 		},
 		"ensure customers empty": func() error {
@@ -427,7 +469,10 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Prefixes: make([]string, billing.MaxEntitlementPrefixes+1)})
 			return err
 		},
-		"effective tier customer": func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },
+		"effective tier customer": func() error {
+			_, err := c.GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{Group: "group", CustomerIDs: []billing.CustomerID{{}}})
+			return err
+		},
 		"subscription payment method": func() error {
 			_, err := c.SetSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: method})
 			return err
@@ -460,17 +505,19 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"balance":       func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
 		"usage":         func() error { _, err := c.GetUsage(ctx, zero, billing.GetUsageParams{Currency: "USD"}); return err },
 		"credit grants": func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
-		"create credit": func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreateCreditGrantParams{}); return err },
+		"create credit": func() error {
+			_, err := c.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{CustomerID: zero}})
+			return err
+		},
 		"transactions": func() error {
 			_, err := c.ListCreditTransactions(ctx, zero, billing.CreditTransactionListParams{})
 			return err
 		},
 		"delegations": func() error { _, err := c.ListSpendDelegations(ctx, zero); return err },
-		"set delegation": func() error {
-			_, err := c.SetSpendDelegation(ctx, zero, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "k"})
+		"customer": func() error {
+			_, err := c.ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{zero}})
 			return err
 		},
-		"customer": func() error { _, err := c.GetCustomers(ctx, []billing.CustomerID{zero}); return err },
 		"ensure customer": func() error {
 			_, err := c.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: zero}})
 			return err

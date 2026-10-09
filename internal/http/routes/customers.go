@@ -10,10 +10,8 @@ import (
 // billing profile, and who is overdue.
 var customersRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/customers", Group: Merchant, Auth: AuthMerchant, Name: "ListCustomers", Level: LevelRead, Resources: res(ResCustomers),
-		Query: params(queryOf(billing.CustomerListParams{}), text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Customer]{}}},
+		Query: params(queryOf(billing.CustomerListParams{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Customer]{}}},
 		Errors: codes("invalid_cursor"), Handler: h(handlers.ListCustomers)},
-	{Method: POST, Path: "/v1/merchant/customers/lookup", Group: Merchant, Auth: AuthMerchant, Name: "GetCustomers", Level: LevelRead, Resources: res(ResCustomers),
-		Request: billing.CustomerLookupParams{}, Responses: []Reply{{200, billing.CustomerLookup{}}}, Errors: codes("invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.GetCustomers)},
 	{Method: POST, Path: "/v1/merchant/customers/ensure", Group: Merchant, Auth: AuthMerchant, Name: "EnsureCustomers", Level: LevelWrite, Resources: res(ResCustomers), Sensitive: true,
 		Request: billing.EnsureCustomerBatchParams{}, Responses: []Reply{{200, billing.EnsureCustomerBatchResult{}}}, Errors: codes("invalid_param", billing.CodeServiceCredentialCustomerScopeDenied), Handler: h(handlers.EnsureCustomers)},
 	{Method: GET, Path: "/v1/merchant/customers/settings", Group: Merchant, Auth: AuthMerchant, Name: "ListCustomerSettings", Level: LevelRead, Resources: res(ResCustomerSettings),

@@ -20,6 +20,9 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.Payment
 		"psp_id": filter.PSPID.String(), "customer_id": filter.CustomerID.String(),
 		"checkout_id": filter.CheckoutID, "subscription_id": filter.SubscriptionID.String(), "cycle_id": filter.CycleID.String(),
 		"since": timeQuery(filter.Since), "until": timeQuery(filter.Until)})
+	if err := setIDs(q, filter.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.PaymentAttempt]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payment-attempts?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -47,6 +50,9 @@ func (c *Client) ListRebillCycles(ctx context.Context, filter billing.RebillCycl
 	setQuery(q, map[string]string{"owner": commaList(filter.Owner), "first_outcome": commaList(filter.FirstOutcome), "miss_reason": commaList(filter.MissReason),
 		"outcome": commaList(filter.Outcome), "psp_id": filter.PSPID.String(), "subscription_id": filter.SubscriptionID.String(),
 		"due_since": timeQuery(filter.DueSince), "due_until": timeQuery(filter.DueUntil)})
+	if err := setIDs(q, filter.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.RebillCycle]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/rebill-cycles?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

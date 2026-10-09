@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 func invalidHostEventRequest(message string) error {
@@ -19,6 +20,10 @@ func invalidHostEventRequest(message string) error {
 }
 
 func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListParams) (billing.ListPage[billing.HostEvent], error) {
+	if req.IDs != nil {
+		events, err := s.hostEvents(ctx, gen.ListHostEventsParams{}, uuidutil.Of(req.IDs))
+		return billing.ListPage[billing.HostEvent]{Items: events}, err
+	}
 	switch req.Type {
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged:
 	default:
@@ -43,7 +48,7 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 		id := req.PaymentID.UUID()
 		params.PaymentID = &id
 	}
-	events, err := s.hostEvents(ctx, params)
+	events, err := s.hostEvents(ctx, params, nil)
 	if err != nil {
 		return billing.ListPage[billing.HostEvent]{}, err
 	}
@@ -54,8 +59,9 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 	}), nil
 }
 
-// hostEvents reads host events with their payloads.
-func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParams) ([]billing.HostEvent, error) {
+// hostEvents reads host events with their payloads: the named ones, or
+// those params selects when ids is nil.
+func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParams, ids []uuid.UUID) ([]billing.HostEvent, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -65,10 +71,20 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 	if err != nil {
 		return nil, err
 	}
-	params.MerchantID = mid.UUID()
-	rows, err := s.rt.DB.Gen(ctx).ListHostEvents(ctx, params)
-	if err != nil {
-		return nil, err
+	var rows []gen.ListHostEventsRow
+	if ids != nil {
+		named, err := s.rt.DB.Gen(ctx).ListHostEventsByIDs(ctx, gen.ListHostEventsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range named {
+			rows = append(rows, gen.ListHostEventsRow(row))
+		}
+	} else {
+		params.MerchantID = mid.UUID()
+		if rows, err = s.rt.DB.Gen(ctx).ListHostEvents(ctx, params); err != nil {
+			return nil, err
+		}
 	}
 	events := make([]billing.HostEvent, 0, len(rows))
 	for _, row := range rows {
@@ -145,7 +161,7 @@ func (s *Service) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostE
 	if len(acknowledged) == 0 {
 		return out, nil
 	}
-	events, err := s.hostEvents(ctx, gen.ListHostEventsParams{Ids: acknowledged, IncludeAcknowledged: true, RowLimit: billing.MaxBatchItems})
+	events, err := s.hostEvents(ctx, gen.ListHostEventsParams{}, acknowledged)
 	if err != nil {
 		return nil, err
 	}

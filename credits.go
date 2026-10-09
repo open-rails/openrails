@@ -38,21 +38,28 @@ func withQuery(path string, q url.Values) string {
 	return path + "?" + q.Encode()
 }
 
-// CreateCreditGrant grants a customer prepaid credit. SourceID makes the grant
-// idempotent: an identical retry returns the existing grant with Replayed set,
-// one with a different amount, currency or expiry is
-// billing.ErrIdempotencyKeyReused.
-func (c *Client) CreateCreditGrant(ctx context.Context, customer billing.CustomerID, params billing.CreateCreditGrantParams, requestOptions ...RequestOption) (*billing.CreditGrant, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
+// CreateCreditGrants grants 1 to billing.MaxBatchItems credits, across any
+// customers, all or none; the answer is in request order. Each item's
+// SourceID makes it idempotent per customer: an identical retry answers the
+// existing grant with Replayed set, one with a different amount, currency or
+// expiry refuses the batch with billing.ErrIdempotencyKeyReused.
+func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams, requestOptions ...RequestOption) ([]billing.CreditGrant, error) {
+	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	params.Currency = normalizeCurrency(params.Currency)
-	var out billing.CreditGrant
-	if err := c.do(ctx, http.MethodPost, path+"/credit-grants", params, &out, requestOptions...); err != nil {
+	body := billing.CreateCreditGrantBatchParams{Items: make([]billing.CreateCreditGrantParams, len(items))}
+	for i, item := range items {
+		if item.CustomerID.IsZero() {
+			return nil, invalidErr("customer_id is required")
+		}
+		item.Currency = normalizeCurrency(item.Currency)
+		body.Items[i] = item
+	}
+	var out billing.CreateCreditGrantBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credit-grants", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Items, nil
 }
 
 // ListCreditGrants lists a customer's credit grants, newest first.
@@ -67,6 +74,9 @@ func (c *Client) ListCreditGrants(ctx context.Context, customer billing.Customer
 	}
 	if params.SourceID != "" {
 		q.Set("source_id", params.SourceID)
+	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
 	}
 	var out billing.ListPage[billing.CreditGrant]
 	if err := c.do(ctx, http.MethodGet, withQuery(path+"/credit-grants", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
@@ -114,13 +124,19 @@ func (c *Client) RevokeCreditGrant(ctx context.Context, customer billing.Custome
 }
 
 // ListCreditTransactions lists a customer's credit ledger in one currency,
-// newest first.
+// newest first, or the transactions params.IDs names.
 func (c *Client) ListCreditTransactions(ctx context.Context, customer billing.CustomerID, params billing.CreditTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditTransaction], error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
 	}
-	q := url.Values{"currency": {normalizeCurrency(params.Currency)}}
+	q := url.Values{}
+	if params.IDs == nil || params.Currency != "" {
+		q.Set("currency", normalizeCurrency(params.Currency))
+	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.CreditTransaction]
 	if err := c.do(ctx, http.MethodGet, withQuery(path+"/transactions", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -186,24 +202,6 @@ func spendDelegationPath(customer billing.CustomerID, scope billing.SpendDelegat
 		return "", err
 	}
 	return path + "/spend-delegations/" + scopeSegment + "/" + keySegment, nil
-}
-
-// SetSpendDelegation sets the delegation at its scope and key, leaving the
-// customer's other delegations untouched.
-func (c *Client) SetSpendDelegation(ctx context.Context, customer billing.CustomerID, delegation billing.SpendDelegation, requestOptions ...RequestOption) (*billing.SpendDelegation, error) {
-	path, err := spendDelegationPath(customer, delegation.Scope, delegation.ScopeKey)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.SpendDelegation
-	body := billing.SetSpendDelegationParams{Windows: delegation.Windows}
-	if delegation.Provenance != nil {
-		body.Provenance = *delegation.Provenance
-	}
-	if err := c.do(ctx, http.MethodPut, path, body, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // DeleteSpendDelegation revokes the delegation at scope and scopeKey; a

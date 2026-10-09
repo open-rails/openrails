@@ -3,6 +3,7 @@
 package ci_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -141,6 +142,26 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		return w.Body.String()
 	}
+	// markRead marks notifications read and answers each requested id: the
+	// notification, or nil when it is not the caller's.
+	markRead := func(token, selector string, ids ...string) map[string]any {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"notification_ids": ids})
+		require.NoError(t, err)
+		r := httptest.NewRequest(http.MethodPost, "https://"+api+"/billing/v1/me/notifications/read", bytes.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("OpenRails-Merchant", selector)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var out struct {
+			Notifications map[string]any `json:"notifications"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		require.Len(t, out.Notifications, len(ids), "every requested id is answered")
+		return out.Notifications
+	}
 	refused := func(w *httptest.ResponseRecorder, status int, code string) {
 		t.Helper()
 		require.Equal(t, status, w.Code, w.Body.String())
@@ -229,14 +250,16 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 			for _, note := range notes {
 				require.NotContains(t, body, note)
 			}
+			ids := make([]string, 0, len(notes))
 			for _, note := range notes {
-				w := do(api, bobToken, http.MethodPost, "/billing/v1/me/notifications/"+note+"/read", selector)
-				require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+				ids = append(ids, note)
+			}
+			for id, marked := range markRead(bobToken, selector, ids...) {
+				require.Nil(t, marked, "Bob marked Alice's %s", id)
 			}
 		}
 		// Alice's own object at one merchant does not exist at another.
-		w := do(api, aliceToken, http.MethodPost, "/billing/v1/me/notifications/"+notes[m.id]+"/read", other(m, first, second).slug)
-		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		require.Nil(t, markRead(aliceToken, other(m, first, second).slug, notes[m.id])[notes[m.id]])
 	}
 	for _, m := range []shop{first, second} {
 		require.JSONEq(t, `{"unread_count":1}`, read(me(aliceToken, "/notifications/unread-count", m.slug)), "Alice's notifications are unread")

@@ -75,8 +75,12 @@ type FindingRecommendation struct {
 
 // FindingListParams pages the findings queue: most severe first, then
 // oldest. Status empty lists the open findings.
+//
+// IDs instead reads 1 to MaxBatchItems named findings in one page, open or
+// resolved; unknown ones are absent.
 type FindingListParams struct {
 	PageRequest
+	IDs      []FindingID
 	Status   FindingStatus
 	Severity string
 	Type     string

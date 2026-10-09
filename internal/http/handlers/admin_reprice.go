@@ -108,7 +108,11 @@ func ListRepriceBatches(r *httprequest.Request) {
 	if !ok || !repriceServiceReady(r) {
 		return
 	}
-	out, err := r.State.RepriceService.ListBatches(r.Request.Context(), billing.RepriceBatchListParams{PageRequest: page, PriceKey: query.PriceKey, ProductKey: query.ProductKey})
+	ids, ok := listIDs(r, billing.ParseRepriceBatchID)
+	if !ok {
+		return
+	}
+	out, err := r.State.RepriceService.ListBatches(r.Request.Context(), billing.RepriceBatchListParams{PageRequest: page, IDs: ids, PriceKey: query.PriceKey, ProductKey: query.ProductKey})
 	if err != nil {
 		writeRepriceError(r, err)
 		return
@@ -168,8 +172,12 @@ func ListReprices(r *httprequest.Request) {
 	if !ok || !repriceServiceReady(r) {
 		return
 	}
+	ids, ok := listIDs(r, billing.ParseRepriceID)
+	if !ok {
+		return
+	}
 	out, err := r.State.RepriceService.ListReprices(r.Request.Context(), billing.RepriceListParams{
-		PageRequest: page, SubscriptionID: query.SubscriptionID, RepriceBatchID: query.RepriceBatchID, Status: status,
+		PageRequest: page, IDs: ids, SubscriptionID: query.SubscriptionID, RepriceBatchID: query.RepriceBatchID, Status: status,
 	})
 	if err != nil {
 		writeRepriceError(r, err)

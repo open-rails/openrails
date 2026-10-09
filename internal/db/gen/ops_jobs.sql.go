@@ -66,6 +66,67 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 	return count, err
 }
 
+const listCatalogDriftByIDs = `-- name: ListCatalogDriftByIDs :many
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND finding_type LIKE 'catalog.%'
+ORDER BY created_at DESC, id DESC
+`
+
+type ListCatalogDriftByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+// Named drift findings, open or resolved, newest first.
+func (q *Queries) ListCatalogDriftByIDs(ctx context.Context, arg ListCatalogDriftByIDsParams) ([]BillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listCatalogDriftByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingReconciliationFinding
+	for rows.Next() {
+		var i BillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
+			&i.SubjectKey,
+			&i.Severity,
+			&i.Status,
+			&i.RecommendedAction,
+			&i.FirstSeenRun,
+			&i.LastSeenRun,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+			&i.OperatorNotes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Evidence,
+			&i.ResolvedBy,
+			&i.NotifiedAt,
+			&i.NotifiedSeverity,
+			&i.SeenRunClass,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings

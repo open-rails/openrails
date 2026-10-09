@@ -51,12 +51,25 @@ type InvoiceCollectionRetryResult struct {
 
 // ListInvoicePayments is one page of a payer's invoice's payments, newest
 // first.
-func (s *MoneyService) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, page billing.PageRequest) (billing.ListPage[models.InvoicePaymentAttempt], error) {
+func (s *MoneyService) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, params billing.InvoicePaymentListParams) (billing.ListPage[models.InvoicePaymentAttempt], error) {
 	var out billing.ListPage[models.InvoicePaymentAttempt]
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
 	}
+	if params.IDs != nil {
+		rows, err := s.db.Gen(ctx).ListInvoicePaymentsByIDs(ctx, gen.ListInvoicePaymentsByIDsParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID, Ids: uuidutil.Of(params.IDs),
+		})
+		if err != nil {
+			return out, fmt.Errorf("list invoice payments: %w", err)
+		}
+		for _, row := range rows {
+			out.Items = append(out.Items, invoicePaymentAttemptFromGen(row))
+		}
+		return out, nil
+	}
+	page := params.PageRequest
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return out, err

@@ -106,11 +106,11 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/merchant/host-events/acknowledge":                                         write,
 		"GET /v1/merchant/customers/{customer_id}/entitlements":                             read,
 		"POST /v1/merchant/customers/ensure":                                                write,
-		"POST /v1/merchant/customers/lookup":                                                read,
+		"POST /v1/merchant/tiers/lookup":                                                    read,
 		"GET /v1/merchant/customers/{customer_id}/delinquency":                              read,
 		"GET /v1/merchant/delinquency":                                                      read,
 		"GET /v1/merchant/customers/{customer_id}/payment-settlement-status":                read,
-		"PUT /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}":    write,
+		"PUT /v1/merchant/customers/{customer_id}/spend-delegations":                        write,
 		"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": write,
 		"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}":                  write,
 		"POST /v1/merchant/customers/{customer_id}/payments/off-channel":                    write,
@@ -118,12 +118,15 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}":               admin,
 		"PATCH /v1/merchant/customers/settings":                                             write,
 		"GET /v1/merchant/customers/settings":                                               read,
-		"POST /v1/merchant/customers/{customer_id}/credit-grants":                           write,
+		"POST /v1/merchant/credit-grants":                                                   write,
 		"POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke":               write,
 		"GET /v1/merchant/customers/{customer_id}/credit-grants":                            read,
 		"POST /v1/merchant/checkout-sessions":                                               write,
 		"POST /v1/merchant/admissions":                                                      write,
 		"POST /v1/merchant/admissions/{request_id}/capture":                                 write,
+		"POST /v1/merchant/admissions/release":                                              write,
+		"POST /v1/merchant/admissions/extend":                                               write,
+		"POST /v1/merchant/wasted-spend":                                                    write,
 		"GET /v1/merchant/admissions/{request_id}":                                          read,
 		"POST /v1/merchant/provider-operations":                                             write,
 		"GET /v1/merchant/provider-operations/{operation_id}":                               read,
@@ -223,7 +226,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	staff, configuration := &router.Table{}, &router.Table{}
 	RegisterMerchantRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, Merchant)
 	RegisterMerchantRoutes(router.NewMux(configuration, "", rt), rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, MerchantConfig)
-	for _, key := range []string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /merchant/catalog/products", "POST /merchant/catalog/offers/lookup", "GET /merchant/customers/{customer_id}/rate-overrides", "POST /merchant/customers/{customer_id}/credit-grants"} {
+	for _, key := range []string{"GET /merchant/catalog/revision", "GET /merchant/catalog/meters", "GET /merchant/catalog/product-archives/{id}", "GET /merchant/catalog/products", "POST /merchant/catalog/offers/lookup", "GET /merchant/customers/{customer_id}/rate-overrides", "POST /merchant/credit-grants"} {
 		require.Contains(t, routeKeys(staff), key)
 	}
 	for _, key := range routeKeys(staff) {

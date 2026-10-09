@@ -298,6 +298,10 @@ func (s *RepriceService) GetBatch(ctx context.Context, id billing.RepriceBatchID
 
 // ListBatches is one page of the merchant's batches, newest first.
 func (s *RepriceService) ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error) {
+	if params.IDs != nil {
+		rows, err := s.repo.ListBatchesByIDs(ctx, uuidutil.Of(params.IDs))
+		return billing.ListPage[billing.RepriceBatch]{Items: rows}, err
+	}
 	if params.PriceKey != "" && strings.TrimSpace(params.ProductKey) == "" {
 		return billing.ListPage[billing.RepriceBatch]{}, apperr.Invalidf("product_key is required with price_key")
 	}
@@ -336,6 +340,10 @@ func (s *RepriceService) GetReprice(ctx context.Context, id billing.RepriceID) (
 
 // ListReprices is one page of the merchant's reprices, newest first.
 func (s *RepriceService) ListReprices(ctx context.Context, params billing.RepriceListParams) (billing.ListPage[billing.Reprice], error) {
+	if params.IDs != nil {
+		rows, err := s.repo.ListByIDs(ctx, uuidutil.Of(params.IDs))
+		return pagination.Map(billing.ListPage[*models.SubscriptionReprice]{Items: rows}, Reprice), err
+	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.Reprice]{}, err

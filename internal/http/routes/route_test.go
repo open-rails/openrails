@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -47,7 +48,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 219)
+	require.Len(t, Catalog(), 217)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -103,6 +104,33 @@ func TestCatalogDeclarations(t *testing.T) {
 		require.True(t, ok, key)
 		require.Equal(t, key, got.Key())
 	}
+}
+
+// Every staff list of records with stable ids reads named ones by its ids
+// filter: the one way to fetch several known records.
+func TestMerchantListsTakeIDs(t *testing.T) {
+	typedID := reflect.TypeFor[interface{ UUID() uuid.UUID }]()
+	lists := 0
+	for _, r := range Catalog() {
+		if !r.Staff() || r.Method != GET || len(r.Responses) == 0 || r.Responses[0].Body == nil {
+			continue
+		}
+		page := reflect.TypeOf(r.Responses[0].Body)
+		if !strings.HasPrefix(page.Name(), "ListPage[") {
+			continue
+		}
+		items, _ := page.FieldByName("Items")
+		if items.Type.Elem().Kind() != reflect.Struct {
+			continue
+		}
+		id, ok := items.Type.Elem().FieldByName("ID")
+		if !ok || !id.Type.Implements(typedID) {
+			continue
+		}
+		lists++
+		require.Contains(t, r.Query, idsParam, "%s lists records with ids: declare idsParam", r.Key())
+	}
+	require.Equal(t, 21, lists)
 }
 
 type recorder struct {
@@ -243,4 +271,37 @@ func TestDeclaredIntegerQueriesAreStrict(t *testing.T) {
 		}
 	}
 	require.Equal(t, 4, reached)
+}
+
+// A list's ids filter names 1 to MaxBatchItems records, as one comma list,
+// and nothing else beside it.
+func TestIDsFilterIsBoundedAndAlone(t *testing.T) {
+	ids := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = "pay_" + uuid.NewString()
+		}
+		return strings.Join(parts, ",")
+	}
+	for query, want := range map[string]int{
+		"":                                    http.StatusOK,
+		"status=open&limit=5":                 http.StatusOK,
+		"ids=" + ids(1):                       http.StatusOK,
+		"ids=" + ids(billing.MaxBatchItems):   http.StatusOK,
+		"ids=" + ids(billing.MaxBatchItems+1): http.StatusBadRequest,
+		"ids=":                                http.StatusBadRequest,
+		"ids=" + ids(1) + "&ids=" + ids(1):    http.StatusBadRequest,
+		"ids=" + ids(2) + "&status=open":      http.StatusBadRequest,
+		"ids=" + ids(2) + "&limit=1":          http.StatusBadRequest,
+	} {
+		rec := httptest.NewRecorder()
+		called := false
+		idsMW(func(r *httprequest.Request) { called = true; r.Status(http.StatusOK) })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/merchant/payments?"+query, nil), nil))
+		require.Equal(t, want, rec.Code, query)
+		require.Equal(t, want == http.StatusOK, called, query)
+		if want != http.StatusOK {
+			require.Contains(t, rec.Body.String(), `"invalid_query"`, query)
+			require.Contains(t, rec.Body.String(), `"ids"`, query)
+		}
+	}
 }

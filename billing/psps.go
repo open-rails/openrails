@@ -56,8 +56,11 @@ type PSPCredential struct {
 	RotationVersion int `json:"rotation_version"`
 }
 
-// PSPListParams filters ListPSPs. Archived nil lists both states.
+// PSPListParams filters ListPSPs. Archived nil lists both states. IDs instead
+// reads 1 to MaxBatchItems named PSPs in one page, in any state or
+// environment; unknown ones are absent.
 type PSPListParams struct {
+	IDs      []PSPID
 	Rail     Rail
 	Archived *bool
 	PageRequest

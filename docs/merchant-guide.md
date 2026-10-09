@@ -104,8 +104,8 @@ products:
 
 Prepaid balance products use `credit_grant`; see the
 [prepaid catalog example](../README.md#prepaid-api-balance-catalog). Administrative
-funding uses `POST /v1/merchant/customers/{customer_id}/credit-grants`
-(`Client.CreateCreditGrant`), whose grants carry their own expiry. The price
+funding uses `POST /v1/merchant/credit-grants`
+(`Client.CreateCreditGrants`), whose grants carry their own expiry. The price
 `amount` alias does not change numeric credit-grant amounts, customer-selected
 bounds, or metered rate-card fields.
 
@@ -224,9 +224,9 @@ reference: [api/routes.md](api/routes.md).
 | List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Grant / revoke credit | `POST /v1/merchant/customers/{customer_id}/credit-grants`, `POST .../credit-grants/{id}/revoke` | Customers → profile |
+| Grant / revoke credit | `POST /v1/merchant/credit-grants`, `POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | Customers → profile |
 | Ask what a grant key did | `GET /v1/merchant/customers/{customer_id}/credit-grants?source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{customer_id}/spend-delegations[/{scope}/{scope_key}]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
+| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{customer_id}/spend-delegations`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
 | Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/merchant/customers/settings` | Settings; Customers → profile |
 | Catalog over HTTP | `POST /v1/merchant/catalog/products`, `PATCH /v1/merchant/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
@@ -288,8 +288,8 @@ resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
 and ends access, `ignore` keeps both.
 
 Granting credits is money-in: a host that keeps it from everyone who can grant
-access guards `openrails.Credits` (or `openrails.CreateCreditGrant`) with a
-stricter permission than `openrails.StaffWrites`. The grant body's `source_id`
+access guards `openrails.Credits` (or `openrails.CreateCreditGrants`) with a
+stricter permission than `openrails.StaffWrites`. Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 

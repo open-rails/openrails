@@ -32,7 +32,11 @@ func ListPSPs(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListPSPs(r.Request.Context(), id, billing.PSPListParams{Rail: query.Rail, Archived: query.Archived, PageRequest: page})
+	ids, ok := listIDs(r, billing.ParsePSPID)
+	if !ok {
+		return
+	}
+	out, err := svc.ListPSPs(r.Request.Context(), id, billing.PSPListParams{IDs: ids, Rail: query.Rail, Archived: query.Archived, PageRequest: page})
 	if err != nil {
 		writePSPError(r, err)
 		return

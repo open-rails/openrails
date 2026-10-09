@@ -25,6 +25,9 @@ func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, req
 	if params.Cursor != "" {
 		query.Set("cursor", params.Cursor)
 	}
+	if err := setIDs(query, params.IDs); err != nil {
+		return nil, err
+	}
 	path := "/v1/merchant/psps"
 	if len(query) > 0 {
 		path += "?" + query.Encode()

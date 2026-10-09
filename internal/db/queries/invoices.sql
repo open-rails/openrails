@@ -484,6 +484,15 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY p.created_at DESC, p.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListInvoicePaymentsByIDs :many
+-- An invoice's named payments, newest first.
+SELECT p.*
+FROM billing.invoice_payments p
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = ANY(sqlc.arg(ids)::uuid[])
+  AND p.customer_id = sqlc.arg(customer_id)::uuid
+  AND p.invoice_id = sqlc.arg(invoice_id)::uuid
+ORDER BY p.created_at DESC, p.id DESC;
+
 -- name: CountInvoicePaymentAttemptsByPayer :one
 SELECT count(*)
 FROM billing.invoice_payments p

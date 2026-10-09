@@ -117,9 +117,11 @@ LIMIT sqlc.arg(row_limit)::int;
 SELECT count(*) FROM billing.notifications
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid AND read_at IS NULL;
 
--- name: MarkCustomerNotificationRead :one
+-- name: MarkCustomerNotificationsRead :many
+-- Only the customer's own notifications: another customer's id matches none.
 UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid AND id = sqlc.arg(id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+  AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid
 RETURNING *;
 
 -- #1069: renewal-receipt throttle — a receipt for this subscription whose

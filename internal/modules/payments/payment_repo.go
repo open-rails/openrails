@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 type PaymentRepo struct {
@@ -554,6 +555,16 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
+	}
+	if p.IDs != nil {
+		rows, err := r.db.Gen(ctx).ListPaymentsByIDs(ctx, gen.ListPaymentsByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(p.IDs)})
+		if err != nil {
+			return out, err
+		}
+		if out.Items, err = models.PaymentsFromGen(rows); err != nil {
+			return out, err
+		}
+		return out, r.attachPaymentRelations(ctx, out.Items)
 	}
 	limit, err := pagination.Limit(p.PageRequest)
 	if err != nil {

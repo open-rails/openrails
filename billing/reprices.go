@@ -91,6 +91,9 @@ type Reprice struct {
 // RepriceListParams filters the merchant's reprices, newest first.
 type RepriceListParams struct {
 	PageRequest
+	// IDs instead reads 1 to MaxBatchItems named reprices in one page,
+	// whatever their state; unknown ones are absent.
+	IDs            []RepriceID
 	SubscriptionID SubscriptionID
 	RepriceBatchID RepriceBatchID
 	Status         RepriceStatus
@@ -124,6 +127,9 @@ type RepriceBatchListParams struct {
 	ProductKey string `json:"product_key"`
 	PageRequest
 	PriceKey string
+	// IDs instead reads 1 to MaxBatchItems named batches in one page;
+	// unknown ones are absent.
+	IDs []RepriceBatchID
 }
 
 // CreateRepriceBatchParams moves every active subscription on a prior

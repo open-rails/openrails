@@ -993,6 +993,70 @@ func (q *Queries) ListInvoicePayers(ctx context.Context, arg ListInvoicePayersPa
 	return items, nil
 }
 
+const listInvoicePaymentsByIDs = `-- name: ListInvoicePaymentsByIDs :many
+SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.channel, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
+FROM billing.invoice_payments p
+WHERE p.merchant_id = $1::uuid AND p.id = ANY($2::uuid[])
+  AND p.customer_id = $3::uuid
+  AND p.invoice_id = $4::uuid
+ORDER BY p.created_at DESC, p.id DESC
+`
+
+type ListInvoicePaymentsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceID  uuid.UUID
+}
+
+// An invoice's named payments, newest first.
+func (q *Queries) ListInvoicePaymentsByIDs(ctx context.Context, arg ListInvoicePaymentsByIDsParams) ([]BillingInvoicePayment, error) {
+	rows, err := q.db.Query(ctx, listInvoicePaymentsByIDs,
+		arg.MerchantID,
+		arg.Ids,
+		arg.CustomerID,
+		arg.InvoiceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingInvoicePayment
+	for rows.Next() {
+		var i BillingInvoicePayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.InvoiceID,
+			&i.LedgerTransferID,
+			&i.Currency,
+			&i.Amount,
+			&i.Status,
+			&i.Channel,
+			&i.Rail,
+			&i.RailPaymentID,
+			&i.FailureCode,
+			&i.FailureMessage,
+			&i.AttemptedAt,
+			&i.SettledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.FailureReason,
+			&i.PaymentMethodID,
+			&i.IdempotencyKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInvoicePaymentsPage = `-- name: ListInvoicePaymentsPage :many
 SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.channel, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
 FROM billing.invoice_payments p

@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 var (
@@ -56,6 +57,17 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.ListPage[billing.CreditGrant]{}, err
+	}
+	if params.IDs != nil {
+		rows, err := s.db.Gen(ctx).ListCustomerCreditGrantsByIDs(ctx, gen.ListCustomerCreditGrantsByIDsParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), Ids: uuidutil.Of(params.IDs)})
+		if err != nil {
+			return billing.ListPage[billing.CreditGrant]{}, err
+		}
+		var page billing.ListPage[billing.CreditGrant]
+		for _, row := range rows {
+			page.Items = append(page.Items, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), s.now()))
+		}
+		return page, nil
 	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {

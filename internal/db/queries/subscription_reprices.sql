@@ -48,6 +48,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListSubscriptionRepricesByIDs :many
+SELECT * FROM billing.subscription_reprices
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
+
 -- The batch's still-scheduled reprices, for a batch cancel.
 -- name: ListScheduledBatchReprices :many
 SELECT * FROM billing.subscription_reprices

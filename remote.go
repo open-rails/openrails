@@ -357,18 +357,21 @@ func (c *Client) ListEntitlementCustomers(ctx context.Context, entitlement strin
 	return &out, nil
 }
 
-// GetEffectiveTier returns the tier the customer holds in a tier group; its
-// Tier is nil when they hold none.
-func (c *Client) GetEffectiveTier(ctx context.Context, customerID billing.CustomerID, group string, requestOptions ...RequestOption) (*billing.EffectiveTier, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
+// GetEffectiveTiers answers the tier each of 1 to billing.MaxBatchItems
+// customers holds in params.Group. Every requested customer is in the answer;
+// one holding none, or unknown to the merchant, is nil.
+func (c *Client) GetEffectiveTiers(ctx context.Context, params billing.GetEffectiveTiersParams, requestOptions ...RequestOption) (map[billing.CustomerID]*billing.Tier, error) {
+	if strings.TrimSpace(params.Group) == "" {
+		return nil, invalidErr("group is required")
+	}
+	if err := batchIDs("customer_ids", params.CustomerIDs, billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	var out billing.EffectiveTier
-	if err := c.do(ctx, http.MethodGet, path+"/tier?"+url.Values{"group": {group}}.Encode(), nil, &out, requestOptions...); err != nil {
+	var out billing.EffectiveTierLookup
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/tiers/lookup", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Tiers, nil
 }
 
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service

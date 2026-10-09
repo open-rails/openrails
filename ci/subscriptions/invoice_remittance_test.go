@@ -78,7 +78,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			require.Equal(t, accepted.invoice, concurrent.invoice, "concurrent first submissions share one receipt")
 			paid := accepted.invoice
 			require.Equal(t, owed-amount, paid.AmountDue)
-			payments, err := client.ListInvoicePayments(ctx, first.ID, billing.PageRequest{})
+			payments, err := client.ListInvoicePayments(ctx, first.ID, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			require.Len(t, payments.Items, 1)
 			receipt := payments.Items[0]
@@ -99,7 +99,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			require.Equal(t, billing.InvoicePaid, paid.Status)
 			_, err = client.CreateInvoicePayment(ctx, first.ID, billing.CreateInvoicePaymentParams{Amount: 1, Reference: "new-payment-after-paid"})
 			requireInvoiceRefusal(t, err, billing.CodeInvoiceActionNotAllowed)
-			payments, err = client.ListInvoicePayments(ctx, first.ID, billing.PageRequest{})
+			payments, err = client.ListInvoicePayments(ctx, first.ID, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			want := 1
 			if partial {
@@ -114,7 +114,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			nextAfter, err := client.GetInvoice(ctx, next.ID)
 			require.NoError(t, err)
 			require.Equal(t, next, nextAfter)
-			nextPayments, err := client.ListInvoicePayments(ctx, next.ID, billing.PageRequest{})
+			nextPayments, err := client.ListInvoicePayments(ctx, next.ID, billing.InvoicePaymentListParams{})
 			require.NoError(t, err)
 			require.Empty(t, nextPayments.Items)
 			// A receipt is not a replacement for live merchant authorization.

@@ -112,7 +112,7 @@ func requireInvoicePaidOnce(f *fleet, id billing.InvoiceID, sales, requests int,
 	require.Equal(f.t, nmiInvoiceAmount, invoice.AmountPaid)
 	require.Len(f.t, f.base.nmi.ledger(""), sales)
 	require.Len(f.t, f.base.nmi.Attempts(), requests, "same shared database never resends the accepted collection")
-	payments, err := f.any().client[remote].ListInvoicePayments(f.t.Context(), id, billing.PageRequest{})
+	payments, err := f.any().client[remote].ListInvoicePayments(f.t.Context(), id, billing.InvoicePaymentListParams{})
 	require.NoError(f.t, err)
 	require.Len(f.t, payments.Items, 1+manual)
 	var count int

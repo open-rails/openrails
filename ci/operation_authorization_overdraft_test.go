@@ -34,7 +34,7 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 		return c
 	}
 	fund := func(c billing.CustomerID, amount int64) {
-		_, err := client.CreateCreditGrant(ctx, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: uuid.NewString()})
+		_, err := createCreditGrant(ctx, client, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 	}
 	open := func(c billing.CustomerID, operationID string, amount, overdraft int64) error {

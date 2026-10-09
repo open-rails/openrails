@@ -95,7 +95,6 @@ WITH cf AS (
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
       LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
      WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid
-       AND (sqlc.narg(id)::uuid IS NULL OR c.id = sqlc.narg(id)::uuid)
 )
 SELECT cf.*
 FROM cf
@@ -114,6 +113,37 @@ WHERE (sqlc.narg(owners)::text[] IS NULL OR cf.owner = ANY(sqlc.narg(owners)::te
        OR (cf.due_at, cf.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY cf.due_at DESC, cf.id DESC
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListRebillCyclesByIDs :many
+-- The named cycles with ListRebillCycles' facts, latest due first.
+WITH cf AS (
+    SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
+           c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
+           CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
+                WHEN f.category IS NULL THEN 'pending'
+                WHEN f.category = 'approved' THEN 'approved'
+                WHEN f.category = 'system_error' THEN 'error'
+                ELSE 'declined' END::text AS first_outcome,
+           LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
+                 c.due_at + interval '15 days')::timestamptz AS closed_at,
+           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
+                WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
+                WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
+                              WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id AND u.kind = 'updated'
+                                AND u.occurred_at >= COALESCE(c.missed_at, f.attempted_at) AND u.occurred_at <= w.attempted_at) THEN 'updated_card'
+                WHEN w.kind = 'customer_retry' THEN 'customer_retry'
+                ELSE 'dunning_retry' END::text AS recovered_by
+      FROM billing.rebill_cycles c
+      LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+      LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
+                          ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
+     WHERE c.merchant_id = sqlc.arg(merchant_id)::uuid AND c.id = ANY(sqlc.arg(ids)::uuid[])
+)SELECT cf.*
+FROM cf
+ORDER BY cf.due_at DESC, cf.id DESC;
 
 -- #1118: cycles due before the retention cutoff whose attempts are all gone,
 -- batched like the attempt purge that runs first.

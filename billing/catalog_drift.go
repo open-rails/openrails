@@ -23,9 +23,12 @@ type CatalogDrift struct {
 	ResolvedAt         *time.Time `json:"resolved_at"`
 }
 
-// CatalogDriftListParams filters ListCatalogDrift.
+// CatalogDriftListParams filters ListCatalogDrift. IDs instead reads 1 to
+// MaxBatchItems named findings in one page, open or resolved; unknown ones are
+// absent.
 type CatalogDriftListParams struct {
 	PageRequest
+	IDs          []FindingID
 	Rail         string
 	Kind         string
 	ResourceType string

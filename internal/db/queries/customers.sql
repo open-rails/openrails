@@ -55,9 +55,10 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id) AND email IS NUL
 SELECT * FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
 
--- name: GetCustomersByIDs :many
+-- name: ListCustomersByIDs :many
 SELECT * FROM billing.customers
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
 
 -- name: ListCustomers :many
 -- Newest first. q matches an id prefix or an email substring.

@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // GetProduct returns a product by ID.
@@ -78,7 +79,7 @@ func (s *Service) ListProducts(ctx context.Context, params billing.ProductListPa
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err
 	}
-	filter := catalog.ProductFilter{Archived: params.Archived, TierGroup: params.TierGroup, Entitlement: params.Entitlement, ForSale: params.ForSale}
+	filter := catalog.ProductFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, TierGroup: params.TierGroup, Entitlement: params.Entitlement, ForSale: params.ForSale}
 	page, err := products.List(ctx, filter, params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err
@@ -260,7 +261,7 @@ func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams
 	if err != nil {
 		return billing.ListPage[billing.Price]{}, err
 	}
-	filter := catalog.PriceFilter{Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), Recurring: params.Recurring}
+	filter := catalog.PriceFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), Recurring: params.Recurring}
 	if !params.ProductID.IsZero() {
 		id := params.ProductID.UUID()
 		filter.ProductID = &id

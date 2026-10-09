@@ -881,6 +881,7 @@ SELECT price.id, price.product_id, price.amount, price.currency, price.archived,
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND price.id = ANY($2::uuid[])
+ORDER BY price.created_at DESC, price.id DESC
 `
 
 type ListPricesWithProductByIDsParams struct {

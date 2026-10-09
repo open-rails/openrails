@@ -28,6 +28,9 @@ func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 			return
 		}
 		params := billing.InvoiceListParams{PageRequest: page}
+		if params.IDs, ok = listIDs(r, billing.ParseInvoiceID); !ok {
+			return
+		}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
 			id, err := billing.ParseCustomerID(raw)
 			if err != nil || id.IsZero() {
@@ -101,7 +104,11 @@ func ListInvoicePayments(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListInvoicePayments(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID.UUID(), page)
+	ids, ok := listIDs(r, billing.ParseInvoicePaymentID)
+	if !ok {
+		return
+	}
+	out, err := svc.ListInvoicePayments(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID.UUID(), billing.InvoicePaymentListParams{PageRequest: page, IDs: ids})
 	if err != nil {
 		writeInvoiceError(r, err)
 		return

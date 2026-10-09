@@ -82,6 +82,9 @@ func (c *Client) ListProducts(ctx context.Context, params billing.ProductListPar
 		q.Set("entitlement", params.Entitlement)
 	}
 	setBool(q, "for_sale", params.ForSale)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Product]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -165,6 +168,9 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 	}
 	setBool(q, "recurring", params.Recurring)
 	setBool(q, "archived", params.Archived)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Price]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

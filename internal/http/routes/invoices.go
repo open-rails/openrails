@@ -18,11 +18,11 @@ var (
 // the customer who owes them.
 var invoicesRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/invoices", Group: Merchant, Auth: AuthMerchant, Name: "ListInvoices", Level: LevelRead, Resources: res(ResInvoices),
-		Query: params(cursorPage, text("currency"), text("customer_id"), text("period_starts_after"), text("period_starts_before"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Invoice]{}}}, Errors: codes("invalid_cursor"), Bind: gated(handlers.ListInvoices)},
+		Query: params(cursorPage, idsParam, text("currency"), text("customer_id"), text("period_starts_after"), text("period_starts_before"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Invoice]{}}}, Errors: codes("invalid_cursor"), Bind: gated(handlers.ListInvoices)},
 	{Method: GET, Path: "/v1/merchant/invoices/{id}", Group: Merchant, Auth: AuthMerchant, Name: "GetInvoice", Level: LevelRead, Resources: res(ResInvoices),
 		Responses: []Reply{{200, billing.Invoice{}}}, Errors: invoiceErrors, Bind: gated(handlers.GetInvoice)},
 	{Method: GET, Path: "/v1/merchant/invoices/{id}/payments", Group: Merchant, Auth: AuthMerchant, Name: "ListInvoicePayments", Level: LevelRead, Resources: res(ResInvoices),
-		Query: cursorPage, Responses: []Reply{{200, billing.ListPage[billing.InvoicePayment]{}}}, Errors: codes("invalid_cursor", "invalid_param", "resource_not_found"), Handler: h(handlers.ListInvoicePayments)},
+		Query: params(cursorPage, idsParam), Responses: []Reply{{200, billing.ListPage[billing.InvoicePayment]{}}}, Errors: codes("invalid_cursor", "invalid_param", "resource_not_found"), Handler: h(handlers.ListInvoicePayments)},
 	{Method: POST, Path: "/v1/merchant/invoices/{id}/payments", Group: Merchant, Auth: AuthMerchant, Name: "CreateInvoicePayment", Level: LevelWrite, Resources: res(ResInvoices), Sensitive: true, Limit: middleware.AdminOperationOffChannel,
 		Request: billing.CreateInvoicePaymentParams{}, Responses: []Reply{{200, billing.Invoice{}}}, Errors: codes("invalid_param", "invoice_action_not_allowed", "invoice_payment_exceeds_due", "invoice_payment_invalid", "invoice_payment_reference_used", "resource_not_found"), Handler: h(handlers.CreateInvoicePayment)},
 	{Method: POST, Path: "/v1/merchant/invoices/{id}/void", Group: Merchant, Auth: AuthMerchant, Name: "VoidInvoice", Level: LevelWrite, Resources: res(ResInvoices), Sensitive: true, Limit: middleware.AdminOperationDestructive,

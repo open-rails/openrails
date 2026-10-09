@@ -1073,3 +1073,31 @@ func recordUsage(ctx context.Context, client *openrails.Client, params billing.R
 	}
 	return results[0].Event, results[0].Err()
 }
+
+// createCreditGrant grants one customer credit: a batch of one.
+func createCreditGrant(ctx context.Context, client *openrails.Client, customer billing.CustomerID, params billing.CreateCreditGrantParams) (*billing.CreditGrant, error) {
+	params.CustomerID = customer
+	grants, err := client.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{params})
+	if err != nil {
+		return nil, err
+	}
+	return &grants[0], nil
+}
+
+// releaseAdmission releases one admission: a batch of one.
+func releaseAdmission(ctx context.Context, client *openrails.Client, requestID string) (*billing.Admission, error) {
+	results, err := client.ReleaseAdmissions(ctx, []string{requestID})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Admission, results[0].Err()
+}
+
+// extendAdmission extends one hold: a batch of one.
+func extendAdmission(ctx context.Context, client *openrails.Client, requestID string, expiresAt time.Time) (*billing.Admission, error) {
+	results, err := client.ExtendAdmissions(ctx, []billing.ExtendAdmissionParams{{RequestID: requestID, ExpiresAt: expiresAt}})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Admission, results[0].Err()
+}

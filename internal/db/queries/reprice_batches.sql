@@ -36,6 +36,20 @@ CROSS JOIN LATERAL (
 ) c
 WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.id = sqlc.arg(id)::uuid;
 
+-- name: ListRepriceBatchesByIDs :many
+SELECT sqlc.embed(b), c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY b.created_at DESC, b.id DESC;
+
 -- name: ListRepriceBatchesPage :many
 SELECT sqlc.embed(b), c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.reprice_batches b

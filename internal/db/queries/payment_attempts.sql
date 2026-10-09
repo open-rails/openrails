@@ -109,6 +109,11 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY a.attempted_at DESC, a.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListPaymentAttemptsByIDs :many
+SELECT * FROM billing.payment_attempts
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY attempted_at DESC, id DESC;
+
 -- name: GetPaymentAttempt :one
 SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;

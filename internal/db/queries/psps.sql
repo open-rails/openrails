@@ -100,6 +100,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListPSPsByIDs :many
+SELECT * FROM billing.psps
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
+
 -- name: GetActivePSPForNewWork :one
 -- The newest non-archived account on a rail+environment. Existing provider-bound
 -- work must use its recorded psp_id instead of this selector.

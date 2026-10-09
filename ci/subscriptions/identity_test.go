@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +116,7 @@ func TestInvokersShareTheSubjectsBalanceOnTheirOwnLimits(t *testing.T) {
 	const balance, limit, step = int64(600_000), int64(400_000), int64(100_000)
 	const cozy = "https://cozy.example"
 	app := w.newCustomer()
-	_, err := host.CreateCreditGrant(ctx, app.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: balance, Source: "test", SourceID: "seed"})
+	_, err := createCreditGrant(ctx, host, app.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: balance, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
 	key := func(user string) string { return cozy + "|" + user }
 	var delegations []billing.SpendDelegation
@@ -273,7 +274,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
 		"GET /v1/me/payment-method-setups/{id}":                      {"/payment-method-setups/" + setup, nil},
 		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
-		"POST /v1/me/notifications/{id}/read":                        {"/notifications/" + notification + "/read", map[string]any{}},
 		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},
 		"POST /v1/me/checkout-sessions/{id}/pay":                     {"/checkout-sessions/" + session.id + "/pay", map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard}},
 	}
@@ -290,6 +290,32 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	}
 	require.Len(t, probes, probed, "every fixture names a mounted route")
 
+	// Routes naming objects in their body: A's ids are answered null and
+	// left untouched. Every such route needs a fixture here.
+	bodyProbes := map[string]struct {
+		path string
+		body any
+		ids  string
+		id   string
+	}{
+		"POST /v1/me/notifications/read": {"/notifications/read", map[string]any{"notification_ids": []string{notification}}, "notifications", notification},
+	}
+	probed = 0
+	for _, route := range routes.Catalog() {
+		if route.Group != routes.Customer || !namesObjectsInBody(route.Request) {
+			continue
+		}
+		probe, ok := bodyProbes[route.Key()]
+		require.True(t, ok, "%s names objects in its body and has no IDOR fixture", route.Key())
+		status, out := w.callAt(w.server.URL, b.token, route.Method, probe.path, "idor-"+uuid.NewString(), probe.body)
+		require.Equal(t, http.StatusOK, status, "%s with A's id: %v", route.Key(), out)
+		answered := out[probe.ids].(map[string]any)
+		require.Contains(t, answered, probe.id, "%s answers every requested id", route.Key())
+		require.Nil(t, answered[probe.id], "%s with A's id: %v", route.Key(), out)
+		probed++
+	}
+	require.Len(t, bodyProbes, probed, "every body fixture names a mounted route")
+
 	read := session.read()
 	require.Empty(t, read["saved_methods"], "a guest sees no saved cards")
 	status, out := w.page(http.MethodGet, "/v1/checkout-sessions/"+session.id, b.token, nil)
@@ -305,14 +331,16 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.Equal(t, billing.SubscriptionActive, got.Status)
 	require.Equal(t, from.ID, got.PriceID)
 	require.Nil(t, got.CanceledAt)
-	methods, err := w.client[embedded].ListPaymentMethods(ctx, a.cid(), billing.PageRequest{})
+	methods, err := w.client[embedded].ListPaymentMethods(ctx, a.cid(), billing.PaymentMethodListParams{})
 	require.NoError(t, err)
 	require.Len(t, methods.Items, 2, "A's cards are A's")
 	again, err := w.client[embedded].GetInvoice(ctx, invoices.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, invoices.Items[0].AmountDue, again.AmountDue)
 	unread := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)[0].(map[string]any)
-	require.Nil(t, unread["read_at"])
+	require.Equal(t, false, unread["seen"], "A's notification is still unread")
+	marked := a.must(http.MethodPost, "/notifications/read", "", map[string]any{"notification_ids": []string{notification}})["notifications"].(map[string]any)
+	require.Equal(t, true, marked[notification].(map[string]any)["seen"], "A marks it read")
 	require.NotEmpty(t, unwrap(a.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))["client_secret"], "A's upgrade still waits for A")
 }
 
@@ -342,4 +370,19 @@ func TestHarnessAuthConforms(t *testing.T) {
 		StaleStaff: req(v.staleToken(t, "staff")),
 		Machine:    req(v.hostToken(t)),
 	})
+}
+
+// namesObjectsInBody reports a request body carrying a list of object ids.
+func namesObjectsInBody(request any) bool {
+	if request == nil {
+		return false
+	}
+	t := reflect.TypeOf(request)
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		if strings.HasSuffix(name, "_ids") {
+			return true
+		}
+	}
+	return false
 }

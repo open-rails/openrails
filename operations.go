@@ -25,6 +25,9 @@ func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams
 			q.Set(key, value)
 		}
 	}
+	if err := setIDs(q, req.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Finding]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings?"+q.Encode(), nil, &out, options...); err != nil {
 		return nil, err

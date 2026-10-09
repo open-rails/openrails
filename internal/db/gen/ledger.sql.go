@@ -571,6 +571,58 @@ func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLed
 	return items, nil
 }
 
+const listLedgerTransfersByIDs = `-- name: ListLedgerTransfersByIDs :many
+SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM billing.ledger_transfers
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+  AND customer_id = $3::uuid
+ORDER BY created_at DESC, id DESC
+`
+
+type ListLedgerTransfersByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// A customer's named movements, newest first.
+func (q *Queries) ListLedgerTransfersByIDs(ctx context.Context, arg ListLedgerTransfersByIDsParams) ([]BillingLedgerTransfer, error) {
+	rows, err := q.db.Query(ctx, listLedgerTransfersByIDs, arg.MerchantID, arg.Ids, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingLedgerTransfer
+	for rows.Next() {
+		var i BillingLedgerTransfer
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.DebitAccountID,
+			&i.CreditAccountID,
+			&i.Amount,
+			&i.Currency,
+			&i.TransferType,
+			&i.AllowDebitNegativeUpTo,
+			&i.Source,
+			&i.SourceID,
+			&i.GrantID,
+			&i.CustomerID,
+			&i.InvokerID,
+			&i.Resource,
+			&i.InvoiceID,
+			&i.CreatedAt,
+			&i.Operation,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const sumLedgerMovementsByCustomerInPeriod = `-- name: SumLedgerMovementsByCustomerInPeriod :many
 SELECT transfer_type, COALESCE(SUM(amount), 0)::bigint AS total
 FROM billing.ledger_transfers

@@ -206,6 +206,51 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 	return items, nil
 }
 
+const listMerchantNotificationsByIDs = `-- name: ListMerchantNotificationsByIDs :many
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND recipient_kind = 'merchant'
+ORDER BY created_at DESC, id DESC
+`
+
+type ListMerchantNotificationsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListMerchantNotificationsByIDs(ctx context.Context, arg ListMerchantNotificationsByIDsParams) ([]BillingNotification, error) {
+	rows, err := q.db.Query(ctx, listMerchantNotificationsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingNotification
+	for rows.Next() {
+		var i BillingNotification
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.RecipientKind,
+			&i.ReadAt,
+			&i.Severity,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMerchantWebhooks = `-- name: ListMerchantWebhooks :many
 SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM billing.merchant_webhooks
 WHERE merchant_webhooks.merchant_id = $1::uuid
@@ -214,6 +259,47 @@ ORDER BY created_at DESC, id
 
 func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID) ([]BillingMerchantWebhook, error) {
 	rows, err := q.db.Query(ctx, listMerchantWebhooks, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingMerchantWebhook
+	for rows.Next() {
+		var i BillingMerchantWebhook
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Name,
+			&i.DestinationHost,
+			&i.SecretVersion,
+			&i.Format,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMerchantWebhooksByIDs = `-- name: ListMerchantWebhooksByIDs :many
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM billing.merchant_webhooks
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id
+`
+
+type ListMerchantWebhooksByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListMerchantWebhooksByIDs(ctx context.Context, arg ListMerchantWebhooksByIDsParams) ([]BillingMerchantWebhook, error) {
+	rows, err := q.db.Query(ctx, listMerchantWebhooksByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}

@@ -428,37 +428,52 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 	return items, nil
 }
 
-const markCustomerNotificationRead = `-- name: MarkCustomerNotificationRead :one
+const markCustomerNotificationsRead = `-- name: MarkCustomerNotificationsRead :many
 UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
-WHERE merchant_id = $1::uuid AND recipient_kind = 'customer' AND customer_id = $2::uuid AND id = $3::uuid
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+  AND recipient_kind = 'customer' AND customer_id = $3::uuid
 RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
 `
 
-type MarkCustomerNotificationReadParams struct {
+type MarkCustomerNotificationsReadParams struct {
 	MerchantID uuid.UUID
+	Ids        []uuid.UUID
 	CustomerID uuid.UUID
-	ID         uuid.UUID
 }
 
-func (q *Queries) MarkCustomerNotificationRead(ctx context.Context, arg MarkCustomerNotificationReadParams) (BillingNotification, error) {
-	row := q.db.QueryRow(ctx, markCustomerNotificationRead, arg.MerchantID, arg.CustomerID, arg.ID)
-	var i BillingNotification
-	err := row.Scan(
-		&i.ID,
-		&i.EventType,
-		&i.Data,
-		&i.RecipientKind,
-		&i.ReadAt,
-		&i.Severity,
-		&i.Title,
-		&i.Body,
-		&i.Link,
-		&i.CreatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.EmailedAt,
-	)
-	return i, err
+// Only the customer's own notifications: another customer's id matches none.
+func (q *Queries) MarkCustomerNotificationsRead(ctx context.Context, arg MarkCustomerNotificationsReadParams) ([]BillingNotification, error) {
+	rows, err := q.db.Query(ctx, markCustomerNotificationsRead, arg.MerchantID, arg.Ids, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingNotification
+	for rows.Next() {
+		var i BillingNotification
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.RecipientKind,
+			&i.ReadAt,
+			&i.Severity,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markNotificationEmailed = `-- name: MarkNotificationEmailed :execrows

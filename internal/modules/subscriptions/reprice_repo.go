@@ -84,6 +84,23 @@ func (r *RepriceRepo) ListBatches(ctx context.Context, productKey string, priceK
 	return out, nil
 }
 
+// ListBatchesByIDs reads the named batches, newest first.
+func (r *RepriceRepo) ListBatchesByIDs(ctx context.Context, ids []uuid.UUID) ([]billing.RepriceBatch, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListRepriceBatchesByIDs(ctx, gen.ListRepriceBatchesByIDsParams{MerchantID: tid.UUID(), Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]billing.RepriceBatch, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, repriceBatch(row.BillingRepriceBatch, row.Scheduled, row.Applied, row.Canceled, row.Blocked))
+	}
+	return out, nil
+}
+
 // CreateSubscriptionReprice schedules one subscription's price move.
 // batchID is nil for a single ad-hoc reprice() call. acknowledgedShortNotice
 // (#781) records whether this row's effective_at was inside the merchant's
@@ -317,6 +334,19 @@ func (r *RepriceRepo) ListPage(ctx context.Context, f RepriceFilter, fetch int32
 		MerchantID: tid.UUID(), SubscriptionID: f.SubscriptionID, RepriceBatchID: f.RepriceBatchID, Status: status,
 		AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return models.SubscriptionRepricesFromGen(rows), nil
+}
+
+// ListByIDs reads the named reprices, newest first.
+func (r *RepriceRepo) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]*models.SubscriptionReprice, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListSubscriptionRepricesByIDs(ctx, gen.ListSubscriptionRepricesByIDsParams{MerchantID: tid.UUID(), Ids: ids})
 	if err != nil {
 		return nil, err
 	}

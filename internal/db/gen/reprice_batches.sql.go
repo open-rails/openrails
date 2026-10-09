@@ -161,6 +161,70 @@ func (q *Queries) GetRepriceBatch(ctx context.Context, arg GetRepriceBatchParams
 	return i, err
 }
 
+const listRepriceBatchesByIDs = `-- name: ListRepriceBatchesByIDs :many
+SELECT b.id, b.merchant_id, b.price_key, b.to_price_id, b.effective_at, b.subscriptions_matched, b.subscriptions_skipped, b.created_at, b.kind, b.source_price_id, b.fallback_policy, c.scheduled, c.applied, c.canceled, c.blocked
+FROM billing.reprice_batches b
+CROSS JOIN LATERAL (
+    SELECT count(*) FILTER (WHERE r.status = 'scheduled') AS scheduled,
+           count(*) FILTER (WHERE r.status = 'applied') AS applied,
+           count(*) FILTER (WHERE r.status = 'canceled') AS canceled,
+           count(*) FILTER (WHERE r.status = 'blocked') AS blocked
+    FROM billing.subscription_reprices r
+    WHERE r.merchant_id = b.merchant_id AND r.reprice_batch_id = b.id
+) c
+WHERE b.merchant_id = $1::uuid AND b.id = ANY($2::uuid[])
+ORDER BY b.created_at DESC, b.id DESC
+`
+
+type ListRepriceBatchesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+type ListRepriceBatchesByIDsRow struct {
+	BillingRepriceBatch BillingRepriceBatch
+	Scheduled           int64
+	Applied             int64
+	Canceled            int64
+	Blocked             int64
+}
+
+func (q *Queries) ListRepriceBatchesByIDs(ctx context.Context, arg ListRepriceBatchesByIDsParams) ([]ListRepriceBatchesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRepriceBatchesByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRepriceBatchesByIDsRow
+	for rows.Next() {
+		var i ListRepriceBatchesByIDsRow
+		if err := rows.Scan(
+			&i.BillingRepriceBatch.ID,
+			&i.BillingRepriceBatch.MerchantID,
+			&i.BillingRepriceBatch.PriceKey,
+			&i.BillingRepriceBatch.ToPriceID,
+			&i.BillingRepriceBatch.EffectiveAt,
+			&i.BillingRepriceBatch.SubscriptionsMatched,
+			&i.BillingRepriceBatch.SubscriptionsSkipped,
+			&i.BillingRepriceBatch.CreatedAt,
+			&i.BillingRepriceBatch.Kind,
+			&i.BillingRepriceBatch.SourcePriceID,
+			&i.BillingRepriceBatch.FallbackPolicy,
+			&i.Scheduled,
+			&i.Applied,
+			&i.Canceled,
+			&i.Blocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRepriceBatchesPage = `-- name: ListRepriceBatchesPage :many
 SELECT b.id, b.merchant_id, b.price_key, b.to_price_id, b.effective_at, b.subscriptions_matched, b.subscriptions_skipped, b.created_at, b.kind, b.source_price_id, b.fallback_policy, c.scheduled, c.applied, c.canceled, c.blocked
 FROM billing.reprice_batches b

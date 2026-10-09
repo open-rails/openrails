@@ -128,29 +128,34 @@ WHERE pe.added_at <= sqlc.arg(at_time)::timestamptz
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
 ORDER BY k.key COLLATE "C", pa.starts_at, pa.id;
 
--- name: ResolveEffectiveTier :one
--- or#912: the customer's tier in a group: the highest-ranked product of the
+-- name: ResolveEffectiveTiers :many
+-- or#912: each customer's tier in a group: the highest-ranked product of the
 -- group granting a key the customer holds at at (archived products included:
--- holders keep deriving them). Ties: product key, then key.
-SELECT p.id AS product_id, p.key AS product_key, p.display_name AS product_display_name, p.tier_rank,
-       tier_key.entitlement::text AS entitlement
-FROM billing.products p
-JOIN billing.product_entitlements tier_key ON tier_key.merchant_id = p.merchant_id AND tier_key.product_id = p.id
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.tier_group = sqlc.arg(tier_group)::text
-  AND tier_key.added_at <= sqlc.arg(at)::timestamptz
-  AND (tier_key.removed_at IS NULL OR tier_key.removed_at > sqlc.arg(at)::timestamptz)
-  AND EXISTS (
-    SELECT 1 FROM billing.product_entitlements pe
-    JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
-    WHERE pe.merchant_id = p.merchant_id AND pe.entitlement = tier_key.entitlement
-      AND pe.added_at <= sqlc.arg(at)::timestamptz
-      AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at)::timestamptz)
-      AND pa.customer_id = sqlc.arg(customer_id)::uuid
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= sqlc.arg(at)::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz))
-ORDER BY p.tier_rank DESC, p.key ASC, tier_key.entitlement COLLATE "C" ASC
-LIMIT 1;
+-- holders keep deriving them). Ties: product key, then key. A customer with
+-- no tier has no row.
+SELECT c.customer_id::uuid AS customer_id, t.product_id, t.product_key, t.product_display_name, t.tier_rank, t.entitlement
+FROM unnest(sqlc.arg(customer_ids)::uuid[]) AS c(customer_id)
+CROSS JOIN LATERAL (
+  SELECT p.id AS product_id, p.key AS product_key, p.display_name AS product_display_name, p.tier_rank,
+         tier_key.entitlement::text AS entitlement
+  FROM billing.products p
+  JOIN billing.product_entitlements tier_key ON tier_key.merchant_id = p.merchant_id AND tier_key.product_id = p.id
+  WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.tier_group = sqlc.arg(tier_group)::text
+    AND tier_key.added_at <= sqlc.arg(at)::timestamptz
+    AND (tier_key.removed_at IS NULL OR tier_key.removed_at > sqlc.arg(at)::timestamptz)
+    AND EXISTS (
+      SELECT 1 FROM billing.product_entitlements pe
+      JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
+      WHERE pe.merchant_id = p.merchant_id AND pe.entitlement = tier_key.entitlement
+        AND pe.added_at <= sqlc.arg(at)::timestamptz
+        AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at)::timestamptz)
+        AND pa.customer_id = c.customer_id
+        AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+        AND pa.starts_at <= sqlc.arg(at)::timestamptz
+        AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz))
+  ORDER BY p.tier_rank DESC, p.key ASC, tier_key.entitlement COLLATE "C" ASC
+  LIMIT 1
+) t;
 
 -- name: PermanentBenefitsCovered :one
 -- A partial bundle remains useful; refuse only when every key of the product

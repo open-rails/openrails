@@ -92,42 +92,37 @@ func moneyRefusal(err error) *api.APIError {
 	return refusalOf(err)
 }
 
-// CreateCreditGrant grants a customer prepaid credit.
-func CreateCreditGrant(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
-	var params billing.CreateCreditGrantParams
+// CreateCreditGrants grants prepaid credit across customers, all or none.
+// It answers 201, or 200 when every grant replayed one already made.
+func CreateCreditGrants(r *httprequest.Request) {
+	var params billing.CreateCreditGrantBatchParams
 	if !r.BindJSON(&params) {
 		return
 	}
-	if params.Amount <= 0 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be positive").WithParam("amount"))
+	if !batchItems(r, len(params.Items), billing.MaxBatchItems) {
 		return
 	}
-	if strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "source_id must contain 1 to 255 bytes").WithParam("source_id"))
-		return
-	}
-	if strings.TrimSpace(params.Source) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "source is required").WithParam("source"))
-		return
+	for _, item := range params.Items {
+		if !item.CustomerID.IsZero() && !requireServiceCustomerScope(r, item.CustomerID) {
+			return
+		}
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
 	}
-	grant, err := svc.CreateCreditGrant(r.Request.Context(), customer, params)
+	grants, err := svc.CreateCreditGrants(r.Request.Context(), params.Items)
 	if err != nil {
 		writeMoneyError(r, err, "credit grant failed")
 		return
 	}
-	status := http.StatusCreated
-	if grant.Replayed {
-		status = http.StatusOK
+	status := http.StatusOK
+	for _, grant := range grants {
+		if !grant.Replayed {
+			status = http.StatusCreated
+		}
 	}
-	r.JSON(status, grant)
+	r.JSON(status, billing.CreateCreditGrantBatchResult{Items: grants})
 }
 
 // ListCreditGrants lists a customer's credit grants, newest first.
@@ -141,6 +136,9 @@ func ListCreditGrants(r *httprequest.Request) {
 		return
 	}
 	if params.PageRequest, ok = r.Page(); !ok {
+		return
+	}
+	if params.IDs, ok = listIDs(r, billing.ParseCreditGrantID); !ok {
 		return
 	}
 	svc, ok := billingService(r)
@@ -223,10 +221,14 @@ func ListCreditTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listCreditTransactions(r, customer)
+	ids, ok := listIDs(r, billing.ParseCreditTransactionID)
+	if !ok {
+		return
+	}
+	listCreditTransactions(r, customer, ids)
 }
 
-func listCreditTransactions(r *httprequest.Request, customer billing.CustomerID) {
+func listCreditTransactions(r *httprequest.Request, customer billing.CustomerID, ids []billing.CreditTransactionID) {
 	var params billing.CreditTransactionListParams
 	if !r.BindQuery(&params) {
 		return
@@ -235,6 +237,7 @@ func listCreditTransactions(r *httprequest.Request, customer billing.CustomerID)
 	if params.PageRequest, ok = r.Page(); !ok {
 		return
 	}
+	params.IDs = ids
 	svc, ok := billingService(r)
 	if !ok {
 		return

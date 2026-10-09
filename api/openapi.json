@@ -1144,6 +1144,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "kind",
             "in": "query",
             "schema": {
@@ -2185,6 +2199,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -2565,6 +2593,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -3057,6 +3099,20 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -3630,6 +3686,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -3979,6 +4049,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -4969,35 +5053,27 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/tier": {
-      "get": {
+    "/v1/merchant/tiers/lookup": {
+      "post": {
         "tags": [
           "merchant"
         ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "group",
-            "in": "query",
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetEffectiveTiersParams"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EffectiveTier"
+                  "$ref": "#/components/schemas/EffectiveTierLookup"
                 }
               }
             }
@@ -5013,7 +5089,7 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-guards": [
-          "GetEffectiveTier",
+          "GetEffectiveTiers",
           "Access",
           "StaffReads"
         ],
@@ -5106,6 +5182,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -5478,6 +5568,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -5538,56 +5642,6 @@
         ],
         "x-openrails-errors": [
           "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/customers/lookup": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CustomerLookupParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CustomerLookup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-guards": [
-          "GetCustomers",
-          "Customers",
-          "StaffReads"
-        ],
-        "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5988,26 +6042,16 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/credit-grants": {
+    "/v1/merchant/credit-grants": {
       "post": {
         "tags": [
           "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateCreditGrantParams"
+                "$ref": "#/components/schemas/CreateCreditGrantBatchParams"
               }
             }
           }
@@ -6018,7 +6062,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreditGrant"
+                  "$ref": "#/components/schemas/CreateCreditGrantBatchResult"
                 }
               }
             }
@@ -6028,7 +6072,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreditGrant"
+                  "$ref": "#/components/schemas/CreateCreditGrantBatchResult"
                 }
               }
             }
@@ -6044,7 +6088,7 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-guards": [
-          "CreateCreditGrant",
+          "CreateCreditGrants",
           "Credits",
           "StaffWrites"
         ],
@@ -6053,7 +6097,6 @@
         "x-openrails-errors": [
           "currency_unsupported",
           "idempotency_key_reused",
-          "invalid_customer_id",
           "invalid_param",
           "service_credential_customer_scope_denied"
         ],
@@ -6061,7 +6104,9 @@
           "tier:merchant",
           "request"
         ]
-      },
+      }
+    },
+    "/v1/merchant/customers/{customer_id}/credit-grants": {
       "get": {
         "tags": [
           "merchant"
@@ -6087,6 +6132,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -6319,6 +6378,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -6590,81 +6663,6 @@
       }
     },
     "/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": {
-      "put": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetSpendDelegationParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpendDelegation"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-guards": [
-          "SetSpendDelegation",
-          "Credits",
-          "StaffWrites"
-        ],
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
       "delete": {
         "tags": [
           "merchant"
@@ -7057,78 +7055,16 @@
         ]
       }
     },
-    "/v1/merchant/admissions/{request_id}/release": {
+    "/v1/merchant/admissions/release": {
       "post": {
         "tags": [
           "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Admission"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-guards": [
-          "ReleaseAdmission",
-          "Usage",
-          "StaffWrites"
-        ],
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "admission_captured",
-          "admission_not_found",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/admissions/{request_id}/extend": {
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExtendAdmissionParams"
+                "$ref": "#/components/schemas/ReleaseAdmissionBatchParams"
               }
             }
           }
@@ -7139,7 +7075,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Admission"
+                  "$ref": "#/components/schemas/AdmissionBatchResult"
                 }
               }
             }
@@ -7155,16 +7091,63 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-guards": [
-          "ExtendAdmission",
+          "ReleaseAdmissions",
           "Usage",
           "StaffWrites"
         ],
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
-          "admission_not_found",
-          "hold_not_found",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/admissions/extend": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtendAdmissionBatchParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-guards": [
+          "ExtendAdmissions",
+          "Usage",
+          "StaffWrites"
+        ],
+        "x-openrails-sensitive": true,
+        "x-openrails-errors": [
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7181,7 +7164,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReportWastedSpendParams"
+                "$ref": "#/components/schemas/ReportWastedSpendBatchParams"
               }
             }
           }
@@ -7192,7 +7175,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WastedSpendReport"
+                  "$ref": "#/components/schemas/ReportWastedSpendBatchResult"
                 }
               }
             }
@@ -7214,10 +7197,7 @@
         ],
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -7948,6 +7928,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -8098,6 +8092,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -8775,6 +8783,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "kind",
             "in": "query",
             "schema": {
@@ -9072,6 +9094,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "kind",
             "in": "query",
             "schema": {
@@ -9284,6 +9320,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -9676,6 +9726,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -10331,6 +10395,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -11100,6 +11178,22 @@
         "tags": [
           "merchant_config"
         ],
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -11148,7 +11242,8 @@
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       },
       "post": {
@@ -12324,6 +12419,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "include_acknowledged",
             "in": "query",
             "schema": {
@@ -12643,6 +12752,20 @@
             }
           },
           {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -12873,6 +12996,20 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
             }
           },
           {
@@ -13224,28 +13361,27 @@
         ]
       }
     },
-    "/v1/me/notifications/{id}/read": {
+    "/v1/me/notifications/read": {
       "post": {
         "tags": [
           "customer"
         ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationsReadParams"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Notification"
+                  "$ref": "#/components/schemas/CustomerNotificationLookup"
                 }
               }
             }
@@ -13262,11 +13398,11 @@
         "x-openrails-auth": "customer",
         "x-openrails-customer-scope": "billing_management",
         "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:customer"
+          "tier:customer",
+          "request"
         ]
       }
     },
@@ -13922,6 +14058,53 @@
           "expires_at",
           "captured_amount",
           "replayed"
+        ]
+      },
+      "AdmissionBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdmissionResult"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AdmissionResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "admission": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Admission"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "admission",
+          "error"
         ]
       },
       "AdmissionVerdict": {
@@ -16192,9 +16375,37 @@
           }
         }
       },
+      "CreateCreditGrantBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateCreditGrantParams"
+            }
+          }
+        }
+      },
+      "CreateCreditGrantBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreditGrant"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "CreateCreditGrantParams": {
         "type": "object",
         "properties": {
+          "customer_id": {
+            "type": "string"
+          },
           "currency": {
             "type": "string"
           },
@@ -17132,17 +17343,17 @@
           "entitlement"
         ]
       },
-      "CustomerLookup": {
+      "CustomerNotificationLookup": {
         "type": "object",
         "properties": {
-          "customers": {
+          "notifications": {
             "oneOf": [
               {
                 "type": "object",
                 "additionalProperties": {
                   "oneOf": [
                     {
-                      "$ref": "#/components/schemas/Customer"
+                      "$ref": "#/components/schemas/Notification"
                     },
                     {
                       "type": "null"
@@ -17157,19 +17368,8 @@
           }
         },
         "required": [
-          "customers"
+          "notifications"
         ]
-      },
-      "CustomerLookupParams": {
-        "type": "object",
-        "properties": {
-          "customer_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
       },
       "CustomerSettings": {
         "type": "object",
@@ -17681,16 +17881,23 @@
           }
         }
       },
-      "EffectiveTier": {
+      "EffectiveTierLookup": {
         "type": "object",
         "properties": {
-          "group": {
-            "type": "string"
-          },
-          "tier": {
+          "tiers": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/Tier"
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Tier"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
               },
               {
                 "type": "null"
@@ -17699,8 +17906,7 @@
           }
         },
         "required": [
-          "group",
-          "tier"
+          "tiers"
         ]
       },
       "EnsureCustomerBatchParams": {
@@ -17901,9 +18107,23 @@
           "message"
         ]
       },
+      "ExtendAdmissionBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExtendAdmissionParams"
+            }
+          }
+        }
+      },
       "ExtendAdmissionParams": {
         "type": "object",
         "properties": {
+          "request_id": {
+            "type": "string"
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time"
@@ -18305,6 +18525,20 @@
           "title",
           "viz"
         ]
+      },
+      "GetEffectiveTiersParams": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "customer_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "Health": {
         "type": "object",
@@ -23014,6 +23248,17 @@
           }
         }
       },
+      "ReleaseAdmissionBatchParams": {
+        "type": "object",
+        "properties": {
+          "request_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "ReleaseOperationAuthorizationParams": {
         "type": "object",
         "properties": {
@@ -23054,6 +23299,31 @@
             "$ref": "#/components/schemas/BillingDetails"
           }
         }
+      },
+      "ReportWastedSpendBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReportWastedSpendParams"
+            }
+          }
+        }
+      },
+      "ReportWastedSpendBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WastedSpendResult"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "ReportWastedSpendParams": {
         "type": "object",
@@ -23563,20 +23833,6 @@
           },
           "allowance": {
             "$ref": "#/components/schemas/Allowance"
-          }
-        }
-      },
-      "SetSpendDelegationParams": {
-        "type": "object",
-        "properties": {
-          "windows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BudgetWindow"
-            }
-          },
-          "provenance": {
-            "type": "string"
           }
         }
       },
@@ -25106,6 +25362,39 @@
           "charged_amount",
           "policy_charged_amount",
           "action"
+        ]
+      },
+      "WastedSpendResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "report": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WastedSpendReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "report",
+          "error"
         ]
       },
       "WebhookReceipt": {

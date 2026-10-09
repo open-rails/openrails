@@ -147,46 +147,6 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 	return i, err
 }
 
-const getCustomersByIDs = `-- name: GetCustomersByIDs :many
-SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
-WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
-`
-
-type GetCustomersByIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
-}
-
-func (q *Queries) GetCustomersByIDs(ctx context.Context, arg GetCustomersByIDsParams) ([]BillingCustomer, error) {
-	rows, err := q.db.Query(ctx, getCustomersByIDs, arg.MerchantID, arg.Ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingCustomer
-	for rows.Next() {
-		var i BillingCustomer
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Issuer,
-			&i.Email,
-			&i.CreatedAt,
-			&i.LastSeenAt,
-			&i.Username,
-			&i.Blocked,
-			&i.AccessVersion,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCustomers = `-- name: ListCustomers :many
 SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers c
 WHERE c.merchant_id = $1
@@ -216,6 +176,47 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 		arg.AfterID,
 		arg.RowLimit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomer
+	for rows.Next() {
+		var i BillingCustomer
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Issuer,
+			&i.Email,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.Username,
+			&i.Blocked,
+			&i.AccessVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomersByIDs = `-- name: ListCustomersByIDs :many
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked, access_version FROM billing.customers
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
+`
+
+type ListCustomersByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListCustomersByIDs(ctx context.Context, arg ListCustomersByIDsParams) ([]BillingCustomer, error) {
+	rows, err := q.db.Query(ctx, listCustomersByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}

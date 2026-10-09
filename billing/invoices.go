@@ -179,13 +179,25 @@ type InvoicePayment struct {
 // InvoiceListParams selects invoices, newest period first; every filter is
 // optional. PeriodStartsAfter (inclusive) and PeriodStartsBefore (exclusive)
 // bound the invoice's period_starts_at.
+//
+// IDs instead reads 1 to MaxBatchItems named invoices in one page, whatever
+// their state; unknown ones are absent.
 type InvoiceListParams struct {
+	IDs                []InvoiceID
 	CustomerID         CustomerID
 	Currency           string
 	Status             InvoiceStatus
 	PeriodStartsAfter  *time.Time
 	PeriodStartsBefore *time.Time
 	PageRequest
+}
+
+// InvoicePaymentListParams pages an invoice's payments, newest first. IDs
+// instead reads 1 to MaxBatchItems of its named payments in one page; unknown
+// ones are absent.
+type InvoicePaymentListParams struct {
+	PageRequest
+	IDs []InvoicePaymentID
 }
 
 // RetryInvoiceCollectionParams charges an open invoice to one of the

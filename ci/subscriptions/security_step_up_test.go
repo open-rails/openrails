@@ -66,7 +66,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		body         any
 	}{
 		{http.MethodPost, "/v1/merchant/product-access", timed},
-		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/credit-grants", map[string]any{}},
+		{http.MethodPost, "/v1/merchant/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/subscriptions/" + none + "/cancel", map[string]any{}},
@@ -89,7 +89,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	require.True(t, member.entitled("content:comp"), "the fresh grants landed")
 
 	// A read needs no step-up, and neither does the host's in-process client.
-	status, body := call(stale, http.MethodPost, "/v1/merchant/customers/lookup", map[string]any{"customer_ids": []string{member.id}})
+	status, body := call(stale, http.MethodGet, "/v1/merchant/customers?ids="+member.id, nil)
 	require.Equal(t, http.StatusOK, status, "%v", body)
 	member.grant(host, nil, nil)
 	require.True(t, member.entitled("content:host"))

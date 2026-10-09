@@ -161,13 +161,13 @@ func (s *Service) invoiceRecovery(ctx context.Context, invoice *models.Invoice) 
 }
 
 // ListInvoicePayments is one page of an invoice's payments, newest first.
-func (s *Service) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, page billing.PageRequest) (billing.ListPage[billing.InvoicePayment], error) {
+func (s *Service) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, params billing.InvoicePaymentListParams) (billing.ListPage[billing.InvoicePayment], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.ListPage[billing.InvoicePayment]{}, err
 	}
 	defer release()
-	rows, err := s.moneyService().ListInvoicePayments(ctx, payer, invoiceID, page)
+	rows, err := s.moneyService().ListInvoicePayments(ctx, payer, invoiceID, params)
 	if err != nil {
 		return billing.ListPage[billing.InvoicePayment]{}, err
 	}

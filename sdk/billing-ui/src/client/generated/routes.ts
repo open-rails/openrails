@@ -73,7 +73,7 @@ export const OPENRAILS_ROUTES = [
   { method: "POST", path: "/v1/me/billing-portal", group: "customer", auth: "customer", guards: [], permission: null, sensitive: false, mountedWhen: "stripe_portal", scope: "self_service", request: null, responses: { 200: "PortalResponse" }, errors: ["invalid_param", "resource_not_found"], errorSets: ["tier:customer"] },
   { method: "GET", path: "/v1/me/notifications", group: "customer", auth: "customer", guards: [], permission: null, sensitive: false, mountedWhen: null, scope: "billing_management", request: null, responses: { 200: "ListPage<Notification>" }, errors: ["invalid_cursor"], errorSets: ["tier:customer", "request"] },
   { method: "GET", path: "/v1/me/notifications/unread-count", group: "customer", auth: "customer", guards: [], permission: null, sensitive: false, mountedWhen: null, scope: "billing_management", request: null, responses: { 200: "UnreadCount" }, errors: [], errorSets: ["tier:customer"] },
-  { method: "POST", path: "/v1/me/notifications/{id}/read", group: "customer", auth: "customer", guards: [], permission: null, sensitive: false, mountedWhen: null, scope: "billing_management", request: null, responses: { 200: "Notification" }, errors: ["invalid_param", "resource_not_found"], errorSets: ["tier:customer"] },
+  { method: "POST", path: "/v1/me/notifications/read", group: "customer", auth: "customer", guards: [], permission: null, sensitive: false, mountedWhen: null, scope: "billing_management", request: "MarkNotificationsReadParams", responses: { 200: "CustomerNotificationLookup" }, errors: ["invalid_param"], errorSets: ["tier:customer", "request"] },
 ] as const satisfies readonly OpenRailsRoute[]
 
 // The codes every route of a kind answers, by set name.

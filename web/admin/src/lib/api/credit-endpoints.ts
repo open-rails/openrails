@@ -21,11 +21,17 @@ export const listCreditGrants = (
     signal,
   })
 
-export const createCreditGrant = (customer: string, body: CreditGrantInput) =>
-  api<CreditGrant>(`${customerPath(customer)}/credit-grants`, {
+// A grant is a batch of one; the batch route is all or none.
+export const createCreditGrant = async (
+  customer: string,
+  body: CreditGrantInput
+) => {
+  const out = await api<{ items: CreditGrant[] }>("/merchant/credit-grants", {
     method: "POST",
-    body,
+    body: { items: [{ customer_id: customer, ...body }] },
   })
+  return out.items[0]
+}
 
 export const revokeCreditGrant = (
   customer: string,

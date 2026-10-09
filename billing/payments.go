@@ -69,8 +69,10 @@ type Payment struct {
 }
 
 // PaymentListParams selects payments, newest first; every filter is
-// optional.
+// optional. IDs instead reads 1 to MaxBatchItems named payments in one page,
+// whatever their state; unknown ones are absent.
 type PaymentListParams struct {
+	IDs            []PaymentID
 	CustomerID     CustomerID
 	SubscriptionID SubscriptionID
 	PriceID        PriceID

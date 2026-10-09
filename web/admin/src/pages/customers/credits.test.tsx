@@ -49,15 +49,16 @@ describe("credit support requests", () => {
     const queries = client()
     const options = creditMutations.grant(queries, "alpha", "cus_a")
     let attempt = 0
-    routes["POST /merchant/customers/cus_a/credit-grants"] = () =>
+    routes["POST /merchant/credit-grants"] = () =>
       attempt++ === 0
         ? Response.json({ error: { message: "network failed" } }, { status: 503 })
-        : { id: "cgr_a", replayed: true }
+        : { items: [{ id: "cgr_a", replayed: true }] }
     await expect(exec(queries, options, grantInput)).rejects.toThrow("network failed")
-    await exec(queries, options, grantInput)
-    expect(requests.map((r) => (r.body as typeof grantInput).source_id)).toEqual([
-      "stable-operation",
-      "stable-operation",
+    await expect(exec(queries, options, grantInput)).resolves.toMatchObject({ id: "cgr_a" })
+    const items = requests.map((r) => (r.body as { items: (typeof grantInput & { customer_id: string })[] }).items)
+    expect(items.map(([item]) => [item.customer_id, item.source_id])).toEqual([
+      ["cus_a", "stable-operation"],
+      ["cus_a", "stable-operation"],
     ])
   })
 

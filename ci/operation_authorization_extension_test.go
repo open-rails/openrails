@@ -37,7 +37,7 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 		customer := billing.CustomerID(uuid.New())
 		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 		require.NoError(t, err)
-		_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: uuid.NewString()})
+		_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: amount, Source: "support", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		return customer
 	}

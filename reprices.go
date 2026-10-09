@@ -44,6 +44,9 @@ func (c *Client) ListRepriceBatches(ctx context.Context, params billing.RepriceB
 		q.Set("price_key", key)
 		q.Set("product_key", params.ProductKey)
 	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.RepriceBatch]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprice-batches?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -121,6 +124,9 @@ func (c *Client) ListReprices(ctx context.Context, params billing.RepriceListPar
 	}
 	if params.Status != "" {
 		q.Set("status", string(params.Status))
+	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
 	}
 	var out billing.ListPage[billing.Reprice]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprices?"+q.Encode(), nil, &out, requestOptions...); err != nil {

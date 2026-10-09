@@ -241,7 +241,6 @@ WITH cf AS (
                           ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
       LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
      WHERE c.merchant_id = $13::uuid
-       AND ($14::uuid IS NULL OR c.id = $14::uuid)
 )
 SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
 FROM cf
@@ -276,7 +275,6 @@ type ListRebillCyclesParams struct {
 	AfterID        *uuid.UUID
 	RowLimit       int32
 	MerchantID     uuid.UUID
-	ID             *uuid.UUID
 }
 
 type ListRebillCyclesRow struct {
@@ -318,7 +316,6 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 		arg.AfterID,
 		arg.RowLimit,
 		arg.MerchantID,
-		arg.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -327,6 +324,97 @@ func (q *Queries) ListRebillCycles(ctx context.Context, arg ListRebillCyclesPara
 	var items []ListRebillCyclesRow
 	for rows.Next() {
 		var i ListRebillCyclesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubscriptionID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.Rail,
+			&i.Owner,
+			&i.DueAt,
+			&i.Amount,
+			&i.Currency,
+			&i.MissedAt,
+			&i.MissReason,
+			&i.WonAt,
+			&i.FirstOutcome,
+			&i.ClosedAt,
+			&i.RecoveredBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRebillCyclesByIDs = `-- name: ListRebillCyclesByIDs :many
+WITH cf AS (
+    SELECT c.id, c.subscription_id, c.customer_id, c.psp_id, c.rail, c.owner, c.due_at, c.amount, c.currency,
+           c.missed_at, c.miss_reason, CASE WHEN w.id IS NOT NULL THEN w.attempted_at END AS won_at,
+           CASE WHEN c.missed_at IS NOT NULL THEN 'missed'
+                WHEN f.category IS NULL THEN 'pending'
+                WHEN f.category = 'approved' THEN 'approved'
+                WHEN f.category = 'system_error' THEN 'error'
+                ELSE 'declined' END::text AS first_outcome,
+           LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END,
+                 c.due_at + interval '15 days')::timestamptz AS closed_at,
+           CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
+                WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
+                WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
+                              WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id AND u.kind = 'updated'
+                                AND u.occurred_at >= COALESCE(c.missed_at, f.attempted_at) AND u.occurred_at <= w.attempted_at) THEN 'updated_card'
+                WHEN w.kind = 'customer_retry' THEN 'customer_retry'
+                ELSE 'dunning_retry' END::text AS recovered_by
+      FROM billing.rebill_cycles c
+      LEFT JOIN LATERAL (SELECT a.category, a.attempted_at FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id ORDER BY a.attempted_at, a.id LIMIT 1) f ON true
+      LEFT JOIN LATERAL (SELECT a.id, a.kind, a.source, a.attempted_at, a.payment_method_id FROM billing.payment_attempts a
+                          WHERE a.merchant_id = c.merchant_id AND a.cycle_id = c.id AND a.category = 'approved'
+                          ORDER BY a.attempted_at, a.id LIMIT 1) w ON true
+      LEFT JOIN billing.subscriptions s ON s.merchant_id = c.merchant_id AND s.id = c.subscription_id AND s.deleted_at IS NULL
+     WHERE c.merchant_id = $1::uuid AND c.id = ANY($2::uuid[])
+)SELECT cf.id, cf.subscription_id, cf.customer_id, cf.psp_id, cf.rail, cf.owner, cf.due_at, cf.amount, cf.currency, cf.missed_at, cf.miss_reason, cf.won_at, cf.first_outcome, cf.closed_at, cf.recovered_by
+FROM cf
+ORDER BY cf.due_at DESC, cf.id DESC
+`
+
+type ListRebillCyclesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+type ListRebillCyclesByIDsRow struct {
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	CustomerID     uuid.UUID
+	PspID          uuid.UUID
+	Rail           string
+	Owner          string
+	DueAt          time.Time
+	Amount         int64
+	Currency       string
+	MissedAt       *time.Time
+	MissReason     *string
+	WonAt          *time.Time
+	FirstOutcome   string
+	ClosedAt       time.Time
+	RecoveredBy    string
+}
+
+// The named cycles with ListRebillCycles' facts, latest due first.
+func (q *Queries) ListRebillCyclesByIDs(ctx context.Context, arg ListRebillCyclesByIDsParams) ([]ListRebillCyclesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRebillCyclesByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRebillCyclesByIDsRow
+	for rows.Next() {
+		var i ListRebillCyclesByIDsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.SubscriptionID,

@@ -1,16 +1,15 @@
 package handlers
 
 import (
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // MyNotificationsQuery is the customer's notification list query.
@@ -56,10 +55,16 @@ func GetNotifications(r *httprequest.Request) {
 	r.SuccessJSON(notes)
 }
 
-// MarkNotificationRead handles POST /v1/me/notifications/{id}/read.
-func MarkNotificationRead(r *httprequest.Request) {
+// MarkMyNotificationsRead handles POST /v1/me/notifications/read: 1 to
+// billing.MaxBatchItems of the customer's notifications marked read. Another
+// customer's id is null and untouched.
+func MarkMyNotificationsRead(r *httprequest.Request) {
 	ctx := r.Request.Context()
-	id, ok := pathID(r, billing.ParseNotificationID)
+	var req billing.MarkNotificationsReadParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	ids, ok := batchIDs(r, req.NotificationIDs, billing.MaxBatchItems, "notification_ids")
 	if !ok {
 		return
 	}
@@ -67,21 +72,25 @@ func MarkNotificationRead(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	row, err := r.State.DB.Gen(ctx).MarkCustomerNotificationRead(ctx, gen.MarkCustomerNotificationReadParams{MerchantID: merchantID, CustomerID: customerID, ID: id.UUID()})
-	if errors.Is(err, pgx.ErrNoRows) {
-		r.ErrorCode(billing.CodeResourceNotFound, "")
-		return
-	}
+	rows, err := r.State.DB.Gen(ctx).MarkCustomerNotificationsRead(ctx, gen.MarkCustomerNotificationsReadParams{MerchantID: merchantID, CustomerID: customerID, Ids: uuidutil.Of(ids)})
 	if err != nil {
-		r.InternalError("mark notification read failed", err)
+		r.InternalError("mark notifications read failed", err)
 		return
 	}
-	n, err := models.NotificationFromGen(row)
-	if err != nil {
-		r.InternalError("decode notification failed", err)
-		return
+	out := billing.CustomerNotificationLookup{Notifications: make(map[billing.NotificationID]*billing.Notification, len(ids))}
+	for _, id := range ids {
+		out.Notifications[id] = nil
 	}
-	r.SuccessJSON(n.View())
+	for _, row := range rows {
+		n, err := models.NotificationFromGen(row)
+		if err != nil {
+			r.InternalError("decode notification failed", err)
+			return
+		}
+		view := n.View()
+		out.Notifications[view.ID] = &view
+	}
+	r.SuccessJSON(out)
 }
 
 // GetUnreadNotificationCount handles GET /v1/me/notifications/unread-count.

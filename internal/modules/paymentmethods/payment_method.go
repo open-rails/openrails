@@ -87,6 +87,11 @@ func (s *PaymentMethodService) ListPage(ctx context.Context, customerID uuid.UUI
 	return s.repo.ListPage(ctx, customerID, page)
 }
 
+// ListByIDs reads a customer's named methods, newest first.
+func (s *PaymentMethodService) ListByIDs(ctx context.Context, customerID uuid.UUID, ids []uuid.UUID) ([]*models.PaymentMethod, error) {
+	return s.repo.ListByIDs(ctx, customerID, ids)
+}
+
 // GetByCustodianRef finds a custodian-held card by its custodian token.
 func (s *PaymentMethodService) GetByCustodianRef(ctx context.Context, custodianID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
 	return s.repo.GetByCustodianRef(ctx, custodianID, methodRef)

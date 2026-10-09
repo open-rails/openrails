@@ -247,7 +247,7 @@ func TestLegacyNMICardUpdate(t *testing.T) {
 			_, err = w.client[tp].ImportBilling(t.Context(), billing.DeclaredBilling{AsOf: w.clock.Now(), DefaultPSP: billing.PSPRef{Key: "nmi"},
 				PaymentMethods: []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "nmi", RailCustomerRef: l.railCust, RailMethodRef: other, Card: declaredCard(mastercard)}}})
 			require.NoError(t, err)
-			methods, err := w.client[tp].ListPaymentMethods(t.Context(), l.c.cid(), billing.PageRequest{Limit: 20})
+			methods, err := w.client[tp].ListPaymentMethods(t.Context(), l.c.cid(), billing.PaymentMethodListParams{PageRequest: billing.PageRequest{Limit: 20}})
 			require.NoError(t, err)
 			sameVault := ""
 			for _, m := range methods.Items {

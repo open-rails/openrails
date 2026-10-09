@@ -448,6 +448,91 @@ func (q *Queries) HasPermanentProductAccess(ctx context.Context, arg HasPermanen
 	return exists, err
 }
 
+const listCustomerProductAccessByIDs = `-- name: ListCustomerProductAccessByIDs :many
+SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
+FROM billing.product_access pa
+JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
+JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
+WHERE pa.merchant_id = $1::uuid AND pa.id = ANY($2::uuid[])
+  AND pa.customer_id = $3::uuid AND pa.deleted_at IS NULL
+ORDER BY pa.id DESC
+`
+
+type ListCustomerProductAccessByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+	CustomerID uuid.UUID
+}
+
+type ListCustomerProductAccessByIDsRow struct {
+	ID                  uuid.UUID
+	MerchantID          uuid.UUID
+	CustomerID          uuid.UUID
+	ProductID           uuid.UUID
+	GrantID             uuid.UUID
+	SourceType          string
+	SourceID            string
+	PaymentID           *uuid.UUID
+	StartsAt            time.Time
+	EndsAt              *time.Time
+	RevokedAt           *time.Time
+	RevokeReason        *string
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	ProductKey          string
+	ProductName         string
+	GrantReason         *string
+	Actor               *string
+	Note                *string
+}
+
+// A customer's named windows, newest first.
+func (q *Queries) ListCustomerProductAccessByIDs(ctx context.Context, arg ListCustomerProductAccessByIDsParams) ([]ListCustomerProductAccessByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerProductAccessByIDs, arg.MerchantID, arg.Ids, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomerProductAccessByIDsRow
+	for rows.Next() {
+		var i ListCustomerProductAccessByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.GrantID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProductKey,
+			&i.ProductName,
+			&i.GrantReason,
+			&i.Actor,
+			&i.Note,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExtendableSubscriptionAccess = `-- name: ListExtendableSubscriptionAccess :many
 SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at FROM billing.product_access pa
 WHERE pa.merchant_id = $1::uuid AND pa.source_type = 'subscription'

@@ -189,7 +189,7 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
 receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
-// or client.ReleaseAdmission(ctx, requestID) if the work failed
+// or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
 Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
@@ -234,8 +234,9 @@ curl -X POST https://openrails.example/v1/merchant/admissions/req-789/capture \
   -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
 
 # …or release the hold when the work failed
-curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \
-  -H "Authorization: Bearer openrails_st_..."
+curl -X POST https://openrails.example/v1/merchant/admissions/release \
+  -H "Authorization: Bearer openrails_st_..." \
+  -d '{"request_ids":["req-789"]}'
 ```
 
 The `/v1/merchant/*` surface (admissions, credits, entitlements, usage,

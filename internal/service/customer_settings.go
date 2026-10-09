@@ -54,19 +54,9 @@ func (s *Service) ListCustomerSettings(ctx context.Context, params billing.Custo
 	q := s.rt.DB.Gen(ctx)
 	var customers billing.ListPage[gen.BillingCustomer]
 	if params.IDs != nil {
-		ids := make([]uuid.UUID, len(params.IDs))
-		for i, id := range params.IDs {
-			ids[i] = id.UUID()
-		}
-		if customers.Items, err = q.GetCustomersByIDs(ctx, gen.GetCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids}); err != nil {
+		if customers.Items, err = q.ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)}); err != nil {
 			return page, err
 		}
-		slices.SortFunc(customers.Items, func(a, b gen.BillingCustomer) int {
-			if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
-				return c
-			}
-			return strings.Compare(b.ID.String(), a.ID.String())
-		})
 	} else {
 		rows, err := q.ListCustomers(ctx, gen.ListCustomersParams{MerchantID: mid.UUID(), AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)})
 		if err != nil {

@@ -15,6 +15,12 @@ type Notification struct {
 	CreatedAt  time.Time        `json:"created_at"`
 }
 
+// CustomerNotificationLookup answers every notification a customer marked
+// read; one that is unknown or not theirs is null.
+type CustomerNotificationLookup struct {
+	Notifications map[NotificationID]*Notification `json:"notifications"`
+}
+
 // NotificationData is the typed payload every notification event writes:
 // each event fills the fields it has and the rest are omitted. Money is an
 // exact decimal string of Currency's native unit, ids are typed and

@@ -43,5 +43,5 @@ func GetMyCreditTransactions(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listCreditTransactions(r, payer)
+	listCreditTransactions(r, payer, nil)
 }

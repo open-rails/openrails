@@ -109,7 +109,8 @@ FOR UPDATE;
 
 -- name: ListSubscriptionsByIDs :many
 SELECT * FROM billing.subscriptions WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+ORDER BY created_at DESC, id DESC;
 
 -- name: GetLatestSubscriptionByCustomer :one
 SELECT * FROM billing.subscriptions sub

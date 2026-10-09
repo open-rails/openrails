@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -54,7 +55,25 @@ func ListCustomerPaymentMethods(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listPaymentMethods(r, customer)
+	ids, ok := listIDs(r, billing.ParsePaymentMethodID)
+	if !ok {
+		return
+	}
+	if ids == nil {
+		listPaymentMethods(r, customer)
+		return
+	}
+	methods, err := r.State.PaymentMethodService.ListByIDs(r.Request.Context(), customer.UUID(), uuidutil.Of(ids))
+	if err != nil {
+		writeRefusal(r, err, "failed to list payment methods")
+		return
+	}
+	out, err := paymentMethodsView(r, customer, methods)
+	if err != nil {
+		r.InternalError("failed to read payment methods", err)
+		return
+	}
+	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out})
 }
 
 func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID) {

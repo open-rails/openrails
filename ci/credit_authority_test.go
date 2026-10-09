@@ -64,9 +64,9 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/ensure", c.selector, map[string]any{"items": []any{map[string]any{"id": customer}}})
 		require.Equal(t, writer, w.Code == http.StatusOK, "%s edits customers: %s", name, w.Body.String())
 
-		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/"+customer+"/credit-grants", c.selector, map[string]any{
-			"invoker": "staff", "currency": "USD", "amount": "1000000000", "source": "manual", "source_id": uuid.NewString(),
-		})
+		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/credit-grants", c.selector, map[string]any{"items": []any{map[string]any{
+			"customer_id": customer, "invoker": "staff", "currency": "USD", "amount": "1000000000", "source": "manual", "source_id": uuid.NewString(),
+		}}})
 		if !writer {
 			require.Equal(t, http.StatusForbidden, w.Code, "%s grants credit: %s", name, w.Body.String())
 			require.Contains(t, w.Body.String(), "permission_required")

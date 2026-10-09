@@ -23,6 +23,15 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Lists.** `{"data": [...], "next_cursor": "..."}`. Pass `next_cursor` back as
   `?cursor=`; it is `null` on the last page. `?limit=` is 1 to 500, 50 by
   default. There is no offset and no total.
+- **Several known records.** Every merchant list of records with ids takes
+  `?ids=a,b,c`: 1 to 100 ids, answered in one page in the list's order,
+  whatever their state. An unknown id, or another merchant's, is absent. `ids`
+  takes no other parameter beside it; anything else, or more than 100, is
+  `400 invalid_query`.
+- **Batches.** A write or lookup of many items takes 1 to 100 (usage events and
+  admissions: 1,000). A batch either applies all or none, refusing with the
+  offending `items[i].field`, or answers one `{status, …, error}` result per
+  item, decided on its own.
 - **Values.** Money is a decimal string of the currency's native units beside a
   `currency` ([money on the wire](../money-wire.md)). Times are RFC 3339 in UTC.
   A member with no value is `null`, never left out; an empty list is `[]`.
@@ -184,13 +193,14 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 ## Customers, credit and usage
 
 - A **customer** is created by its first use or declared, up to 100 at a time,
-  with `POST /v1/merchant/customers/ensure`; `POST /v1/merchant/customers/lookup`
-  reads up to 500. Its balance, credit limit, trust level, spend delegations,
+  with `POST /v1/merchant/customers/ensure`; `GET /v1/merchant/customers?ids=`
+  reads up to 100. Its balance, credit limit, trust level, spend delegations,
   credit grants and ledger all live beneath `/v1/merchant/customers/{customer_id}`.
-- A **credit grant** (`POST …/credit-grants`) is idempotent on `source_id`: an
-  identical retry answers the same grant with `replayed: true`; other terms are
-  `409 idempotency_key_reused`. Revoking takes the unspent remainder
-  (`409 credit_grant_held` while holds need it).
+- **Credit grants** (`POST /v1/merchant/credit-grants`, up to 100 across
+  customers, all or none) are idempotent on each customer's `source_id`: an
+  identical retry answers the same grant with `replayed: true`; other terms
+  refuse the batch with `409 idempotency_key_reused`. Revoking takes the
+  unspent remainder (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
 - **Usage events** (`POST /v1/merchant/usage-events`, up to 1,000 per call, one

@@ -88,12 +88,19 @@ type CustomerEntitlement struct {
 	Entitlement string `json:"entitlement"`
 }
 
-// EffectiveTier is the tier a customer holds in a tier group: the
-// highest-ranked product whose entitlements the customer holds. Tier is nil
-// when they hold none; the host applies its default.
-type EffectiveTier struct {
-	Group string `json:"group"`
-	Tier  *Tier  `json:"tier"`
+// GetEffectiveTiersParams asks the tier each of 1 to MaxBatchItems customers
+// holds in Group.
+type GetEffectiveTiersParams struct {
+	Group       string       `json:"group"`
+	CustomerIDs []CustomerID `json:"customer_ids"`
+}
+
+// EffectiveTierLookup answers every requested customer with the tier they
+// hold in the group: the highest-ranked product whose entitlements they hold.
+// A customer holding none, or unknown to the merchant, is null; the host
+// applies its default.
+type EffectiveTierLookup struct {
+	Tiers map[CustomerID]*Tier `json:"tiers"`
 }
 
 // Tier is one product of a tier group. Entitlement is its immutable key;
@@ -203,8 +210,10 @@ type CreateProductAccessBatchResult struct {
 }
 
 // ProductAccessListParams pages a customer's product-access windows, newest
-// first; LiveOnly keeps those live now.
+// first; LiveOnly keeps those live now. IDs instead reads 1 to MaxBatchItems
+// of the customer's named windows in one page; unknown ones are absent.
 type ProductAccessListParams struct {
 	PageRequest
 	LiveOnly bool
+	IDs      []ProductAccessID
 }

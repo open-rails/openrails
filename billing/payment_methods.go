@@ -4,6 +4,14 @@ import (
 	"time"
 )
 
+// PaymentMethodListParams pages a customer's saved cards, newest first. IDs
+// instead reads 1 to MaxBatchItems of the customer's named cards in one page;
+// unknown ones are absent.
+type PaymentMethodListParams struct {
+	PageRequest
+	IDs []PaymentMethodID
+}
+
 // PaymentMethod is a customer's stored card. PSPID names the PSP holding it,
 // null for a card a third-party custodian holds (any PSP of its rail that
 // reaches the custodian charges it).

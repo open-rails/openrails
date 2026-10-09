@@ -35,7 +35,7 @@ func TestMonthlyInvoicesCoverActivePayersOnly(t *testing.T) {
 	require.NoError(t, err)
 	activity := from.Add(time.Hour)
 	for c, at := range map[*customer]time.Time{active: activity, dormant: from.AddDate(0, -6, 0), newcomer: to.Add(time.Hour)} {
-		_, err := client.CreateCreditGrant(ctx, c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
+		_, err := createCreditGrant(ctx, client, c.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		// Ledger rows take the database's clock; move them onto the world's.
 		tx, err := w.pool.Begin(ctx)

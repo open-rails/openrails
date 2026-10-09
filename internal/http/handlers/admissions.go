@@ -17,9 +17,6 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// maxAdmitBatchItems bounds one admission batch.
-const maxAdmitBatchItems = 1000
-
 // maxSourceIDBytes bounds a caller's source_id, as the tables holding it do.
 const maxSourceIDBytes = 255
 
@@ -123,8 +120,7 @@ func Admit(r *httprequest.Request) {
 	if !r.BindJSON(&params) {
 		return
 	}
-	if len(params.Items) == 0 || len(params.Items) > maxAdmitBatchItems {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "items must hold 1 to 1000 admissions").WithParam("items"))
+	if !batchItems(r, len(params.Items), billing.MaxAdmissionBatchItems) {
 		return
 	}
 	if !requireMerchantRoutePrincipal(r) {
@@ -204,100 +200,172 @@ func CaptureAdmission(r *httprequest.Request) {
 	r.SuccessJSON(receipt)
 }
 
-// ReleaseAdmission frees an admitted request's hold.
-func ReleaseAdmission(r *httprequest.Request) {
-	svc, ok := billingService(r)
-	if !ok {
-		return
+// admissionItemScope resolves one request id to its customer and checks the
+// credential's customer scope; nil when the item may proceed.
+func admissionItemScope(r *httprequest.Request, svc *billingservice.Service, requestID string) *api.APIError {
+	if requestID == "" {
+		return api.Coded(billing.CodeInvalidParam, "request_id required").WithParam("request_id")
 	}
-	requestID, ok := admissionParam(r, svc)
-	if !ok {
-		return
-	}
-	admission, err := svc.ReleaseAdmission(r.Request.Context(), requestID)
-	if errors.Is(err, spendgate.ErrCaptured) {
-		r.APIError(api.Coded("admission_captured", ""))
-		return
+	customer, err := svc.AdmissionCustomer(r.Request.Context(), requestID)
+	if errors.Is(err, spendgate.ErrNotFound) {
+		return api.Coded("admission_not_found", "")
 	}
 	if err != nil {
-		writeMoneyError(r, err, "release failed")
-		return
+		log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error("admission lookup failed")
+		return api.Coded(billing.CodeInternalError, "admission lookup failed")
 	}
-	r.SuccessJSON(admission)
+	if !serviceCustomerScopeAllows(r, billingidentity.CustomerID(customer)) {
+		return api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, "")
+	}
+	return nil
 }
 
-// ExtendAdmission moves an open hold's deadline later.
-func ExtendAdmission(r *httprequest.Request) {
-	var params billing.ExtendAdmissionParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	if params.ExpiresAt.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "expires_at required").WithParam("expires_at"))
+func admissionRefusal(err *api.APIError) billing.AdmissionResult {
+	details := err.ToResponse().Error
+	return billing.AdmissionResult{Status: err.HTTPStatus, Error: &details}
+}
+
+// admissionBatch answers one result per item, in order: each runs on its own,
+// exactly as it would alone.
+func admissionBatch(r *httprequest.Request, n int, run func(*billingservice.Service, int) billing.AdmissionResult) {
+	if !batchItems(r, n, billing.MaxAdmissionBatchItems) || !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
 	}
-	requestID, ok := admissionParam(r, svc)
-	if !ok {
-		return
-	}
-	admission, err := svc.ExtendAdmission(r.Request.Context(), requestID, params.ExpiresAt.UTC())
-	switch {
-	case err == nil:
-		r.SuccessJSON(admission)
-	case errors.Is(err, billingservice.ErrHoldNotFound):
-		r.APIError(api.Coded("hold_not_found", ""))
-	case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
-		r.APIError(api.Coded(billing.CodeInvalidParam, "expires_at already passed").WithParam("expires_at"))
-	case errors.Is(err, spendgate.ErrDeadlineShortened):
-		r.APIError(api.Coded(billing.CodeInvalidParam, "an extension cannot shorten the deadline").WithParam("expires_at"))
-	default:
-		var invalid *spendgate.ValidationError
-		if errors.As(err, &invalid) {
-			r.APIError(api.Coded(billing.CodeInvalidParam, invalid.Message).WithParam(invalid.Param))
-			return
+	out := make([]billing.AdmissionResult, n)
+	for i := range out {
+		out[i] = run(svc, i)
+		if out[i].Error != nil {
+			out[i].Error.RequestID = r.RequestID()
 		}
-		writeMoneyError(r, err, "extend failed")
 	}
+	r.JSON(http.StatusOK, billing.AdmissionBatchResult{Items: out})
 }
 
-// ReportWastedSpend records spend a customer's invoker wasted.
-func ReportWastedSpend(r *httprequest.Request) {
-	var params billing.ReportWastedSpendParams
+// ReleaseAdmissions frees the holds of admitted requests, one result per
+// request id. Releasing a released admission answers it.
+func ReleaseAdmissions(r *httprequest.Request) {
+	var params billing.ReleaseAdmissionBatchParams
 	if !r.BindJSON(&params) {
 		return
 	}
-	if params.Amount < 0 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
+	admissionBatch(r, len(params.RequestIDs), func(svc *billingservice.Service, i int) billing.AdmissionResult {
+		requestID := strings.TrimSpace(params.RequestIDs[i])
+		if refusal := admissionItemScope(r, svc, requestID); refusal != nil {
+			return admissionRefusal(refusal)
+		}
+		admission, err := svc.ReleaseAdmission(r.Request.Context(), requestID)
+		switch {
+		case err == nil:
+			return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
+		case errors.Is(err, spendgate.ErrCaptured):
+			return admissionRefusal(api.Coded("admission_captured", ""))
+		}
+		return admissionRefusal(admissionFailure(r, err, requestID, "release failed"))
+	})
+}
+
+// ExtendAdmissions moves open holds' deadlines later, one result per item.
+func ExtendAdmissions(r *httprequest.Request) {
+	var params billing.ExtendAdmissionBatchParams
+	if !r.BindJSON(&params) {
 		return
 	}
-	if params.CustomerID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
+	admissionBatch(r, len(params.Items), func(svc *billingservice.Service, i int) billing.AdmissionResult {
+		item := params.Items[i]
+		requestID := strings.TrimSpace(item.RequestID)
+		if item.ExpiresAt.IsZero() {
+			return admissionRefusal(api.Coded(billing.CodeInvalidParam, "expires_at required").WithParam("expires_at"))
+		}
+		if refusal := admissionItemScope(r, svc, requestID); refusal != nil {
+			return admissionRefusal(refusal)
+		}
+		admission, err := svc.ExtendAdmission(r.Request.Context(), requestID, item.ExpiresAt.UTC())
+		var invalid *spendgate.ValidationError
+		switch {
+		case err == nil:
+			return billing.AdmissionResult{Status: http.StatusOK, Admission: admission}
+		case errors.Is(err, billingservice.ErrHoldNotFound):
+			return admissionRefusal(api.Coded("hold_not_found", ""))
+		case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
+			return admissionRefusal(api.Coded(billing.CodeInvalidParam, "expires_at already passed").WithParam("expires_at"))
+		case errors.Is(err, spendgate.ErrDeadlineShortened):
+			return admissionRefusal(api.Coded(billing.CodeInvalidParam, "an extension cannot shorten the deadline").WithParam("expires_at"))
+		case errors.As(err, &invalid):
+			return admissionRefusal(api.Coded(billing.CodeInvalidParam, invalid.Message).WithParam(invalid.Param))
+		}
+		return admissionRefusal(admissionFailure(r, err, requestID, "extend failed"))
+	})
+}
+
+// admissionFailure is a money refusal, or an internal error whose cause
+// reaches the operator log and never the wire.
+func admissionFailure(r *httprequest.Request, err error, requestID, message string) *api.APIError {
+	if refusal := moneyRefusal(err); refusal != nil {
+		return refusal
+	}
+	log.WithContext(r.Request.Context()).WithError(err).WithField("request_id", requestID).Error(message)
+	return api.Coded(billing.CodeInternalError, message)
+}
+
+// ReportWastedSpend records spend customers' invokers wasted, one result per
+// report in order: each is handled or refused on its own, exactly as
+// reporting it alone would be.
+func ReportWastedSpend(r *httprequest.Request) {
+	var params billing.ReportWastedSpendBatchParams
+	if !r.BindJSON(&params) {
 		return
 	}
-	if strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "source and source_id (at most 255 bytes) required").WithParam("source_id"))
-		return
-	}
-	if !requireServiceCustomerScope(r, params.CustomerID) {
+	if !batchItems(r, len(params.Items), billing.MaxBatchItems) || !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
+	}
+	out := make([]billing.WastedSpendResult, len(params.Items))
+	for i, item := range params.Items {
+		out[i] = reportWastedSpendItem(r, svc, item)
+		if out[i].Error != nil {
+			out[i].Error.RequestID = r.RequestID()
+		}
+	}
+	r.JSON(http.StatusOK, billing.ReportWastedSpendBatchResult{Items: out})
+}
+
+func wastedSpendRefusal(err *api.APIError) billing.WastedSpendResult {
+	details := err.ToResponse().Error
+	return billing.WastedSpendResult{Status: err.HTTPStatus, Error: &details}
+}
+
+func reportWastedSpendItem(r *httprequest.Request, svc *billingservice.Service, params billing.ReportWastedSpendParams) billing.WastedSpendResult {
+	switch {
+	case params.Amount < 0:
+		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
+	case params.CustomerID.IsZero():
+		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
+	case strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes:
+		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "source and source_id (at most 255 bytes) required").WithParam("source_id"))
+	case !serviceCustomerScopeAllows(r, params.CustomerID):
+		return wastedSpendRefusal(api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, ""))
 	}
 	report, err := svc.ReportWastedSpend(r.Request.Context(), billingservice.WastedSpendInput{
 		CustomerID: params.CustomerID, Invoker: strings.TrimSpace(params.Invoker), InvokerType: params.InvokerType,
 		Currency: params.Currency, Amount: params.Amount, Source: params.Source, SourceID: params.SourceID, Reason: params.Reason,
 	})
 	if err != nil {
-		writeMoneyError(r, err, "wasted spend report failed")
-		return
+		refusal := moneyRefusal(err)
+		if refusal == nil {
+			log.WithContext(r.Request.Context()).WithError(err).WithFields(log.Fields{"customer_id": params.CustomerID, "source_id": params.SourceID}).
+				Error("wasted spend report failed")
+			refusal = api.Coded(billing.CodeInternalError, "wasted spend report failed")
+		}
+		return wastedSpendRefusal(refusal)
 	}
-	r.SuccessJSON(report)
+	return billing.WastedSpendResult{Status: http.StatusOK, Report: report}
 }
 
 // RecordUsage records a batch of usage events, one result per item in

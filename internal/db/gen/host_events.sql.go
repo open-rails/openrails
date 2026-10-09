@@ -51,18 +51,16 @@ SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = $1::uuid
-  AND ($2::uuid[] IS NULL OR h.id = ANY($2::uuid[]))
-  AND ($3::text = '' OR h.event_type = $3::text)
-  AND ($4::uuid IS NULL OR h.payment_id = $4::uuid)
-  AND ($5::boolean OR h.delivered_at IS NULL)
-  AND ($6::uuid IS NULL OR h.id > $6::uuid)
+  AND ($2::text = '' OR h.event_type = $2::text)
+  AND ($3::uuid IS NULL OR h.payment_id = $3::uuid)
+  AND ($4::boolean OR h.delivered_at IS NULL)
+  AND ($5::uuid IS NULL OR h.id > $5::uuid)
 ORDER BY h.id
-LIMIT $7::int
+LIMIT $6::int
 `
 
 type ListHostEventsParams struct {
 	MerchantID          uuid.UUID
-	Ids                 []uuid.UUID
 	EventType           string
 	PaymentID           *uuid.UUID
 	IncludeAcknowledged bool
@@ -93,7 +91,6 @@ type ListHostEventsRow struct {
 func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) ([]ListHostEventsRow, error) {
 	rows, err := q.db.Query(ctx, listHostEvents,
 		arg.MerchantID,
-		arg.Ids,
 		arg.EventType,
 		arg.PaymentID,
 		arg.IncludeAcknowledged,
@@ -107,6 +104,74 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 	var items []ListHostEventsRow
 	for rows.Next() {
 		var i ListHostEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.EventType,
+			&i.SubjectType,
+			&i.PaymentID,
+			&i.Amount,
+			&i.SubjectID,
+			&i.Currency,
+			&i.OccurredAt,
+			&i.Data,
+			&i.DeliveredAt,
+			&i.DedupeKey,
+			&i.PaymentCustomerID,
+			&i.PaymentPriceID,
+			&i.PaymentSubscriptionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHostEventsByIDs = `-- name: ListHostEventsByIDs :many
+SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
+  p.subscription_id AS payment_subscription_id
+FROM billing.host_outbox h
+LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
+WHERE h.merchant_id = $1::uuid AND h.id = ANY($2::uuid[])
+ORDER BY h.id
+`
+
+type ListHostEventsByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+type ListHostEventsByIDsRow struct {
+	ID                    uuid.UUID
+	MerchantID            uuid.UUID
+	EventType             string
+	SubjectType           string
+	PaymentID             *uuid.UUID
+	Amount                *int64
+	SubjectID             uuid.UUID
+	Currency              *string
+	OccurredAt            time.Time
+	Data                  []byte
+	DeliveredAt           *time.Time
+	DedupeKey             string
+	PaymentCustomerID     *uuid.UUID
+	PaymentPriceID        *uuid.UUID
+	PaymentSubscriptionID *uuid.UUID
+}
+
+func (q *Queries) ListHostEventsByIDs(ctx context.Context, arg ListHostEventsByIDsParams) ([]ListHostEventsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listHostEventsByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListHostEventsByIDsRow
+	for rows.Next() {
+		var i ListHostEventsByIDsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,

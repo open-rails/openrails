@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (217), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -79,7 +79,7 @@ A customer acting on its own account.
 | POST | `/v1/me/billing-portal` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` | scope `billing_management` |
 | GET | `/v1/me/notifications/unread-count` | customer | — | — | 200 `UnreadCount` | scope `billing_management` |
-| POST | `/v1/me/notifications/{id}/read` | customer | — | — | 200 `Notification` | scope `billing_management` |
+| POST | `/v1/me/notifications/read` | customer | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` | scope `billing_management` |
 
 ## Merchant
 
@@ -125,20 +125,19 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `ListCustomerEntitlements` · `Access` · `StaffReads` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | merchant | `ListEntitlementCustomers` · `Access` · `StaffReads` | — | 200 `ListPage<string>` |  |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements/check` | merchant | `CheckEntitlements` · `Access` · `StaffReads` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
-| GET | `/v1/merchant/customers/{customer_id}/tier` | merchant | `GetEffectiveTier` · `Access` · `StaffReads` | — | 200 `EffectiveTier` |  |
+| POST | `/v1/merchant/tiers/lookup` | merchant | `GetEffectiveTiers` · `Access` · `StaffReads` | `GetEffectiveTiersParams` | 200 `EffectiveTierLookup` |  |
 | POST | `/v1/merchant/customers/{customer_id}/product-access/check` | merchant | `CheckProductAccess` · `Access` · `StaffReads` | `CheckProductAccessParams` | 200 `ProductAccessCheck` |  |
 | GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `ListProductAccess` · `Access` · `StaffReads` | — | 200 `ListPage<ProductAccessGrant>` |  |
 | POST | `/v1/merchant/product-access` | merchant | `CreateProductAccess` · `Access` · `StaffWrites` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `DeleteProductAccess` · `Access` · `StaffWrites` | — | 204 — | sensitive; limit `destructive` |
 | GET | `/v1/merchant/customers` | merchant | `ListCustomers` · `Customers` · `StaffReads` | — | 200 `ListPage<Customer>` |  |
-| POST | `/v1/merchant/customers/lookup` | merchant | `GetCustomers` · `Customers` · `StaffReads` | `CustomerLookupParams` | 200 `CustomerLookup` |  |
 | POST | `/v1/merchant/customers/ensure` | merchant | `EnsureCustomers` · `Customers` · `StaffWrites` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` | sensitive |
 | GET | `/v1/merchant/customers/settings` | merchant | `ListCustomerSettings` · `CustomerSettings` · `StaffReads` | — | 200 `ListPage<CustomerSettings>` |  |
 | PATCH | `/v1/merchant/customers/settings` | merchant | `UpdateCustomerSettings` · `CustomerSettings` · `StaffWrites` | `UpdateCustomerSettingsBatchParams` | 200 `CustomerSettingsBatch` | sensitive; limit `grant` |
 | GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `GetCustomerBillingProfile` · `Customers` · `StaffReads` | — | 200 `CustomerBillingProfile` |  |
 | GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `ListCustomerDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
 | GET | `/v1/merchant/delinquency` | merchant | `ListDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
-| POST | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `CreateCreditGrant` · `Credits` · `StaffWrites` | `CreateCreditGrantParams` | 201 `CreditGrant`<br>200 `CreditGrant` | sensitive; limit `grant` |
+| POST | `/v1/merchant/credit-grants` | merchant | `CreateCreditGrants` · `Credits` · `StaffWrites` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
 | GET | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `ListCreditGrants` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/merchant/customers/{customer_id}/credit-grants/{id}` | merchant | `GetCreditGrant` · `Credits` · `StaffReads` | — | 200 `CreditGrant` |  |
 | POST | `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `RevokeCreditGrant` · `Credits` · `StaffWrites` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
@@ -146,14 +145,13 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `GetBalance` · `Credits` · `StaffReads` | — | 200 `Balance` |  |
 | GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `ListSpendDelegations` · `Credits` · `StaffReads` | — | 200 `ListPage<SpendDelegation>` |  |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `SetSpendDelegations` · `Credits` · `StaffWrites` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` | sensitive |
-| PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `SetSpendDelegation` · `Credits` · `StaffWrites` | `SetSpendDelegationParams` | 200 `SpendDelegation` | sensitive |
 | DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `DeleteSpendDelegation` · `Credits` · `StaffWrites` | — | 204 — | sensitive |
 | POST | `/v1/merchant/admissions` | merchant | `Admit` · `Usage` · `StaffWrites` | `AdmitBatchParams` | 200 `AdmitBatchResult` | sensitive |
 | GET | `/v1/merchant/admissions/{request_id}` | merchant | `GetAdmission` · `Usage` · `StaffReads` | — | 200 `Admission` |  |
 | POST | `/v1/merchant/admissions/{request_id}/capture` | merchant | `CaptureAdmission` · `Usage` · `StaffWrites` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | sensitive |
-| POST | `/v1/merchant/admissions/{request_id}/release` | merchant | `ReleaseAdmission` · `Usage` · `StaffWrites` | — | 200 `Admission` | sensitive |
-| POST | `/v1/merchant/admissions/{request_id}/extend` | merchant | `ExtendAdmission` · `Usage` · `StaffWrites` | `ExtendAdmissionParams` | 200 `Admission` | sensitive |
-| POST | `/v1/merchant/wasted-spend` | merchant | `ReportWastedSpend` · `Usage` · `StaffWrites` | `ReportWastedSpendParams` | 200 `WastedSpendReport` | sensitive |
+| POST | `/v1/merchant/admissions/release` | merchant | `ReleaseAdmissions` · `Usage` · `StaffWrites` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
+| POST | `/v1/merchant/admissions/extend` | merchant | `ExtendAdmissions` · `Usage` · `StaffWrites` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
+| POST | `/v1/merchant/wasted-spend` | merchant | `ReportWastedSpend` · `Usage` · `StaffWrites` | `ReportWastedSpendBatchParams` | 200 `ReportWastedSpendBatchResult` | sensitive |
 | POST | `/v1/merchant/usage-events` | merchant | `RecordUsage` · `Usage` · `StaffWrites` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | sensitive |
 | GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `GetUsage` · `Usage` · `StaffReads` | — | 200 `Usage` |  |
 | POST | `/v1/merchant/provider-operations` | merchant | `OpenOperationAuthorization` · `Usage` · `StaffWrites` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |

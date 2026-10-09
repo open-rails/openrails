@@ -24,6 +24,9 @@ func (c *Client) ListSubscriptions(ctx context.Context, params billing.Subscript
 	if !params.PriceID.IsZero() {
 		q.Set("price_id", params.PriceID.String())
 	}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Subscription]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
@@ -130,13 +133,17 @@ func (c *Client) ChangeTier(ctx context.Context, id billing.SubscriptionID, para
 }
 
 // ListPaymentMethods is one page of a customer's saved cards, newest first.
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error) {
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID billing.CustomerID, params billing.PaymentMethodListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.PaymentMethod], error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
 		return nil, err
 	}
+	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.PaymentMethod]
-	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
