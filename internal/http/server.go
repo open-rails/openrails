@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
@@ -41,8 +42,8 @@ type Dependencies struct {
 	Issuer string
 	// ResourceServer is the trusted issuers the merchant API accepts, and
 	// ConsoleIssuer the one of them the admin console signs staff in at.
-	ResourceServer *config.ResourceServerConfig
-	ConsoleIssuer  *config.ConsoleIssuer
+	ResourceServer *hostconfig.ResourceServerConfig
+	ConsoleIssuer  *hostconfig.ConsoleIssuer
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
 	// The console mounts only when this is present AND admin_console.enabled;
@@ -62,8 +63,8 @@ type Server struct {
 	controlPlane  *controlplane.ControlPlane
 	issuer        string
 	// resourceServer and consoleIssuer are Dependencies'.
-	resourceServer *config.ResourceServerConfig
-	consoleIssuer  *config.ConsoleIssuer
+	resourceServer *hostconfig.ResourceServerConfig
+	consoleIssuer  *hostconfig.ConsoleIssuer
 	// customerResolver replaces the control plane's openrails:self token
 	// verification (tests).
 	customerResolver httproutes.ResourceCustomerResolver

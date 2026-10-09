@@ -11,8 +11,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 )
 
 // Options is the control plane a standalone server declares: its only seam
@@ -30,12 +30,12 @@ import (
 //   - Limiter and ClientIP: tune AuthRateLimitOverrides and the proxy fields.
 type Options struct {
 	// Auth is the server's identity configuration, separate from billing.
-	Auth config.AuthConfig
+	Auth hostconfig.AuthConfig
 	// Registration is AuthKit's native self-registration mode; empty is
 	// closed.
 	Registration iam.RegistrationMode
 	// ResourceServer accepts trusted issuers' RFC 9068 access tokens (#1140).
-	ResourceServer *config.ResourceServerConfig
+	ResourceServer *hostconfig.ResourceServerConfig
 
 	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
 	// confirm routes; PasswordlessAutoRegistration also lets a verified
@@ -150,7 +150,7 @@ func validate(opts Options) error {
 // AuthKit jobs join the engine's River fleet, the server's own hosts are kept
 // from merchants' API hosts, and the embedded mount refuses. Join before the
 // engine's River is bound.
-func Join(a *app.App, cp *controlplane.ControlPlane, auth config.AuthConfig, frontendBaseURL string) error {
+func Join(a *app.App, cp *controlplane.ControlPlane, auth hostconfig.AuthConfig, frontendBaseURL string) error {
 	if err := a.Runtime.AddRiverContribution(cp.RiverJobs()); err != nil {
 		return fmt.Errorf("control plane: register AuthKit jobs: %w", err)
 	}

@@ -17,7 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/server"
 )
 
@@ -52,7 +52,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 	keys := t.TempDir()
-	signing := config.AuthConfig{
+	signing := hostconfig.AuthConfig{
 		ActiveKeyID:         "e2e",
 		ActivePrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})),
 		KeysPath:            keys,
@@ -68,7 +68,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	require.Contains(t, methods(cp), "totp")
 
 	dev := t.TempDir()
-	cp, err = attach(config.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: dev})
+	cp, err = attach(hostconfig.AuthConfig{AllowEphemeralSigningKey: true, KeysPath: dev})
 	require.NoError(t, err, "a disposable TOTP key beside a disposable signing key")
 	require.Contains(t, methods(cp), "totp")
 	require.FileExists(t, filepath.Join(dev, "totp.key"))

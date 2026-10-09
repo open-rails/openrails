@@ -41,7 +41,7 @@ func TestFileReachesConfig(t *testing.T) {
 		}
 	}
 	f.AdminConsole.Enabled = true
-	f.AdminConsole.Issuer = &billing.ConsoleIssuer{}
+	f.AdminConsole.Issuer = &ConsoleIssuer{}
 	cfg, err := f.config()
 	require.NoError(t, err)
 	for _, v := range []reflect.Value{reflect.ValueOf(cfg).Elem(), reflect.ValueOf(cfg.Config).Elem()} {

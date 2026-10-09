@@ -3539,7 +3539,7 @@ pkg openrails/server, method (*Server) Serve(context.Context) error
 pkg openrails/server, method (*Server) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
 pkg openrails/server, method (*Server) Start(context.Context, ...openrails.StartOption) error
 pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
-pkg openrails/server, type AuthConfig = config.AuthConfig
+pkg openrails/server, type AuthConfig = hostconfig.AuthConfig
 pkg openrails/server, type AuthConfig struct
 pkg openrails/server, type AuthConfig struct, ActiveKeyID string
 pkg openrails/server, type AuthConfig struct, ActivePrivateKeyPEM string
@@ -3556,7 +3556,7 @@ pkg openrails/server, type AuthConfig struct, Naming config.NamingConfig
 pkg openrails/server, type AuthConfig struct, PublicKeysJSON string
 pkg openrails/server, type AuthConfig struct, RequestOrigin string
 pkg openrails/server, type AuthConfig struct, Schema string
-pkg openrails/server, type AuthRateLimit = config.AuthRateLimit
+pkg openrails/server, type AuthRateLimit = hostconfig.AuthRateLimit
 pkg openrails/server, type AuthRateLimit struct
 pkg openrails/server, type AuthRateLimit struct, Cooldown time.Duration
 pkg openrails/server, type AuthRateLimit struct, Limit int
@@ -3577,7 +3577,7 @@ pkg openrails/server, type Config struct, PasswordlessLogin bool
 pkg openrails/server, type Config struct, Registration iam.RegistrationMode
 pkg openrails/server, type Config struct, ResourceServer *ResourceServerConfig
 pkg openrails/server, type Config struct, TrustedProxies []string
-pkg openrails/server, type ConsoleIssuer = config.ConsoleIssuer
+pkg openrails/server, type ConsoleIssuer = hostconfig.ConsoleIssuer
 pkg openrails/server, type ConsoleIssuer struct
 pkg openrails/server, type ConsoleIssuer struct, ClientID string
 pkg openrails/server, type ConsoleIssuer struct, Name string
@@ -3594,7 +3594,7 @@ pkg openrails/server, type FormerNamesConfig struct, Duration *time.Duration
 pkg openrails/server, type FormerNamesConfig struct, Mode config.FormerNamesMode
 pkg openrails/server, type FormerNamesMode = config.FormerNamesMode
 pkg openrails/server, type FormerNamesMode string
-pkg openrails/server, type MerchantCreationConfig = config.MerchantCreationConfig
+pkg openrails/server, type MerchantCreationConfig = hostconfig.MerchantCreationConfig
 pkg openrails/server, type MerchantCreationConfig struct
 pkg openrails/server, type MerchantCreationConfig struct, FreeAllowance int
 pkg openrails/server, type MerchantCreationConfig struct, ReservedEscalationRole string
@@ -3605,13 +3605,13 @@ pkg openrails/server, type NamingConfig struct
 pkg openrails/server, type NamingConfig struct, Enabled *bool
 pkg openrails/server, type NamingConfig struct, FormerNames config.FormerNamesConfig
 pkg openrails/server, type NamingConfig struct, RenameInterval *time.Duration
-pkg openrails/server, type ResourceServerConfig = config.ResourceServerConfig
+pkg openrails/server, type ResourceServerConfig = hostconfig.ResourceServerConfig
 pkg openrails/server, type ResourceServerConfig struct
 pkg openrails/server, type ResourceServerConfig struct, DPoPNonceKey string
 pkg openrails/server, type ResourceServerConfig struct, Identifier string
-pkg openrails/server, type ResourceServerConfig struct, TrustedIssuers []config.TrustedIssuerConfig
+pkg openrails/server, type ResourceServerConfig struct, TrustedIssuers []hostconfig.TrustedIssuerConfig
 pkg openrails/server, type Server struct
-pkg openrails/server, type TrustedIssuerConfig = config.TrustedIssuerConfig
+pkg openrails/server, type TrustedIssuerConfig = hostconfig.TrustedIssuerConfig
 pkg openrails/server, type TrustedIssuerConfig struct
 pkg openrails/server, type TrustedIssuerConfig struct, AllowedOrigins []string
 pkg openrails/server, type TrustedIssuerConfig struct, GroupRoles map[string]string

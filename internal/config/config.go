@@ -1650,8 +1650,8 @@ func (m Mode) IsProviderReadOnly() bool { return IsProviderReadOnly(m.Config) }
 // IsLimitedMode reports IsLimitedMode of the Config.
 func (m Mode) IsLimitedMode() bool { return IsLimitedMode(m.Config) }
 
-// validatePublicURL permits HTTP only for explicitly authorized loopback hosts.
-func validatePublicURL(raw string, allowLoopback, originOnly bool) error {
+// ValidatePublicURL permits HTTP only for explicitly authorized loopback hosts.
+func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("must be an absolute HTTPS URL without credentials, query or fragment")

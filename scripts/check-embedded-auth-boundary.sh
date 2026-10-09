@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 packages=(. ./adapters/http ./adapters/gin ./adapters/fiber ./internal/engine ./internal/config ./internal/billingauth ./internal/app ./internal/service ./internal/http/embedhttp ./internal/http/inprocess ./internal/hosttools)
 deps="$(go list -deps "${packages[@]}")"
-if forbidden="$(printf '%s\n' "$deps" | grep -E '^github.com/open-rails/authkit(/|$)' | grep -vE '^github.com/open-rails/authkit/(iam|internal/wireform|internal/errmodel)$')"; then
+if forbidden="$(printf '%s\n' "$deps" | grep -E '^github.com/open-rails/authkit(/|$)')"; then
   printf 'The billing engine links AuthKit:\n%s\n' "$forbidden" >&2
   exit 1
 fi

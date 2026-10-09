@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
@@ -43,7 +44,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
 		Extensions:             s.adminConsole.Extensions,
 	}
-	issuer, err := adminconsole.ConsoleIssuer(s.consoleIssuer, s.resourceServer)
+	issuer, err := consoleIssuer(s.consoleIssuer, s.resourceServer)
 	if err != nil {
 		return err
 	}
@@ -61,4 +62,21 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	s.handle(mux, http.MethodGet+" "+path, console)
 	s.handle(mux, http.MethodGet+" "+path+"/{asset...}", console)
 	return nil
+}
+
+// consoleIssuer resolves the console's issuer against the resource server:
+// nil without one.
+func consoleIssuer(console *hostconfig.ConsoleIssuer, rs *hostconfig.ResourceServerConfig) (*adminconsole.Issuer, error) {
+	if console == nil {
+		return nil, nil
+	}
+	url, name, resource, err := hostconfig.ResolveConsoleIssuer(console, rs)
+	if err != nil {
+		return nil, err
+	}
+	scope := strings.Join(strings.Fields(console.Scope), " ")
+	if scope == "" {
+		scope = hostconfig.ConsoleScope
+	}
+	return &adminconsole.Issuer{URL: url, ClientID: strings.TrimSpace(console.ClientID), Name: name, Resource: resource, Scope: scope}, nil
 }

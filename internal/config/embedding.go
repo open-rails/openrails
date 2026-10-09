@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/billingauth"
 )
@@ -83,50 +82,6 @@ type AdminConsole struct {
 	// served verbatim in config.json. OpenRails never reads it; a plain
 	// console build leaves it empty.
 	Extensions map[string]any
-}
-
-// ConsoleIssuer is the authorization server the console signs staff in at,
-// as an OAuth 2.0 public client (code flow with PKCE and DPoP).
-type ConsoleIssuer struct {
-	// URL is the issuer: one of the resource server's trusted issuers.
-	URL string
-	// ClientID is the console's public client there, registered with the
-	// console path plus /callback as a redirect URI.
-	ClientID string
-	// Name is shown on the sign-in button; empty is the trusted issuer's.
-	Name string
-	// Scope is what the console asks for; empty is ConsoleScope. An issuer
-	// that grants refresh tokens only for offline_access needs it added.
-	Scope string
-}
-
-// ConsoleScope is what the console asks a trusted issuer for by default.
-const ConsoleScope = "openid profile email openrails:merchant"
-
-// ResolveConsoleIssuer checks console against the resource server: its URL
-// must be a trusted issuer's, and it needs a client id.
-func ResolveConsoleIssuer(console *ConsoleIssuer, rs *ResourceServerConfig) (issuer, name, resource string, err error) {
-	if rs == nil {
-		return "", "", "", fmt.Errorf("admin console issuer: declare resource_server, which trusts it")
-	}
-	url := strings.TrimRight(strings.TrimSpace(console.URL), "/")
-	for _, is := range rs.TrustedIssuers {
-		if strings.TrimRight(strings.TrimSpace(is.Issuer), "/") != url {
-			continue
-		}
-		if strings.TrimSpace(console.ClientID) == "" {
-			return "", "", "", fmt.Errorf("admin console issuer %q: client_id is required", url)
-		}
-		name = strings.TrimSpace(console.Name)
-		if name == "" {
-			name = strings.TrimSpace(is.Name)
-		}
-		if name == "" {
-			name = url
-		}
-		return strings.TrimSpace(is.Issuer), name, strings.TrimSpace(rs.Identifier), nil
-	}
-	return "", "", "", fmt.Errorf("admin console issuer %q is not one of resource_server.trusted_issuers", url)
 }
 
 // CheckoutConfig is Config.Checkout: the shared payment page. The zero value

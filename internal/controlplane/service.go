@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/hostconfig"
 )
 
 // ControlPlane is the standalone server's multi-merchant control plane over
@@ -70,7 +71,7 @@ type options struct {
 	rateLimitOverrides           map[string]authkit.RateLimit
 	redis                        *redis.Client
 	merchantCreation             *MerchantCreationConfig
-	resourceServer               *config.ResourceServerConfig
+	resourceServer               *hostconfig.ResourceServerConfig
 }
 
 // Option configures the control plane.
@@ -177,7 +178,7 @@ func newOptions(opts []Option) options {
 // override config, direct-peer excludes proxy lists, and an undeclared posture
 // refuses to boot rather than sharing one rate-limit bucket behind an unknown
 // proxy.
-func clientIPPosture(cfg *config.Config, auth *config.AuthConfig, options options) (authkit.HTTPConfig, error) {
+func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options options) (authkit.HTTPConfig, error) {
 	proxies := cfg.TrustedProxies
 	if len(options.trustedProxies) > 0 {
 		proxies = options.trustedProxies
@@ -199,7 +200,7 @@ func clientIPPosture(cfg *config.Config, auth *config.AuthConfig, options option
 // Registration policy (#469): closed registers nobody and verifies nothing;
 // open and invite-only registration require verified contacts, so they need a
 // sender.
-func registration(options options, auth *config.AuthConfig) authkit.RegistrationConfig {
+func registration(options options, auth *hostconfig.AuthConfig) authkit.RegistrationConfig {
 	reg := authkit.RegistrationConfig{
 		NativeUserMode:               registrationMode(options.registration),
 		Verification:                 iam.RegistrationVerificationNone,
@@ -233,7 +234,7 @@ func ValidateRegistrationMode(mode iam.RegistrationMode) error {
 // inlineKeySource is the signing key from inline PEM (AUTHKIT_ACTIVE_KEY_ID /
 // AUTHKIT_ACTIVE_PRIVATE_KEY_PEM / AUTHKIT_PUBLIC_KEYS, read once at
 // hostconfig.Load, #712/or#917), or nil to resolve auth.keys_path.
-func inlineKeySource(auth *config.AuthConfig) (keys.Source, error) {
+func inlineKeySource(auth *hostconfig.AuthConfig) (keys.Source, error) {
 	activeKeyID := strings.TrimSpace(auth.ActiveKeyID)
 	activePrivateKeyPEM := strings.TrimSpace(auth.ActivePrivateKeyPEM)
 	if activeKeyID == "" && activePrivateKeyPEM == "" {
@@ -273,7 +274,7 @@ func usernames(p config.NamingPolicy) authkit.UsernameConfig {
 
 // authConfig is the AuthKit configuration of the control plane. Its jobs run
 // on OpenRails' River fleet, in riverSchema.
-func authConfig(auth *config.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig, riverSchema string) authkit.Config {
+func authConfig(auth *hostconfig.AuthConfig, options options, naming config.NamingPolicy, httpCfg *authkit.HTTPConfig, riverSchema string) authkit.Config {
 	return authkit.Config{
 		Database: authkit.DatabaseConfig{Schema: strings.TrimSpace(auth.Schema), RiverSchema: riverSchema},
 		Token: authkit.TokenConfig{
@@ -298,7 +299,7 @@ func authConfig(auth *config.AuthConfig, options options, naming config.NamingPo
 // AuthKit is the control plane's AuthKit: the configuration and dependencies
 // a standalone server builds, migrates and serves its AuthKit client from,
 // over pool (OpenRails' own database, owned by the caller).
-func AuthKit(cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (authkit.Config, authkit.Deps, error) {
+func AuthKit(cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool, opts ...Option) (authkit.Config, authkit.Deps, error) {
 	cp, options, err := prepare(cfg, auth, pool, opts)
 	if err != nil {
 		return authkit.Config{}, authkit.Deps{}, err
@@ -339,7 +340,7 @@ func AuthKit(cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, op
 
 // New is the control plane over client, the AuthKit client built from AuthKit
 // with the same arguments. Closing it closes client.
-func New(client *authkit.Client, cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
+func New(client *authkit.Client, cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
 	if client == nil {
 		return nil, errors.New("controlplane: an AuthKit client is required")
 	}
@@ -359,12 +360,12 @@ func New(client *authkit.Client, cfg *config.Config, auth *config.AuthConfig, po
 
 // prepare validates the control plane's declaration: every input is required
 // and a failure is a boot failure, never a silent downgrade (#469).
-func prepare(cfg *config.Config, auth *config.AuthConfig, pool *pgxpool.Pool, opts []Option) (*ControlPlane, options, error) {
+func prepare(cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool, opts []Option) (*ControlPlane, options, error) {
 	options := newOptions(opts)
 	if cfg == nil || auth == nil || strings.TrimSpace(auth.Issuer) == "" {
 		return nil, options, errors.New("controlplane: auth.issuer is required")
 	}
-	if err := config.ValidateAuthTransport(auth); err != nil {
+	if err := hostconfig.ValidateAuthTransport(auth); err != nil {
 		return nil, options, err
 	}
 	if pool == nil {

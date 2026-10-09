@@ -166,7 +166,7 @@ func validateSecurityPolicy(cfg *Config) error {
 		return fmt.Errorf("checkout: %w", err)
 	}
 	for _, raw := range cfg.ReturnOrigins {
-		if err := validatePublicURL(strings.TrimSpace(raw), true, true); err != nil {
+		if err := ValidatePublicURL(strings.TrimSpace(raw), true, true); err != nil {
 			return fmt.Errorf("return_origins %q %w", raw, err)
 		}
 	}

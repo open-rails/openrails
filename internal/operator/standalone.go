@@ -4,6 +4,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	server "github.com/open-rails/openrails/internal/http"
 )
 
@@ -11,8 +12,8 @@ import (
 // engine's routes and the control plane's.
 type Surface struct {
 	AdminConsole   *config.AdminConsole
-	ConsoleIssuer  *config.ConsoleIssuer
-	ResourceServer *config.ResourceServerConfig
+	ConsoleIssuer  *hostconfig.ConsoleIssuer
+	ResourceServer *hostconfig.ResourceServerConfig
 	// Issuer is the control plane's AuthKit issuer.
 	Issuer string
 }

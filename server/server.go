@@ -26,8 +26,8 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/email"
 	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
@@ -41,20 +41,20 @@ import (
 type (
 	// AuthConfig is Config.Auth: the server's AuthKit issuer, signing keys,
 	// naming and development allowances.
-	AuthConfig = config.AuthConfig
+	AuthConfig = hostconfig.AuthConfig
 	// AuthRateLimit is one AuthKit rate-limit bucket of Config.AuthRateLimits.
-	AuthRateLimit = config.AuthRateLimit
+	AuthRateLimit = hostconfig.AuthRateLimit
 	// MerchantCreationConfig is Config.MerchantCreation: the policy for
 	// merchant names users claim.
-	MerchantCreationConfig = config.MerchantCreationConfig
+	MerchantCreationConfig = hostconfig.MerchantCreationConfig
 	// ResourceServerConfig is Config.ResourceServer: the authorization servers
 	// whose access tokens the merchant API accepts.
-	ResourceServerConfig = config.ResourceServerConfig
+	ResourceServerConfig = hostconfig.ResourceServerConfig
 	// TrustedIssuerConfig is one of ResourceServerConfig.TrustedIssuers.
-	TrustedIssuerConfig = config.TrustedIssuerConfig
+	TrustedIssuerConfig = hostconfig.TrustedIssuerConfig
 	// ConsoleIssuer is Config.ConsoleIssuer: the trusted issuer staff sign in
 	// to the admin console at.
-	ConsoleIssuer = config.ConsoleIssuer
+	ConsoleIssuer = hostconfig.ConsoleIssuer
 	// NamingConfig is AuthConfig.Naming: the rename policy for merchant names
 	// and usernames.
 	NamingConfig = config.NamingConfig
@@ -192,7 +192,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		Redis: s.graph.RedisClient,
 	}
 	if opts.EmailSender == nil && s.graph.Runtime.EmailSender != nil {
-		opts.EmailSender = email.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
+		opts.EmailSender = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
 	}
 	if len(cfg.AuthRateLimits) > 0 {
 		opts.AuthRateLimitOverrides = make(map[string]authkit.RateLimit, len(cfg.AuthRateLimits))

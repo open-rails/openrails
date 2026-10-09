@@ -17,8 +17,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/hostconfig"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
@@ -51,14 +51,14 @@ type trustedIssuer struct {
 
 // WithResourceServer accepts the access tokens cfg's trusted issuers mint
 // for this deployment (server.Config.ResourceServer).
-func WithResourceServer(cfg config.ResourceServerConfig) Option {
+func WithResourceServer(cfg hostconfig.ResourceServerConfig) Option {
 	return func(o *options) { o.resourceServer = &cfg }
 }
 
 // newResourceServer builds the verifier: one audience (the identifier), DPoP
 // with replay protection every replica shares and server nonces.
-func newResourceServer(cfg config.ResourceServerConfig, auth *config.AuthConfig, rdb *redis.Client) (*resourceServer, error) {
-	if err := config.ValidateResourceServer(&cfg, auth.AllowLoopbackHTTP); err != nil {
+func newResourceServer(cfg hostconfig.ResourceServerConfig, auth *hostconfig.AuthConfig, rdb *redis.Client) (*resourceServer, error) {
+	if err := hostconfig.ValidateResourceServer(&cfg, auth.AllowLoopbackHTTP); err != nil {
 		return nil, fmt.Errorf("controlplane: %w", err)
 	}
 	replay, err := proofReplay(rdb, auth.AllowMemory)
@@ -101,7 +101,7 @@ func newResourceServer(cfg config.ResourceServerConfig, auth *config.AuthConfig,
 
 // dpopOrigin is where clients reach this deployment, the URL a DPoP proof
 // signs: auth.request_origin, else the issuer's origin. Never a request header.
-func dpopOrigin(auth *config.AuthConfig) string {
+func dpopOrigin(auth *hostconfig.AuthConfig) string {
 	if origin := strings.TrimRight(strings.TrimSpace(auth.RequestOrigin), "/"); origin != "" {
 		return origin
 	}

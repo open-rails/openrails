@@ -15,10 +15,10 @@ import (
 // engine's, the server's AuthKit and the listener.
 type Config struct {
 	*billing.Config
-	Auth *billing.AuthConfig
+	Auth *AuthConfig
 	// ResourceServer accepts trusted issuers' access tokens on the merchant
 	// API (resource_server).
-	ResourceServer *billing.ResourceServerConfig
+	ResourceServer *ResourceServerConfig
 	// LocalSignIn serves sign-in to the server's own accounts
 	// (local_sign_in); off, people sign in at a trusted issuer.
 	LocalSignIn bool
@@ -33,7 +33,7 @@ type Config struct {
 	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
 	// at a trusted issuer.
 	AdminConsole  *billing.AdminConsole
-	ConsoleIssuer *billing.ConsoleIssuer
+	ConsoleIssuer *ConsoleIssuer
 }
 
 type contextKey struct{}
@@ -99,10 +99,10 @@ type fileConfig struct {
 	HyperSwitch         *billing.HyperSwitchConfig     `koanf:"hyperswitch"`
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
 
-	Auth *billing.AuthConfig `koanf:"auth"`
+	Auth *AuthConfig `koanf:"auth"`
 
-	ResourceServer *billing.ResourceServerConfig `koanf:"resource_server"`
-	LocalSignIn    bool                          `koanf:"local_sign_in"`
+	ResourceServer *ResourceServerConfig `koanf:"resource_server"`
+	LocalSignIn    bool                  `koanf:"local_sign_in"`
 }
 
 // defaults is the file before any source is read: local infrastructure and
@@ -122,7 +122,7 @@ func defaults() *fileConfig {
 		Logger:     &billing.LoggerConfig{Level: "info"},
 		RateLimits: billing.DefaultRateLimits(),
 		Captcha:    billing.DefaultCaptcha(),
-		Auth:       &billing.AuthConfig{},
+		Auth:       &AuthConfig{},
 	}
 }
 
@@ -144,9 +144,9 @@ func (s *sendGridFile) config() *billing.SendGridConfig {
 // adminConsoleFile is the admin_console section: the server serves the
 // console at path only while enabled.
 type adminConsoleFile struct {
-	Enabled bool                   `koanf:"enabled"`
-	Path    string                 `koanf:"path"`
-	Issuer  *billing.ConsoleIssuer `koanf:"issuer"`
+	Enabled bool           `koanf:"enabled"`
+	Path    string         `koanf:"path"`
+	Issuer  *ConsoleIssuer `koanf:"issuer"`
 }
 
 func (a *adminConsoleFile) mount() *billing.AdminConsole {
@@ -156,7 +156,7 @@ func (a *adminConsoleFile) mount() *billing.AdminConsole {
 	return &billing.AdminConsole{Path: a.Path}
 }
 
-func (a *adminConsoleFile) issuer() *billing.ConsoleIssuer {
+func (a *adminConsoleFile) issuer() *ConsoleIssuer {
 	if a == nil || !a.Enabled {
 		return nil
 	}
@@ -262,9 +262,9 @@ func Validate(cfg *Config) error {
 			return err
 		}
 	}
-	if err := billing.ValidateAuthTransport(cfg.Auth); err != nil {
+	if err := ValidateAuthTransport(cfg.Auth); err != nil {
 		return err
 	}
 	allowLoopback := cfg.Auth != nil && cfg.Auth.AllowLoopbackHTTP
-	return billing.ValidateResourceServer(cfg.ResourceServer, allowLoopback)
+	return ValidateResourceServer(cfg.ResourceServer, allowLoopback)
 }

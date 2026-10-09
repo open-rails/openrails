@@ -1062,12 +1062,9 @@
     ],
     "internal/config": [
       "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
-      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming NamingConfig\n\n\tSchema string\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
-      "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
       "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSendGrid *SendGridConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
-      "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type CustomerHTTPScope uint8",
@@ -1085,7 +1082,6 @@
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
       "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
-      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
       "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tAPIHost string `yaml:\"api_host,omitempty\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
@@ -1094,12 +1090,18 @@
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr     string\n\tPassword string\n\tDB       int\n}",
-      "type ResourceServerConfig struct {\n\tIdentifier string\n\n\tDPoPNonceKey string\n\n\tTrustedIssuers []TrustedIssuerConfig\n}",
       "type RouteSet string",
       "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tStorefront bool\n\n\tCustomers CustomerHTTPScope\n\n\tMerchant bool\n\n\tMerchantConfig bool\n\n\tGuards Guards\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
       "type SendGridConfig struct {\n\tAPIKey string\n\tFrom   EmailAddress\n}",
-      "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
+    ],
+    "internal/hostconfig": [
+      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming billing.NamingConfig\n\n\tSchema string\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
+      "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
+      "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
+      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
+      "type ResourceServerConfig struct {\n\tIdentifier string\n\n\tDPoPNonceKey string\n\n\tTrustedIssuers []TrustedIssuerConfig\n}",
+      "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}"
     ],
     "openrailstest": [
       "func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases)",
@@ -1134,18 +1136,18 @@
       "func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error",
       "func (s *Server) SubjectHasVaultedPaymentMethod(ctx context.Context, vaultMerchant billing.MerchantID, subject string) (bool, error)",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
-      "type AuthConfig = config.AuthConfig",
-      "type AuthRateLimit = config.AuthRateLimit",
+      "type AuthConfig = hostconfig.AuthConfig",
+      "type AuthRateLimit = hostconfig.AuthRateLimit",
       "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tAdminConsole *openrails.AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n}",
-      "type ConsoleIssuer = config.ConsoleIssuer",
+      "type ConsoleIssuer = hostconfig.ConsoleIssuer",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tSMS authkit.SMSSender\n\n\tAuthEmail authkit.EmailSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
       "type FormerNamesMode = config.FormerNamesMode",
-      "type MerchantCreationConfig = config.MerchantCreationConfig",
+      "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
       "type NamingConfig = config.NamingConfig",
-      "type ResourceServerConfig = config.ResourceServerConfig",
+      "type ResourceServerConfig = hostconfig.ResourceServerConfig",
       "type Server struct {\n}",
-      "type TrustedIssuerConfig = config.TrustedIssuerConfig"
+      "type TrustedIssuerConfig = hostconfig.TrustedIssuerConfig"
     ],
     "web/admin": [
       "func FS() fs.FS"
@@ -2025,7 +2027,6 @@
     },
     "internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",
-      "config": "github.com/open-rails/openrails/internal/config",
       "fmt": "fmt",
       "fs": "io/fs",
       "html": "html",
@@ -2097,8 +2098,7 @@
     },
     "internal/config/embedding.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
-      "fmt": "fmt",
-      "strings": "strings"
+      "fmt": "fmt"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",
@@ -2114,12 +2114,6 @@
     },
     "internal/config/naming.go": {
       "fmt": "fmt",
-      "time": "time"
-    },
-    "internal/config/standalone.go": {
-      "fmt": "fmt",
-      "iam": "github.com/open-rails/authkit/iam",
-      "strings": "strings",
       "time": "time"
     },
     "internal/contract/model.go": {
@@ -2283,6 +2277,13 @@
       "fmt": "fmt",
       "strconv": "strconv",
       "strings": "strings"
+    },
+    "internal/hostconfig/server.go": {
+      "billing": "github.com/open-rails/openrails/internal/config",
+      "fmt": "fmt",
+      "iam": "github.com/open-rails/authkit/iam",
+      "strings": "strings",
+      "time": "time"
     },
     "internal/hosttools/nmi_decline_report.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4607,11 +4608,11 @@
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/internal/controlplane",
-      "email": "github.com/open-rails/openrails/internal/email",
       "embedhttp": "github.com/open-rails/openrails/internal/http/embedhttp",
       "engine": "github.com/open-rails/openrails/internal/engine",
       "errors": "errors",
       "fmt": "fmt",
+      "hostconfig": "github.com/open-rails/openrails/internal/hostconfig",
       "http": "net/http",
       "httpserver": "github.com/open-rails/openrails/internal/http",
       "iam": "github.com/open-rails/authkit/iam",

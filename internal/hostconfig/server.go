@@ -1,8 +1,8 @@
-package config
+package hostconfig
 
-// The standalone server's configuration (package server), defined here so
-// the internal packages it composes share it. The embedded engine reads none
-// of it.
+// The standalone server's own configuration: what it adds to the engine's
+// (internal/config), shared by the packages it composes. The embedded engine
+// links none of it.
 
 import (
 	"fmt"
@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/open-rails/authkit/iam"
+
+	billing "github.com/open-rails/openrails/internal/config"
 )
 
 // ResourceServerConfig makes the standalone server an OAuth 2.0 resource
@@ -58,7 +60,7 @@ func ValidateResourceServer(rs *ResourceServerConfig, allowLoopback bool) error 
 	if rs == nil {
 		return nil
 	}
-	if err := validatePublicURL(strings.TrimSpace(rs.Identifier), allowLoopback, false); err != nil {
+	if err := billing.ValidatePublicURL(strings.TrimSpace(rs.Identifier), allowLoopback, false); err != nil {
 		return fmt.Errorf("resource_server.identifier: %w", err)
 	}
 	if len(rs.DPoPNonceKey) < 32 {
@@ -68,7 +70,7 @@ func ValidateResourceServer(rs *ResourceServerConfig, allowLoopback bool) error 
 	for i, is := range rs.TrustedIssuers {
 		at := fmt.Sprintf("resource_server.trusted_issuers[%d]", i)
 		issuer := strings.TrimSpace(is.Issuer)
-		if err := validatePublicURL(issuer, allowLoopback, false); err != nil {
+		if err := billing.ValidatePublicURL(issuer, allowLoopback, false); err != nil {
 			return fmt.Errorf("%s.issuer: %w", at, err)
 		}
 		if seen[issuer] {
@@ -79,7 +81,7 @@ func ValidateResourceServer(rs *ResourceServerConfig, allowLoopback bool) error 
 			if len(is.Keys) > 0 {
 				return fmt.Errorf("%s: jwks_uri and keys are exclusive", at)
 			}
-			if err := validatePublicURL(uri, allowLoopback, false); err != nil {
+			if err := billing.ValidatePublicURL(uri, allowLoopback, false); err != nil {
 				return fmt.Errorf("%s.jwks_uri: %w", at, err)
 			}
 		}
@@ -100,7 +102,7 @@ func ValidateResourceServer(rs *ResourceServerConfig, allowLoopback bool) error 
 			}
 		}
 		for _, origin := range is.AllowedOrigins {
-			if err := validatePublicURL(strings.TrimSpace(origin), allowLoopback, true); err != nil {
+			if err := billing.ValidatePublicURL(strings.TrimSpace(origin), allowLoopback, true); err != nil {
 				return fmt.Errorf("%s.allowed_origins %q: %w", at, origin, err)
 			}
 		}
@@ -163,7 +165,7 @@ type AuthConfig struct {
 	DirectPeerIP bool
 
 	// Naming is the site naming policy for merchant names and usernames.
-	Naming NamingConfig
+	Naming billing.NamingConfig
 
 	// Schema is the Postgres schema of the server's AuthKit tables; empty is
 	// AuthKit's default, profiles. Deployments sharing a database without
@@ -199,14 +201,58 @@ func ValidateAuthTransport(auth *AuthConfig) error {
 		return nil
 	}
 	if issuer := strings.TrimSpace(auth.Issuer); issuer != "" {
-		if err := validatePublicURL(issuer, auth.AllowLoopbackHTTP, false); err != nil {
+		if err := billing.ValidatePublicURL(issuer, auth.AllowLoopbackHTTP, false); err != nil {
 			return fmt.Errorf("auth issuer: %w", err)
 		}
 	}
 	if origin := strings.TrimSpace(auth.RequestOrigin); origin != "" {
-		if err := validatePublicURL(origin, auth.AllowLoopbackHTTP, true); err != nil {
+		if err := billing.ValidatePublicURL(origin, auth.AllowLoopbackHTTP, true); err != nil {
 			return fmt.Errorf("auth.request_origin: %w", err)
 		}
 	}
 	return nil
+}
+
+// ConsoleIssuer is the authorization server the console signs staff in at,
+// as an OAuth 2.0 public client (code flow with PKCE and DPoP).
+type ConsoleIssuer struct {
+	// URL is the issuer: one of the resource server's trusted issuers.
+	URL string
+	// ClientID is the console's public client there, registered with the
+	// console path plus /callback as a redirect URI.
+	ClientID string
+	// Name is shown on the sign-in button; empty is the trusted issuer's.
+	Name string
+	// Scope is what the console asks for; empty is ConsoleScope. An issuer
+	// that grants refresh tokens only for offline_access needs it added.
+	Scope string
+}
+
+// ConsoleScope is what the console asks a trusted issuer for by default.
+const ConsoleScope = "openid profile email openrails:merchant"
+
+// ResolveConsoleIssuer checks console against the resource server: its URL
+// must be a trusted issuer's, and it needs a client id.
+func ResolveConsoleIssuer(console *ConsoleIssuer, rs *ResourceServerConfig) (issuer, name, resource string, err error) {
+	if rs == nil {
+		return "", "", "", fmt.Errorf("admin console issuer: declare resource_server, which trusts it")
+	}
+	url := strings.TrimRight(strings.TrimSpace(console.URL), "/")
+	for _, is := range rs.TrustedIssuers {
+		if strings.TrimRight(strings.TrimSpace(is.Issuer), "/") != url {
+			continue
+		}
+		if strings.TrimSpace(console.ClientID) == "" {
+			return "", "", "", fmt.Errorf("admin console issuer %q: client_id is required", url)
+		}
+		name = strings.TrimSpace(console.Name)
+		if name == "" {
+			name = strings.TrimSpace(is.Name)
+		}
+		if name == "" {
+			name = url
+		}
+		return strings.TrimSpace(is.Issuer), name, strings.TrimSpace(rs.Identifier), nil
+	}
+	return "", "", "", fmt.Errorf("admin console issuer %q is not one of resource_server.trusted_issuers", url)
 }

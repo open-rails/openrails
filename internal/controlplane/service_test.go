@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/credential"
+	"github.com/open-rails/openrails/internal/hostconfig"
 )
 
 // Every refusal precedes AuthKit's construction, so none needs a database.
@@ -31,24 +32,24 @@ func TestAuthKitRefusesIncompleteConfiguration(t *testing.T) {
 	issuer := "https://openrails.example.com"
 	for want, tc := range map[string]struct {
 		cfg  *config.Config
-		auth *config.AuthConfig
+		auth *hostconfig.AuthConfig
 		pool *pgxpool.Pool
 		opts []Option
 	}{
 		"auth.issuer is required":        {&config.Config{}, nil, pool, nil},
-		"auth issuer":                    {&config.Config{}, &config.AuthConfig{Issuer: "http://openrails.example.com"}, pool, nil},
-		"request_origin":                 {&config.Config{}, &config.AuthConfig{Issuer: issuer, RequestOrigin: "https://a.example/billing"}, pool, nil},
-		"pgx pool is required":           {&config.Config{}, &config.AuthConfig{Issuer: issuer}, nil, nil},
-		"merchant creation slug pattern": {&config.Config{}, &config.AuthConfig{Issuer: issuer}, pool, []Option{WithMerchantCreation(MerchantCreationConfig{SlugPattern: "("})}},
-		"naming policy":                  {&config.Config{}, &config.AuthConfig{Issuer: issuer, Naming: config.NamingConfig{FormerNames: config.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
-		"explicit client-IP posture":     {&config.Config{}, &config.AuthConfig{Issuer: issuer, MintDisabled: true}, pool, nil},
-		"rate limits need Redis":         {&config.Config{}, &config.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
-		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &config.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
+		"auth issuer":                    {&config.Config{}, &hostconfig.AuthConfig{Issuer: "http://openrails.example.com"}, pool, nil},
+		"request_origin":                 {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, RequestOrigin: "https://a.example/billing"}, pool, nil},
+		"pgx pool is required":           {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, nil, nil},
+		"merchant creation slug pattern": {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, pool, []Option{WithMerchantCreation(MerchantCreationConfig{SlugPattern: "("})}},
+		"naming policy":                  {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, Naming: config.NamingConfig{FormerNames: config.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
+		"explicit client-IP posture":     {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, MintDisabled: true}, pool, nil},
+		"rate limits need Redis":         {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
+		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
 	} {
 		_, _, err := AuthKit(tc.cfg, tc.auth, tc.pool, tc.opts...)
 		require.ErrorContains(t, err, want)
 	}
-	_, err = New(nil, &config.Config{}, &config.AuthConfig{Issuer: issuer}, pool)
+	_, err = New(nil, &config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, pool)
 	require.ErrorContains(t, err, "AuthKit client is required")
 }
 
@@ -68,7 +69,7 @@ func TestRegistrationIsClosedUnlessOpened(t *testing.T) {
 	}
 	require.NotContains(t, (&ControlPlane{registration: iam.RegistrationModeClosed}).MountedRouteGroups(), iam.RouteRegistration)
 
-	auth := &config.AuthConfig{}
+	auth := &hostconfig.AuthConfig{}
 	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed, Verification: iam.RegistrationVerificationNone}, registration(options{}, auth))
 	open := registration(newOptions([]Option{WithRegistration(iam.RegistrationModeOpen), WithPasswordless(true)}), auth)
 	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired, PasswordlessLogin: true, PasswordlessAutoRegistration: true}, open)
@@ -126,7 +127,7 @@ func TestClientIPPostureMustBeDeclared(t *testing.T) {
 		{cfg: config.Config{CloudflareProxies: proxies}, opts: options{directPeerIP: true}, wantErr: "conflicts"},
 	} {
 		cfg := tc.cfg
-		got, err := clientIPPosture(&cfg, &config.AuthConfig{DirectPeerIP: tc.direct}, tc.opts)
+		got, err := clientIPPosture(&cfg, &hostconfig.AuthConfig{DirectPeerIP: tc.direct}, tc.opts)
 		if tc.wantErr != "" {
 			require.ErrorContains(t, err, tc.wantErr)
 			continue
@@ -158,17 +159,17 @@ func TestInlineKeySource(t *testing.T) {
 		return false
 	}
 
-	ks, err := inlineKeySource(&config.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM})
+	ks, err := inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM})
 	require.NoError(t, err)
 	require.Equal(t, "k", ks.ActiveSigner().KID())
 	require.True(t, warned())
-	_, err = inlineKeySource(&config.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM, PublicKeysJSON: "{"})
+	_, err = inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: keyPEM, PublicKeysJSON: "{"})
 	require.ErrorContains(t, err, "AUTHKIT_PUBLIC_KEYS")
-	_, err = inlineKeySource(&config.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"})
+	_, err = inlineKeySource(&hostconfig.AuthConfig{ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"})
 	require.Error(t, err)
 
 	hook.Reset()
-	ks, err = inlineKeySource(&config.AuthConfig{KeysPath: t.TempDir()})
+	ks, err = inlineKeySource(&hostconfig.AuthConfig{KeysPath: t.TempDir()})
 	require.NoError(t, err)
 	require.Nil(t, ks, "keys_path is resolved by AuthKit")
 	require.False(t, warned(), "keys_path is the hot-rotating path")
