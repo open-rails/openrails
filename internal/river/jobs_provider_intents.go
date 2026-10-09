@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func workerNow(c clockwork.Clock) time.Time {
@@ -64,7 +65,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	}
 	args := job.Args
 	store := intents.NewStore(w.DB)
-	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: config.Mode{Config: w.Config}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
+	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: writeposture.View{Config: w.Config, DB: w.DB}, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
 	runner.OnSuccessorCommitted = func(mid, id uuid.UUID) {
 		if mid == args.MerchantID && id == args.IntentID {
 			successorCommitted = true
@@ -92,7 +93,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 		// its ordinary retry date. This check survives either actor crashing
 		// between completion and the optional inline wakeup.
 		if intents.IsRecoveryHeld(row) && (row.LeaseExpiresAt == nil || !row.LeaseExpiresAt.After(now)) {
-			if blocked, _ := intents.GateExecution(config.Mode{Config: w.Config}, intents.Origin(row.Origin)); !blocked && store.CheckRecovery(ctx, row, now) == nil {
+			if blocked, _ := intents.GateExecution(ctx, writeposture.View{Config: w.Config, DB: w.DB}, row.MerchantID, intents.Origin(row.Origin)); !blocked && store.CheckRecovery(ctx, row, now) == nil {
 				if err := store.WakeRecoveryHeld(ctx, row.ID, now); err != nil {
 					return err
 				}

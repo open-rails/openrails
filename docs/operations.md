@@ -34,6 +34,24 @@ Provider idempotency supplements database coordination within each provider's
 documented limits; it does not make independent copies safe for active-active
 billing. A provider lookup followed by a charge is not an atomic lock.
 
+Two fences keep a copy from billing:
+
+- **The book's identity.** `billing.book_identity` records the PostgreSQL
+  cluster, database and schema the book was armed in. Anywhere else (a dump
+  restored into another database or schema, a major-version upgrade that
+  re-initializes the cluster) every provider write is readonly, startup logs
+  an error, and `openrails book status` says so. Once every other copy is
+  stopped, `openrails book arm --by NAME` arms this one. A promoted physical
+  replica keeps the identity, so failover needs nothing; a physical clone (a
+  disk snapshot, a base backup started as a second server) keeps it too, so
+  rotate the PSP credentials before running one.
+- **The merchant's write posture.** `billing.merchant_write_posture` can
+  lower one merchant below `provider_write_mode`: the effective mode is the
+  lower of the two. A billing export leaves its source readonly and an import
+  lands readonly, so a moved merchant bills from neither copy until
+  `openrails merchant arm --merchant NAME --by NAME` arms the one that stays.
+  `openrails merchant hold --mode readonly|limited` holds one merchant.
+
 Follow the [offline merchant transfer procedure](merchant-portability.md) when
 moving a book: stop and drain source writers, disable automatic restarts, keep
 destination writers stopped during restore, then activate only the destination.
@@ -90,6 +108,8 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
 | `intents` / `intents-log` | read-only intent-ledger views — see "Inspecting the ledger" |
+| `book status` / `book arm --by NAME` | report whether this database is the billing book's armed copy / arm it once every other copy is stopped |
+| `merchant arm` / `merchant hold --mode readonly\|limited` (`--merchant NAME --by NAME`) | restore or hold one merchant's provider writes; export and import leave it readonly |
 
 The `push-*` commands push declared file state outward; `pull-provider` moves
 the opposite direction and never mutates a payment rail.
@@ -992,6 +1012,9 @@ collector.
 engine payments (initial and renewal). Operations that may already have been
 submitted are still verified, and webhooks are still handled. It changes no
 stored ownership; `provider_write_mode` remains a separate gate.
+
+A merchant's write posture and the book's identity can lower the mode for one
+merchant or the whole book (see above); the lower mode applies.
 
 What each provider write mode permits (`test_mode` applies orthogonally: with
 sandbox the same matrix holds against sandbox rails, so no real money can move

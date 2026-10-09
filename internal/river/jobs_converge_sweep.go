@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/progress"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const KindConvergeSweep = "openrails.converge_sweep"
@@ -89,6 +90,7 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 	// #836: the runtime kill switch, read per merchant so one merchant's stop
 	// does not halt the fleet and the fleet-wide stop halts every merchant.
 	gate := destructive.New(w.DB)
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
 
 	var swept, findings, autoFixed, reconcileRequired, adminRequired, gated int
 	for _, mid := range merchantIDs {
@@ -99,6 +101,10 @@ func (w ConvergeSweepWorker) Work(ctx context.Context, job *river.Job[ConvergeSw
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			if v := gate.Check(ctx, mid); !v.Allowed {
 				blocked = v.Reason
+				return nil
+			}
+			if p := postures.Posture(ctx, mid); p.ReadOnly() {
+				blocked = p.Reason
 				return nil
 			}
 			var e error

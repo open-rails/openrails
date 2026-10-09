@@ -228,6 +228,8 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			require.NoError(t, err)
 			var archive bytes.Buffer
 			require.NoError(t, merchantarchive.Export(t.Context(), sourceDB, mid, &archive))
+			// The backup's source keeps billing.
+			armMerchant(t, source, mid)
 			source.start()
 			status, body := c.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "after-backup", map[string]string{"payment_method_id": method})
 			require.Equal(t, http.StatusOK, status, body)
@@ -255,6 +257,7 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			require.NoError(t, err)
 			_, err = merchantarchive.Restore(t.Context(), targetDB, mid, bytes.NewReader(archive.Bytes()))
 			require.NoError(t, err)
+			armMerchant(t, target, mid)
 			target.advance(5 * 24 * time.Hour)
 			target.start()
 			ctx := merchant.WithID(t.Context(), mid)

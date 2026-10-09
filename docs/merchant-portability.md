@@ -66,8 +66,14 @@ A migration to a different vault is a separate procedure.
 
 The export preflight refuses unsupported or unsettled state instead of silently
 omitting it. Resolve the named state on the source and export again; do not edit
-the archive or delete financial history to force acceptance. A successful export
-still requires the operator to prevent concurrent writes throughout final cutover.
+the archive or delete financial history to force acceptance.
+
+A successful export leaves the source merchant readonly, and an import lands
+the destination readonly: no provider write (charge, renewal, refund, cancel,
+checkout) happens for that merchant on either copy until an operator arms one
+with `openrails merchant arm --merchant NAME --by NAME`. A refused or failed
+export restores the posture it found. Stopping the source writers is still
+the procedure; the fence keeps a forgotten worker from billing.
 
 ## One authoritative database
 
@@ -209,7 +215,9 @@ never provisions or rebinds the target implicitly.
    host configuration and manifest truth deliberately; a stale boot manifest can
    overwrite restored configuration when the destination starts.
 7. Switch application traffic and provider webhook destinations, then enable only
-   the destination workers. Retire or keep the source fenced and read-only.
+   the destination workers and arm the destination merchant
+   (`openrails merchant arm --merchant NAME --by NAME` against the destination
+   database). Retire the source or leave it fenced; never arm it again.
    **Never let the stale source and restored destination run billing concurrently.**
    Record the destination activation and confirm the source remains stopped.
 

@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
@@ -348,7 +349,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		rebill,
 		// Invoice collection rides the ledger like every other money mover; the
 		// charger and reconciliation reads are the #725 store-armed plane.
-		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, config.Mode{Config: r.Config}, clock),
+		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
@@ -402,11 +403,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	return registry
 }
 
-// intentRunner builds a Runner over a registry. Config is attached only when
-// non-nil: since or#865 a nil ModeView fails CLOSED (everything parks), so
-// handing the gate a typed-nil interface would silently park production work.
-// It does NOT panic — config.Mode nil-guards its Config and a nil one reads
-// as readonly, which parks just the same.
+// intentRunner builds a Runner over a registry. Its gate reads each merchant's
+// write posture; a nil Config reads as readonly and parks everything.
 func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock) *intents.Runner {
 	runner := &intents.Runner{
 		// #732: gate the request-path enqueue chokepoint (vault delete, admin
@@ -419,11 +417,14 @@ func (r *Runtime) intentRunner(registry *intents.Registry, clock clockwork.Clock
 		// provider write on every node, no deploy.
 		Destructive: destructive.New(r.DB),
 		Clock:       clock,
-	}
-	if r.Config != nil {
-		runner.Config = config.Mode{Config: r.Config}
+		Config:      r.Posture(),
 	}
 	return runner
+}
+
+// Posture reads merchants' provider write postures.
+func (r *Runtime) Posture() writeposture.View {
+	return writeposture.View{Config: r.Config, DB: r.DB}
 }
 
 // IntentRunner returns a Runner for synchronous enqueue+execute from request

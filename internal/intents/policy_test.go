@@ -19,17 +19,23 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
-type fakeMode struct{ readonly, limited bool }
+type fakeMode writeposture.Mode
 
-func (m fakeMode) IsProviderReadOnly() bool { return m.readonly }
-func (m fakeMode) IsLimitedMode() bool      { return m.limited || m.readonly }
+func (m fakeMode) Posture(context.Context, uuid.UUID) writeposture.Posture {
+	p := writeposture.Posture{Mode: writeposture.Mode(m)}
+	if p.Mode != writeposture.Full {
+		p.Reason = "posture is " + p.Mode.String()
+	}
+	return p
+}
 
 var (
-	modeFull     = fakeMode{}
-	modeLimited  = fakeMode{limited: true}
-	modeReadonly = fakeMode{readonly: true}
+	modeFull     = fakeMode(writeposture.Full)
+	modeLimited  = fakeMode(writeposture.Limited)
+	modeReadonly = fakeMode(writeposture.ReadOnly)
 )
 
 func TestBackoffDoublesToCapAndDefendsInputs(t *testing.T) {
@@ -58,14 +64,14 @@ func TestGateExecutionFailsClosed(t *testing.T) {
 		{"nil mode", nil, map[Origin]bool{OriginUser: true, OriginAdmin: true, OriginSystem: true}},
 	} {
 		for _, origin := range origins {
-			blocked, reason := GateExecution(tc.mode, origin)
+			blocked, reason := GateExecution(context.Background(), tc.mode, uuid.New(), origin)
 			assert.Equal(t, tc.blocked[origin], blocked, "%s/%s", tc.name, origin)
 			assert.Equal(t, blocked, reason != "", "%s/%s: a park always carries its reason", tc.name, origin)
 		}
 	}
-	_, reason := GateExecution(nil, OriginUser)
+	_, reason := GateExecution(context.Background(), nil, uuid.New(), OriginUser)
 	assert.Contains(t, reason, "operating mode is unknown")
-	blocked, reason := GateExecution(modeFull, Origin("robot"))
+	blocked, reason := GateExecution(context.Background(), modeFull, uuid.New(), Origin("robot"))
 	assert.True(t, blocked)
 	assert.Contains(t, reason, "robot")
 }

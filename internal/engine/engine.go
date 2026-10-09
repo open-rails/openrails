@@ -154,6 +154,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 	if signerPending {
 		confirmSigner(application, declaration)
 	}
+	rt.CheckBookIdentity(ctx)
 	rt.StartProviderPosture(declared...)
 	return e, nil
 }

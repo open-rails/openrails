@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/progress"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -384,7 +385,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		// remote writes or destructive repairs are held. Only the latter needs
 		// the operator's destructive arming; readonly never changes its mode.
 		verdict := gate.Check(tctx, mid)
-		overwrite := verdict.Allowed && verdict.EnforceArmed && (w.Config == nil || !config.IsProviderReadOnly(w.Config))
+		overwrite := verdict.Allowed && verdict.EnforceArmed && !(writeposture.View{Config: w.Config, DB: w.DB}).Posture(tctx, mid).ReadOnly()
 		if !overwrite {
 			stats.Gated++
 		}
@@ -718,7 +719,7 @@ func (w *ProviderRefreshWorker) completeRecovery(ctx context.Context, mid, psp u
 		if err != nil {
 			return err
 		}
-		if w.Config == nil || config.IsLimitedMode(w.Config) {
+		if (writeposture.View{Config: w.Config, DB: d}).Posture(ctx, mid).Limited() {
 			return nil
 		}
 		if err := providerrecovery.CheckPSP(ctx, d, mid, psp, w.now()); err != nil {

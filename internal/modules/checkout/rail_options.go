@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // CheckoutOption is a locally ready payment-provider choice for a price.
@@ -42,12 +43,12 @@ func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceI
 	if !ok || checkoutService == nil || checkoutService.Rails == nil {
 		return nil, fmt.Errorf("checkout rail options unavailable")
 	}
-	if s.config == nil || config.IsProviderReadOnly(s.config) {
-		return []CheckoutOption{}, nil
-	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("resolve checkout merchant: %w", err)
+	}
+	if s.config == nil || (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, merchantID.UUID()).ReadOnly() {
+		return []CheckoutOption{}, nil
 	}
 
 	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, productKey, priceKey)

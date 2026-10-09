@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 func (h *SubscriptionCollectionHandler) stripeEngineService(ctx context.Context, in gen.BillingProviderIntent) (*subscriptions.StripeService, error) {
@@ -168,7 +168,7 @@ func (h *SubscriptionCollectionHandler) executeStripeEngineDecline(ctx context.C
 	if h.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Config}, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, current.MerchantID, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)

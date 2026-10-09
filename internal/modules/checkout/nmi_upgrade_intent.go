@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	paymentattempts "github.com/open-rails/openrails/internal/modules/attempts"
 
 	"github.com/google/uuid"
@@ -273,7 +272,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingPro
 				return intents.RecoveryHeld(err.Error())
 			}
 			if errors.Is(err, errNMIScheduleWriteRequired) {
-				if blocked, reason := intents.GateExecution(config.Mode{Config: h.Checkout.Config}, intents.Origin(in.Origin)); blocked || client.ReadOnly {
+				if blocked, reason := intents.GateExecution(ctx, h.Checkout.Posture, in.MerchantID, intents.Origin(in.Origin)); blocked || client.ReadOnly {
 					return intents.Parked("NMI schedule write held: " + reason)
 				}
 				if err := store.CheckRecovery(ctx, in, h.Checkout.now()); err != nil {
@@ -352,7 +351,7 @@ func (h *NMIUpgradeIntentHandler) pushScheduleAmount(ctx context.Context, client
 	}
 	// Verify may observe an already-applied update, but it never performs one.
 	// Recheck the gates at the write boundary after reading the current plan.
-	if blocked, _ := intents.GateExecution(config.Mode{Config: h.Checkout.Config}, intents.Origin(in.Origin)); !send || blocked || client.ReadOnly {
+	if blocked, _ := intents.GateExecution(ctx, h.Checkout.Posture, in.MerchantID, intents.Origin(in.Origin)); !send || blocked || client.ReadOnly {
 		return errNMIScheduleWriteRequired
 	}
 	if err := intents.NewStore(h.Checkout.SubscriptionService.Database()).CheckRecovery(ctx, in, h.Checkout.now()); err != nil {

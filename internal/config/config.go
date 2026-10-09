@@ -1640,16 +1640,6 @@ func IsProviderReadOnly(cfg *Config) bool {
 	return GetProviderWriteMode(cfg) == ProviderWriteModeReadOnly
 }
 
-// Mode is a Config's provider write mode behind the interface the intent
-// executor's gate reads (intents.ModeView). A nil Config is readonly.
-type Mode struct{ Config *Config }
-
-// IsProviderReadOnly reports IsProviderReadOnly of the Config.
-func (m Mode) IsProviderReadOnly() bool { return IsProviderReadOnly(m.Config) }
-
-// IsLimitedMode reports IsLimitedMode of the Config.
-func (m Mode) IsLimitedMode() bool { return IsLimitedMode(m.Config) }
-
 // ValidatePublicURL permits HTTP only for explicitly authorized loopback hosts.
 func ValidatePublicURL(raw string, allowLoopback, originOnly bool) error {
 	u, err := url.Parse(raw)

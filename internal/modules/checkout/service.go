@@ -81,7 +81,9 @@ type CheckoutService struct {
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
 	Config    *config.Config
-	Rails     railresolve.Source
+	// Posture gates provider writes per merchant; nil parks them.
+	Posture intents.ModeView
+	Rails   railresolve.Source
 	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
 	// one from Config.
 	NMIClients *railresolve.NMIFactory

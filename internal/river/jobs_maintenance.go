@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/alerting"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"

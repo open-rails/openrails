@@ -48,6 +48,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 const (
@@ -226,8 +227,15 @@ func (s *CheckoutAttemptService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-func (s *CheckoutAttemptService) requireProviderWrites() error {
-	if s == nil || s.config == nil || config.IsProviderReadOnly(s.config) {
+func (s *CheckoutAttemptService) requireProviderWrites(ctx context.Context) error {
+	if s == nil || s.config == nil {
+		return fmt.Errorf("%w: provider writes are disabled", ErrCheckoutAttemptValidation)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, mid.UUID()).ReadOnly() {
 		return fmt.Errorf("%w: provider writes are disabled", ErrCheckoutAttemptValidation)
 	}
 	return nil
@@ -260,7 +268,7 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 	if err := validateCheckoutPriceSelector(req.PriceID, req.ProductKey, req.PriceKey); err != nil {
 		return nil, err
 	}
-	if err := s.requireProviderWrites(); err != nil {
+	if err := s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
 	// The idempotency key is an opaque client token, but it is persisted and
@@ -2579,7 +2587,7 @@ func (s *CheckoutAttemptService) GetSessionForSolanaPay(ctx context.Context, ses
 // BuildSolanaPayTransaction builds a Solana transaction for the given checkout attempt and wallet account.
 // This implements the POST endpoint of the Solana Pay Transaction Request spec.
 func (s *CheckoutAttemptService) BuildSolanaPayTransaction(ctx context.Context, sessionID uuid.UUID, account string) (*solanamodule.PayTransactionResponse, error) {
-	if err := s.requireProviderWrites(); err != nil {
+	if err := s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
 	if s.repo == nil {

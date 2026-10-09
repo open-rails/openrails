@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 var errEngineObligationChanged = errors.New("accepted engine obligation changed before submission")
@@ -71,7 +72,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 		}
 		return h.Verify(ctx, in)
 	}
-	if reason := h.submissionHeld(in); reason != "" {
+	if reason := h.submissionHeld(ctx, in); reason != "" {
 		return intents.Parked(reason)
 	}
 	if outcome, done := h.obligationOutcome(ctx, in, p); done {
@@ -147,14 +148,14 @@ func (h *SubscriptionCollectionHandler) hit(ctx context.Context, in gen.BillingP
 	return failpoint.Hit(ctx, site)
 }
 
-func (h *SubscriptionCollectionHandler) submissionHeld(in gen.BillingProviderIntent) string {
+func (h *SubscriptionCollectionHandler) submissionHeld(ctx context.Context, in gen.BillingProviderIntent) string {
 	if h.Config == nil {
 		return "engine execution mode is not configured"
 	}
 	if h.Config.EngineAdmissionHold {
 		return "new engine payment submission is held"
 	}
-	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Config}, intents.Origin(in.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: h.Config, DB: h.DB}, in.MerchantID, intents.Origin(in.Origin)); blocked {
 		return reason
 	}
 	if h.Resolver == nil {
@@ -549,7 +550,7 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 // obligation is already paid. Verify may recover an exact positive receipt
 // without inventing a local submission fence; absence never authorizes a POST.
 func (h *SubscriptionCollectionHandler) awaitRecoveredSubmission(ctx context.Context, in gen.BillingProviderIntent) intents.Outcome {
-	if reason := h.submissionHeld(in); reason != "" {
+	if reason := h.submissionHeld(ctx, in); reason != "" {
 		return intents.Parked(reason)
 	}
 	if err := intents.NewStore(h.DB).CheckRecovery(ctx, in, h.now()); err != nil {

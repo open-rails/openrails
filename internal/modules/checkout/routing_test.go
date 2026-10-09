@@ -429,21 +429,11 @@ func TestSavedMethodMustBelongToTargetPSP(t *testing.T) {
 	require.Error(t, paymentMethodMatchesTargetPSP(&models.PaymentMethod{PspID: &id}, railTarget{}))
 }
 
+// Checkout refuses without a config and under readonly; a merchant's own
+// posture is covered end to end.
 func TestCheckoutRequiresProviderWrites(t *testing.T) {
-	for _, tc := range []struct {
-		cfg *config.Config
-		ok  bool
-	}{
-		{nil, false},
-		{&config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}, false},
-		{&config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}, true},
-		{&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, true},
-	} {
-		err := (&CheckoutAttemptService{config: tc.cfg}).requireProviderWrites()
-		if tc.ok {
-			require.NoError(t, err)
-		} else {
-			require.ErrorIs(t, err, ErrCheckoutAttemptValidation)
-		}
+	ctx := merchant.WithID(context.Background(), billing.MerchantID(uuid.New()))
+	for _, cfg := range []*config.Config{nil, {ProviderWriteMode: config.ProviderWriteModeReadOnly}} {
+		require.ErrorIs(t, (&CheckoutAttemptService{config: cfg}).requireProviderWrites(ctx), ErrCheckoutAttemptValidation)
 	}
 }

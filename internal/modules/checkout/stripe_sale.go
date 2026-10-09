@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -69,7 +68,7 @@ func (h *NMISaleIntentHandler) recoverStripeSale(ctx context.Context, in gen.Bil
 	if h.Sale.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Sale.Config}, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, h.Sale.Posture, current.MerchantID, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeService(ctx, current)

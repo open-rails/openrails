@@ -98,7 +98,10 @@ grant log by convergence, not restored directly — which is why the grant log m
    copy must become the sole authoritative database. Replicas may share that database;
    independently writable copies are not a supported active-active deployment.
 2. Restore Postgres to the target time; confirm `ENCRYPTION_MASTER_KEY` and Vault are available.
-3. Start the restored instance. For established NMI and Stripe accounts, stale completed
+3. Start the restored instance. A restore into another cluster, database or schema is a copy
+   of the book: every provider write stays readonly until `openrails book arm --by NAME`,
+   which you run only once the source is stopped for good. A point-in-time restore of the same
+   cluster keeps its identity. For established NMI and Stripe accounts, stale completed
    coverage holds new collection and destructive work while provider reads recover qualified
    financial receipts. Failed or incomplete reads and unresolved financial conflicts keep
    that work held. See [provider recovery](provider-recovery.md) for coverage and limitations.

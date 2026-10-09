@@ -10,13 +10,13 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/providerrecovery"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // EffectOptions is the caller's context for a transition's effects.
@@ -214,8 +214,8 @@ func (s *SubscriptionLifecycleService) CheckCancellationRecovery(ctx context.Con
 	if sub.Rail != models.RailNMI && sub.Rail != models.RailStripe {
 		return nil
 	}
-	if s.Config != nil && config.IsProviderReadOnly(s.Config) {
-		return fmt.Errorf("%w: readonly holds local cancellation", providerrecovery.ErrPending)
+	if p := (writeposture.View{Config: s.Config, DB: d}).Posture(ctx, sub.MerchantID); s.Config != nil && p.ReadOnly() {
+		return fmt.Errorf("%w: %s holds local cancellation", providerrecovery.ErrPending, p.Reason)
 	}
 	if sub.PspID == uuid.Nil {
 		return nil

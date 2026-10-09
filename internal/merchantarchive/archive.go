@@ -74,8 +74,12 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 		return &Error{Code: "merchant_mismatch"}
 	}
 	ctx = merchant.WithID(ctx, id)
+	undo, err := fenceExport(ctx, database, id)
+	if err != nil {
+		return classify(err)
+	}
 	// RunInTx (not MerchantTx) lets isolation be set before even the GUC query.
-	err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); err != nil {
 			return err
 		}
@@ -145,6 +149,9 @@ func Export(ctx context.Context, database *db.DB, id billing.MerchantID, out io.
 		}
 		return w.Close()
 	})
+	if err != nil {
+		undo()
+	}
 	return classify(err)
 }
 
@@ -248,6 +255,9 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 			}
 		}
 		if err := validateReferences(ctx, tx, id); err != nil {
+			return err
+		}
+		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}
 		return q.FinishBillingRestore(ctx, gen.FinishBillingRestoreParams{MerchantID: id.UUID(), Digest: info.Digest, Rows: info.Rows})

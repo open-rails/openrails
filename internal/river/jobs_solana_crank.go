@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/progress"
+	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -182,6 +183,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	log.WithContext(ctx).WithField("count", len(due)).Info("Solana cranker: processing due subscriptions")
 
 	failures := 0
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
 	for _, row := range due {
 		select {
 		case <-ctx.Done():
@@ -189,6 +191,10 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		default:
 		}
 		progress.Mark(ctx, "solana crank subscription "+row.ID.String())
+		if posture := postures.Posture(ctx, row.MerchantID); posture.Limited() {
+			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": row.MerchantID, "reason": posture.Reason}).Warn("Solana cranker: recurring pulls wait for this merchant's write posture")
+			continue
+		}
 		// Per-row isolation: a failure on one subscriber never aborts the batch.
 		//
 		// #674 write-through: durable intent first (keyed on the persisted

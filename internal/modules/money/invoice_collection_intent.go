@@ -274,7 +274,7 @@ func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.Billin
 		if !h.stripeReplayable(intent) {
 			return intents.Ambiguous("stripe idempotency window elapsed; resolve with the exact stripe invoice or provider-confirmed non-execution")
 		}
-		if blocked, reason := intents.GateExecution(h.Config, intents.Origin(intent.Origin)); blocked {
+		if blocked, reason := intents.GateExecution(ctx, h.Config, intent.MerchantID, intents.Origin(intent.Origin)); blocked {
 			return intents.Ambiguous("stripe replay deferred: " + reason)
 		}
 		// The executor replays through the provider-enforced idempotency key.

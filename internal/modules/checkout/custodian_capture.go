@@ -205,7 +205,7 @@ func (s *CheckoutAttemptService) createPaymentMethodSetup(ctx context.Context, r
 	} else if !db.IsNotFound(err) {
 		return nil, err
 	}
-	if err = s.requireProviderWrites(); err != nil {
+	if err = s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
 	pending, client, err := s.resolveCapture(ctx, req.Payment.PSPID)

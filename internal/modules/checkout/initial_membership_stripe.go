@@ -119,7 +119,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context
 	if h.Checkout.Config == nil {
 		return intents.Parked("Stripe execution mode unavailable")
 	}
-	if blocked, reason := intents.GateExecution(config.Mode{Config: h.Checkout.Config}, intents.Origin(current.Origin)); blocked {
+	if blocked, reason := intents.GateExecution(ctx, h.Checkout.Posture, current.MerchantID, intents.Origin(current.Origin)); blocked {
 		return intents.Parked(reason)
 	}
 	service, err := h.stripeEngineService(ctx, current)

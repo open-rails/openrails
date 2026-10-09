@@ -49,8 +49,10 @@ type CheckoutNMISaleService struct {
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
 	// state (#788) — the ONLY client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
-	// Config gates provider writes (execution mode) for Stripe sales.
+	// Config arms the Stripe sale clients.
 	Config *config.Config
+	// Posture gates provider writes per merchant; nil parks them.
+	Posture intents.ModeView
 	// StripeEngines arms the accepted Stripe account for saved-card sales.
 	StripeEngines intents.StripeEngineServiceResolver
 	// Intents executes the durable write-ahead sale intent (#674). Every card

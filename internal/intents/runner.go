@@ -223,7 +223,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		return
 	}
 
-	if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
+	if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
 		r.holdForRecovery(ctx, logEntry, stats, intent, now, reason, false)
 		return
 	}
@@ -497,7 +497,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		if verifying && (intent.IntentType == "subscription_collection" || intent.IntentType == "invoice_collection") {
 			submitted, malformed := hasSubmissionEvidence(intent)
 			if !submitted && malformed == nil {
-				if blocked, reason := GateExecution(r.Config, Origin(intent.Origin)); blocked {
+				if blocked, reason := GateExecution(ctx, r.Config, intent.MerchantID, Origin(intent.Origin)); blocked {
 					err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), reason, nil)
 					applied = OutcomeAmbiguous
 					break
@@ -783,7 +783,7 @@ func (r *Runner) holdForRecovery(ctx context.Context, logger *log.Entry, stats *
 // have skipped the verifier's live lease just before that commit; a newly ready
 // account must not leave the now-unleased operation sleeping on its old hold.
 func (r *Runner) wakeRecoveryIfReady(ctx context.Context, logger *log.Entry, in gen.BillingProviderIntent, now time.Time) {
-	if blocked, _ := GateExecution(r.Config, Origin(in.Origin)); blocked {
+	if blocked, _ := GateExecution(ctx, r.Config, in.MerchantID, Origin(in.Origin)); blocked {
 		return
 	}
 	if r.Store.CheckRecovery(ctx, in, now) != nil {

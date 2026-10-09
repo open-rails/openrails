@@ -3228,7 +3228,8 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5",
-      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
+      "vault": "github.com/open-rails/openrails/internal/integrations/vault",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/modules/checkout/attempt_types.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -3300,7 +3301,6 @@
     "internal/modules/checkout/nmi_upgrade_intent.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "decline": "github.com/open-rails/openrails/internal/decline",
@@ -4342,7 +4342,8 @@
       "river": "github.com/riverqueue/river",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/river/jobs_provider_refresh.go": {
       "alerting": "github.com/open-rails/openrails/internal/modules/alerting",
@@ -4375,7 +4376,8 @@
       "uuid": "github.com/google/uuid",
       "v2": "math/rand/v2",
       "v5": "github.com/jackc/pgx/v5",
-      "webhookhealth": "github.com/open-rails/openrails/internal/modules/webhookhealth"
+      "webhookhealth": "github.com/open-rails/openrails/internal/modules/webhookhealth",
+      "writeposture": "github.com/open-rails/openrails/internal/writeposture"
     },
     "internal/river/jobs_solana_pull_intent.go": {
       "context": "context",

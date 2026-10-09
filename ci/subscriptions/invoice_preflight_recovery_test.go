@@ -40,6 +40,8 @@ func TestInvoicePreflightRecoversPaymentNewerThanBulkWindow(t *testing.T) {
 	require.NoError(t, err)
 	var archive bytes.Buffer
 	require.NoError(t, merchantarchive.Export(t.Context(), sourceDB, mid, &archive))
+	// The backup's source keeps billing.
+	armMerchant(t, source, mid)
 	source.start()
 	answer := payNMIInvoice(t.Context(), source, c, invoice, method, "paid-after-backup")
 	require.NoError(t, answer.err)
@@ -59,6 +61,7 @@ func TestInvoicePreflightRecoversPaymentNewerThanBulkWindow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = merchantarchive.Restore(t.Context(), targetDB, mid, bytes.NewReader(archive.Bytes()))
 	require.NoError(t, err)
+	armMerchant(t, target, mid)
 	target.advance(time.Minute)
 	target.start()
 	require.True(t, paidAt.After(target.clock.Now().Add(-5*time.Minute)), "receipt is newer than the bulk catch-up safety horizon")

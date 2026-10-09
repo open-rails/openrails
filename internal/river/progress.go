@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/alerting"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/alerting"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"

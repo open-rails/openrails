@@ -6,13 +6,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // This is a view of the existing engine operation, never authority to submit.
@@ -47,7 +47,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}
-	if s.rt.Config == nil || config.IsProviderReadOnly(s.rt.Config) {
+	if (writeposture.View{Config: s.rt.Config, DB: s.rt.DB}).Posture(ctx, mid.UUID()).ReadOnly() {
 		out.BlockedReason = "provider_writes_disabled"
 		return out, nil
 	}

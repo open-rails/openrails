@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/progress"
+	"github.com/open-rails/openrails/internal/writeposture"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,7 +120,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 		Clock:    w.Clock,
 	}
 	if w.Config != nil {
-		runner.Config = config.Mode{Config: w.Config}
+		runner.Config = writeposture.View{Config: w.Config, DB: w.DB}
 	}
 	return runner
 }
@@ -157,22 +158,13 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// terminal cancellations either — nothing on this path cancels without a
 	// charge. Readonly stays a pure observer: no charges, no state moves, no
 	// intents.
-	materialize := false
-	observeOnly := false
-	if w.Config != nil {
-		switch {
-		case config.IsProviderReadOnly(w.Config):
-			observeOnly = true
-			log.WithContext(ctx).Warn("Readonly mode: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
-		case config.IsLimitedMode(w.Config):
-			materialize = true
-			log.WithContext(ctx).Warn("Limited mode: dunning materializes decisions — stale subscriptions park as unknown (no local cancellations), charge intents enqueue PARKED (no provider writes until mode=full)")
-		}
-	}
+	// Each merchant's write posture can lower the process's mode (an exported
+	// or restored merchant, a copied book).
+	postures := writeposture.View{Config: w.Config, DB: w.DB}
 	// The completion transaction inserts this scoped normal job as its durable
 	// recovery handoff. It must wake eligible held work even if a verifier's
 	// hold committed after that transaction skipped its live lease.
-	if job.Args.MerchantID != uuid.Nil && w.Config != nil && !materialize && !observeOnly {
+	if job.Args.MerchantID != uuid.Nil && !postures.Posture(ctx, job.Args.MerchantID).Limited() {
 		mctx := merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
 		resumed, err := intents.NewStore(w.DB).ResumeRecoveryHeld(mctx, w.now(), 100)
 		if err != nil {
@@ -250,10 +242,16 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			if len(dueSubscriptions) == 0 {
 				return nil
 			}
-			if observeOnly {
-				log.WithContext(mctx).WithField("count", len(dueSubscriptions)).
-					Warn("Readonly mode: found due subscriptions but skipping dunning mutations")
+			posture := postures.Posture(mctx, mid)
+			if posture.ReadOnly() {
+				log.WithContext(mctx).WithFields(log.Fields{"count": len(dueSubscriptions), "reason": posture.Reason}).
+					Warn("Readonly: dunning observes due subscriptions only (no charges, no cancellations, no intents)")
 				return nil
+			}
+			materialize := posture.Limited()
+			if materialize {
+				log.WithContext(mctx).WithField("reason", posture.Reason).
+					Warn("Limited: dunning materializes decisions — stale subscriptions park as unknown, charge intents enqueue parked")
 			}
 			log.WithContext(mctx).WithFields(log.Fields{
 				"count": len(dueSubscriptions), "merchant_id": merchantID.String(),

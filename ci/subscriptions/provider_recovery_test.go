@@ -109,6 +109,8 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	require.NoError(t, err)
 	var archive bytes.Buffer
 	require.NoError(t, merchantarchive.Export(t.Context(), sourceDB, mid, &archive))
+	// The backup's source keeps billing.
+	armMerchant(t, source, mid)
 	if alreadyPaid {
 		// The original live database charges through its normal worker after
 		// the backup. Its accepted operation is therefore absent from restore.
@@ -129,6 +131,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	require.NoError(t, err)
 	_, err = merchantarchive.Restore(t.Context(), targetDB, mid, bytes.NewReader(archive.Bytes()))
 	require.NoError(t, err)
+	armMerchant(t, target, mid)
 	target.advance(end.Add(5 * 24 * time.Hour).Sub(target.clock.Now()))
 	target.nmi.Intercept(func(r *http.Request) bool {
 		if !strings.HasSuffix(r.URL.Path, "/query.php") {
@@ -261,6 +264,8 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			require.NoError(t, err)
 			var archive bytes.Buffer
 			require.NoError(t, merchantarchive.Export(t.Context(), sourceDB, mid, &archive))
+			// The backup's source keeps billing.
+			armMerchant(t, source, mid)
 			source.start()
 			source.pull()
 			status, body := customer.call(http.MethodPost, "/invoices/"+invoice.String()+"/pay-now", "after-backup", map[string]string{"payment_method_id": method})
@@ -279,6 +284,7 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			require.NoError(t, err)
 			_, err = merchantarchive.Restore(t.Context(), targetDB, mid, bytes.NewReader(archive.Bytes()))
 			require.NoError(t, err)
+			armMerchant(t, target, mid)
 			target.advance(5 * 24 * time.Hour)
 			require.ErrorIs(t, providerrecovery.CheckPSP(t.Context(), targetDB, mid.UUID(), source.psp["nmi"].UUID(), target.clock.Now()), providerrecovery.ErrPending, "old unpaid invoice alone is an established book")
 			target.start()

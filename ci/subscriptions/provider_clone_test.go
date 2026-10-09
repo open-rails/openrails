@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // Separate databases matter here: schemas in one database can still share
@@ -48,7 +49,24 @@ func providerCopyDatabase(t *testing.T, adminDSN string) string {
 	return u.String()
 }
 
+// copiedStripeBook is an operator error: a book exported and restored, and
+// both copies armed. The provider's idempotency is the last defense.
 func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeClock) {
+	t.Helper()
+	return copyStripeBook(t, true)
+}
+
+// armMerchant is the operator's cutover: this copy's provider writes resume.
+func armMerchant(t *testing.T, w *world, mid billing.MerchantID) {
+	t.Helper()
+	database, err := db.NewWithPGXPool(w.pool, w.schema)
+	require.NoError(t, err)
+	require.NoError(t, database.RunInMerchantScope(t.Context(), mid, "arm", func(ctx context.Context) error {
+		return writeposture.Set(ctx, database.Gen(ctx), mid.UUID(), writeposture.Full, writeposture.ReasonOperator, "e2e cutover", w.clock.Now())
+	}))
+}
+
+func copyStripeBook(t *testing.T, armBoth bool) (*engineCase, *engineCase, *clockwork.FakeClock) {
 	t.Helper()
 	adminDSN := dsn(t)
 	a := prepareWorldAtDSN(t, 12, providerCopyDatabase(t, adminDSN))
@@ -91,6 +109,10 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 	require.NoError(t, a.pool.QueryRow(t.Context(), "SELECT current_database()").Scan(&firstDB))
 	require.NoError(t, b.pool.QueryRow(t.Context(), "SELECT current_database()").Scan(&secondDB))
 	require.NotEqual(t, firstDB, secondDB)
+	if armBoth {
+		armMerchant(t, a, merchantID)
+		armMerchant(t, b, merchantID)
+	}
 	a.start()
 	b.start()
 	// Restore brings billing history, not current provider observation. Catch
@@ -108,6 +130,33 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 
 func stripeIntentCreate(r *http.Request) bool {
 	return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents"
+}
+
+// A moved book renews only where an operator armed it: export leaves the
+// source readonly and restore the destination, so two live copies never bill
+// the same period.
+func TestMovedBookRenewsOnlyWhereArmed(t *testing.T) {
+	t.Parallel()
+	a, b, _ := copyStripeBook(t, false)
+	a.w.waive("recorded", "the retired source never records the destination's renewal")
+	paidThrough := a.periodEnd()
+	provider := a.w.stripe
+	before := len(provider.submitted("/v1/payment_intents"))
+	a.toPeriodEnd()
+	b.toPeriodEnd()
+	a.w.runRenewals()
+	b.w.runRenewals()
+	a.w.settle()
+	b.w.settle()
+	require.Len(t, provider.submitted("/v1/payment_intents"), before, "neither copy renews before one is armed")
+	armMerchant(t, b.w, a.w.client[embedded].MerchantID())
+	b.w.runRenewals()
+	b.w.until(func() bool { return b.periodEnd().After(paidThrough) }, "the armed copy renews")
+	a.w.runRenewals()
+	a.w.settle()
+	require.Len(t, provider.submitted("/v1/payment_intents"), before+1, "only the armed copy renews")
+	require.Equal(t, paidThrough, a.periodEnd(), "the exported source stays readonly")
+	require.Len(t, a.providerLedger(), 2, "one initial payment and one renewal")
 }
 
 // A copied book admits the same renewal in two independent databases. The

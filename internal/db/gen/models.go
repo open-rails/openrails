@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Access changes an operator approved before the cutover from per-key entitlement windows to product access: a key a customer loses (their product dropped it after purchase) or gains (their product added it). The cutover refuses any change not listed. Retention: permanent, never pruned.
@@ -92,6 +93,16 @@ type BillingBillingPolicyBinding struct {
 	PolicyName string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.
+type BillingBookIdentity struct {
+	Singleton        bool
+	SystemIdentifier string
+	DatabaseOid      pgtype.Uint32
+	SchemaOid        pgtype.Uint32
+	ArmedBy          string
+	ArmedAt          time.Time
 }
 
 // Card-testing failure counts per merchant, subject and five-minute bucket. Retention: buckets are deleted once older than the longest card-abuse window.
@@ -809,6 +820,15 @@ type BillingMerchantWebhook struct {
 	Enabled         bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// One merchant's provider write posture; no row is full. The effective mode is the lower of this and provider_write_mode. Export sets the source readonly and restore the destination; an operator arms it back to full.
+type BillingMerchantWritePosture struct {
+	MerchantID uuid.UUID
+	Mode       string
+	Reason     string
+	SetBy      string
+	SetAt      time.Time
 }
 
 // Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once. Retention: permanent, never pruned.

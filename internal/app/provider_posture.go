@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/retry"
+	"github.com/open-rails/openrails/internal/writeposture"
 )
 
 // StartProviderPosture verifies, in the background, every PSP credential set
@@ -210,4 +211,20 @@ func pspSecret(ctx context.Context, svc *merchants.Service, mid billing.Merchant
 		return value, nil
 	}
 	return "", merchants.ErrSecretNotFound
+}
+
+// CheckBookIdentity says loudly when this database is a copy of the billing
+// book: every merchant's provider writes stay readonly until it is armed.
+func (r *Runtime) CheckBookIdentity(ctx context.Context) {
+	if r == nil || r.DB == nil {
+		return
+	}
+	armed, err := writeposture.BookArmed(ctx, r.DB.GenDirectory())
+	switch {
+	case err != nil:
+		log.WithContext(ctx).WithError(err).Error("billing book identity unreadable: provider writes stay readonly")
+	case !armed:
+		log.WithContext(ctx).Error("this database is a copy of the billing book (another cluster, database or schema than the one it was armed in): " +
+			"every provider write stays readonly. Once every other copy is stopped, run `openrails book arm --by NAME`")
+	}
 }
