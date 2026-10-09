@@ -305,7 +305,7 @@ func TestUserRoutes(t *testing.T) {
 		return routeKeys(table)
 	}
 	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/prices", "GET /v1/checkout-config", "GET /v1/currencies",
+	require.Subset(t, none, []string{"GET /v1/products", "GET /v1/checkout-config", "GET /v1/currencies",
 		"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay"})
 	for _, key := range none {
 		require.NotContains(t, key, "solana")

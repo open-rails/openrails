@@ -75,8 +75,8 @@ POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deploy
 GET  /v1/me/notifications[.../unread-count]   billing notifications
 ```
 
-The public catalog needs no auth: `GET /v1/products` (each product with its current
-prices) and `GET /v1/prices?product_id=prod_...` drive your pricing page.
+The public catalog needs no auth: `GET /v1/products` returns each product on sale with
+its current prices, which is everything your pricing page needs.
 
 ### Discovering payment options: `GET /v1/checkout-config`
 

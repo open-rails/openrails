@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (220), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -37,7 +37,6 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 | GET | `/v1/captcha/status` | public | — | — | 200 `CaptchaStatus` |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
 | GET | `/v1/products` | public | — | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/prices` | public | — | — | 200 `ListPage<Price>` |  |
 
 ## Customer (`/v1/me`)
 

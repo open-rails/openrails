@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -129,6 +128,9 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	for _, item := range listed["data"].([]any) {
 		product := item.(map[string]any)
 		keys[product["key"].(string)] = true
+		if product["key"] == products[0].Key {
+			require.Len(t, product["prices"], 1, "a product embeds its prices on sale")
+		}
 		for _, p := range product["prices"].([]any) {
 			psp := p.(map[string]any)["psps"].(map[string]any)["nmi"].(map[string]any)
 			require.Equal(t, "linked", psp["status"])
@@ -138,10 +140,9 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.True(t, keys[products[0].Key])
 	require.False(t, keys[products[2].Key], "an archived product is not on sale")
 	require.Contains(t, listed, "next_cursor")
-	prices := w.public("/v1/prices?" + url.Values{"product_id": {products[0].ID.String()}, "recurring": {"true"}}.Encode())
-	require.Len(t, prices["data"], 1)
 
 	// Retired routes and fields are gone.
+	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodGet, "/v1/prices", nil, nil), "a product embeds its prices")
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/merchant/catalog/products/"+products[0].ID.String()+"/activate", nil, nil))
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/merchant/catalog/prices/"+price.ID.String()+"/key", map[string]any{"key": "x"}, nil))
 	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+products[0].ID.String(), map[string]any{"set_tier_group": true}, nil))

@@ -60,7 +60,7 @@ charges that exact amount, and its payment form cannot change it:
 ```tsx
 import { decimalToAmount } from "@openrails/billing-ui/client"
 
-// `depositPrice` comes from listPrices; `currency` from listCurrencies.
+// `depositPrice` is in a product from listProducts; `currency` from listCurrencies.
 // `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
 const amount = decimalToAmount(enteredAmount, currency.decimals)
 const bounds = depositPrice.customer_amount
@@ -142,7 +142,7 @@ checkout routes.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts()`, `listPrices({ currency, productId, recurring })`                                  | `GET /products`, `GET /prices`                                  |
+| `listProducts()` (each product embeds its prices on sale)                                           | `GET /products`                                                 |
 | `listCurrencies()` (`client.currencies` is the pinned copy)                                         | `GET /currencies`                                               |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |

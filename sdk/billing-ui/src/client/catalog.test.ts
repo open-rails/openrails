@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest"
 import currenciesFixture from "../test/fixtures/wire/currencies.json"
 import { apiError, json, product } from "../test/billing-server"
 import { createBillingClient } from "./client"
-import { BillingError } from "./errors"
 
 const MAX = "9223372036854775807"
 
@@ -100,32 +99,6 @@ describe("catalog", () => {
     await expect(client.listProducts()).rejects.toMatchObject({
       code: "invalid_response",
     })
-  })
-
-  it("lists prices by currency, product and renewal", async () => {
-    const { client, request } = served(
-      json(200, list([price, { ...price, id: "price_2", billing_interval_hours: null }])),
-      apiError(400, "invalid_query", "product_id is invalid")
-    )
-    const page = await client.listPrices({
-      currency: "USD",
-      productId: "prod_1",
-      recurring: true,
-    })
-    expect(request().url).toBe(
-      "/billing/v1/prices?currency=USD&product_id=prod_1&recurring=true&limit=100"
-    )
-    expect(page.data.map((p) => p.id)).toEqual(["price_1", "price_2"])
-    expect(page.data[0]).toMatchObject({
-      unit_amount: MAX,
-      product_id: "prod_1",
-    })
-
-    const err = await client
-      .listPrices({ productId: "nope" })
-      .catch((e: unknown) => e)
-    expect(err).toBeInstanceOf(BillingError)
-    expect(err).toMatchObject({ status: 400, code: "invalid_query" })
   })
 
   it("reads the currency registry", async () => {

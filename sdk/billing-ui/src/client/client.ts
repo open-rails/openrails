@@ -26,7 +26,6 @@ import {
   pageSchema,
   paymentMethodSchema,
   paymentSchema,
-  priceSchema,
   productSchema,
   solanaTokensSchema,
   subscriptionSchema,
@@ -45,7 +44,6 @@ import {
   type Page,
   type Payment,
   type PaymentMethod,
-  type Price,
   type Product,
   type SolanaToken,
   type Subscription,
@@ -304,7 +302,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     cursor: opts.cursor ?? undefined,
   })
   const productPage = pageSchema(productSchema)
-  const pricePage = pageSchema(priceSchema)
 
   return {
     baseUrl: base,
@@ -541,26 +538,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     listProducts(opts: ListOptions = {}): Promise<Page<Product>> {
       return json(productPage, "/products", {
         query: { limit: opts.limit ?? 100, cursor: opts.cursor },
-        signal: opts.signal,
-      })
-    },
-
-    /** Prices on sale. `productId` is a `prod_` id; `recurring` selects subscriptions or one-time prices. */
-    listPrices(
-      opts: ListOptions & {
-        currency?: string
-        productId?: string
-        recurring?: boolean
-      } = {}
-    ): Promise<Page<Price>> {
-      return json(pricePage, "/prices", {
-        query: {
-          currency: opts.currency,
-          product_id: opts.productId,
-          recurring: opts.recurring,
-          limit: opts.limit ?? 100,
-          cursor: opts.cursor,
-        },
         signal: opts.signal,
       })
     },

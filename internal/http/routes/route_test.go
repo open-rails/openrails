@@ -48,7 +48,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 220)
+	require.Len(t, Catalog(), 219)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)

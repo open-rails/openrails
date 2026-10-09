@@ -1,5 +1,11 @@
 # Changelog
 
+## Prices come with their products
+
+- `listPrices` is removed with `GET /prices`: `listProducts()` returns every
+  product on sale with its current prices. Filter by currency, product or
+  renewal in the browser.
+
 ## Paying on a customer surface
 
 - `client.checkoutSource(id, { customerBase })` reads and pays a checkout
