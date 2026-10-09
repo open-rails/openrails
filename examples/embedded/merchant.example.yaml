@@ -1,6 +1,7 @@
 # merchant.yaml: you, the seller, and your payment processor accounts (PSPs).
 # Copy this file to merchant.yaml and fill it in; merchant.yaml holds secrets,
 # so keep it out of version control.
+slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
 psps:
   mobius: # your name for this account; any key you like

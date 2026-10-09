@@ -103,6 +103,7 @@ gateway's secret keys, so keep it out of version control:
 
 ```yaml
 # merchant.yaml
+slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
 psps:
   mobius: # your name for this account; any key you like
@@ -141,7 +142,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 	if err != nil {
 		return nil, err
 	}
-	merchant.Slug = "onlydemo"
 
 	// What you sell. New applies each distinct catalog once, even across restarts.
 	// Later edits through the Go client remain available and are not undone by a replay.

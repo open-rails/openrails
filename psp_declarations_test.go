@@ -119,6 +119,7 @@ func put[V any](m map[string]V, key string, value V) map[string]V {
 // The typed form and the YAML form are one declaration.
 func TestTypedPSPsMatchTheirYAML(t *testing.T) {
 	m, err := ParseMerchantDeclaration([]byte(`
+slug: onlydemo
 psps:
   mobius:
     rail: nmi

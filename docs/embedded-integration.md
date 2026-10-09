@@ -217,8 +217,10 @@ cfg.Merchant = openrails.MerchantDeclaration{
 `client.MerchantID()` is the declared merchant's ID. A host builds the
 declaration from its own configuration (koanf, kong, flags), or keeps it in a
 YAML file: `openrails.ReadMerchantFile(path)` reads one merchant strictly
-(unknown fields refused; `openrails.ParseMerchantDeclaration` takes the bytes);
-set its `Slug`. `MerchantDeclaration` and `PSPConfig` carry `yaml` tags, so they
+(unknown fields refused; `openrails.ParseMerchantDeclaration` takes the bytes).
+The file names its merchant with a required top-level `slug:`; a standalone
+manifest keys each merchant by slug instead and refuses the field inside an
+entry. `MerchantDeclaration` and `PSPConfig` carry `yaml` tags, so they
 can also sit inside the host's own YAML config. The file holds PSP secrets: keep
 it out of version control.
 

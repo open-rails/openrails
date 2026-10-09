@@ -203,15 +203,15 @@ var (
 	ErrForbidden = billingauth.ErrForbidden
 )
 
-// ParseMerchantDeclaration reads Config.Merchant from one YAML document,
-// refusing unknown fields; the slug comes from the caller, not the document.
+// ParseMerchantDeclaration reads Config.Merchant from one YAML document that
+// names its merchant with a required slug, refusing unknown fields.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return config.ParseMerchantDeclaration(raw)
 }
 
 // ReadMerchantFile reads Config.Merchant from a YAML file in
-// ParseMerchantDeclaration's shape; the caller sets Slug. The file carries
-// PSP credentials, so keep it out of version control.
+// ParseMerchantDeclaration's shape. The file carries PSP credentials, so keep
+// it out of version control.
 func ReadMerchantFile(path string) (MerchantDeclaration, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

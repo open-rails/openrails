@@ -94,6 +94,7 @@ func TestMerchantManifestValidation(t *testing.T) {
 		"remote allowed origins":       {remote("      issuer: https://auth.example\n      jwks_uri: https://auth.example/jwks\n      allowed_origins: [https://auth.example]\n"), "allowed_origins"},
 		"renamed rail accounts":        {base("    rail_merchant_accounts: {}\n"), "merchants.host-three.rail_merchant_accounts was renamed to psps"},
 		"renamed provider accounts":    {base("    provider_accounts: {}\n"), "merchants.host-three.provider_accounts was renamed to psps"},
+		"slug inside an entry":         {base("    slug: host-three\n"), "merchants.host-three.slug is not accepted: the entry's key is its slug"},
 		"psp routing removed":          {psp("        routing: standby\n"), `unknown field "routing"`},
 		"psp mode removed":             {psp("        mode: primary\n"), `unknown field "mode"`},
 		"psp role removed":             {psp("        role: primary\n"), `unknown field "role"`},

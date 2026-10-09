@@ -55,7 +55,6 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, auth *authkit.Client) (*o
 	if err != nil {
 		return nil, err
 	}
-	merchant.Slug = "onlydemo"
 
 	// What you sell. New applies each distinct catalog once, even across restarts.
 	// Later edits through the Go client remain available and are not undone by a replay.

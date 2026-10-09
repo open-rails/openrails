@@ -177,7 +177,7 @@ func ValidateMerchantSecretOverlay(raw []byte) error {
 // push-merchant-config. Bootstrap authority and catalog state are intentionally
 // rejected by the strict YAML decoder.
 func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
-	if err := RejectRenamedMerchantConfigKeys(raw); err != nil {
+	if err := RejectMisplacedMerchantConfigKeys(raw); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
 	}
 	var manifest BillingConfig
@@ -193,13 +193,14 @@ func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
 	return &manifest, nil
 }
 
-// RejectRenamedMerchantConfigKeys fails a manifest that still spells the
-// psps key by a retired name (psps <- accounts <- rail_merchant_accounts <-
-// provider_accounts). The strict parser would
-// reject these as unknown fields anyway, but "unknown field" reads like a typo
-// — a rename deserves a pointer. Silent-ignore is the worst failure here: it
-// would apply an empty account set.
-func RejectRenamedMerchantConfigKeys(raw []byte) error {
+// RejectMisplacedMerchantConfigKeys fails a manifest entry that still spells
+// the psps key by a retired name (psps <- accounts <- rail_merchant_accounts
+// <- provider_accounts), or that names its own slug: the entry's key is the
+// slug, so the two can never disagree. The strict parser would reject these
+// as unknown fields anyway, but "unknown field" reads like a typo — each
+// deserves a pointer. Silent-ignore is the worst failure here: it would apply
+// an empty account set.
+func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 	var probe struct {
 		Merchants map[string]map[string]any `yaml:"merchants"`
 	}
@@ -212,6 +213,9 @@ func RejectRenamedMerchantConfigKeys(raw []byte) error {
 	}
 	sort.Strings(slugs)
 	for _, slug := range slugs {
+		if _, ok := probe.Merchants[slug]["slug"]; ok {
+			return fmt.Errorf("merchants.%s.slug is not accepted: the entry's key is its slug", slug)
+		}
 		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
 			if _, ok := probe.Merchants[slug][old]; ok {
 				return fmt.Errorf("merchants.%s.%s was renamed to psps", slug, old)

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -13,12 +14,13 @@ import (
 func TestReadMerchantFile(t *testing.T) {
 	m, err := ReadMerchantFile(filepath.Join("examples", "embedded", "merchant.example.yaml"))
 	require.NoError(t, err)
-	require.Empty(t, m.Slug, "the caller names the merchant")
-	mobius := m.PSPs["mobius"]
-	require.Equal(t, billing.RailNMI, mobius.Rail)
-	require.Equal(t, "000000", mobius.AccountID)
-	require.Equal(t, "your-public-tokenization-key", mobius.Settings["tokenization_key"])
-	require.Equal(t, map[string]string{"security_key": "your-private-security-key", "webhook_signing_secret": "your-webhook-signing-key"}, mobius.Secrets)
+	require.Equal(t, "onlydemo", m.Slug)
+	require.Equal(t, NMIPSP{
+		AccountID:            "000000",
+		TokenizationKey:      "your-public-tokenization-key",
+		SecurityKey:          "your-private-security-key",
+		WebhookSigningSecret: "your-webhook-signing-key",
+	}.PSPConfig(), m.PSPs["mobius"], "the README's Go form is the same declaration")
 
 	_, err = ReadMerchantFile(filepath.Join(t.TempDir(), "missing.yaml"))
 	require.ErrorIs(t, err, os.ErrNotExist)
@@ -27,4 +29,26 @@ func TestReadMerchantFile(t *testing.T) {
 	require.NoError(t, os.WriteFile(typo, []byte("psp:\n  mobius: {rail: nmi}\n"), 0o600))
 	_, err = ReadMerchantFile(typo)
 	require.ErrorContains(t, err, typo, "a refused file names itself")
+}
+
+// A declaration built in Go, written as a merchant file, reads back unchanged.
+func TestMerchantFileRoundTrip(t *testing.T) {
+	want := MerchantDeclaration{
+		Slug: "onlydemo", DisplayName: "OnlyDemo", APIHost: "api.onlydemo.example",
+		PSPs: map[string]PSPConfig{
+			"mobius": NMIPSP{AccountID: "000000", TokenizationKey: "tk", SecurityKey: "sk", WebhookSigningSecret: "whs", CardEntry: "server"}.PSPConfig(),
+			"wallet": SolanaPSP{TransitKey: "transit", RPCProvider: "public", Tokens: map[string]SolanaToken{"SOL": {}, "XYZ": {Mint: "m", Name: "Xyz"}}}.PSPConfig(),
+		},
+		Settings: billing.MerchantSettings{InvoiceBillingBoundary: "calendar_month"},
+	}
+	raw, err := yaml.Marshal(struct {
+		Slug                string `yaml:"slug"`
+		MerchantDeclaration `yaml:",inline"`
+	}{want.Slug, want})
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "merchant.yaml")
+	require.NoError(t, os.WriteFile(path, raw, 0o600))
+	got, err := ReadMerchantFile(path)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }

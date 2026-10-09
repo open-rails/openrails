@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
@@ -11,7 +12,8 @@ import (
 // MerchantDeclaration declares one merchant: the embedded engine's merchant
 // (Config.Merchant) or one entry of a standalone merchant manifest.
 type MerchantDeclaration struct {
-	// Slug is the merchant's name. A manifest keys merchants by slug instead.
+	// Slug is the merchant's name: slug: in a single-merchant file, the
+	// entry's key in a manifest, which refuses the field.
 	Slug        string `yaml:"-"`
 	DisplayName string `yaml:"display_name"`
 	// APIHost is the merchant's canonical API host (e.g. "api.myapp.example"):
@@ -84,9 +86,15 @@ type PSPSignerConfig struct {
 	Key  string `yaml:"key,omitempty"`
 }
 
-// ParseMerchantDeclaration parses one merchant YAML document. Unknown fields
-// are refused, so a typo fails loudly instead of declaring a merchant with no
-// PSPs; the slug comes from the caller, not the document.
+// merchantFile is the single-merchant document: the declaration and its slug.
+type merchantFile struct {
+	Slug                string `yaml:"slug"`
+	MerchantDeclaration `yaml:",inline"`
+}
+
+// ParseMerchantDeclaration parses one merchant YAML document, which names its
+// merchant with a required slug. Unknown fields are refused, so a typo fails
+// loudly instead of declaring a merchant with no PSPs.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	var probe map[string]any
 	if yaml.Unmarshal(raw, &probe) == nil {
@@ -96,9 +104,17 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 			}
 		}
 	}
-	var m MerchantDeclaration
-	if err := yaml.UnmarshalWithOptions(raw, &m, yaml.DisallowUnknownField()); err != nil {
+	var f merchantFile
+	if err := yaml.UnmarshalWithOptions(raw, &f, yaml.DisallowUnknownField()); err != nil {
 		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
 	}
+	if strings.TrimSpace(f.Slug) == "" {
+		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: slug is required")
+	}
+	if err := billing.ValidateMerchantSlug(f.Slug); err != nil {
+		return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %w", err)
+	}
+	m := f.MerchantDeclaration
+	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
 }

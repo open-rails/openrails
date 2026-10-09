@@ -2070,7 +2070,8 @@
     "internal/config/merchant_declaration.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "fmt": "fmt",
-      "go-yaml": "github.com/goccy/go-yaml"
+      "go-yaml": "github.com/goccy/go-yaml",
+      "strings": "strings"
     },
     "internal/config/naming.go": {
       "fmt": "fmt",

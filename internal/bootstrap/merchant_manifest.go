@@ -119,7 +119,7 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 // push-merchant-config. Bootstrap authority and catalog state are intentionally
 // rejected by the strict YAML decoder.
 func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
-	if err := rejectRenamedMerchantConfigKeys(raw); err != nil {
+	if err := rejectMisplacedMerchantConfigKeys(raw); err != nil {
 		return nil, fmt.Errorf("parse merchant config manifest: %w", err)
 	}
 	var manifest BillingConfig
@@ -566,7 +566,7 @@ const merchantManifestAdvisoryLock = int64(734252042137424)
 const DefaultMerchantConfigManifestPath = merchantbootstrap.DefaultMerchantConfigManifestPath
 
 var validateMerchantSecretOverlay = merchantbootstrap.ValidateMerchantSecretOverlay
-var rejectRenamedMerchantConfigKeys = merchantbootstrap.RejectRenamedMerchantConfigKeys
+var rejectMisplacedMerchantConfigKeys = merchantbootstrap.RejectMisplacedMerchantConfigKeys
 
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig
