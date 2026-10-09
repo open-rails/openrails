@@ -70,16 +70,12 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
 	// Partitions follow the calendar, not the migration chain: a database
-	// migrated months ago still needs this month's. Replicas booting into a
-	// new month would race to create the same ones.
+	// migrated months ago still needs this month's.
 	data, err := db.NewWithPGXPool(pool, schema)
 	if err != nil {
 		return err
 	}
-	if err := locked(ctx, pool, "openrails-partitions:"+schema, func() error {
-		_, err := retention.EnsurePartitions(ctx, data.GenDirectory(), time.Now())
-		return err
-	}); err != nil {
+	if _, err := retention.EnsurePartitions(ctx, data.GenDirectory(), time.Now()); err != nil {
 		return fmt.Errorf("openrails: %w", err)
 	}
 	if opts.RiverSchema != "" {

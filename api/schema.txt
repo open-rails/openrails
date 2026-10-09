@@ -22,6 +22,7 @@ migration 0018_product_entitlements.up.sql sha256:350b3d0dd394f0ce9089e712635aaa
 migration 0019_product_access.up.sql sha256:fee52c1fbafd1af152efd83a5116f1f164e6389eb3748a48bd1b9c5ca7fec4c6
 migration 0020_product_access_cutover.up.sql sha256:7840a26f86166d6fb76936789d2aff19d126969d1fbe3cfab00ce9204b86a3c9
 migration 0021_entitlement_cache.up.sql sha256:9c4b60cee1998e589501b2142c4e2fdf08c0a1614ec6d29c4bb3d2df85fb5371
+migration 0022_partition_race.up.sql sha256:6532f6a6254907507a3050ae4b42f05b79103b541be27cb9ff8d07707db8e097
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2708,12 +2709,11 @@ function billing.ensure_month_partitions(name,timestamp with time zone,timestamp
   DECLARE
       parent regclass := to_regclass(quote_ident(p_table));
       parent_schema name;
-      parent_owner name;
       month_start timestamptz := date_trunc('month', p_from);
       partition name;
       created integer := 0;
   BEGIN
-      SELECT n.nspname, pg_get_userbyid(c.relowner) INTO parent_schema, parent_owner
+      SELECT n.nspname INTO parent_schema
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE c.oid = parent AND c.relkind = 'p';
       IF NOT FOUND THEN
@@ -2725,13 +2725,10 @@ function billing.ensure_month_partitions(name,timestamp with time zone,timestamp
               BEGIN
                   EXECUTE format('CREATE TABLE %I.%I (LIKE %I.%I INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES INCLUDING GENERATED INCLUDING STORAGE)',
                       parent_schema, partition, parent_schema, p_table);
-                  IF parent_owner <> current_user THEN
-                      EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', parent_schema, partition, parent_owner);
-                  END IF;
                   EXECUTE format('ALTER TABLE %I.%I ATTACH PARTITION %I.%I FOR VALUES FROM (%L) TO (%L)',
                       parent_schema, p_table, parent_schema, partition, month_start, month_start + interval '1 month');
                   created := created + 1;
-              EXCEPTION WHEN duplicate_table THEN
+              EXCEPTION WHEN duplicate_table OR duplicate_object OR unique_violation THEN
                   NULL; -- another session created it first
               END;
           END IF;

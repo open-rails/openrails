@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
@@ -629,4 +631,42 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	// not keep the merchant on the due list.
 	again := w.sweep(0)
 	require.Zero(t, again.ProviderIntents+again.ProviderMutationLogs+again.CostObservations)
+}
+
+// Writers crossing into a new month create its partitions at the same moment,
+// each through its own pool, as db.EnsurePartitions does on a first write.
+// Every one of them finds the month ready.
+func TestWritersRaceIntoANewMonth(t *testing.T) {
+	f := newFixture(t)
+	writers := make([]*db.DB, 8)
+	for i := range writers {
+		pool, err := pgxpool.New(t.Context(), f.dsn(t))
+		require.NoError(t, err)
+		t.Cleanup(pool.Close)
+		writers[i], err = db.NewWithPGXPool(pool, f.schema)
+		require.NoError(t, err)
+	}
+	for ahead := 6; ahead < 12; ahead++ {
+		month := retention.MonthStart(time.Now()).AddDate(0, ahead, 0)
+		start := make(chan struct{})
+		errs := make([]error, len(writers))
+		var wg sync.WaitGroup
+		for i, writer := range writers {
+			wg.Go(func() {
+				<-start
+				_, errs[i] = retention.EnsurePartitions(context.Background(), writer.GenDirectory(), month)
+			})
+		}
+		close(start)
+		wg.Wait()
+		for i, err := range errs {
+			require.NoError(t, err, "writer %d entering %s", i, month.Format("2006-01"))
+		}
+		for _, table := range []string{"usage_events", "admission_operations"} {
+			var n int
+			require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema}.Sanitize()+".month_partitions($1) WHERE partition = $2",
+				table, partitionName(table, month)).Scan(&n))
+			require.Equal(t, 1, n, "%s has %s", table, month.Format("2006-01"))
+		}
+	}
 }
