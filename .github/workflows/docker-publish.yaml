@@ -116,7 +116,7 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       # Both builds share one builder, so the per-arch caches they seed hold the
-      # same build-platform layers and the publish build hits both.
+      # same build-platform layers.
       - name: Build smoke image
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
@@ -245,33 +245,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - name: Image tags
-        id: tags
-        env:
-          TAG: ${{ needs.verify-source.outputs.tag }}
-          MINOR: ${{ needs.verify-source.outputs.minor }}
-        run: |
-          names=("$TAG" latest)
-          if [[ -n "$MINOR" ]]; then
-            names+=("$MINOR")
-          fi
-          {
-            echo 'list<<EOF'
-            for name in "${names[@]}"; do
-              echo "${IMAGE}:${name}"
-              echo "${GHCR_IMAGE}:${name}"
-            done
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
-
-      # Rebuilds from the smoke job's caches, so it pushes what it tested.
-      - name: Build and push multi-arch image
+      # Each arch rebuilds from its own smoke-job cache, so it pushes what the
+      # smoke test built. One cache per build: a build importing both caches
+      # reused only one arch's chain and recompiled the other.
+      - name: Push amd64 image
+        id: amd64
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.tags.outputs.list }}
+          platforms: linux/amd64
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             VERSION=${{ needs.verify-source.outputs.version }}
             COMMIT=${{ github.sha }}
@@ -279,6 +262,39 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.verify-source.outputs.tag }}
-          cache-from: |
-            type=gha,scope=openrails-amd64
-            type=gha,scope=openrails-arm64
+          cache-from: type=gha,scope=openrails-amd64
+
+      - name: Push arm64 image
+        id: arm64
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            VERSION=${{ needs.verify-source.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ needs.verify-source.outputs.date }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.verify-source.outputs.tag }}
+          cache-from: type=gha,scope=openrails-arm64
+
+      - name: Push multi-arch manifests
+        env:
+          TAG: ${{ needs.verify-source.outputs.tag }}
+          MINOR: ${{ needs.verify-source.outputs.minor }}
+          AMD64: ${{ steps.amd64.outputs.digest }}
+          ARM64: ${{ steps.arm64.outputs.digest }}
+        run: |
+          names=("$TAG" latest)
+          if [[ -n "$MINOR" ]]; then
+            names+=("$MINOR")
+          fi
+          hub=() ghcr=()
+          for name in "${names[@]}"; do
+            hub+=(-t "${IMAGE}:${name}")
+            ghcr+=(-t "${GHCR_IMAGE}:${name}")
+          done
+          docker buildx imagetools create "${hub[@]}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
+          docker buildx imagetools create "${ghcr[@]}" "${IMAGE}:${TAG}"
