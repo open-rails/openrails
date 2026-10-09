@@ -20,6 +20,10 @@ same contract, and the in-process Go client its own host authority.
 | customer (`/v1/me`) | `Required` | a user subject, the customer; an invoker acting for someone else, or an application, only on its own spend limits |
 | merchant (`/v1/merchant`) | `RequirePermission(permission)`, then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that exact permission on the mounted merchant |
 
+OpenRails binds the merchant a customer route serves before `Required` runs;
+the middleware reads it with `openrails.RequestMerchant` rather than resolving
+`OpenRails-Merchant` itself.
+
 The middleware answers its own refusals. Afterwards OpenRails reads
 `Auth.Identity` and refuses a request it finds no identity or invoker on, so a
 middleware that checks nothing admits no one; each handler checks the

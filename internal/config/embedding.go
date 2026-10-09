@@ -147,7 +147,8 @@ type CustomerRoutes struct {
 	// Request.PathValue.
 	Prefix string
 	// Merchant is the merchant slug the surface's customers buy from;
-	// default the configured merchant (Config.Merchant).
+	// default the configured merchant (Config.Merchant) or, on a standalone
+	// server, the merchant each request selects (openrails.RequestMerchant).
 	Merchant string
 	// Scope selects the surface's routes; it is required.
 	Scope CustomerHTTPScope

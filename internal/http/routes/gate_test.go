@@ -531,7 +531,7 @@ func TestBindersHaveOneSite(t *testing.T) {
 			}
 			name := pkg.Name + "." + sel.Sel.Name
 			switch name {
-			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff":
+			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff", "billingauth.BindMerchant":
 				rel, _ := filepath.Rel(root, path)
 				calls[name] = append(calls[name], filepath.ToSlash(rel))
 			}
@@ -544,6 +544,7 @@ func TestBindersHaveOneSite(t *testing.T) {
 		"customerscope.Bind":       {gate},
 		"billingauth.BindIdentity": {gate},
 		"billingauth.BindStaff":    {gate},
+		"billingauth.BindMerchant": {gate},
 	}, calls)
 }
 

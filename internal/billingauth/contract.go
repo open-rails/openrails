@@ -107,6 +107,22 @@ type Staff struct {
 
 type identityKey struct{}
 type staffKey struct{}
+type merchantKey struct{}
+
+// BindMerchant records the merchant the route gate pinned a request to; the
+// host's Auth runs after it. Only the route gate calls it.
+func BindMerchant(ctx context.Context, id billing.MerchantID) context.Context {
+	return context.WithValue(ctx, merchantKey{}, id)
+}
+
+// BoundMerchant is the merchant the route gate pinned the request to.
+func BoundMerchant(ctx context.Context) (billing.MerchantID, bool) {
+	if ctx == nil {
+		return billing.MerchantID{}, false
+	}
+	id, ok := ctx.Value(merchantKey{}).(billing.MerchantID)
+	return id, ok && !id.IsZero()
+}
 
 // BindIdentity records a customer route's admitted identity in OpenRails' own
 // context. Only the route gate calls it (TestBindersHaveOneSite).

@@ -33,7 +33,17 @@ Both profiles reuse the same route registration and customer ownership checks.
 Neither exposes merchant administration, credentials or callbacks.
 
 Each audience serves `Config.Merchant`, or the merchant its `Merchant` slug
-names. Its `Auth` verifies the actual credential; the identity's subject is the
+names. On a standalone server (`Server.Routes`), an audience without a
+`Merchant` serves the merchant each request selects: the `OpenRails-Merchant`
+header or the merchant's API host. A request that selects none is refused
+`merchant_unresolved`, and an unknown or deleted merchant `merchant_not_found`.
+OpenRails binds the merchant before the audience's `Auth` runs, and the `Auth`
+reads it with `openrails.RequestMerchant` to check the user is that merchant's
+customer; it does not resolve the header itself. The customer is the
+identity's subject at that merchant, so selecting another merchant never
+reaches another subject's billing.
+
+Its `Auth` verifies the actual credential; the identity's subject is the
 customer, and a URL parameter or request-body field is never authority. Route
 parameters are available through `Request.PathValue` before authentication. Original URL,
 RawPath, RequestURI and body remain available for signature and sender-proof

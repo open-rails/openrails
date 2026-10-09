@@ -78,10 +78,12 @@ type External struct {
 type Env struct {
 	Options
 	Runtime *app.Runtime
-	// Customers gates customer routes at CustomerMerchant (zero only when
-	// AuthBindsMerchant).
+	// Customers gates customer routes at CustomerMerchant, else at the
+	// merchant each request selects (SelectedMerchant), else at the
+	// configured one (unless AuthBindsMerchant).
 	Customers        billingauth.Auth
 	CustomerMerchant billingauth.Target
+	SelectedMerchant bool
 	// Viewers says who presents a checkout session.
 	Viewers billingauth.Auth
 	// permissions caches Auth.RequirePermission by permission for staffCan.
@@ -363,18 +365,20 @@ func serves(scope CustomerScope) func(Route) bool {
 }
 
 // CustomerMount is one customer surface: the Auth that admits its
-// customers and the merchant they buy from (zero only when the Auth binds
-// the merchant itself).
+// customers and the merchant they buy from. Without a Merchant, a server's
+// surface (SelectedMerchant) serves the merchant each request selects, and
+// otherwise the Auth binds the merchant itself or the configured one serves.
 type CustomerMount struct {
 	Auth              billingauth.Auth
 	AuthBindsMerchant bool
 	Merchant          billingauth.Target
+	SelectedMerchant  bool
 	Providers         routesurface.ProviderRoutes
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, AuthBindsMerchant: m.AuthBindsMerchant})
-	env.Customers, env.CustomerMerchant = m.Auth, m.Merchant
+	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
 	return env
 }
 

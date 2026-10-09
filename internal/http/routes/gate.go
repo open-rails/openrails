@@ -82,13 +82,15 @@ func refuse(r *httprequest.Request, route Route, a billingauth.Auth, code, fault
 	r.AbortCode(code, "")
 }
 
-// pin binds target as the merchant the request acts on.
+// pin binds target as the merchant the request acts on: the one the host's
+// Auth reads (billingauth.BoundMerchant).
 func pin(r *httprequest.Request, target billingauth.Target) bool {
 	if !middleware.EnforceMerchantBinding(r, target.MerchantID) {
 		return false
 	}
 	ctx := merchanttarget.WithResolved(r.Request.Context(), target)
-	r.Request = r.Request.WithContext(merchant.WithID(ctx, target.MerchantID))
+	ctx = billingauth.BindMerchant(merchant.WithID(ctx, target.MerchantID), target.MerchantID)
+	r.Request = r.Request.WithContext(ctx)
 	r.Set("openrails.merchant_id", target.MerchantID)
 	return true
 }
@@ -106,8 +108,8 @@ func gateTarget(r *http.Request) billingauth.Target {
 }
 
 // customerGates gates a customer route: the mount's merchant (the profile's,
-// else the configured one), the host's Required, then a person as the
-// customer.
+// the one the request selects on a server, else the configured one), the
+// host's Required, then a person as the customer.
 func (e *Env) customerGates(route Route) []router.Middleware {
 	auth := e.Customers
 	if IsNilAuth(auth) {
@@ -117,6 +119,8 @@ func (e *Env) customerGates(route Route) []router.Middleware {
 	switch fixed := e.CustomerMerchant; {
 	case !fixed.MerchantID.IsZero():
 		out = append(out, fixedMerchant(fixed))
+	case e.SelectedMerchant:
+		out = append(out, selectedMerchant())
 	case !e.AuthBindsMerchant:
 		out = append(out, e.mountedMerchant())
 	}
@@ -138,6 +142,37 @@ func fixedMerchant(fixed billingauth.Target) router.Middleware {
 			}
 			if host, ok := merchant.HostMerchant(r.Request.Context()); ok && host != target.MerchantID {
 				r.AbortCode(billing.CodeHostMerchantMismatch, "")
+				return
+			}
+			if err := merchanttarget.Assert(r.Request, target); err != nil {
+				r.AbortGate(err)
+				return
+			}
+			if pin(r, target) {
+				next(r)
+			}
+		}
+	}
+}
+
+// selectedMerchant pins the merchant the request selected, by its
+// OpenRails-Merchant selector (resolved before the gate) or the merchant API
+// host it called. Without a selection the request is refused.
+func selectedMerchant() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			ctx := r.Request.Context()
+			target, selected := merchanttarget.FromContext(ctx)
+			selected = selected && !target.MerchantID.IsZero()
+			host, hosted := merchant.HostMerchant(ctx)
+			switch {
+			case selected && hosted && host != target.MerchantID:
+				r.AbortCode(billing.CodeHostMerchantMismatch, "")
+				return
+			case !selected && hosted:
+				target = billingauth.Target{MerchantID: host}
+			case !selected:
+				r.AbortCode(billing.CodeMerchantUnresolved, "")
 				return
 			}
 			if err := merchanttarget.Assert(r.Request, target); err != nil {

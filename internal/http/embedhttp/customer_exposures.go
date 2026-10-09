@@ -51,9 +51,9 @@ func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string 
 }
 
 // BuildCustomerRoutes mounts each customer profile, gated by its Auth at its
-// merchant (or at the merchant each verdict names, when it has none). host
-// resolves a merchant's API host (#734): the standalone server's; nil
-// embedded.
+// merchant: the profile's, else on a server the one each request selects,
+// else the configured one. host resolves a merchant's API host: the
+// standalone server's; nil embedded.
 func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host merchant.HostResolver) (*router.Table, error) {
 	if err := validateCustomerRoutes(exposures, a.Runtime); err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host mer
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
-		mount := httproutes.CustomerMount{Auth: e.Auth, Providers: providers}
+		mount := httproutes.CustomerMount{Auth: e.Auth, Providers: providers, SelectedMerchant: a.Standalone}
 		if strings.TrimSpace(e.Merchant) != "" {
 			target, err := merchanttarget.Resolve(context.Background(), nil, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), e.Merchant)
 			if err != nil {

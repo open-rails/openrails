@@ -262,7 +262,10 @@ func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
 // own root router (the adapters' MountRoutes), plus further customer
-// surfaces, each with its own Auth and merchant.
+// surfaces, each with its own Auth. A surface without a Merchant serves the
+// merchant each request selects (the OpenRails-Merchant header or the
+// merchant's API host), bound before its Auth runs (openrails.RequestMerchant);
+// a request that selects none is refused merchant_unresolved.
 func (s *Server) Routes(profiles ...openrails.CustomerRoutes) ([]openrails.Route, error) {
 	a := s.graph
 	extra, err := embedhttp.BuildCustomerRoutes(a, profiles, s.cp.ResolveMerchantByHost)

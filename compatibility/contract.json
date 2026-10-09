@@ -184,6 +184,7 @@
       "func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error)",
       "func Permissions() []string",
       "func ReadMerchantFile(path string) (MerchantDeclaration, error)",
+      "func RequestMerchant(ctx context.Context) (billing.MerchantID, bool)",
       "func WithAPIKey(key string) ClientOption",
       "func WithCredentialProvider(fn func(context.Context, CredentialTarget) (string, error)) ClientOption",
       "func WithDefaultMerchant(slug string) ClientOption",
@@ -4533,6 +4534,11 @@
       "context": "context",
       "http": "net/http",
       "strings": "strings"
+    },
+    "request_merchant.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingauth": "github.com/open-rails/openrails/internal/billingauth",
+      "context": "context"
     },
     "request_options.go": {
       "billing": "github.com/open-rails/openrails/billing",

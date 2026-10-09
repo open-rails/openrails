@@ -25,6 +25,7 @@ pkg openrails, func NewRemote(string, ...ClientOption) (*Client, error)
 pkg openrails, func ParseMerchantDeclaration([]byte) (MerchantDeclaration, error)
 pkg openrails, func Permissions() []string
 pkg openrails, func ReadMerchantFile(string) (MerchantDeclaration, error)
+pkg openrails, func RequestMerchant(context.Context) (billing.MerchantID, bool)
 pkg openrails, func WithAPIKey(string) ClientOption
 pkg openrails, func WithCredentialProvider(func(context.Context, CredentialTarget) (string, error)) ClientOption
 pkg openrails, func WithDefaultMerchant(string) ClientOption

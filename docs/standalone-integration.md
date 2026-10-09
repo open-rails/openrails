@@ -388,7 +388,9 @@ which unlocks merchant creation beyond the free allowance.
 
 `Run` serves `Handler` and runs the workers; `Serve` serves without them. A
 product with its own router mounts `Routes` instead (the surface without
-health routes, plus customer surfaces with their own `Auth`) and composes
+health routes, plus customer surfaces with their own `Auth`; one without a
+`Merchant` serves the merchant each request selects, which its `Auth` reads
+with `openrails.RequestMerchant`) and composes
 `RiverJobs` into its River fleet before `Start(ctx,
 openrails.WithRiverClient(fleet))`. The operator's operations are methods of
 the server: `ProvisionMerchant`, `SetMerchantAPIHost`,
