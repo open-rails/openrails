@@ -300,11 +300,11 @@ window of a replica that stalls after that check (NMI has no remote fence):
 such a late request is caught only by the account's own duplicate window, so
 keep NMI's duplicate check on.
 
-A submitted charge with no receipt is settled from NMI's record under its
-order: after five minutes with no transaction it ends not executed. If the
-search is unavailable, a `life.tier_change.proration_unresolved` finding names
-`openrails intents resolve --intent <id> --step proration --not-executed`
-(accepted only when NMI holds no transaction for the order) or `--receipt`.
+A submitted charge with no receipt is settled only from NMI's record under its
+order: a definitive decline ends it unpaid, and an empty search proves nothing.
+Until NMI shows an outcome, a `life.tier_change.proration_unresolved` finding
+names `openrails intents resolve --intent <id> --step proration --receipt
+<transaction id>`; `--not-executed` is refused.
 
 ### Verifying unverified subscriptions
 

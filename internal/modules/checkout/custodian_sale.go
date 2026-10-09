@@ -460,8 +460,9 @@ func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.Bill
 	return h.finalize(ctx, intent, cfg, p, orderID, txnID, true)
 }
 
-// Resolve accepts only provider-confirmed non-execution for a custodian sale.
-// Receipts converge through the exact order-reference search.
+// Resolve accepts only provider-confirmed non-execution for a custodian sale:
+// NMI's definitive decline under the sale's order. Receipts converge through
+// the exact order-reference search.
 func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.BillingProviderIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	p, err := decodeCustodianSalePayload(intent)
 	if err != nil {
@@ -487,10 +488,11 @@ func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.Bil
 	if err != nil {
 		return intents.Outcome{}, err
 	}
-	if err := refuseContradictedNonExecution(ctx, client, nmiSaleIntentOrderID(intent.ID, p.E2ERunID)); err != nil {
+	evidence, err := nmiSaleRefusal(ctx, client, nmiSaleIntentOrderID(intent.ID, p.E2ERunID))
+	if err != nil {
 		return intents.Outcome{}, err
 	}
-	return intents.TerminalWithEvidence("provider confirmed the custodian sale was not executed", nil), nil
+	return intents.TerminalWithEvidence("NMI declined the custodian sale; nothing was charged", evidence), nil
 }
 
 // priorAnchor finds an existing instrument by the custodian's PAN fingerprint

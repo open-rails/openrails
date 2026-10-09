@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -257,20 +256,14 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.BillingProvid
 		return intents.Outcome{}, err
 	}
 	if resolution.NotExecuted {
-		// NMI holding no transaction under the sale's unique order is the
-		// operator's proof that nothing was charged.
-		attempts, err := client.ReadOrderAttempts(ctx, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
+		evidence, err := nmiSaleRefusal(ctx, client, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
 		if err != nil {
-			return intents.Outcome{}, intents.RejectResolution("NMI transaction search is unavailable: %v", err)
+			return intents.Outcome{}, err
 		}
-		if attempts.Transactions != 0 {
-			return intents.Outcome{}, intents.RejectResolution("NMI holds %d transaction(s) under this order; resolve with its receipt", attempts.Transactions)
-		}
-		evidence := map[string]any{"request_refused": true, "resolved_absent": true}
 		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
 			return intents.Outcome{}, err
 		}
-		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("NMI holds no transaction for this sale; nothing was charged", evidence)), nil
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("NMI declined this sale; nothing was charged", evidence)), nil
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
 	if err != nil || !found {
@@ -412,17 +405,18 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	return outcome
 }
 
-// refuseContradictedNonExecution rejects a non-execution attestation while the
-// provider shows a successful sale on the operation's exact order reference.
-func refuseContradictedNonExecution(ctx context.Context, client *nmi.NMIClient, orderID string) error {
-	txn, found, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
+// nmiSaleRefusal is the only non-execution proof a submitted NMI sale has:
+// NMI's definitive decline as the one transaction under the sale's own order.
+// An empty search is not proof; the Query API has no visibility bound.
+func nmiSaleRefusal(ctx context.Context, client *nmi.NMIClient, orderID string) (map[string]any, error) {
+	attempts, err := client.ReadOrderAttempts(ctx, orderID)
 	if err != nil {
-		return fmt.Errorf("read provider order before accepting non-execution: %w", err)
+		return nil, intents.RejectResolution("NMI transaction search is unavailable: %v", err)
 	}
-	if found {
-		return intents.RejectResolution("provider shows successful sale %s for order %s", txn, orderID)
+	if !attempts.Declined {
+		return nil, intents.RejectResolution("NMI shows no definitive decline under order %s (%d transaction(s)); an empty search does not prove nothing was charged, so resolve with the sale's receipt", orderID, attempts.Transactions)
 	}
-	return nil
+	return map[string]any{"declined": true, "response_code": attempts.DeclineCode, "decline_transaction_id": attempts.DeclineTransactionID}, nil
 }
 
 // The persisted row retains custody. Runner diagnostics/pruning receive only

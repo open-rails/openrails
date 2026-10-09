@@ -39,9 +39,11 @@ operation (sale: approved sale of the amount on the vault; enrollment: live
 subscription on the vault and plan, unowned locally; refund: approved refund of
 the reserved amount on the original sale's vault) before local effects commit
 through the normal receipt path. `--not-executed` requires the operation type's supported non-execution proof; it is not an override of provider uncertainty.
-For invoice collection, an empty NMI search after possible submission is insufficient. Rebills and
-custodian sales accept only non-execution because their receipts correlate
-exactly by order reference. Every resolution records actor and reason on the
+An empty NMI search after possible submission is never that proof: an NMI or
+custodian sale accepts `--not-executed` only when NMI shows a definitive
+decline as the one transaction under the sale's order, and a submitted invoice
+collection, rebill or tier-change proration refuses it. Custodian sale receipts
+converge only through the exact order search. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
