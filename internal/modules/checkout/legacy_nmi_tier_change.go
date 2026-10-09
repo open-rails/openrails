@@ -52,9 +52,6 @@ func providerNMITierAdmissible(sub *models.Subscription, current, target *models
 	if oldCycle == nil || *oldCycle != *newCycle {
 		return errTierChangeCadence
 	}
-	if sub.ScheduledPriceID != nil {
-		return errTierChangeScheduled
-	}
 	if sub.PaymentMethodID == nil {
 		return ErrPaymentMethodStale
 	}
@@ -107,6 +104,11 @@ func (s *CheckoutService) previewProviderNMITierChange(ctx context.Context, resp
 	now := s.now().UTC()
 	if err := providerNMITierAdmissible(sub, current, target, now); err != nil {
 		return nil, err
+	}
+	if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), sub.ID); err != nil {
+		return nil, err
+	} else if pending != nil {
+		return nil, errTierChangeScheduled
 	}
 	if _, err := s.scheduleTargetPlan(ctx, sub, target); err != nil {
 		return nil, err
@@ -174,10 +176,10 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if !downgrade {
-		if _, err := subscriptions.NewRepriceRepo(database).GetScheduledForSubscription(ctx, sub.ID); err == nil {
-			return nil, errTierChangeScheduled
-		}
+	if pending, err := subscriptions.PendingChange(ctx, database, sub.ID); err != nil {
+		return nil, err
+	} else if pending != nil {
+		return nil, errTierChangeScheduled
 	}
 	amount := int64(0)
 	if !downgrade {

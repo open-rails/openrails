@@ -41,12 +41,11 @@ type SubscriptionCounter interface {
 	CountSubscribers(ctx context.Context, f subscriptions.GetSubscriptionsFilters) (int64, error)
 }
 
-// RepricePreviewer is the read-only reprice surface the copilot rides for
-// affected-count previews and pending-migration lookups. It never reaches the
-// mutating methods.
+// RepricePreviewer is the read-only price-migration surface the copilot rides
+// for affected-count previews and pending-migration lookups.
 type RepricePreviewer interface {
-	PreviewBatch(ctx context.Context, productKey, priceKey string) (*billing.RepriceBatchPreview, error)
-	ListBatches(ctx context.Context, params billing.RepriceBatchListParams) (billing.ListPage[billing.RepriceBatch], error)
+	Preview(ctx context.Context, params billing.CreatePriceMigrationParams) (*billing.PriceMigrationPreview, error)
+	List(ctx context.Context, params billing.PriceMigrationListParams) (billing.ListPage[billing.PriceMigration], error)
 }
 
 // Deps are the catalog copilot's collaborators. LLM may be nil, which leaves

@@ -871,94 +871,43 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("load accepted renewal payment: %w", err)
 			}
-			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms, params.PreviousPeriodEnd)
+			var applied *models.ScheduledChange
+			applied, preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms, params.PreviousPeriodEnd)
 			if err != nil {
 				return err
 			}
 			price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.Amount, Currency: terms.Currency}
 			newProduct = &models.Product{ID: terms.ProductID, DisplayName: terms.ProductName}
-			applyingDowngrade = terms.ScheduledPriceID != nil
+			applyingDowngrade = applied != nil && applied.Source == billing.ScheduledChangeChange && applied.PriceID != applied.FromPriceID
 		} else {
-			// #773: pick up a due scheduled reprice at the renewal boundary — v1's
-			// ONLY effective moment is "the subscription's first renewal on/after
-			// effective_at". Re-pin BEFORE the downgrade check below so the normal-
-			// renewal price resolution (the else branch) sees the repriced value.
-			// Idempotent: a scheduled row that already applied is gone, so a second
-			// RenewMembership call for the same renewal (e.g. a caller that also
-			// pre-resolves price before charging) just sees no due reprice here.
-
-			repriceRepo := NewRepriceRepo(db)
-			if scheduledReprice, repriceErr := repriceRepo.GetScheduledForSubscription(ctx, subscription.ID); repriceErr == nil {
-				if scheduledReprice.IsDue(s.now()) {
-					repricedTo, err := priceService.GetByID(ctx, scheduledReprice.ToPriceID)
-					if err != nil {
-						return fmt.Errorf("failed to get repriced price: %w", err)
-					}
-					log.WithContext(ctx).WithFields(log.Fields{
-						"subscription_id": subscription.ID,
-						"reprice_id":      scheduledReprice.ID,
-						"kind":            scheduledReprice.Kind,
-						"old_price_id":    subscription.PriceID,
-						"new_price_id":    repricedTo.ID,
-					}).Info("Applying scheduled reprice on renewal")
-					if repricedTo.ProductID != subscription.ProductID {
-						// #813 plan_change: cross-product cutover — move the
-						// product ref at the same boundary the price moves.
-
-						newProduct, err = productService.GetByID(ctx, repricedTo.ProductID)
-						if err != nil {
-							return fmt.Errorf("failed to get target product for plan change: %w", err)
-						}
-						subscription.ProductID = repricedTo.ProductID
-					}
-					// #773 same-product reprice: price re-pin only.
-					subscription.PriceID = repricedTo.ID
-					subscription.AccessDurationHoursSnapshot = repricedTo.AccessDurationHours
-					if err := repriceRepo.Apply(ctx, scheduledReprice.ID); err != nil && !errors.Is(err, ErrRepriceNotScheduled) {
-						return fmt.Errorf("failed to mark reprice applied: %w", err)
-					}
-				}
-			} else if !errors.Is(repriceErr, pgx.ErrNoRows) {
-				return fmt.Errorf("failed to check for scheduled reprice: %w", repriceErr)
+			// A due scheduled change applies at this renewal: its first on or
+			// after effective_at.
+			change, err := PendingChange(ctx, db, subscription.ID)
+			if err != nil {
+				return fmt.Errorf("failed to check for a scheduled change: %w", err)
 			}
-
-			// Check for scheduled downgrade
-			applyingDowngrade = subscription.ScheduledPriceID != nil
-
-			if applyingDowngrade {
-				// Apply the scheduled downgrade - switch to the new price
-				price, err = priceService.GetByID(ctx, *subscription.ScheduledPriceID)
+			if change.IsDue(s.now()) {
+				price, err = priceService.GetByID(ctx, change.PriceID)
 				if err != nil {
-					return fmt.Errorf("failed to get scheduled price: %w", err)
+					return fmt.Errorf("failed to get the scheduled price: %w", err)
 				}
-
-				newProduct, err = productService.GetByID(ctx, price.ProductID)
-				if err != nil {
-					return fmt.Errorf("failed to get new product: %w", err)
+				if price.ProductID != subscription.ProductID {
+					if newProduct, err = productService.GetByID(ctx, price.ProductID); err != nil {
+						return fmt.Errorf("failed to get the scheduled product: %w", err)
+					}
 				}
-
 				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"user_id":         subscription.CustomerID.String(),
-					"old_price_id":    subscription.PriceID,
-					"new_price_id":    price.ID,
-					"old_product_id":  subscription.ProductID,
-					"new_product":     newProduct.DisplayName,
-				}).Info("Applying scheduled downgrade on renewal")
-
-				// Update subscription to new price and product
-				subscription.PriceID = price.ID
-				subscription.AccessDurationHoursSnapshot = price.AccessDurationHours
-				subscription.ProductID = price.ProductID
-				subscription.ScheduledPriceID = nil // Clear the scheduled downgrade
-			} else {
-				// Normal renewal - use current price
-				price, err = priceService.GetByID(ctx, subscription.PriceID)
-				if err != nil {
-					return fmt.Errorf("failed to get price: %w", err)
+					"subscription_id": subscription.ID, "scheduled_change_id": change.ID, "source": change.Source,
+					"old_price_id": subscription.PriceID, "new_price_id": price.ID,
+				}).Info("Applying the scheduled change on renewal")
+				if err := ApplyChange(ctx, db, change.ID, s.now()); err != nil {
+					return fmt.Errorf("failed to mark the scheduled change applied: %w", err)
 				}
+				applyingDowngrade = change.Source == billing.ScheduledChangeChange && change.PriceID != subscription.PriceID
+				subscription.PriceID, subscription.ProductID = price.ID, price.ProductID
+			} else if price, err = priceService.GetByID(ctx, subscription.PriceID); err != nil {
+				return fmt.Errorf("failed to get price: %w", err)
 			}
-
 		}
 
 		if params.Prepared == nil {

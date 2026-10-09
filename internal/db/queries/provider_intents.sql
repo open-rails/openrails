@@ -631,7 +631,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid
 
 -- A pending quote remains owned after a charge decline: provider preparation
 -- may already have changed its recurring amount. Applied/canceled historical
--- quotes do not lock future price changes. Call under the subscription lock.
+-- changes do not lock future price changes. Call under the subscription lock.
 -- name: ListRebillTermOwners :many
 SELECT i.*
 FROM billing.provider_intents i
@@ -643,13 +643,12 @@ WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
   AND (
     i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
     OR EXISTS (
-      SELECT 1 FROM billing.subscription_reprices r
-      WHERE r.merchant_id=i.merchant_id AND r.subscription_id=i.subscription_id
-        AND r.merchant_id=sqlc.arg(merchant_id)::uuid
-        AND r.status IN ('scheduled','blocked')
-        AND r.id::text=i.payload->'renewal'->>'reprice_id'
+      SELECT 1 FROM billing.scheduled_changes c
+      WHERE c.merchant_id=i.merchant_id AND c.subscription_id=i.subscription_id
+        AND c.merchant_id=sqlc.arg(merchant_id)::uuid
+        AND c.status IN ('scheduled','blocked')
+        AND c.id::text=i.payload->'renewal'->>'scheduled_change_id'
     )
-    OR s.scheduled_price_id::text=i.payload->'renewal'->>'scheduled_price_id'
   );
 
 -- The subscription/domain lock precedes the operation lock, as at admission.

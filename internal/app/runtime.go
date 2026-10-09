@@ -148,14 +148,9 @@ type Runtime struct {
 	PaymentMethodService     *paymentmethods.PaymentMethodService
 	PaymentService           *payments.PaymentService
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
-	// RepriceService is the #773 reprice primitive (move subscribers to a
-	// different price at their next renewal).
-	RepriceService *subscriptions.RepriceService
-
-	// PlanMigrationService (#813): operator-driven cross-product bulk plan
-	// migration (retire plan-A -> move cohort to plan-B) over the reprice
-	// engine.
-	PlanMigrationService *subscriptions.PlanMigrationService
+	// PriceMigrationService moves subscribers to another price at their
+	// renewal.
+	PriceMigrationService *subscriptions.PriceMigrationService
 	// PaymentSourceUpdateIntents routes NMI payment-method swaps through the
 	// durable nmi_payment_source_update intent (#674 write-through). Set by the
 	// composition root alongside the other write-through producers.

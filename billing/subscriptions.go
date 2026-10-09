@@ -33,8 +33,8 @@ type SubscriptionListParams struct {
 // credentials or mutable storage models part of the client contract. Ids are
 // the typed family of ids.go. The
 // merchant routes and the customer's own /v1/me/subscriptions routes serve
-// this one shape; the self routes additionally fill ScheduledPrice,
-// ScheduledProduct, CancelPortalURL and Access.
+// this one shape; the self routes additionally fill ScheduledChange's Price
+// and Product, CancelPortalURL and Access.
 type Subscription struct {
 	// CollectionPolicy is read-only scheduling/recovery ownership.
 	CollectionPolicy    string           `json:"collection_policy"`

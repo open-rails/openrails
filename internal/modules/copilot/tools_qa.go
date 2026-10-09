@@ -80,7 +80,7 @@ func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]c
 			}
 			grand := 0
 			if s.reprices != nil {
-				preview, err := s.reprices.PreviewBatch(ctx, p.Key, price.Key)
+				preview, err := s.reprices.Preview(ctx, billing.CreatePriceMigrationParams{ProductKey: p.Key, PriceKey: price.Key})
 				if err == nil && preview.Matched > active {
 					grand = preview.Matched - active
 				}
@@ -197,10 +197,10 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	grand := 0
 	pending := "no pending migration"
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewBatch(ctx, args.ProductKey, key); err == nil && preview.Matched > active {
+		if preview, err := s.reprices.Preview(ctx, billing.CreatePriceMigrationParams{ProductKey: args.ProductKey, PriceKey: key}); err == nil && preview.Matched > active {
 			grand = preview.Matched - active
 		}
-		if batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 1}, PriceKey: key, ProductKey: args.ProductKey}); err == nil && len(batches.Items) > 0 {
+		if batches, err := s.reprices.List(ctx, billing.PriceMigrationListParams{PageRequest: billing.PageRequest{Limit: 1}, PriceKey: key, ProductKey: args.ProductKey}); err == nil && len(batches.Items) > 0 {
 			b := batches.Items[0]
 			pending = fmt.Sprintf("pending migration: batch effective %s, %d/%d scheduled, %d skipped",
 				b.EffectiveAt.Format("2006-01-02"), b.Scheduled, b.Matched, b.Skipped)
@@ -308,7 +308,7 @@ func (s *Service) runListRepriceBatches(ctx context.Context, raw json.RawMessage
 	if s.reprices == nil {
 		return "", fmt.Errorf("reprice service unavailable")
 	}
-	batches, err := s.reprices.ListBatches(ctx, billing.RepriceBatchListParams{PageRequest: billing.PageRequest{Limit: 20}, PriceKey: key, ProductKey: args.ProductKey})
+	batches, err := s.reprices.List(ctx, billing.PriceMigrationListParams{PageRequest: billing.PageRequest{Limit: 20}, PriceKey: key, ProductKey: args.ProductKey})
 	if err != nil {
 		return "", err
 	}

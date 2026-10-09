@@ -75,7 +75,10 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 	}
 	at := terms.PeriodStart
 	reason := models.CancelTypeUpgrade
-	old.Status, old.CancelType, old.CanceledAt, old.EndedAt, old.ScheduledPriceID = models.StatusCanceled, &reason, &at, &at, nil
+	old.Status, old.CancelType, old.CanceledAt, old.EndedAt = models.StatusCanceled, &reason, &at, &at
+	if err := dropPendingChange(ctx, txDB, old.ID, at); err != nil {
+		return err
+	}
 	old.CurrentPeriodEndsAt = &at
 	if old.CurrentPeriodStartsAt != nil && !old.CurrentPeriodStartsAt.Before(at) {
 		start := at.Add(-time.Microsecond)
@@ -124,11 +127,13 @@ func (s *SubscriptionLifecycleService) ChangeTierInPlaceTx(ctx context.Context, 
 		return fmt.Errorf("subscription changed since the tier change was accepted; the provider schedule already bills the new amount")
 	}
 	if c.Downgrade {
-		id := c.PriceID
-		sub.ScheduledPriceID = &id
-		return repo.UpdateAt(ctx, sub, c.At)
+		_, err := RecordProviderChange(ctx, txDB, sub, c.PriceID, c.At)
+		return err
 	}
-	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = c.PriceID, c.ProductID, nil
+	if err := dropPendingChange(ctx, txDB, sub.ID, c.At); err != nil {
+		return err
+	}
+	sub.PriceID, sub.ProductID = c.PriceID, c.ProductID
 	if c.AccessEndsAt == nil {
 		sub.AccessDurationHoursSnapshot = c.AccessDurationHours
 	}

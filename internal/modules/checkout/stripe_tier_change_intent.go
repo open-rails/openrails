@@ -497,8 +497,11 @@ func (h *StripeTierChangeIntentHandler) requireFrozenSubscription(ctx context.Co
 	if err != nil {
 		return fmt.Errorf("load subscription before submission: %w", err)
 	}
-	if (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.PriceID != p.OldPriceID || sub.RailSubscriptionID != p.StripeSubscriptionID || sub.ScheduledPriceID != nil {
+	if (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.PriceID != p.OldPriceID || sub.RailSubscriptionID != p.StripeSubscriptionID {
 		return errors.New("subscription changed before submission")
+	}
+	if pending, err := subscriptions.PendingChange(ctx, h.Checkout.SubscriptionService.Database(), sub.ID); err != nil || pending != nil {
+		return errors.Join(errors.New("subscription changed before submission"), err)
 	}
 	return nil
 }
@@ -540,7 +543,10 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in 
 				return completion.commit(ctx)
 			}
 		case p.OldPriceID:
-			sub.PriceID, sub.ProductID, sub.ScheduledPriceID = p.PriceID, p.ProductID, nil
+			if err := subscriptions.ProviderMovedPrice(ctx, bound, sub.ID, p.PriceID, now); err != nil {
+				return err
+			}
+			sub.PriceID, sub.ProductID = p.PriceID, p.ProductID
 		default:
 			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
@@ -575,18 +581,20 @@ func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, i
 		if in.PspID == nil || sub.PspID != *in.PspID || sub.CustomerID.String() != p.UserID || sub.RailSubscriptionID != p.StripeSubscriptionID {
 			return errors.New("subscription no longer names accepted tier target")
 		}
-		if sub.ScheduledPriceID != nil {
-			if *sub.ScheduledPriceID == p.PriceID {
+		pending, err := subscriptions.PendingChange(ctx, bound, sub.ID)
+		if err != nil {
+			return err
+		}
+		if pending != nil {
+			if pending.PriceID == p.PriceID {
 				return completion.commit(ctx)
 			}
-			return fmt.Errorf("subscription %s already schedules price %s", sub.ID, *sub.ScheduledPriceID)
+			return fmt.Errorf("subscription %s already schedules price %s", sub.ID, pending.PriceID)
 		}
 		if sub.PriceID != p.OldPriceID {
 			return fmt.Errorf("subscription %s is on price %s, not the frozen predecessor %s", sub.ID, sub.PriceID, p.OldPriceID)
 		}
-		scheduled := p.PriceID
-		sub.ScheduledPriceID = &scheduled
-		if err := repo.UpdateAt(ctx, sub, now); err != nil {
+		if _, err := subscriptions.RecordProviderChange(ctx, bound, sub, p.PriceID, now); err != nil {
 			return err
 		}
 		return completion.commit(ctx)

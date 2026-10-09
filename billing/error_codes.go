@@ -53,6 +53,17 @@ const (
 	CodeSubscriptionPaidThrough = "subscription_paid_through"
 )
 
+// Scheduled changes and price migrations.
+const (
+	CodeScheduledChangeExists         = "scheduled_change_exists"
+	CodeScheduledChangeNotFound       = "scheduled_change_not_found"
+	CodeScheduledChangeHeldByProvider = "scheduled_change_held_by_provider"
+	CodePriceMigrationNotFound        = "price_migration_not_found"
+	CodePriceChangeCurrencyMismatch   = "price_change_currency_mismatch"
+	CodePriceChangeTargetArchived     = "price_change_target_archived"
+	CodePriceIncreaseNoticeTooShort   = "price_increase_notice_too_short"
+)
+
 // CodeCatalogBenefitOverlap: two recurring products would grant one
 // entitlement outside a shared tier group.
 const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
@@ -251,15 +262,13 @@ var errorCodes = []ErrorCode{
 	{"customer_email_required", 400, invalid, "The rail needs the customer's verified email and username."},
 	{"solana_transaction_refused", 400, invalid, "The wallet transaction could not be prepared or confirmed; the message says why."},
 	{"solana_rpc_unavailable", 502, fault, "The Solana RPC endpoints did not answer; retry."},
-	{"reprice_not_found", 404, invalid, "The reprice does not exist."},
-	{"reprice_price_key_not_found", 404, invalid, "The reprice names a price key that does not exist."},
-	{"reprice_target_price_not_found", 404, invalid, "The reprice's target price does not exist."},
-	{"reprice_already_scheduled", 409, invalid, "The subscription already has a scheduled reprice."},
-	{"reprice_not_scheduled", 409, invalid, "The reprice is no longer scheduled."},
-	{"reprice_cross_currency", 422, invalid, "The target price must be in the same currency."},
-	{"reprice_cross_product", 422, invalid, "The target price must be on the same product."},
-	{"reprice_inactive_price", 422, invalid, "The target price must be active."},
-	{"reprice_notice_window_violation", 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},
+	{CodeScheduledChangeExists, 409, invalid, "The subscription already has a scheduled change."},
+	{CodeScheduledChangeNotFound, 404, invalid, "The subscription has no scheduled change."},
+	{CodeScheduledChangeHeldByProvider, 409, invalid, "The subscription's provider already bills the scheduled change; change it back at the provider."},
+	{CodePriceMigrationNotFound, 404, invalid, "The price migration does not exist."},
+	{CodePriceChangeCurrencyMismatch, 422, invalid, "The target price must be in the subscription's currency."},
+	{CodePriceChangeTargetArchived, 422, invalid, "The target price is archived."},
+	{CodePriceIncreaseNoticeTooShort, 422, invalid, "effective_at is inside the merchant's notice window for a price increase."},
 
 	// Invoices and collection.
 	{CodeInvoiceActionNotAllowed, 409, invalid, "The invoice's status does not allow this action."},

@@ -12,6 +12,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -79,7 +80,7 @@ func adminTierChangeRequest(
 		return nil, nil, nil, false
 	}
 	subscriptionID := typedSubscriptionID.UUID()
-	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil || r.State.RepriceService == nil {
+	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil {
 		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
 		return nil, nil, nil, false
 	}
@@ -125,9 +126,19 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 		r.ErrorCode(billing.CodeResourceConflict, "only active or past-due subscriptions can change tier")
 		return false
 	}
+	pending, err := subscriptions.PendingChange(r.Request.Context(), r.State.SubscriptionService.Database(), subscriptionID)
+	if err != nil {
+		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check the scheduled change")
+		r.ErrorCode(billing.CodeInternalError, "failed to check the scheduled change")
+		return false
+	}
+	if pending != nil && pending.Source == billing.ScheduledChangeMigration {
+		r.ErrorCode(billing.CodeResourceConflict, "subscription already has a scheduled price change")
+		return false
+	}
 	// An engine subscription's service answers its own schedule: the same
 	// downgrade replays, another is a typed refusal, an upgrade replaces it.
-	if subscription.ScheduledPriceID != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
+	if pending != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeTierChangeAlreadyScheduled, "subscription already has a tier change scheduled"))
 		return false
 	}
@@ -135,21 +146,6 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 	// wallet: only the customer can take that step.
 	if subscription.Rail == models.RailCCBill || subscription.Rail == models.RailSolana {
 		r.APIError(api.Coded(billing.CodeCustomerActionRequired, "this subscription's tier changes only through the customer's own step on its rail"))
-		return false
-	}
-
-	reprices, err := r.State.RepriceService.ListReprices(r.Request.Context(), billing.RepriceListParams{
-		PageRequest:    billing.PageRequest{Limit: 1},
-		SubscriptionID: billing.SubscriptionID(subscriptionID),
-		Status:         billing.RepriceScheduled,
-	})
-	if err != nil {
-		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check scheduled reprices")
-		r.ErrorCode(billing.CodeInternalError, "failed to check scheduled price changes")
-		return false
-	}
-	if len(reprices.Items) > 0 {
-		r.ErrorCode(billing.CodeResourceConflict, "subscription already has a scheduled price change")
 		return false
 	}
 	return true

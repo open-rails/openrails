@@ -224,7 +224,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 
 	affected := 0
 	if s.reprices != nil {
-		if preview, err := s.reprices.PreviewBatch(ctx, args.ProductKey, key); err == nil {
+		if preview, err := s.reprices.Preview(ctx, billing.CreatePriceMigrationParams{ProductKey: args.ProductKey, PriceKey: key}); err == nil {
 			affected = preview.Matched
 		}
 	}
@@ -254,7 +254,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		},
 	}
 	if mode == "migrate" {
-		draft.Reprice = &billing.CreateRepriceBatchParams{ProductKey: args.ProductKey, PriceKey: key, EffectiveAt: effectiveAt}
+		draft.Migration = &billing.CreatePriceMigrationParams{ProductKey: args.ProductKey, PriceKey: key, EffectiveAt: effectiveAt}
 	}
 
 	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the price-change wizard — nothing has been changed yet.", reviewText)

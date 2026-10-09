@@ -3,7 +3,7 @@
 
 -- name: CreateSubscription :execrows
 INSERT INTO billing.subscriptions (
-    id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
+    id, merchant_id, customer_id, product_id, price_id,
     access_duration_hours_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
     rail_subscription_id, payment_method_id, last_retry_at,
@@ -11,7 +11,7 @@ INSERT INTO billing.subscriptions (
     cancel_type, canceled_at, deletion_scheduled_at, gateway_response,
     created_at, updated_at, psp_id, collection_policy, quantity
 ) VALUES (
-    $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
+    $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4,
     sqlc.narg(access_duration_hours_snapshot)::int,
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending'),
     sqlc.arg(started_at),
@@ -53,7 +53,6 @@ UPDATE billing.subscriptions SET
     canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
-    scheduled_price_id = sqlc.narg(scheduled_price_id),
     dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at)
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
@@ -87,7 +86,6 @@ UPDATE billing.subscriptions SET
     canceled_at = sqlc.narg(canceled_at),
     deletion_scheduled_at = sqlc.narg(deletion_scheduled_at),
     gateway_response = sqlc.narg(gateway_response),
-    scheduled_price_id = sqlc.narg(scheduled_price_id),
     dunning_policy = sqlc.narg(dunning_policy)::jsonb,
     updated_at = sqlc.arg(updated_at),
     lifecycle_rev = lifecycle_rev + 1
@@ -206,14 +204,6 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1 AND sub.status = 'active'
-  AND sub.deleted_at IS NULL;
-
--- #773: every active subscription pinned to one of a set of price rows — the
--- reprice_all_prior_versions(key, ...) match set (a key's prior-version price
--- ids). Uses subscriptions_price_id_idx.
--- name: ListActiveSubscriptionsByPriceIDs :many
-SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.arg(price_ids)::uuid[]) AND sub.status = 'active'
   AND sub.deleted_at IS NULL;
 
 -- name: CountSubscriptionsByCustomer :one
@@ -386,16 +376,15 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
--- #813: the plan-migration cohort — every subscription still billing (or
--- still being dunned) on the retired price. past_due is INCLUDED: a sub whose
--- dunning recovers would otherwise renew on the old plan and silently escape
--- the migration.
--- name: ListMigratableSubscriptionsByPriceID :many
+-- A price migration's cohort: every subscription still billing (or still
+-- being dunned) on one of the prices. A past_due one that recovers would
+-- otherwise renew on the old price.
+-- name: ListMigratableSubscriptionsByPriceIDs :many
 SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = sqlc.arg(price_id)::uuid
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.price_id = ANY(sqlc.arg(price_ids)::uuid[])
   AND sub.status IN ('active', 'past_due', 'awaiting_method')
   AND sub.deleted_at IS NULL
-ORDER BY sub.created_at;
+ORDER BY sub.created_at, sub.id;
 
 -- A verified provider stop owns only this marker. A full-row replay can undo
 -- another command's price/card/period/quote while waiting for the lock.

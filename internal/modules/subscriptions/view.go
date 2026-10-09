@@ -13,8 +13,10 @@ import (
 // at the response's read time.
 func (r *UserSubscriptionResponse) View() billing.Subscription {
 	out := SubscriptionView(r.Subscription, r.Price, r.EvaluationTime())
-	out.ScheduledPrice = r.ScheduledPrice.PublicView()
-	out.ScheduledProduct = r.ScheduledProduct.Summary()
+	if out.ScheduledChange != nil {
+		out.ScheduledChange.Price = r.ScheduledPrice.PublicView()
+		out.ScheduledChange.Product = r.ScheduledProduct.Summary()
+	}
 	out.Access = r.Access
 	return out
 }
@@ -35,10 +37,7 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Ti
 		CancelPortalURL: CancelPortalURL(sub, now),
 		Price:           price.PublicView(), Product: sub.Product.Summary(), Card: subscriptionCardView(sub.PaymentMethod),
 	}
-	if sub.ScheduledPriceID != nil {
-		id := billing.PriceID(*sub.ScheduledPriceID)
-		out.ScheduledPriceID = &id
-	}
+	out.ScheduledChange = sub.ScheduledChange.View()
 	if sub.CancelType != nil {
 		v := string(*sub.CancelType)
 		out.CancelType = &v

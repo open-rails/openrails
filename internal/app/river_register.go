@@ -179,15 +179,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add notification email sweep worker: %w", err)
 	}
-	// Plan-migration re-driver (#816): re-drives blocked #813 plan-change rows
-	// (deferred far-future pushes entering their final pre-effective period;
-	// crash-window rows whose rail already carries the target) through the same
-	// idempotent execute paths a manual re-run uses. Nil service (worker-only
-	// runtimes) log-and-skips inside the worker.
-	if err := addTrackedWorker(r, workers, &riverjobs.PlanMigrationRedriveWorker{
-		Migrations: r.PlanMigrationService,
+	// Price-migration re-driver: retries failed provider pushes on time. A
+	// nil service (worker-only runtimes) skips inside the worker.
+	if err := addTrackedWorker(r, workers, &riverjobs.PriceMigrationRedriveWorker{
+		Migrations: r.PriceMigrationService,
 	}); err != nil {
-		return fmt.Errorf("add plan migration redrive worker: %w", err)
+		return fmt.Errorf("add price migration redrive worker: %w", err)
 	}
 	// Accepted operations carry their own durable River lifecycle job.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
@@ -579,14 +576,14 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
-	// Hourly: plan-migration re-drive (#816). Period granularity is days, so
+	// Hourly: price-migration re-drive. Period granularity is days, so
 	// hourly can never miss a subscription's final pre-effective period.
 	// RunOnStart=true: a reboot after downtime is exactly when deferred rows
 	// have accumulated, and an empty pass is a cheap indexed no-op.
 	jobs = append(jobs, r.healthPeriodic(
 		time.Hour,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.PlanMigrationRedriveArgs{}, &river.InsertOpts{
+			return riverjobs.PriceMigrationRedriveArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}

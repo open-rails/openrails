@@ -41,8 +41,9 @@ type CatalogDraft struct {
 }
 
 // PriceChangeDraft proposes a new version of the price under PriceKey.
-// CreatePrice creates it; Reprice, when set, moves the existing subscribers
-// to it, and they keep their price when it is nil.
+// CreatePrice creates it; Migration, when set, moves the existing subscribers
+// to it (its to_price_id is the created price), and they keep their price
+// when it is nil.
 type PriceChangeDraft struct {
 	ProductKey    string `json:"product_key"`
 	PriceKey      string `json:"price_key"`
@@ -50,10 +51,10 @@ type PriceChangeDraft struct {
 	NewAmount     int64  `json:"new_amount,string"`
 	Currency      string `json:"currency"`
 	// AffectedCount is how many subscribers hold an earlier version.
-	AffectedCount int                       `json:"affected_count"`
-	ReviewText    string                    `json:"review_text"`
-	CreatePrice   CreatePriceParams         `json:"create_price"`
-	Reprice       *CreateRepriceBatchParams `json:"reprice"`
+	AffectedCount int                         `json:"affected_count"`
+	ReviewText    string                      `json:"review_text"`
+	CreatePrice   CreatePriceParams           `json:"create_price"`
+	Migration     *CreatePriceMigrationParams `json:"migration"`
 }
 
 // NewPriceDraft proposes another price on an existing product.

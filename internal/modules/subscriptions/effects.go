@@ -189,11 +189,15 @@ func (s *SubscriptionLifecycleService) queueNotice(ctx context.Context, d *db.DB
 // so the renewed period is the new tier's. Call after a RenewalPaid
 // transition, before persisting the row.
 func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-	if sub.CollectionPolicy == models.CollectionPolicyEngine || !rails.IsNMI(sub.Rail) || sub.ScheduledPriceID == nil ||
+	if sub.CollectionPolicy == models.CollectionPolicyEngine || !rails.IsNMI(sub.Rail) ||
 		sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil {
 		return nil
 	}
-	price, err := catalog.NewPriceService(d).GetByID(ctx, *sub.ScheduledPriceID)
+	change, err := PendingChange(ctx, d, sub.ID)
+	if err != nil || !change.IsDue(*sub.CurrentPeriodStartsAt) {
+		return err
+	}
+	price, err := catalog.NewPriceService(d).GetByID(ctx, change.PriceID)
 	if err != nil {
 		return fmt.Errorf("scheduled tier %s: price: %w", sub.ID, err)
 	}
@@ -201,7 +205,10 @@ func (s *SubscriptionLifecycleService) ApplyScheduledTier(ctx context.Context, d
 	if err != nil {
 		return fmt.Errorf("scheduled tier %s: product: %w", sub.ID, err)
 	}
-	sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, product.ID, nil
+	if err := ApplyChange(ctx, d, change.ID, *sub.CurrentPeriodStartsAt); err != nil {
+		return fmt.Errorf("scheduled tier %s: %w", sub.ID, err)
+	}
+	sub.PriceID, sub.ProductID = price.ID, product.ID
 	sub.AccessDurationHoursSnapshot = price.AccessDurationHours
 	sub.Price = price
 	return nil // The caller grants the newly paid period of the new product.

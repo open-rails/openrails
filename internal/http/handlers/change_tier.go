@@ -200,7 +200,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		r.ErrorCode(billing.CodeResourceConflict, "already on this plan")
 	case errors.Is(err, checkout.ErrTierChangeDifferentGroup):
 		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a different tier group")
-	case errors.Is(err, subscriptions.ErrRepriceCrossCurrency):
+	case errors.Is(err, subscriptions.ErrPriceCurrencyMismatch):
 		r.ErrorCode(billing.CodeInvalidParam, "cannot change to a plan in a different currency")
 	default:
 		writeRefusal(r, err, "tier change request failed")

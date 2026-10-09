@@ -56,9 +56,9 @@ type Subscription struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	ProductID  uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
 	PriceID    uuid.UUID `json:"price_id"`   // Required for all subscriptions
-
-	// Scheduled tier change (for downgrades that take effect at end of period)
-	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
+	// ScheduledChange is the pending change, loaded only by the readers that
+	// serve the subscription on the wire; it is not a column.
+	ScheduledChange *ScheduledChange `json:"-"`
 
 	// Quantity is the seats each period bills; above 1 only on an engine
 	// NMI or Stripe subscription.

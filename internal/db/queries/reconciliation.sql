@@ -335,7 +335,8 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
        subscriptions.retry_attempts, subscriptions.next_retry_at,
-       subscriptions.access_duration_hours_snapshot, subscriptions.scheduled_price_id,
+       subscriptions.access_duration_hours_snapshot,
+       scheduled.price_id AS scheduled_price_id,
        price.currency AS price_currency,
        EXISTS (SELECT 1 FROM billing.provider_intents ri
                WHERE ri.merchant_id = subscriptions.merchant_id AND ri.subscription_id = subscriptions.id
@@ -343,6 +344,8 @@ SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subs
                  AND ri.status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable'))::boolean AS tier_change_pending
 FROM billing.subscriptions subscriptions
 LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
+LEFT JOIN billing.scheduled_changes scheduled ON scheduled.merchant_id = subscriptions.merchant_id
+  AND scheduled.subscription_id = subscriptions.id AND scheduled.status = 'scheduled'
 WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.rail = ANY (sqlc.arg(rails)::text[])
   AND subscriptions.deleted_at IS NULL
   AND subscriptions.psp_id = sqlc.arg(psp_id)::uuid;

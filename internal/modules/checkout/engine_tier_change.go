@@ -185,22 +185,26 @@ func (s *CheckoutService) processEngineDowngrade(ctx context.Context, newPrice *
 	if err := s.engineDowngradeAdmissible(ctx, newPrice, existingSub); err != nil {
 		return nil, err
 	}
-	if existingSub.ScheduledPriceID == nil {
-		scheduled, err := subscriptions.NewSubscriptionRepo(s.SubscriptionService.Database()).SchedulePriceChange(ctx, existingSub.ID, existingSub.PriceID, newPrice.ID)
+	database := s.SubscriptionService.Database()
+	pending, err := subscriptions.PendingChange(ctx, database, existingSub.ID)
+	if err != nil {
+		return nil, err
+	}
+	if pending == nil {
+		_, err := subscriptions.NewSubscriptionRepo(database).ScheduleChange(ctx, existingSub.ID, existingSub.PriceID, subscriptions.NewScheduledChange{PriceID: newPrice.ID, Source: billing.ScheduledChangeChange}, s.now())
 		switch {
 		case errors.Is(err, subscriptions.ErrRebillTermsCommitted):
 			return nil, errTierChangeRenewalDue
-		case errors.Is(err, subscriptions.ErrRepriceAlreadyScheduled):
-			if scheduled, err = s.SubscriptionService.GetByID(ctx, existingSub.ID); err != nil {
+		case errors.Is(err, subscriptions.ErrChangeAlreadyScheduled):
+			if pending, err = subscriptions.PendingChange(ctx, database, existingSub.ID); err != nil {
 				return nil, err
 			}
-			if scheduled.ScheduledPriceID == nil || *scheduled.ScheduledPriceID != newPrice.ID || scheduled.PriceID != existingSub.PriceID {
+			if !sameDowngrade(pending, existingSub, newPrice) {
 				return nil, errTierChangeScheduled
 			}
 		case err != nil:
 			return nil, err
 		}
-		existingSub = scheduled
 	}
 	end := *existingSub.CurrentPeriodEndsAt
 	subID := billing.SubscriptionID(existingSub.ID)
@@ -221,15 +225,19 @@ func (s *CheckoutService) engineDowngradeAdmissible(ctx context.Context, newPric
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return ErrTierChangePeriodUnknown
 	}
-	if sub.ScheduledPriceID != nil && *sub.ScheduledPriceID != newPrice.ID {
-		return errTierChangeScheduled
-	}
-	if _, err := subscriptions.NewRepriceRepo(s.SubscriptionService.Database()).GetScheduledForSubscription(ctx, sub.ID); err == nil {
-		return errTierChangeScheduled
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), sub.ID)
+	if err != nil {
 		return err
 	}
+	if pending != nil && !sameDowngrade(pending, sub, newPrice) {
+		return errTierChangeScheduled
+	}
 	return nil
+}
+
+// sameDowngrade: the pending change is this very downgrade, repeated.
+func sameDowngrade(pending *models.ScheduledChange, sub *models.Subscription, target *models.Price) bool {
+	return pending != nil && pending.Source == billing.ScheduledChangeChange && pending.PriceID == target.ID && pending.FromPriceID == sub.PriceID
 }
 
 // previewEngineTierChange quotes exactly what processEngineUpgrade charges and

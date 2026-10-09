@@ -1278,7 +1278,9 @@ func (s *CheckoutService) tierChangePreview(ctx context.Context, req *TierChange
 			return nil, err
 		}
 		// Downgrade: scheduled for period end, nothing charged now.
-		if existingSub.ScheduledPriceID != nil {
+		if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), existingSub.ID); err != nil {
+			return nil, err
+		} else if pending != nil {
 			return nil, ErrTierChangePending
 		}
 		resp.Action = "downgrade"
@@ -1417,7 +1419,9 @@ func (s *CheckoutService) processTierChangeStripe(
 	if !ok || strings.TrimSpace(currentStripePriceID) == "" {
 		return nil, &TierChangeError{Code: billing.CodeTierChangeProviderConflict, Message: "current price not configured for Stripe"}
 	}
-	if existingSub.ScheduledPriceID != nil {
+	if pending, err := subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), existingSub.ID); err != nil {
+		return nil, err
+	} else if pending != nil {
 		return &TierChangeResponse{
 			Status: "blocked", Action: action,
 			PriceID: billing.PriceID(newPrice.ID), Rail: "stripe",

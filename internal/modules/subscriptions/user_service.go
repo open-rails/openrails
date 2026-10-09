@@ -204,14 +204,17 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 		}
 		applySubscriptionAccess(responses, active)
 	}
+	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subscriptionsOf(responses)); err != nil {
+		return err
+	}
 	ids := make([]uuid.UUID, 0, 2*len(responses))
 	for _, resp := range responses {
 		resp.EvaluatedAt = at
 		if resp.Subscription.PriceID != uuid.Nil {
 			ids = append(ids, resp.Subscription.PriceID)
 		}
-		if resp.Subscription.ScheduledPriceID != nil {
-			ids = append(ids, *resp.Subscription.ScheduledPriceID)
+		if resp.Subscription.ScheduledChange != nil {
+			ids = append(ids, resp.Subscription.ScheduledChange.PriceID)
 		}
 	}
 	if s.PriceService == nil {
@@ -226,14 +229,22 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 			resp.Price = price
 			resp.Subscription.Product = price.Product
 		}
-		if resp.Subscription.ScheduledPriceID != nil {
-			if price := prices[*resp.Subscription.ScheduledPriceID]; price != nil {
+		if resp.Subscription.ScheduledChange != nil {
+			if price := prices[resp.Subscription.ScheduledChange.PriceID]; price != nil {
 				resp.ScheduledPrice = price
 				resp.ScheduledProduct = price.Product
 			}
 		}
 	}
 	return nil
+}
+
+func subscriptionsOf(responses []*UserSubscriptionResponse) []*models.Subscription {
+	out := make([]*models.Subscription, 0, len(responses))
+	for _, r := range responses {
+		out = append(out, r.Subscription)
+	}
+	return out
 }
 
 // CancelUserSubscription cancels the member's named subscription at period

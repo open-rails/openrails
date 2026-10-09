@@ -16,10 +16,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/lifecycle"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -366,16 +364,9 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 			return nil
 		}
 		oldProduct = sub.ProductID
-		sub.PriceID, sub.ProductID, sub.ScheduledPriceID = price.ID, price.ProductID, nil
-		scope, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		// #813: the provider flip applies a scheduled reprice that targeted it.
-		if _, err := txdb.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, gen.ApplyScheduledRepriceForSubscriptionPriceParams{
-			MerchantID: scope.UUID(), SubscriptionID: sub.ID, ToPriceID: price.ID,
-		}); err != nil {
-			return fmt.Errorf("stripe converge: mark scheduled reprice applied: %w", err)
+		sub.PriceID, sub.ProductID = price.ID, price.ProductID
+		if err := subscriptions.ProviderMovedPrice(ctx, txdb, sub.ID, price.ID, now); err != nil {
+			return fmt.Errorf("stripe converge: settle the scheduled change: %w", err)
 		}
 		if err := subRepo.UpdateAt(ctx, sub, now); err != nil {
 			return fmt.Errorf("stripe converge: write price remap: %w", err)

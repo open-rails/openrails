@@ -340,8 +340,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 		UserSubscriptionService:  serviceInstances.UserSubscriptionService,
 		AdminSubscriptionService: serviceInstances.AdminSubscriptionService,
-		RepriceService:           serviceInstances.RepriceService,
-		PlanMigrationService:     serviceInstances.PlanMigrationService,
+		PriceMigrationService:    serviceInstances.PriceMigrationService,
 
 		EmailService:                 emailService,
 		EmailSender:                  sender,
@@ -554,12 +553,9 @@ type servicesInstances struct {
 
 	UserSubscriptionService  *subscriptions.UserSubscriptionService
 	AdminSubscriptionService *subscriptions.AdminSubscriptionService
-	// RepriceService is the #773 reprice primitive (move subscribers to a
-	// different price at their next renewal).
-	RepriceService *subscriptions.RepriceService
-	// PlanMigrationService (#813) is the operator-driven cross-product bulk
-	// migration over the reprice engine.
-	PlanMigrationService *subscriptions.PlanMigrationService
+	// PriceMigrationService moves subscribers to another price at their
+	// renewal.
+	PriceMigrationService *subscriptions.PriceMigrationService
 
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	DeduplicationService         *webhooks.DeduplicationService
@@ -671,10 +667,10 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		clock,
 	)
 
-	// #773: reprice primitive — moving existing subscribers to a different
-	// (same-product, same-currency, active) price at their next renewal.
-	repriceRepo := subscriptions.NewRepriceRepo(database)
-	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database), clock)
+	// Price migrations push to Stripe and to NMI gateway schedules through
+	// the per-merchant client resolver.
+	priceMigrationService := subscriptions.NewPriceMigrationService(database, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database),
+		&subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), clock)
 
 	// Catalog Q&A and drafting are independently opt-in. Draft tools only
 	// propose changes; the reprice API owns #781 notice-window enforcement.
@@ -684,7 +680,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		Products: productService,
 		Prices:   priceService,
 		Subs:     subscriptionService,
-		Reprices: repriceService,
+		Reprices: priceMigrationService,
 		LLM:      dashboardLLM,
 		Enabled:  cfg.LLM != nil && cfg.LLM.CatalogCopilotEnabled,
 		Drafting: cfg.LLM != nil && cfg.LLM.CatalogDraftingEnabled,
@@ -723,12 +719,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		clock,
 	)
 	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}
-
-	// #813: plan migrations — cross-product bulk retirement over the #773
-	// reprice engine. Observed rails with a server-side push: Stripe, and
-	// (#815) gateway-native NMI recurring via the per-merchant client
-	// resolver.
-	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver))
 
 	// #1099: deliveries are claimed in Postgres; webhook_events is the applied fact (#678).
 	deduplicationService, err := webhooks.NewDeduplicationService(webhookClaims, database)
@@ -813,8 +803,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		FXRateRefresher:              fxRateRefresher,
 		UserSubscriptionService:      userSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
-		RepriceService:               repriceService,
-		PlanMigrationService:         planMigrationService,
+		PriceMigrationService:        priceMigrationService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
 		DeduplicationService:         deduplicationService,
 		WebhookDispatcher:            webhookDispatcher,

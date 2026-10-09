@@ -199,7 +199,6 @@ func SubscriptionFromGen(s gen.BillingSubscription) (*Subscription, error) {
 		CustomerID:                  s.CustomerID,
 		ProductID:                   s.ProductID,
 		PriceID:                     DerefUUID(s.PriceID),
-		ScheduledPriceID:            s.ScheduledPriceID,
 		Quantity:                    int(s.Quantity),
 		Status:                      SubscriptionStatus(s.Status),
 		StartedAt:                   s.StartedAt,
@@ -363,34 +362,6 @@ func PriceKeyMovementsFromGen(rows []gen.BillingPriceKeyMovement) []*PriceKeyMov
 	out := make([]*PriceKeyMovement, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, PriceKeyMovementFromGen(r))
-	}
-	return out
-}
-
-// SubscriptionRepriceFromGen maps a generated subscription_reprices row (#773).
-func SubscriptionRepriceFromGen(r gen.BillingSubscriptionReprice) *SubscriptionReprice {
-	return &SubscriptionReprice{
-		ID:                      r.ID,
-		MerchantID:              r.MerchantID,
-		SubscriptionID:          r.SubscriptionID,
-		FromPriceID:             r.FromPriceID,
-		ToPriceID:               r.ToPriceID,
-		EffectiveAt:             r.EffectiveAt,
-		Status:                  RepriceStatus(r.Status),
-		RepriceBatchID:          r.RepriceBatchID,
-		CreatedAt:               r.CreatedAt,
-		AppliedAt:               r.AppliedAt,
-		CanceledAt:              r.CanceledAt,
-		AcknowledgedShortNotice: r.AcknowledgedShortNotice,
-		Kind:                    RepriceKind(r.Kind),
-		BlockedReason:           DerefStr(r.BlockedReason),
-	}
-}
-
-func SubscriptionRepricesFromGen(rows []gen.BillingSubscriptionReprice) []*SubscriptionReprice {
-	out := make([]*SubscriptionReprice, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, SubscriptionRepriceFromGen(r))
 	}
 	return out
 }

@@ -124,10 +124,10 @@ func TestModelBUpgradeQuoteRefusals(t *testing.T) {
 		u    ModelBUpgrade
 		want error
 	}{
-		{"eur to usd", at(eur, usd(25_000_000), &start, &end, intPtr(1)), subscriptions.ErrRepriceCrossCurrency},
-		{"usd to eur", at(usd(25_000_000), eur, &start, &end, intPtr(1)), subscriptions.ErrRepriceCrossCurrency},
-		{"missing old currency", at(PriceAmount{Micros: 1}, usd(2), &start, &end, intPtr(1)), subscriptions.ErrRepriceCrossCurrency},
-		{"blank new currency", at(usd(1), PriceAmount{Micros: 2, Currency: "  "}, &start, &end, intPtr(1)), subscriptions.ErrRepriceCrossCurrency},
+		{"eur to usd", at(eur, usd(25_000_000), &start, &end, intPtr(1)), subscriptions.ErrPriceCurrencyMismatch},
+		{"usd to eur", at(usd(25_000_000), eur, &start, &end, intPtr(1)), subscriptions.ErrPriceCurrencyMismatch},
+		{"missing old currency", at(PriceAmount{Micros: 1}, usd(2), &start, &end, intPtr(1)), subscriptions.ErrPriceCurrencyMismatch},
+		{"blank new currency", at(usd(1), PriceAmount{Micros: 2, Currency: "  "}, &start, &end, intPtr(1)), subscriptions.ErrPriceCurrencyMismatch},
 		{"nil new cycle", at(usd(1), usd(2), &start, &end, nil), ErrTierChangeCycleUnknown},
 		{"zero new cycle", at(usd(1), usd(2), &start, &end, intPtr(0)), ErrTierChangeCycleUnknown},
 		{"negative new cycle", at(usd(1), usd(2), &start, &end, intPtr(-24)), ErrTierChangeCycleUnknown},

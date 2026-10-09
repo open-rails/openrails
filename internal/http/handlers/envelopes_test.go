@@ -71,7 +71,7 @@ func render(t *testing.T, write func(*httprequest.Request)) envelope {
 func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 	writers := map[string]func(*httprequest.Request, error){
 		"catalog":  writeCatalogError,
-		"reprice":  writeRepriceError,
+		"reprice":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "price migration failed") },
 		"psp":      writePSPError,
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
@@ -105,13 +105,12 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"refusal", fmt.Errorf("%w: declared field refused", billingimport.ErrInvalidDeclaredInput), want{400, api.CodeInvalidParam, ""}},
 		{"refusal", apperr.Conflictf("payment method belongs to another customer"), want{409, api.CodeResourceConflict, ""}},
 		{"reprice", subscriptions.ErrSubscriptionNotFound, want{404, "subscription_not_found", ""}},
-		{"reprice", subscriptions.ErrRepriceTargetPriceNotFound, want{404, "reprice_target_price_not_found", ""}},
-		{"reprice", fmt.Errorf("%w: price key %q", subscriptions.ErrRepricePriceKeyNotFound, "k"), want{404, "reprice_price_key_not_found", ""}},
-		{"reprice", subscriptions.ErrRepriceNotFound, want{404, "reprice_not_found", ""}},
-		{"reprice", &subscriptions.RepriceConstraintError{Sentinel: subscriptions.ErrRepriceCrossProduct}, want{422, "reprice_cross_product", ""}},
-		{"reprice", &subscriptions.RepriceConstraintError{Sentinel: subscriptions.ErrRepriceNoticeWindowViolation}, want{422, "reprice_notice_window_violation", ""}},
-		{"reprice", &subscriptions.RepriceConstraintError{Sentinel: subscriptions.ErrRepriceAlreadyScheduled}, want{409, "reprice_already_scheduled", ""}},
-		{"reprice", subscriptions.ErrRepriceNotScheduled, want{409, "reprice_not_scheduled", ""}},
+		{"reprice", subscriptions.ErrPriceMigrationNotFound, want{404, "price_migration_not_found", ""}},
+		{"reprice", fmt.Errorf("%w: to price", subscriptions.ErrPriceCurrencyMismatch), want{422, "price_change_currency_mismatch", ""}},
+		{"reprice", subscriptions.ErrPriceTargetArchived, want{422, "price_change_target_archived", ""}},
+		{"reprice", subscriptions.ErrChangeAlreadyScheduled, want{409, "scheduled_change_exists", ""}},
+		{"reprice", subscriptions.ErrScheduledChangeNotFound, want{404, "scheduled_change_not_found", ""}},
+		{"reprice", subscriptions.ErrScheduledChangeHeldByProvider, want{409, "scheduled_change_held_by_provider", ""}},
 		{"psp", apperr.Invalidf("unknown rail %q", "abacus").WithParam("rail"), want{400, api.CodeInvalidParam, "rail"}},
 		{"psp", fmt.Errorf("%w: stripe key rejected (401)", merchants.ErrPSPCredentialsRejected), want{400, "psp_credentials_rejected", ""}},
 		{"psp", merchants.ErrPSPNotFound, want{404, "psp_not_found", ""}},
@@ -274,7 +273,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		checkout.ErrTierChangeSameProduct:                         409,
 		checkout.ErrTierChangeNoSubscription:                      404,
 		checkout.ErrTierChangeDifferentGroup:                      400,
-		subscriptions.ErrRepriceCrossCurrency:                     400,
+		subscriptions.ErrPriceCurrencyMismatch:                    400,
 	}
 	for err, status := range tierStatus {
 		require.Equal(t, status, render(t, func(r *httprequest.Request) { writeChangeTierError(r, err) }).Status, "%v", err)

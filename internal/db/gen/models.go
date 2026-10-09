@@ -1193,6 +1193,24 @@ type BillingPriceKeyMovement struct {
 	Archived    bool
 }
 
+// One move of subscribers from a price (from_price_id), or from every version of a price key but the target (from_product_id, from_price_key), to to_price_id at each subscription's first renewal on or after effective_at. Matched and skipped are facts of creation (a skipped subscription gets no scheduled change); progress is counted from the scheduled_changes that carry price_migration_id. Retention: permanent, never pruned.
+type BillingPriceMigration struct {
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	FromPriceID   *uuid.UUID
+	FromProductID *uuid.UUID
+	FromPriceKey  *string
+	ToPriceID     uuid.UUID
+	EffectiveAt   time.Time
+	// The operator's choice for subscriptions whose provider cannot be moved from OpenRails (CCBill, Solana, an unreachable NMI schedule): keep_grandfathered leaves them on the old price; cancel_at_period_end records that they should end, which OpenRails does not do.
+	FallbackPolicy       string
+	SubscriptionsMatched int32
+	SubscriptionsSkipped int32
+	CreatedAt            time.Time
+	// When its still-scheduled changes were canceled; a canceled migration is never re-driven.
+	CanceledAt *time.Time
+}
+
 // A price's provider objects on one PSP. Each rail uses its own reference column.
 type BillingPricePspBinding struct {
 	MerchantID               uuid.UUID
@@ -1485,21 +1503,25 @@ type BillingReconciliationState struct {
 	UpdatedAt       time.Time
 }
 
-// Header row for one bulk reprice or plan migration. Matched and skipped are facts of creation (skipped subscriptions get no row); per-status progress is counted from the subscription_reprices rows that carry reprice_batch_id. Retention: permanent, never pruned.
-type BillingRepriceBatch struct {
-	ID                   uuid.UUID
-	MerchantID           uuid.UUID
-	PriceKey             *string
-	ToPriceID            uuid.UUID
-	EffectiveAt          time.Time
-	SubscriptionsMatched int32
-	SubscriptionsSkipped int32
-	CreatedAt            time.Time
-	Kind                 string
-	// The retired plan's price for a plan_change batch (the cohort selector); NULL for price-key batches.
-	SourcePriceID *uuid.UUID
-	// Operator's choice for subscriptions on rails that cannot be auto-migrated (ccbill/solana): keep_grandfathered leaves them billing the archived source; cancel_at_period_end schedules their cancellation.
-	FallbackPolicy *string
+// A subscription's change waiting for its renewal: the price (price_id) and, for a per-seat price, the seats (quantity; NULL keeps the subscription's) it bills from its first renewal on or after effective_at. At most one is scheduled per subscription. source is change (a tier or seat change) or migration (price_migration_id). blocked is a migration's move its provider could not take; blocked_reason says why, and a push failure (rail_push_failed:) is re-driven. Retention: permanent, never pruned.
+type BillingScheduledChange struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	SubscriptionID uuid.UUID
+	// The price the subscription billed when the change was scheduled; the change applies only while it still does.
+	FromPriceID      uuid.UUID
+	PriceID          uuid.UUID
+	Quantity         *int32
+	EffectiveAt      time.Time
+	Source           string
+	PriceMigrationID *uuid.UUID
+	Status           string
+	BlockedReason    *string
+	// A price increase scheduled inside the merchant's notice window under the request's acknowledge_short_notice.
+	AcknowledgedShortNotice bool
+	CreatedAt               time.Time
+	AppliedAt               *time.Time
+	CanceledAt              *time.Time
 }
 
 // Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.
@@ -1579,17 +1601,15 @@ type BillingSubscription struct {
 	StartedAt             time.Time
 	EndedAt               *time.Time
 	GraceEndsAt           *time.Time
-	// Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.
-	ScheduledPriceID *uuid.UUID
-	LastRetryAt      *time.Time
-	RetryAttempts    *int32
-	NextRetryAt      *time.Time
-	CanceledAt       *time.Time
-	CancelType       *string
-	CancelFeedback   *string
-	GatewayResponse  []byte
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	LastRetryAt           *time.Time
+	RetryAttempts         *int32
+	NextRetryAt           *time.Time
+	CanceledAt            *time.Time
+	CancelType            *string
+	CancelFeedback        *string
+	GatewayResponse       []byte
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 	// Copied from products.tier_group by trg_subscriptions_set_tier_group. Backs subscriptions_customer_id_tier_group_key: one live subscription per (customer, tier group). Regrouping is refused while the product has a live plan change.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
@@ -1609,27 +1629,6 @@ type BillingSubscription struct {
 	AccessDurationHoursSnapshot *int32
 	// Seats: renewals bill the unit price times this. Above 1 only on an engine-owned NMI or Stripe subscription; provider-owned and Solana subscriptions bill one unit.
 	Quantity int32
-}
-
-// A scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle). Retention: permanent, never pruned.
-type BillingSubscriptionReprice struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-	FromPriceID    uuid.UUID
-	ToPriceID      uuid.UUID
-	EffectiveAt    time.Time
-	Status         string
-	RepriceBatchID *uuid.UUID
-	CreatedAt      time.Time
-	AppliedAt      *time.Time
-	CanceledAt     *time.Time
-	// True when this INCREASE reprice's effective_at was inside the merchant's configured notice window and was scheduled anyway via the explicit acknowledge_short_notice override on the request — the audit record for the support/emergency bypass path.
-	AcknowledgedShortNotice bool
-	// 'reprice' = same-product price move; 'plan_change' = cross-product migration — the renewal-boundary pickup also moves product_id and cuts entitlement/credit snapshots over.
-	Kind string
-	// Why this row could not be auto-scheduled (rail_requires_user_action, missing rail config, rail push failure). Only set when status=blocked.
-	BlockedReason *string
 }
 
 // Append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Retention: rows are deleted 25 months (761 days) after occurred_at, by the cleanup job only.

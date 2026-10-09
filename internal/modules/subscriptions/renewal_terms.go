@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -39,9 +39,9 @@ type RenewalTerms struct {
 	PeriodEnd           time.Time       `json:"period_end"`
 	// Entitlements is the keys a renewal admitted before product access, kept
 	// only to reproduce its provider binding. Access follows ProductID.
-	Entitlements     json.RawMessage `json:"entitlements,omitempty"`
-	RepriceID        *uuid.UUID      `json:"reprice_id,omitempty"`
-	ScheduledPriceID *uuid.UUID      `json:"scheduled_price_id,omitempty"`
+	Entitlements json.RawMessage `json:"entitlements,omitempty"`
+	// ScheduledChangeID is the scheduled change this renewal applies.
+	ScheduledChangeID *uuid.UUID `json:"scheduled_change_id,omitempty"`
 }
 
 func (t RenewalTerms) Validate() error {
@@ -57,8 +57,8 @@ func (t RenewalTerms) Validate() error {
 	if _, err := moneyutil.NativeToRailMinorExact(t.Currency, t.Amount); err != nil {
 		return fmt.Errorf("renewal amount: %w", err)
 	}
-	if (t.RepriceID != nil && *t.RepriceID == uuid.Nil) || (t.ScheduledPriceID != nil && *t.ScheduledPriceID == uuid.Nil) || (t.RepriceID != nil && t.ScheduledPriceID != nil) {
-		return errors.New("renewal has inconsistent scheduled changes")
+	if t.ScheduledChangeID != nil && *t.ScheduledChangeID == uuid.Nil {
+		return errors.New("renewal names an empty scheduled change")
 	}
 	return nil
 }
@@ -97,22 +97,18 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		return terms, errors.New("native renewal cannot substitute an engine agreement")
 	}
 
-	reprice, err := NewRepriceRepo(d).GetScheduledForSubscription(ctx, sub.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	change, err := PendingChange(ctx, d, sub.ID)
+	if err != nil {
 		return terms, fmt.Errorf("prepare renewal scheduled change: %w", err)
 	}
-	if err == nil && reprice.IsDue(now) {
-		if reprice.FromPriceID != sub.PriceID || sub.ScheduledPriceID != nil {
-			return terms, errors.New("renewal scheduled changes contradict the current subscription")
+	if change.IsDue(now) {
+		if change.FromPriceID != sub.PriceID {
+			return terms, errors.New("renewal scheduled change contradicts the current subscription")
 		}
-		terms.RepriceID = &reprice.ID
-		terms.PriceID = reprice.ToPriceID
-	} else if sub.ScheduledPriceID != nil {
-		id := *sub.ScheduledPriceID
-		terms.ScheduledPriceID = &id
-		terms.PriceID = id
+		terms.ScheduledChangeID = &change.ID
+		terms.PriceID = change.PriceID
 	}
-	if sub.CollectionPolicy == models.CollectionPolicyEngine && terms.RepriceID == nil && terms.ScheduledPriceID == nil {
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && terms.ScheduledChangeID == nil {
 		return terms, terms.Validate()
 	}
 	price, err := catalog.NewPriceService(d).GetByID(ctx, terms.PriceID)
@@ -134,51 +130,49 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	return terms, terms.Validate()
 }
 
-func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, terms RenewalTerms, previousPeriodEnd *time.Time) (bool, error) {
+// applyRenewalTerms moves sub to the accepted terms and answers the scheduled
+// change they apply, if any.
+func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, terms RenewalTerms, previousPeriodEnd *time.Time) (*models.ScheduledChange, bool, error) {
 	if err := terms.Validate(); err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if sub.ID != terms.SubscriptionID || sub.CustomerID != terms.CustomerID || sub.PspID != terms.PSPID || sub.CurrentPeriodEndsAt == nil {
-		return false, errors.New("subscription no longer matches the accepted renewal")
+		return nil, false, errors.New("subscription no longer matches the accepted renewal")
 	}
 	previous := terms.PeriodStart
 	if previousPeriodEnd != nil {
 		if sub.CollectionPolicy != models.CollectionPolicyEngine || previousPeriodEnd.IsZero() || previousPeriodEnd.After(terms.PeriodStart) {
-			return false, errors.New("accepted previous boundary is not an engine renewal")
+			return nil, false, errors.New("accepted previous boundary is not an engine renewal")
 		}
 		previous = previousPeriodEnd.UTC()
 	} else if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		return false, errors.New("engine renewal requires its accepted previous boundary")
+		return nil, false, errors.New("engine renewal requires its accepted previous boundary")
 	}
 	alreadyAdvanced := sub.CurrentPeriodEndsAt.Equal(terms.PeriodEnd) && sub.PriceID == terms.PriceID && sub.ProductID == terms.ProductID
 	if !alreadyAdvanced && (!sub.CurrentPeriodEndsAt.Equal(previous) || sub.PriceID != terms.FromPriceID || sub.ProductID != terms.FromProductID) {
-		return false, errors.New("subscription period no longer matches the accepted renewal")
+		return nil, false, errors.New("subscription period no longer matches the accepted renewal")
 	}
 
-	if terms.RepriceID != nil {
-		repo := NewRepriceRepo(d)
-		change, err := repo.GetByID(ctx, *terms.RepriceID)
+	var applied *models.ScheduledChange
+	if terms.ScheduledChangeID != nil {
+		row, err := d.Gen(ctx).GetScheduledChange(ctx, gen.GetScheduledChangeParams{MerchantID: sub.MerchantID, ID: *terms.ScheduledChangeID})
 		if err != nil {
-			return false, fmt.Errorf("load accepted renewal change: %w", err)
+			return nil, false, fmt.Errorf("load accepted renewal change: %w", err)
 		}
-		if change.SubscriptionID != sub.ID || change.FromPriceID != terms.FromPriceID || change.ToPriceID != terms.PriceID || (change.Status != models.RepriceStatusScheduled && !(alreadyAdvanced && change.Status == models.RepriceStatusApplied)) {
-			return false, errors.New("scheduled change no longer matches the accepted renewal")
+		applied = models.ScheduledChangeFromGen(row)
+		change := applied
+		if change.SubscriptionID != sub.ID || change.FromPriceID != terms.FromPriceID || change.PriceID != terms.PriceID || (change.Status != models.ScheduledChangeScheduled && !(alreadyAdvanced && change.Status == models.ScheduledChangeApplied)) {
+			return nil, false, errors.New("scheduled change no longer matches the accepted renewal")
 		}
-		if change.Status == models.RepriceStatusScheduled {
-			if err := repo.Apply(ctx, change.ID); err != nil {
-				return false, fmt.Errorf("apply accepted renewal change: %w", err)
+		if change.Status == models.ScheduledChangeScheduled {
+			if err := ApplyChange(ctx, d, change.ID, terms.PeriodStart); err != nil {
+				return nil, false, fmt.Errorf("apply accepted renewal change: %w", err)
 			}
 		}
 	}
-	if terms.ScheduledPriceID != nil && !alreadyAdvanced {
-		if sub.ScheduledPriceID == nil || *sub.ScheduledPriceID != *terms.ScheduledPriceID {
-			return false, errors.New("scheduled price no longer matches the accepted renewal")
-		}
-		sub.ScheduledPriceID = nil
-	}
 	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
 	sub.AccessDurationHoursSnapshot = terms.AccessDurationHours
-	return alreadyAdvanced, nil
+	return applied, alreadyAdvanced, nil
 }
 
 // Prepared renewals name the local obligation. Native calls must still match

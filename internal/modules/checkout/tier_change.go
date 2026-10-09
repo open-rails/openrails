@@ -26,9 +26,9 @@ var (
 	ErrTierChangeDifferentGroup = errors.New("cannot change to a different tier group")
 	// ErrTierChangeCrossCurrency (#820): proration subtracts the old plan's
 	// unused value from the new plan's price, which is only meaningful inside
-	// one currency. Wraps the repo-wide FX sentinel used by reprice and plan
-	// migration, so every FX-crossing plan move answers to one errors.Is.
-	ErrTierChangeCrossCurrency = fmt.Errorf("cannot change to a plan in a different currency: %w", subscriptions.ErrRepriceCrossCurrency)
+	// one currency. Wraps the price-change FX sentinel, so every FX-crossing
+	// price move answers to one errors.Is.
+	ErrTierChangeCrossCurrency = fmt.Errorf("cannot change to a plan in a different currency: %w", subscriptions.ErrPriceCurrencyMismatch)
 )
 
 // PriceAmount is an amount together with the currency it is denominated in.

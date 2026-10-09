@@ -36,7 +36,7 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.DunningArgs{}.Kind():                   {riverjobs.DuePassInterval, true},
 		riverjobs.ProviderRefreshArgs{}.Kind():           {providerrecovery.RefreshInterval, true},
 		riverjobs.JobRescueArgs{}.Kind():                 {time.Minute, true},
-		riverjobs.PlanMigrationRedriveArgs{}.Kind():      {time.Hour, true},
+		riverjobs.PriceMigrationRedriveArgs{}.Kind():     {time.Hour, true},
 		riverjobs.AccountUpdaterBatchArgs{}.Kind():       {6 * time.Hour, true},
 		riverjobs.MerchantSecretCleanupArgs{}.Kind():     {5 * time.Minute, true},
 		riverjobs.ConvergeSweepArgs{}.Kind():             {15 * time.Minute, true},

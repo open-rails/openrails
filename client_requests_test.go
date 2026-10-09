@@ -255,16 +255,12 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Opaque host strings (request ids, deposit keys, migration prices): only blankness is refused.
 	blankOnly := map[string]func(id string) error{
-		"preview migration source": func(id string) error {
-			_, err := c.PreviewPlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: id, TargetPrice: "b"})
+		"preview migration product key": func(id string) error {
+			_, err := c.PreviewPriceMigration(ctx, billing.CreatePriceMigrationParams{ProductKey: id, PriceKey: "monthly"})
 			return err
 		},
-		"preview migration target": func(id string) error {
-			_, err := c.PreviewPlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: "a", TargetPrice: id})
-			return err
-		},
-		"create migration source": func(id string) error {
-			_, err := c.CreatePlanMigration(ctx, billing.CreatePlanMigrationParams{SourcePrice: id, TargetPrice: "b"})
+		"preview migration price key": func(id string) error {
+			_, err := c.PreviewPriceMigration(ctx, billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: id})
 			return err
 		},
 		"capture": func(id string) error {
@@ -535,10 +531,9 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 	}
 	uuidCalls := map[string]func() error{
-		"get reprice batch":    func() error { _, err := c.GetRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
-		"cancel reprice batch": func() error { _, err := c.CancelRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
-		"get reprice":          func() error { _, err := c.GetReprice(ctx, billing.RepriceID{}); return err },
-		"cancel reprice":       func() error { _, err := c.CancelReprice(ctx, billing.RepriceID{}); return err },
+		"get price migration":     func() error { _, err := c.GetPriceMigration(ctx, billing.PriceMigrationID{}); return err },
+		"cancel price migration":  func() error { _, err := c.CancelPriceMigration(ctx, billing.PriceMigrationID{}); return err },
+		"delete scheduled change": func() error { return c.DeleteScheduledChange(ctx, billing.SubscriptionID{}) },
 		"acknowledge host event": func() error {
 			_, err := c.AcknowledgeHostEvents(ctx, []billing.HostEventID{{}})
 			return err

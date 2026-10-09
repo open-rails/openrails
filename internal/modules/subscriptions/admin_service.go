@@ -96,6 +96,9 @@ func (s *AdminSubscriptionService) ListSubscriptions(ctx context.Context, f GetS
 	if err != nil {
 		return billing.ListPage[*AdminSubscriptionResponse]{}, fmt.Errorf("failed to load subscription prices: %w", err)
 	}
+	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subs.Items); err != nil {
+		return billing.ListPage[*AdminSubscriptionResponse]{}, err
+	}
 	return pagination.Map(subs, func(sub *models.Subscription) *AdminSubscriptionResponse {
 		out := &AdminSubscriptionResponse{Subscription: sub}
 		if price := prices[sub.PriceID]; price != nil {
@@ -125,6 +128,9 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 		return nil, err
 	}
 
+	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), []*models.Subscription{subscription}); err != nil {
+		return nil, err
+	}
 	response := &AdminSubscriptionResponse{
 		Subscription: subscription,
 		Payments:     []*models.Payment{},
@@ -153,6 +159,15 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 	}
 
 	return response, nil
+}
+
+// CancelScheduledChange removes the subscription's scheduled change: 404 when
+// it has none, 409 when its provider already bills it.
+func (s *AdminSubscriptionService) CancelScheduledChange(ctx context.Context, subscriptionID uuid.UUID) error {
+	if _, err := s.requireSubscription(ctx, subscriptionID); err != nil {
+		return err
+	}
+	return NewSubscriptionRepo(s.SubscriptionService.Database()).CancelScheduledChange(ctx, subscriptionID, s.now())
 }
 
 // Partial admin commands must read their input image after taking the same

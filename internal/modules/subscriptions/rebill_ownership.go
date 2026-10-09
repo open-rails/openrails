@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -35,20 +33,12 @@ func RefuseOwnedRebillTerms(ctx context.Context, d *db.DB, sub *models.Subscript
 		return err
 	}
 	for _, row := range rows {
-		accepted, err := DecodeManualRebillPayload(row)
-		if err != nil {
+		if _, err := DecodeManualRebillPayload(row); err != nil {
 			return fmt.Errorf("%w: accepted rebill terms are invalid: %v", ErrRebillTermsCommitted, err)
 		}
 		switch row.Status {
 		case "pending", "in_flight", "unknown_needs_verify", "failed_retryable":
 			return ErrRebillTermsCommitted
-		}
-		// scheduled_price_id is a reusable target, not a quote identity. A terminal
-		// historical A->B operation does not own another A->B in a later period.
-		// Unique reprice rows instead remain owned while that exact row is pending.
-		if accepted.Renewal.ScheduledPriceID != nil && (sub.CurrentPeriodEndsAt == nil ||
-			!sub.CurrentPeriodEndsAt.Equal(accepted.Renewal.PeriodStart) || sub.PriceID != accepted.Renewal.FromPriceID || sub.ProductID != accepted.Renewal.FromProductID) {
-			continue
 		}
 		// Only the canonical handler's terminal pre-preparation release proves that
 		// no provider terms changed. A decline, lease expiry or absent progress on
@@ -71,30 +61,6 @@ func RefuseOwnedRebillTerms(ctx context.Context, d *db.DB, sub *models.Subscript
 		}
 	}
 	return nil
-}
-
-// SchedulePriceChange updates only a freshly locked subscription. Checkout's
-// preflight model cannot overwrite a renewal that committed in the meantime.
-func (r *SubscriptionRepo) SchedulePriceChange(ctx context.Context, id, expectedPrice, targetPrice uuid.UUID) (*models.Subscription, error) {
-	var sub *models.Subscription
-	err := r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := r.db.NewWithPgxTx(tx)
-		repo := NewSubscriptionRepo(d)
-		var err error
-		sub, err = repo.GetByIDForUpdate(ctx, id)
-		if err != nil {
-			return err
-		}
-		if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
-			return err
-		}
-		if sub.PriceID != expectedPrice || sub.ScheduledPriceID != nil {
-			return ErrRepriceAlreadyScheduled
-		}
-		sub.ScheduledPriceID = &targetPrice
-		return repo.Update(ctx, sub)
-	})
-	return sub, err
 }
 
 // refuseSubmittedRenewal refuses a lifecycle change while the subscription's
