@@ -55,7 +55,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/basistheory/",
 		"internal/integrations/solana/",
 		"internal/modules/payments/",
-		"internal/controlplane/",
+		"server/internal/controlplane/",
 		"internal/intents/",
 		"internal/integrations/fx/",
 		"internal/integrations/nmi/",

@@ -41,7 +41,7 @@ func run(write bool, dsn string) error {
 	}
 	defer root.Close()
 	ctx := context.Background()
-	surface, err := apisurface.Load(ctx)
+	surface, err := apisurface.Load(ctx, ".")
 	if err != nil {
 		return err
 	}

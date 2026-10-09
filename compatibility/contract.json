@@ -1119,14 +1119,6 @@
       "type SendGridConfig struct {\n\tAPIKey string\n\tFrom   EmailAddress\n}",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
-    "internal/hostconfig": [
-      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming billing.NamingConfig\n\n\tSchema string\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
-      "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
-      "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
-      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
-      "type ResourceServerConfig struct {\n\tIdentifier string\n\n\tDPoPNonceKey string\n\n\tTrustedIssuers []TrustedIssuerConfig\n}",
-      "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}"
-    ],
     "internal/nmimock": [
       "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n}",
       "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}"
@@ -1194,6 +1186,14 @@
       "type ResourceServerConfig = hostconfig.ResourceServerConfig",
       "type Server struct {\n}",
       "type TrustedIssuerConfig = hostconfig.TrustedIssuerConfig"
+    ],
+    "server/internal/hostconfig": [
+      "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming billing.NamingConfig\n\n\tSchema string\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
+      "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
+      "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
+      "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}",
+      "type ResourceServerConfig struct {\n\tIdentifier string\n\n\tDPoPNonceKey string\n\n\tTrustedIssuers []TrustedIssuerConfig\n}",
+      "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}"
     ],
     "web/admin": [
       "func FS() fs.FS"
@@ -1272,9 +1272,6 @@
       "func (f Field[T]) MarshalJSON() ([]byte, error) {\n\tif err := f.validateField(); err != nil {\n\t\treturn nil, err\n\t}\n\tif !f.Set || f.Null {\n\t\treturn []byte(\"null\"), nil\n\t}\n\n\tif v, ok := any(f.Value).(int64); ok {\n\t\treturn json.Marshal(strconv.FormatInt(v, 10))\n\t}\n\treturn json.Marshal(f.Value)\n}",
       "func (p *ApplyPrice) UnmarshalJSON(raw []byte) error {\n\ttype price ApplyPrice\n\tvar decoded struct {\n\t\tprice\n\t\tAmount          Field[string] `json:\"amount,omitzero\"`\n\t\tAccessDuration  Field[string] `json:\"access_duration,omitzero\"`\n\t\tBillingInterval Field[string] `json:\"billing_interval,omitzero\"`\n\t\tTrialDuration   Field[string] `json:\"trial_duration,omitzero\"`\n\t}\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\tif err := decoder.Decode(\u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif decoded.Amount.Set {\n\t\tif decoded.Amount.Null {\n\t\t\treturn fmt.Errorf(\"amount cannot be null\")\n\t\t}\n\t\tif decoded.UnitAmount.Set || decoded.Currency.Set {\n\t\t\treturn fmt.Errorf(\"amount cannot be combined with unit_amount or currency\")\n\t\t}\n\t\tamount, currency, err := parseAmount(decoded.Amount.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"amount: %w\", err)\n\t\t}\n\t\tdecoded.UnitAmount = Value(amount)\n\t\tdecoded.Currency = Value(currency)\n\t}\n\tfor _, field := range []struct {\n\t\tname  string\n\t\ttext  Field[string]\n\t\thours *Field[int]\n\t}{\n\t\t{\"access_duration\", decoded.AccessDuration, \u0026decoded.AccessDurationHours},\n\t\t{\"billing_interval\", decoded.BillingInterval, \u0026decoded.BillingIntervalHours},\n\t\t{\"trial_duration\", decoded.TrialDuration, \u0026decoded.TrialDurationHours},\n\t} {\n\t\tif !field.text.Set {\n\t\t\tcontinue\n\t\t}\n\t\tif field.hours.Set {\n\t\t\treturn fmt.Errorf(\"%s and %s_hours cannot both be set\", field.name, field.name)\n\t\t}\n\t\tif field.text.Null {\n\t\t\t*field.hours = Null[int]()\n\t\t\tcontinue\n\t\t}\n\t\thours, err := ParseDurationHours(field.text.Value)\n\t\tif err != nil {\n\t\t\treturn fmt.Errorf(\"%s: %w\", field.name, err)\n\t\t}\n\t\t*field.hours = Value(hours)\n\t}\n\t*p = ApplyPrice(decoded.price)\n\treturn nil\n}"
     ],
-    "cmd/openrails": [
-      "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
-    ],
     "internal/adminconsole": [
       "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}"
@@ -1342,9 +1339,6 @@
     "internal/db/sqlaudit": [
       "type explainRoot struct {\n\tPlan planNode `json:\"Plan\"`\n}",
       "type planNode struct {\n\tNodeType     string     `json:\"Node Type\"`\n\tRelationName string     `json:\"Relation Name\"`\n\tSchema       string     `json:\"Schema\"`\n\tAlias        string     `json:\"Alias\"`\n\tIndexName    string     `json:\"Index Name\"`\n\tIndexCond    string     `json:\"Index Cond\"`\n\tRecheckCond  string     `json:\"Recheck Cond\"`\n\tFilter       string     `json:\"Filter\"`\n\tPlans        []planNode `json:\"Plans\"`\n}"
-    ],
-    "internal/hostconfig": [
-      "func (p *port) UnmarshalText(text []byte) error {\n\ts := strings.TrimSpace(string(text))\n\tif s == \"\" {\n\t\t*p = 0\n\t\treturn nil\n\t}\n\tval, err := strconv.ParseInt(s, 10, 32)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"invalid port value: %w\", err)\n\t}\n\tif val \u003c 1 || val \u003e 65535 {\n\t\treturn fmt.Errorf(\"invalid port value %d: must be 1-65535\", val)\n\t}\n\t*p = port(val)\n\treturn nil\n}"
     ],
     "internal/hosttools": [
       "type declineMonth struct {\n\tMonth    string `json:\"month\"`\n\tKind     string `json:\"kind\"`\n\tAttempts int    `json:\"attempts\"`\n\tApproved int    `json:\"approved\"`\n\tRefused  int    `json:\"refused\"`\n\n\tRefusalRate float64 `json:\"refusal_rate\"`\n}",
@@ -1756,6 +1750,12 @@
       "type ReconcileResult struct {\n\tProviders map[string]billing.PSPLinkState `json:\"providers,omitempty\"`\n\n\tActions map[string]string `json:\"actions,omitempty\"`\n}",
       "type SyncCatalogSidecarsRequest struct {\n\tMeters    []CatalogMeterSpec    `json:\"meters,omitempty\"`\n\tRateCards []CatalogRateCardSpec `json:\"rate_cards,omitempty\"`\n}",
       "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}"
+    ],
+    "server/cmd/openrails": [
+      "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
+    ],
+    "server/internal/hostconfig": [
+      "func (p *port) UnmarshalText(text []byte) error {\n\ts := strings.TrimSpace(string(text))\n\tif s == \"\" {\n\t\t*p = 0\n\t\treturn nil\n\t}\n\tval, err := strconv.ParseInt(s, 10, 32)\n\tif err != nil {\n\t\treturn fmt.Errorf(\"invalid port value: %w\", err)\n\t}\n\tif val \u003c 1 || val \u003e 65535 {\n\t\treturn fmt.Errorf(\"invalid port value %d: must be 1-65535\", val)\n\t}\n\t*p = port(val)\n\treturn nil\n}"
     ]
   },
   "declaring_file_imports": {
@@ -2030,21 +2030,6 @@
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "http": "net/http"
-    },
-    "cmd/openrails/ledger_audit.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "cobra": "github.com/spf13/cobra",
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "os": "os",
-      "strings": "strings",
-      "tabwriter": "text/tabwriter",
-      "uuid": "github.com/google/uuid"
     },
     "config.go": {
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
@@ -2329,20 +2314,6 @@
       "fmt": "fmt",
       "json": "encoding/json",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/hostconfig/config.go": {
-      "billing": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "fmt": "fmt",
-      "strconv": "strconv",
-      "strings": "strings"
-    },
-    "internal/hostconfig/server.go": {
-      "billing": "github.com/open-rails/openrails/internal/config",
-      "fmt": "fmt",
-      "iam": "github.com/open-rails/authkit/iam",
-      "strings": "strings",
-      "time": "time"
     },
     "internal/hosttools/nmi_decline_report.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4700,6 +4671,21 @@
       "strconv": "strconv",
       "url": "net/url"
     },
+    "server/cmd/openrails/ledger_audit.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "cobra": "github.com/spf13/cobra",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "fmt": "fmt",
+      "json": "encoding/json",
+      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "os": "os",
+      "strings": "strings",
+      "tabwriter": "text/tabwriter",
+      "uuid": "github.com/google/uuid"
+    },
     "server/control_plane.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
@@ -4708,8 +4694,22 @@
       "http": "net/http",
       "iam": "github.com/open-rails/authkit/iam",
       "openrails": "github.com/open-rails/openrails",
-      "operator": "github.com/open-rails/openrails/internal/operator",
+      "operator": "github.com/open-rails/openrails/server/internal/operator",
       "staffperm": "github.com/open-rails/openrails/internal/staffperm"
+    },
+    "server/internal/hostconfig/config.go": {
+      "billing": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "fmt": "fmt",
+      "strconv": "strconv",
+      "strings": "strings"
+    },
+    "server/internal/hostconfig/server.go": {
+      "billing": "github.com/open-rails/openrails/internal/config",
+      "fmt": "fmt",
+      "iam": "github.com/open-rails/authkit/iam",
+      "strings": "strings",
+      "time": "time"
     },
     "server/server.go": {
       "app": "github.com/open-rails/openrails/internal/app",
@@ -4718,20 +4718,20 @@
       "billingauth": "github.com/open-rails/openrails/internal/billingauth",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
-      "controlplane": "github.com/open-rails/openrails/internal/controlplane",
+      "controlplane": "github.com/open-rails/openrails/server/internal/controlplane",
       "embedhttp": "github.com/open-rails/openrails/internal/http/embedhttp",
       "engine": "github.com/open-rails/openrails/internal/engine",
       "errors": "errors",
       "fmt": "fmt",
-      "hostconfig": "github.com/open-rails/openrails/internal/hostconfig",
+      "hostconfig": "github.com/open-rails/openrails/server/internal/hostconfig",
       "http": "net/http",
-      "httpserver": "github.com/open-rails/openrails/internal/http",
+      "httpserver": "github.com/open-rails/openrails/server/internal/http",
       "iam": "github.com/open-rails/authkit/iam",
       "log": "github.com/sirupsen/logrus",
       "merchanttarget": "github.com/open-rails/openrails/internal/merchanttarget",
       "net": "net",
       "openrails": "github.com/open-rails/openrails",
-      "operator": "github.com/open-rails/openrails/internal/operator",
+      "operator": "github.com/open-rails/openrails/server/internal/operator",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "riverhelpers": "github.com/open-rails/helpers/river",
       "routebundle": "github.com/open-rails/openrails/internal/http/routebundle",

@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -32,6 +33,10 @@ var Packages = []string{
 	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "server", "web/admin",
 }
 
+// ServerModule is the directory of the module released in lockstep with the
+// root; its packages are listed from there.
+const ServerModule = "server"
+
 // Surface is the covered API.
 type Surface struct {
 	// Features is one sorted line per exported feature.
@@ -45,24 +50,26 @@ type Surface struct {
 }
 
 // Load type-checks the covered packages from their export data (go list
-// -export) and lists their features. It runs the go command in the working
-// directory, which must be inside the module.
-func Load(ctx context.Context) (*Surface, error) {
+// -export) and lists their features. repo is the repository root; each module's
+// packages are listed in that module.
+func Load(ctx context.Context, repo string) (*Surface, error) {
 	paths := make([]string, len(Packages))
+	byModule := map[string][]string{}
 	for i, rel := range Packages {
 		paths[i] = importPath(rel)
+		dir := "."
+		if rel == ServerModule || strings.HasPrefix(rel, ServerModule+"/") {
+			dir = ServerModule
+		}
+		byModule[dir] = append(byModule[dir], paths[i])
 	}
-	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Export}}"}, paths...)...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("go list: %w: %s", err, stderr.Bytes())
-	}
+	// One importer over both lists: a root package keeps the root module's
+	// export data, so both modules' packages share its types.
 	exports := map[string]string{}
-	for line := range strings.Lines(string(out)) {
-		path, file, _ := strings.Cut(strings.TrimSpace(line), "\t")
-		exports[path] = file
+	for _, dir := range []string{".", ServerModule} {
+		if err := listExports(ctx, filepath.Join(repo, dir), byModule[dir], exports); err != nil {
+			return nil, err
+		}
 	}
 	imp := importer.ForCompiler(token.NewFileSet(), "gc", func(path string) (io.ReadCloser, error) {
 		if exports[path] == "" {
@@ -94,6 +101,24 @@ func Load(ctx context.Context) (*Surface, error) {
 	slices.Sort(s.aliasMethods)
 	surface.AliasMethods = s.aliasMethods
 	return surface, nil
+}
+
+func listExports(ctx context.Context, dir string, paths []string, exports map[string]string) error {
+	cmd := exec.CommandContext(ctx, "go", append([]string{"list", "-export", "-deps", "-f", "{{.ImportPath}}\t{{.Export}}"}, paths...)...)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("go list in %s: %w: %s", dir, err, stderr.Bytes())
+	}
+	for line := range strings.Lines(string(out)) {
+		path, file, _ := strings.Cut(strings.TrimSpace(line), "\t")
+		if _, ok := exports[path]; !ok {
+			exports[path] = file
+		}
+	}
+	return nil
 }
 
 // Text is the list as api/go.txt holds it.
@@ -145,8 +170,9 @@ func (s *surfacer) walk(pkg *types.Package, name string) {
 	}
 }
 
+// internal reports a package of either module under an internal/ directory.
 func (s *surfacer) internal(p *types.Package) bool {
-	return p != nil && strings.HasPrefix(p.Path(), Module+"/internal/")
+	return p != nil && strings.HasPrefix(p.Path(), Module+"/") && slices.Contains(strings.Split(p.Path(), "/"), "internal")
 }
 
 type writer struct {

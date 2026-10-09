@@ -16,7 +16,7 @@ import (
 // reach a fake gateway.
 func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
 	mocks := []string{"github.com/open-rails/openrails/internal/nmimock", "github.com/open-rails/openrails/openrailstest/nmimock"}
-	allowed := []string{"internal/nmimock/", "openrailstest/nmimock/", "cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
+	allowed := []string{"internal/nmimock/", "openrailstest/nmimock/", "server/cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

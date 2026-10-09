@@ -25,19 +25,18 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	// godotenv.Load has exactly ONE consumption point, logged at boot.
 	writeNeedles := []string{"os.Setenv(", "os.Unsetenv(", "godotenv.Load("}
 	writeAllowedFiles := map[string]string{
-		"internal/hostconfig/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
+		"server/internal/hostconfig/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
 	}
 
 	// Allowlisted path prefixes (relative to the module root). One-line
 	// justification per entry — anything else that reads env FAILS.
 	allowedPrefixes := map[string]string{
-		"cmd/":                 "binary boundary: the process entrypoint owns flags and env",
-		"examples/":            "standalone example apps: each is its own main(), a binary boundary like cmd/",
-		"internal/config/":     "mounted secret-file access for explicit host loading",
-		"internal/hostconfig/": "standalone configuration-loading boundary",
-		"tests/":               "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
-		"scripts/":             "operational tooling run as its own process, not importable library code",
-		"internal/dbtest/":     "test-support package: container/DSN discovery for test binaries",
+		"server/cmd/":                 "binary boundary: the process entrypoint owns flags and env",
+		"internal/config/":            "mounted secret-file access for explicit host loading",
+		"server/internal/hostconfig/": "standalone configuration-loading boundary",
+		"tests/":                      "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
+		"scripts/":                    "operational tooling run as its own process, not importable library code",
+		"internal/dbtest/":            "test-support package: container/DSN discovery for test binaries",
 	}
 
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -59,8 +58,9 @@ func TestNoLibraryEnvReads(t *testing.T) {
 			if name := d.Name(); strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" {
 				return filepath.SkipDir
 			}
-			// Nested modules (sdk/*/e2e/server) are their own binaries.
-			if path != root {
+			// Nested modules (examples, sdk/*/e2e/server) are their own
+			// binaries; server is released with this one and guarded with it.
+			if path != root && path != filepath.Join(root, "server") {
 				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
 					return filepath.SkipDir
 				}
