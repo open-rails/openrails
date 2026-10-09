@@ -13,6 +13,7 @@ migration 0009_invoice_collection_cadence.up.sql sha256:b90e15a74c20dd154c34bbb4
 migration 0010_entitlement_names.up.sql sha256:b232cc073d440a64f515c5b868624efe731d3681a1373e851a21710259255acb
 migration 0011_currency_codes.up.sql sha256:513950fd96eae6df288a7afd6956ded16b0c84f6fec0ff2b9f0fd3a12103ff37
 migration 0012_provider_applied_coverage.up.sql sha256:33533330adbe12918eae947cd4c94f5c791ebff7a7e65d65d60eeafca9986f16
+migration 0013_federated_grants.up.sql sha256:515cb9f231fbfd2850c0c3e379009be93da9ca702b8cec7bfdf31710857830cf
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -560,6 +561,31 @@ table billing.entitlements
   index CREATE INDEX entitlements_source_id_entitlement_ends_at_idx ON billing.entitlements USING btree (merchant_id, source_id, entitlement, ends_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX entitlements_source_id_entitlement_idx ON billing.entitlements USING btree (merchant_id, source_id, entitlement) WHERE ((source_type = 'purchase'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL))
   index CREATE INDEX entitlements_source_type_source_id_idx ON billing.entitlements USING btree (merchant_id, source_type, source_id)
+
+table billing.federated_grants
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column email text NOT NULL
+  column role text NOT NULL
+  column issuer text
+  column subject text
+  column accepted_at timestamp with time zone
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint federated_grants_acceptance_check CHECK ((((issuer IS NULL) = (subject IS NULL)) AND ((subject IS NULL) = (accepted_at IS NULL))))
+  constraint federated_grants_email_check CHECK (((email <> ''::text) AND (email = lower(email))))
+  constraint federated_grants_email_key UNIQUE (merchant_id, email)
+  constraint federated_grants_issuer_check CHECK ((issuer <> ''::text))
+  constraint federated_grants_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint federated_grants_pkey PRIMARY KEY (merchant_id, id)
+  constraint federated_grants_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'support'::text, 'viewer'::text])))
+  constraint federated_grants_subject_check CHECK ((subject <> ''::text))
+  constraint federated_grants_subject_key UNIQUE (merchant_id, issuer, subject)
+  index CREATE UNIQUE INDEX federated_grants_email_key ON billing.federated_grants USING btree (merchant_id, email)
+  index CREATE INDEX federated_grants_pending_idx ON billing.federated_grants USING btree (email) WHERE (subject IS NULL)
+  index CREATE UNIQUE INDEX federated_grants_pkey ON billing.federated_grants USING btree (merchant_id, id)
+  index CREATE INDEX federated_grants_subject_idx ON billing.federated_grants USING btree (issuer, subject)
+  index CREATE UNIQUE INDEX federated_grants_subject_key ON billing.federated_grants USING btree (merchant_id, issuer, subject)
 
 table billing.grants
   column id uuid NOT NULL DEFAULT uuidv7()

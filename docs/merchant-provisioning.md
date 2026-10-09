@@ -196,8 +196,9 @@ Per merchant:
   with `PUT /v1/merchant/api-host` and binds it once a TXT record proves
   control of the domain (`POST /v1/merchant/api-host/verify`).
 - `remote_application` — the host app's issuer (JWKS URI, inline static
-  `jwks`, or raw `public_keys`), registered as merchant **owner**: delegated
-  tokens signed by that issuer fully administer this one merchant and no other.
+  `jwks`, or raw `public_keys`), registered as merchant **owner**: its RFC 9068
+  access tokens act for this one merchant and no other, within that role
+  ([auth](auth.md#trusted-issuers); needs `resource_server`).
 - `settings` — the merchant's settings (`billing.MerchantSettings`), the same
   document `GET /v1/merchant/configuration` reads and a configuration
   application changes, with the same names, units and validation

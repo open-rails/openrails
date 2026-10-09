@@ -46,6 +46,8 @@ type AttachOptions struct {
 	// Registration is AuthKit's native self-registration mode. Empty is
 	// closed, the right mode for private standalone-compatible embedded hosts.
 	Registration iam.RegistrationMode
+	// ResourceServer accepts trusted issuers' RFC 9068 access tokens (#1140).
+	ResourceServer *config.ResourceServerConfig
 
 	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
 	// confirm routes. PasswordlessAutoRegistration additionally lets a verified
@@ -163,6 +165,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 	if opts.Registration != "" {
 		cpOpts = append(cpOpts, controlplane.WithRegistration(opts.Registration))
+	}
+	if opts.ResourceServer != nil {
+		cpOpts = append(cpOpts, controlplane.WithResourceServer(*opts.ResourceServer))
 	}
 	if opts.PasswordlessLogin {
 		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))

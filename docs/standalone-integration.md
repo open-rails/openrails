@@ -10,9 +10,9 @@ on nmi) — declared under `merchants.<slug>.psps.<key>`, with its `rail:`.
 
 ```mermaid
 flowchart LR
-    B[Browser] -- session credential --> H[Your backend]
-    H -. mints delegated token .-> B
-    B -- delegated token, /v1/me/* --> OR[OpenRails :3053]
+    B[Browser] -- session credential --> H[Your identity provider]
+    H -. access token, scope openrails:self .-> B
+    B -- DPoP access token, /v1/me/* --> OR[OpenRails :3053]
     H -- API key, /v1/merchant/* --> OR
     OR --> PG[(Postgres 18+)]
     OR --> RD[(Garnet/Redis)]
@@ -146,8 +146,8 @@ POST /v1/merchant/api-keys   {"name": "backend", "role": "owner"}
 
 Roles are fixed: `viewer` (read-only — right for LLM agents), `support`,
 `owner`. Requires `merchant:credentials:manage` (owner-only), so authenticate
-the mint with a delegated JWT signed by the issuer you registered in step 2
-(issuer-as-owner: your app's tokens administer exactly that one merchant), an
+the mint with an access token from the issuer you registered in step 2
+(issuer-as-owner: its tokens administer exactly that one merchant), an
 operator session from the bootstrap user, or the admin console
 (`admin_console.enabled`). The secret is returned **exactly once** in the mint
 response and is never retrievable again. `GET /v1/merchant/api-keys` lists,
@@ -241,12 +241,63 @@ another merchant's data.
 
 Your users' browsers call OpenRails' self-service surface (`/v1/me/*`:
 entitlements, subscriptions, payment methods, checkout sessions, invoices) **directly**, using
-a short-lived delegated token your backend mints with its registered issuer
-key — your session tokens never leave your trust domain. The token contract,
-exchange-endpoint pattern, and checkout flows are in
-[frontend-integration.md](frontend-integration.md); the rationale for the
-two-token model is in [auth.md](auth.md). CORS requires zero configuration
-(see below).
+a short-lived, DPoP-bound access token with scope `openrails:self` that your
+identity provider mints for OpenRails — your session tokens never leave your
+trust domain. The token contract and checkout flows are in
+[frontend-integration.md](frontend-integration.md); the trust model is in
+[auth.md](auth.md). CORS requires zero configuration (see below).
+
+### Trusted issuers: staff, machines and customers
+
+Your identity provider lets your staff, admin UI, machines and customers call
+OpenRails directly, without OpenRails holding accounts for them. OpenRails is an
+OAuth 2.0 resource server: it accepts RFC 9068 access tokens (`typ: at+jwt`)
+that a trusted issuer minted for this deployment's resource identifier (`aud`).
+A merchant's manifest `remote_application` is a trusted issuer for that
+merchant too, within its owner role; it needs `resource_server` declared.
+
+```yaml
+resource_server:
+  identifier: https://openrails.example.com
+  dpop_nonce_key: ""            # >= 32 bytes, the same on every replica
+  trusted_issuers:
+    - name: example
+      issuer: https://example.com/auth   # keys from <issuer>/.well-known/jwks.json, or pin them with keys:
+      merchants: [example]
+      permissions: ["merchant:*"]        # the ceiling
+      allowed_origins: [https://admin.example.com]
+```
+
+- `scope` selects the surface: `openrails:merchant` for the merchant API and
+  `GET /v1/merchants` (the merchants the token reaches, with its role and
+  permissions there), `openrails:self` for a customer's own billing
+  (`/v1/me/*`, DPoP-bound, `sub` a UUID: the customer's id). Another scope is
+  answered `403 insufficient_scope`.
+- A token's `permissions` claim is what it grants, within the issuer's ceiling
+  (`permissions`), on the issuer's `merchants` only. A token never names its
+  merchant: it acts for the one the request selects (`OpenRails-Merchant`), or
+  the issuer's only merchant. An issuer that cannot mint OpenRails permissions
+  maps the roles in its tokens' `roles` claim to merchant roles with
+  `group_roles` (`owner`, `support`, `viewer`).
+- A token with `sub` equal to its `client_id` is a machine acting for itself.
+- Staff your issuer grants nothing are invited by email:
+  `POST /v1/merchant/federated-grants {"email","role"}` (owners). The invitee
+  signs in at an issuer trusted for the merchant, lists
+  `GET /v1/merchants/invites` and accepts `POST /v1/merchants/invites/{id}/accept`
+  with a token carrying that `email` and `email_verified: true`. The role then
+  joins the token's own permissions, within the ceiling, until
+  `DELETE /v1/merchant/federated-grants/{id}`.
+- A token bound to a DPoP key (`cnf.jkt`) is accepted only with
+  `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
+  first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
+  header to retry with.
+- Browsers on `allowed_origins` may call the merchant API across origins.
+  Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
+  headers, never cookies.
+- Refusals: `access_token_issuer_unknown` (untrusted `iss`),
+  `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
+  `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
+  `permission_required`.
 
 ### Webhooks
 

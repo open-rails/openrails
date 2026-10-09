@@ -13,15 +13,11 @@ import (
 // surface on the PUBLIC API mux under /v1/me/*, authenticated by a delegated
 // customer principal.
 //
-// A merchant's host frontend mints a short-lived AuthKit delegated access token
-// (aud=openrails, merchant issuer, delegated_sub) for the logged-in end-user;
-// the browser calls OpenRails directly with it. Every operation is scoped to the
-// token's delegated_sub + resolved merchant.
-//
-// The surface is ALWAYS mounted (#469): the OpenRails-owned AuthKit control
-// plane is the default delegated-token verifier. IDENTITY IS HOST-PLUGGABLE
-// (issue #339): a host-supplied billingauth.DelegatedAuthenticator overrides
-// the control-plane verifier.
+// A trusted issuer mints a short-lived, DPoP-bound access token (scope
+// openrails:self) for the signed-in end user; the browser calls OpenRails
+// directly with it. Every operation is scoped to the token's subject and
+// resolved merchant. IDENTITY IS HOST-PLUGGABLE (#339): a host-supplied
+// billingauth.DelegatedAuthenticator overrides the trusted issuers.
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	delegatedMW := s.delegatedMiddleware()
 	providerRoutes := embedhttp.ProviderRoutesForRuntime(s.runtime, nil)
@@ -37,17 +33,17 @@ func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 		Info("delegated self-service API routes registered on public handler")
 }
 
-// delegatedMiddleware picks the delegated-identity middleware for the
+// delegatedMiddleware picks the customer-identity middleware for the
 // self-service surface (#339): the host-supplied DelegatedAuthenticator when
-// present (an explicit override), else the control plane's delegated-token
-// verifier (always available, #469).
+// present (an explicit override), else trusted issuers' openrails:self
+// access tokens (#1140).
 func (s *Server) delegatedMiddleware() router.Middleware {
 	if s.delegatedAuthenticator != nil {
 		return middleware.DelegatedPrincipalRequired(s.delegatedAuthenticator)
 	}
-	resolver := middleware.DelegatedResolver(s.controlPlane)
-	if s.delegatedResolver != nil {
-		resolver = s.delegatedResolver
+	resolver := middleware.ResourceCustomerResolver(s.controlPlane)
+	if s.customerResolver != nil {
+		resolver = s.customerResolver
 	}
-	return middleware.DelegatedSelfRequired(resolver)
+	return middleware.ResourceCustomerRequired(resolver)
 }

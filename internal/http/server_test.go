@@ -13,13 +13,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -144,9 +143,9 @@ func (hostAuthenticator) AuthenticateDelegated(context.Context, *http.Request) (
 
 type proofRejectingResolver struct{ origin string }
 
-func (r *proofRejectingResolver) ResolveDelegated(req *http.Request) (*controlplane.ResolvedDelegated, error) {
+func (r *proofRejectingResolver) ResolveResourceCustomer(req *http.Request) (*credential.ResolvedDelegated, error) {
 	r.origin = req.Header.Get("Origin")
-	return nil, auth.ErrSenderProofRequired
+	return nil, credential.ChallengeError{Code: billing.CodeSenderProofRequired}
 }
 
 // #339/#469: the self-service surface is always mounted; a host authenticator
@@ -164,7 +163,7 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound}, w.Code, w.Body.String())
 
 	resolver := &proofRejectingResolver{}
-	s := &Server{cfg: &config.Config{}, delegatedResolver: resolver}
+	s := &Server{cfg: &config.Config{}, customerResolver: resolver}
 	mux = http.NewServeMux()
 	s.registerSelfServiceRoutes(mux)
 	ts := httptest.NewServer(s.wrapPublicHandler(mux))
@@ -178,7 +177,7 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me/balance?currency=USD", nil)
 	require.NoError(t, err)
 	req.Header.Set("Origin", "https://evil.example")
-	req.Header.Set("Authorization", "Bearer delegated.jwt.token")
+	req.Header.Set("Authorization", "Bearer eyJ0eXAiOiJhdCtqd3QifQ.e30.sig")
 	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (218), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (223), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential holding the permission on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -247,6 +247,11 @@ Merchant accounts, API keys and the team.
 | POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | `CreateAPIKeyParams` | 201 `CreatedAPIKey` |  |
 | GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 `ListPage<APIKey>` |  |
 | DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 204 — |  |
+| GET | `/v1/merchant/federated-grants` | merchant | `merchant:members:read` | — | 200 `ListPage<FederatedGrant>` |  |
+| POST | `/v1/merchant/federated-grants` | merchant | `merchant:members:manage` | `CreateFederatedGrantParams` | 201 `FederatedGrant` |  |
+| DELETE | `/v1/merchant/federated-grants/{id}` | merchant | `merchant:members:manage` | — | 204 — |  |
+| GET | `/v1/merchants/invites` | user | — | — | 200 `ListPage<FederatedInvite>` |  |
+| POST | `/v1/merchants/invites/{id}/accept` | user | — | — | 200 `UserMerchant` |  |
 | GET | `/v1/merchant/team` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamMember>` |  |
 | GET | `/v1/merchant/team/invites` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamInvite>` |  |
 | POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | `InviteTeamMemberParams` | 201 `TeamInviteResult` |  |

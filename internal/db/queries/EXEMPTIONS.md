@@ -109,8 +109,9 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
 `custodians`, `merchant_webhooks`, `catalog_meters`, default `catalog_rate_cards`,
-`merchant_secrets`. Row counts follow the merchant's own configuration, not
-customer activity, so listing them whole does not scale with records on file.
+`merchant_secrets`, and the staff a merchant invited (`federated_grants`). Row
+counts follow the merchant's own configuration, not customer activity, so
+listing them whole does not scale with records on file.
 
 A residual filter on a scan whose index condition and filter together pin
 every primary-key column (`merchant_id` and `id` on tenant tables) is a

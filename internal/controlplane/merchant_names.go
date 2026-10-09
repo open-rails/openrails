@@ -68,7 +68,8 @@ func (c *ControlPlane) ListUserMerchants(ctx context.Context, userID string) ([]
 	}
 	out := make([]billing.UserMerchant, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: roles[ref.GroupID]})
+		grants, _ := merchantRoleGrants(roles[ref.GroupID])
+		out = append(out, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: roles[ref.GroupID], Permissions: append([]string{}, grants...)})
 	}
 	return out, nil
 }

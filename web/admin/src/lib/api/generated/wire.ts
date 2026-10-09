@@ -600,6 +600,11 @@ export type CreateEntitlementParams = {
   ends_at?: string | null
 }
 
+export type CreateFederatedGrantParams = {
+  email?: string
+  role?: string
+}
+
 export type CreateInvoicePaymentParams = {
   amount?: string
   reference?: string
@@ -994,6 +999,22 @@ export type ExtendAdmissionParams = {
   expires_at?: string
 }
 
+export type FederatedGrant = {
+  id: string
+  email: string
+  role: string
+  issuer: string | null
+  subject: string | null
+  accepted_at: string | null
+  created_at: string
+}
+
+export type FederatedInvite = {
+  id: string
+  merchant: MerchantRef
+  role: string
+}
+
 export type Finding = {
   id: string
   finding_type: string
@@ -1214,6 +1235,12 @@ export type MerchantProfile = {
   from_email?: string
   support_url?: string
   signup_url?: string
+}
+
+export type MerchantRef = {
+  id: string
+  slug: string
+  display_name: string
 }
 
 export type MerchantSettings = {
@@ -2451,6 +2478,7 @@ export type UserMerchant = {
   slug: string
   display_name: string
   role: string
+  permissions: string[]
 }
 
 export type VerificationPressure = {

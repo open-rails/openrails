@@ -47,6 +47,11 @@ type (
 	// MerchantCreationConfig is ControlPlaneConfig.MerchantCreation: the
 	// policy for merchant names users claim.
 	MerchantCreationConfig = config.MerchantCreationConfig
+	// ResourceServerConfig is ControlPlaneConfig.ResourceServer: the
+	// authorization servers whose access tokens the merchant API accepts.
+	ResourceServerConfig = config.ResourceServerConfig
+	// TrustedIssuerConfig is one of ResourceServerConfig.TrustedIssuers.
+	TrustedIssuerConfig = config.TrustedIssuerConfig
 	// NamingConfig is AuthConfig.Naming: the rename policy for merchant names
 	// and usernames.
 	NamingConfig = config.NamingConfig

@@ -9,9 +9,9 @@ OpenRails-SaaS, not the engine.
 
 | Surface | Embedded application | Standalone or SaaS server |
 | --- | --- | --- |
-| Go business client | In-process application authority | API key or registered service JWT |
-| Browser self-service | `Deps.Authenticate` maps the normal user credential to its paying customer | Sender-bound delegated token from the merchant issuer |
-| User billing routes | `Deps.Authenticate` | Local AuthKit user credential |
+| Go business client | In-process application authority | API key, or a trusted issuer's client-credentials access token |
+| Browser self-service | `Deps.Authenticate` maps the normal user credential to its paying customer | A trusted issuer's DPoP-bound access token with scope `openrails:self` |
+| User billing routes | `Deps.Authenticate` | Local AuthKit user credential, or a trusted issuer's access token |
 | Merchant operations | `Deps.Authorize`, live per operation | Verified credential plus current merchant permission |
 | Platform operations | Owned by the host | Local human operator plus current root permission |
 
@@ -19,8 +19,6 @@ Embedded applications supply `Deps.Authenticate`, `Deps.Authorize` and
 `Deps.RecentSignIn` over their own request verifier, with explicit customer and
 permission mappings; live admission is an explicit host policy.
 Remote JWKS verification cannot independently observe a remote user's ban.
-The normal local host-user adapter remains distinct from the wire delegated
-profile: a local user has `sub`, while a delegated caller has `delegated_sub`.
 
 The standalone control plane is mandatory and uses closed registration.
 OpenRails-SaaS explicitly enables hosted registration when attaching it. A
@@ -28,28 +26,40 @@ merchant signing application maps to exactly one merchant permission group;
 its token cannot select another merchant by adding a claim or changing a URL.
 Identity/contact attributes do not confer authorization.
 
-## Browser and native delegation
+## Trusted issuers
 
-The browser first authenticates to its merchant application. It then calls
-that issuer's AuthKit `POST /api/v1/delegated/token`, using its local access credential
-and a non-extractable WebCrypto key. The host authorizer selects the grant.
-OpenRails accepts the resulting `Authorization: DPoP <token>` only with a fresh
-ES256 proof covering that token, HTTP method and external URL. Replay, wrong
-key/target/token, missing proof and a Bearer downgrade are refused. Native
-clients instead use a certificate-bound delegated Bearer token and its actual
-TLS client certificate. Unbound wire delegation is unsupported.
+Standalone OpenRails is an OAuth 2.0 resource server. It accepts RFC 9068
+access tokens (`typ: at+jwt`) whose `aud` is `resource_server.identifier`, from
+two kinds of trusted issuer:
 
-See [frontend integration](frontend-integration.md#authentication) for the
-mint/request contract. Receiver proof targets are the configured
-`auth.request_origin` plus the request path. Arbitrary Host/Forwarded headers
-never define that target.
-Redis-backed AuthKit proof claims are shared across receiver replicas and must
-retain accepted claims for the full proof window. Storage errors fail closed
-with 503; a rejected proof receives the DPoP authentication challenge.
+- declared in `resource_server.trusted_issuers`: issuer, keys, the merchants it
+  acts for, a permission ceiling, CORS origins and optional group roles;
+- a merchant's registered signing application (the manifest's
+  `remote_application`): it acts for that merchant only, within its stored
+  authority, read on every request, so disabling it applies to the next one.
 
-Delegated CORS permits credential-free browser requests and preflight with
-Authorization/DPoP headers. Origin is transport metadata, not identity or the
-signing application's authority.
+The token's `scope` selects the surface: `openrails:merchant` for the merchant
+API and a user's own merchant list, `openrails:self` for a customer's own
+billing (`/v1/me`). A token never names its merchant; the request does
+(`OpenRails-Merchant` or the merchant's API host), and it must be one the
+issuer is trusted for. Permissions are the token's `permissions`, the issuer's
+group roles and the user's accepted federated grants, within the ceiling. A
+token whose `sub` equals its `client_id` is a client acting for itself.
+
+A token bound to a key (`cnf.jkt`) is accepted only as `Authorization: DPoP`
+with a fresh single-use proof for the method, the configured
+`auth.request_origin` plus path, and the server nonce: the first proof without
+one is answered `401 use_dpop_nonce` with a `DPoP-Nonce` header. Customer
+tokens must be bound (DPoP, or a certificate-bound token over mTLS). Proof
+claims are shared across replicas through Redis and fail closed with 503.
+Arbitrary Host/Forwarded headers never define a proof target.
+
+Merchant routes answer CORS for the trusted issuers' declared origins only,
+without credentials mode; browser self-service answers any origin. Origin is
+transport metadata, not identity.
+
+OpenRails cannot see an issuer's end-user ban or session revocation: the
+issuer stops minting, and the access token's lifetime bounds the exposure.
 
 ## Cookies and local account admission
 
@@ -77,12 +87,6 @@ own sign-in (`verify.ActorFromClaims`): once that session is revoked (logout,
 revoke-all, password change, ban, deletion) the check answers 401
 `credential_revoked`, whatever time the token has left. Routes that only
 authenticate, with no permission check, accept the token until it expires.
-
-Delegated verification consults the registered signing application's enabled
-state/grant and active merchant binding. Issuer disablement, grant removal or
-merchant retirement affects subsequent requests. OpenRails cannot see the
-issuer's end-user ban/session revocation independently: the issuer stops
-mint/refresh, and remaining delegated-token lifetime bounds that exposure.
 
 Every HTTP attempt authenticates and authorizes again. Documented financial
 operations own durable idempotency receipts; there is no generic response

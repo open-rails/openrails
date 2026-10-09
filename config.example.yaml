@@ -67,6 +67,20 @@ auth:
   # (default /vault/auth); allow_ephemeral_signing_key generates development
   # keys.json and totp.key there
 
+# Access tokens (RFC 9068 at+jwt) that your identity provider mints for this
+# deployment: its users call the merchant API directly, and OpenRails holds no
+# accounts for them. Permissions come from the token, within the ceiling.
+# resource_server:
+#   identifier: https://openrails.example.com  # the tokens' aud
+#   dpop_nonce_key: ""        # >= 32 bytes, same on every replica; env RESOURCE_SERVER_DPOP_NONCE_KEY
+#   trusted_issuers:
+#     - name: example
+#       issuer: https://example.com/auth      # exact iss; keys from <issuer>/.well-known/jwks.json
+#       merchants: [example]                  # the merchants its tokens act for
+#       permissions: ["merchant:*"]           # the ceiling
+#       allowed_origins: [https://admin.example.com]
+#       # group_roles: {billing-admins: owner}  # only for issuers that cannot mint permissions
+
 encryption:
   master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it
                     # Required for DB-backed alert webhook URLs and HyperSwitch SDK captures.

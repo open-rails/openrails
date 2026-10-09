@@ -6,9 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	auth "github.com/open-rails/helpers/auth"
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
@@ -31,7 +28,24 @@ const (
 	// ServiceCredentialContextKey holds the *credential.ResolvedServiceCredential
 	// for the request (pinned by the route gate; read by handlers).
 	ServiceCredentialContextKey = "openrails.service_credential"
+	// ResourceUserContextKey holds the *credential.ResourceUser a trusted
+	// issuer's token resolved to on a signed-in user's own routes.
+	ResourceUserContextKey = "openrails.resource_user"
 )
+
+// ResourceUserFromRequest returns the trusted issuer's principal the user
+// tier resolved, if any.
+func ResourceUserFromRequest(r *request.Request) (*credential.ResourceUser, bool) {
+	if r == nil {
+		return nil, false
+	}
+	v, ok := r.Get(ResourceUserContextKey)
+	if !ok {
+		return nil, false
+	}
+	user, ok := v.(*credential.ResourceUser)
+	return user, ok && user != nil
+}
 
 // CredentialType identifies the bearer credential profile that authenticated
 // the request. Webhooks are intentionally outside this model.
@@ -76,11 +90,11 @@ func (p *Principal) Can(ctx context.Context, perm string) bool {
 	return p.can(ctx, strings.TrimSpace(perm))
 }
 
-// DelegatedResolver validates a presented browser-direct delegated access token
-// against live AuthKit + merchant-directory state. The control plane implements
-// it; tests can inject a fake.
-type DelegatedResolver interface {
-	ResolveDelegated(r *http.Request) (*credential.ResolvedDelegated, error)
+// ResourceCustomerResolver verifies a trusted issuer's access token granted
+// openrails:self and resolves the customer it acts as (#1140). The control
+// plane implements it; tests can inject a fake.
+type ResourceCustomerResolver interface {
+	ResolveResourceCustomer(r *http.Request) (*credential.ResolvedDelegated, error)
 }
 
 // DelegatedFromRequest returns the resolved delegated token attached to the
@@ -110,43 +124,29 @@ func PrincipalFromRequest(r *request.Request) (*Principal, bool) {
 	return p, ok && p != nil
 }
 
-// DelegatedSelfRequired authenticates a merchant-scoped self-service route with
-// a browser-direct DELEGATED ACCESS TOKEN (#222 browser tier). On success it
-// pins the resolved merchant, binds the acting user (the token's
-// delegated_sub), and records the delegated state + principal for permission
-// gates. Fail-closed on missing/expired/revoked/cross-merchant tokens.
-func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
+// ResourceCustomerRequired authenticates the self-service surface with a
+// trusted issuer's DPoP-bound access token granted openrails:self: the
+// token's user is the customer of the merchant the request names, or of the
+// issuer's only one. Every other credential is refused.
+func ResourceCustomerRequired(resolver ResourceCustomerResolver) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			if resolver == nil {
-				r.AbortCode(billing.CodeInternalError, "delegated authentication not configured")
+				r.AbortCode(billing.CodeInternalError, "customer authentication not configured")
 				return
 			}
 			token := requestAuthorizationToken(r.Request)
 			if token == "" {
-				r.AbortCode(billing.CodeAuthenticationRequired, "delegated bearer token required")
+				r.AbortCode(billing.CodeAuthenticationRequired, "access token required")
 				return
 			}
-			resolved, err := resolver.ResolveDelegated(r.Request)
+			if !credential.LooksLikeResourceToken(token) {
+				r.AbortGate(billingauth.Refusal(billing.CodeAccessTokenInvalid))
+				return
+			}
+			resolved, err := resolver.ResolveResourceCustomer(r.Request)
 			if err != nil {
-				switch {
-				case errors.Is(err, auth.ErrExpired):
-					r.AbortCode(billing.CodeDelegatedTokenExpired, "")
-				case errors.Is(err, auth.ErrRevoked):
-					r.AbortCode(billing.CodeDelegatedTokenRevoked, "")
-				case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved),
-					errors.Is(err, credential.ErrDelegatedIssuerUnknown):
-					r.AbortCode(billing.CodeDelegatedMerchantUnresolved, "")
-				case errors.Is(err, auth.ErrSenderProofRequired):
-					r.AbortGate(billingauth.Refusal(billing.CodeSenderProofRequired))
-				case errors.Is(err, credential.ErrDelegatedUnavailable):
-					r.AbortCode(billing.CodeDelegatedVerificationUnavailable, "")
-				case errors.Is(err, credential.ErrDelegatedNotConfigured):
-					r.AbortCode(billing.CodeInternalError, "delegated authentication not configured")
-				default:
-					log.WithError(err).Warn("delegated token resolution failed")
-					r.AbortCode(billing.CodeDelegatedTokenInvalid, "")
-				}
+				r.AbortGate(credential.ResourceTokenRefusal(err))
 				return
 			}
 			if !bindDelegated(r, resolved, CredentialDelegatedUser, resolved.CredentialClass) {

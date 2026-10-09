@@ -196,6 +196,39 @@ func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	}
 }
 
+// IssuerOriginCORSHTTP admits the merchant API (match) from the browser
+// origins trusted issuers declared (#1140): a host's admin UI calls it
+// directly with its users' access tokens. Those are Authorization and DPoP
+// headers, never cookies, so credentials mode stays off; every other origin
+// gets no CORS headers.
+func IssuerOriginCORSHTTP(match func(*http.Request) bool, allowed func(string) bool) HTTPMiddleware {
+	const (
+		allowHeaders  = "Authorization,DPoP,Content-Type,OpenRails-Merchant,Idempotency-Key,X-Request-ID"
+		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+		exposeHeaders = "WWW-Authenticate,DPoP-Nonce,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset"
+	)
+	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin != "" && match != nil && allowed != nil && match(r) && allowed(origin) {
+				h := w.Header()
+				h.Set("Access-Control-Allow-Origin", origin)
+				h.Add("Vary", "Origin")
+				h.Set("Access-Control-Allow-Headers", allowHeaders)
+				h.Set("Access-Control-Allow-Methods", allowMethods)
+				h.Set("Access-Control-Expose-Headers", exposeHeaders)
+				h.Set("Access-Control-Max-Age", maxAge)
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RecoverHTTP converts handler panics into a 500 response (the net/http
 // analogue of gin.Recovery, kept for the standalone flip #670).
 func RecoverHTTP() HTTPMiddleware {

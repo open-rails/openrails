@@ -63,9 +63,10 @@ func TestClassifyMapsDatabaseRefusals(t *testing.T) {
 	}
 }
 
-// Directory identity rows are not billing data: a restore destination may hold
-// them (a renamed merchant, a host claim) and still be empty.
-var restoreOccupancyExempt = []string{"merchant_api_host_claims", "merchant_slug_aliases"}
+// Directory identity and access grants are not billing data: a restore
+// destination may hold them (a renamed merchant, a host claim, invited staff)
+// and still be empty.
+var restoreOccupancyExempt = []string{"federated_grants", "merchant_api_host_claims", "merchant_slug_aliases"}
 
 var (
 	createTable    = regexp.MustCompile(`(?s)CREATE TABLE billing\.(\w+) \((.*?)\n\)(?: PARTITION BY [^;]*)?;`)

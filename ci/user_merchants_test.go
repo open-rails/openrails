@@ -48,10 +48,16 @@ func TestUserMerchantsListing(t *testing.T) {
 		require.Empty(t, body.Next, "one page")
 		return body.Items
 	}
+	listed := list(memberToken)
+	require.Len(t, listed, 2)
+	require.Equal(t, []string{"merchant:*"}, listed[0].Permissions, "an owner holds the namespace")
+	require.Contains(t, listed[1].Permissions, billing.MerchantPaymentsRead)
+	require.NotContains(t, listed[1].Permissions, billing.MerchantCatalogUpdate, "a viewer reads only")
+	viewerGrants := listed[1].Permissions
 	require.Equal(t, []billing.UserMerchant{
-		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner"},
-		{ID: theirs.MerchantID, Slug: viewed, Role: "viewer"},
-	}, list(memberToken))
+		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner", Permissions: []string{"merchant:*"}},
+		{ID: theirs.MerchantID, Slug: viewed, Role: "viewer", Permissions: viewerGrants},
+	}, listed)
 
 	renamed := uniqueName("a-renamed")
 	require.NoError(t, operatorRename(ctx, cp, mine.MerchantID, renamed))
@@ -59,7 +65,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	result, err := cp.RetireUnusedMerchant(ctx, mine.MerchantID, mine.GroupID)
 	require.NoError(t, err)
 	require.True(t, result.Retired)
-	require.Equal(t, []billing.UserMerchant{{ID: theirs.MerchantID, Slug: viewed, Role: "viewer"}}, list(memberToken))
+	require.Equal(t, []billing.UserMerchant{{ID: theirs.MerchantID, Slug: viewed, Role: "viewer", Permissions: viewerGrants}}, list(memberToken))
 
 	w = call(t, handler, "not-a-token", http.MethodGet, "/v1/merchants", "", nil)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

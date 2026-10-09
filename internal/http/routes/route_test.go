@@ -45,7 +45,7 @@ var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "Me
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 218)
+	require.Len(t, Catalog(), 223)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -132,6 +132,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		Live: raw, Ready: raw, Metrics: raw, Capabilities: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
+		ListFederatedGrants: handler, CreateFederatedGrant: handler, RevokeFederatedGrant: handler, ListMyFederatedGrants: handler, AcceptFederatedGrant: handler,
 		MerchantCreationEnabled: true,
 	}}
 	pass := func(next router.Handler) router.Handler { return next }

@@ -15,6 +15,7 @@ sql:
       - "internal/migrate/postgres/0010_entitlement_names.up.sql"
       - "internal/migrate/postgres/0011_currency_codes.up.sql"
       - "internal/migrate/postgres/0012_provider_applied_coverage.up.sql"
+      - "internal/migrate/postgres/0013_federated_grants.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

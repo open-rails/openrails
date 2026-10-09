@@ -10,8 +10,9 @@ to concrete code (enum, table, or manifest key).
 | Merchant | The billing/isolation namespace — scopes subscriptions, payments, credits, catalog, webhooks, analytics. `billing.merchants`; every tenant-scoped query carries an explicit `merchant_id` (or `psp_id`) predicate, backed by composite foreign keys. Deliberately controlled by exactly **one** AuthKit group (1:1). |
 | Org / permission-group | The AuthKit-side controller of a merchant. The merchant row stores `permission_group_id`; AuthKit decides which users, API keys, and remote applications act for that group. OpenRails carries no auth of its own. |
 | Customer | The paying subject under a merchant: a UUID the host supplies (`billing.CustomerID`); identity is `(merchant_id, id)`. The same person is a separate customer at each merchant. |
-| `delegated_sub` | External OIDC subject from a registered issuer — the host app's end user, carried in AuthKit delegated access tokens. OpenRails resolves the issuer to its merchant and touches the customer `(merchant_id, delegated_sub)`; tokens never carry merchant claims. |
-| Remote application | AuthKit-registered issuer/JWKS principal that signs delegated and service tokens. A credential nested under a permission-group, not an owner. |
+| Trusted issuer | An OAuth 2.0 authorization server whose RFC 9068 access tokens OpenRails accepts: declared under `resource_server.trusted_issuers`, or a merchant's remote application. Bound to its merchants by OpenRails, never by a token claim. |
+| Remote application | AuthKit-registered issuer/JWKS principal nested under a merchant's permission-group: a trusted issuer for that merchant, within its role there. |
+| Federated grant | A merchant role an owner grants by email to a trusted issuer's user, who accepts it with that verified email. |
 | Invoker | The opaque caller that caused usage when it is not the customer itself (`invoker`, `invoker_type`); spend-delegation budgets meter per invoker. |
 
 ## Money & access

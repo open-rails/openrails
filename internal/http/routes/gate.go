@@ -19,9 +19,9 @@ import (
 
 type GateOptions struct {
 	Authenticator             billingauth.Authenticator
+	ResourceTokenResolver     ResourceTokenResolver
 	AdminPermissionChecker    authpolicy.AdminPermissionChecker
 	ServiceCredentialResolver ServiceCredentialResolver
-	DelegatedResolver         DelegatedResolver
 	DelegatedAuthenticator    billingauth.DelegatedAuthenticator
 }
 
@@ -36,18 +36,16 @@ type ServiceCredentialResolver interface {
 	ResolveAPIKey(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
 }
 
-// DelegatedResolver validates a browser-direct delegated access token and
-// resolves its merchant + acting user (#259/#555).
-type DelegatedResolver interface {
-	ResolveDelegated(r *http.Request) (*credential.ResolvedDelegated, error)
+// ResourceTokenResolver verifies a trusted issuer's RFC 9068 access token
+// and resolves its merchant and permissions (#1140).
+type ResourceTokenResolver interface {
+	ResolveResourceToken(r *http.Request) (*credential.ResolvedResourceAccess, error)
 }
 
-type serviceJWTResolver interface {
-	ResolveServiceJWT(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
-}
-
-type remoteApplicationResolver interface {
-	ResolveRemoteApplication(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
+// ResourceUserResolver verifies a trusted issuer's access token on a
+// signed-in user's own routes and resolves the merchants it may act on.
+type ResourceUserResolver interface {
+	ResolveResourceUser(r *http.Request) (*credential.ResourceUser, error)
 }
 
 func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm string) (billingauth.Principal, error) {
@@ -70,16 +68,18 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{MerchantID: hp.MerchantID, Kind: billingauth.Machine, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
 	}
-	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
+	if req != nil && credential.LooksLikeResourceToken(authorizationToken(req.Header.Get("Authorization"))) {
+		return g.authorizeResourceToken(req, perm)
+	}
+	if resolved, err, handled := g.resolveAPIKey(ctx, req); handled {
 		if err != nil {
 			switch {
 			case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved):
 				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialMerchantUnresolved)
 			case errors.Is(err, credential.ErrServiceCredentialScopeDenied):
 				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialResourceScopeDenied)
-			case errors.Is(err, credential.ErrDelegatedIssuerUnknown), errors.Is(err, credential.ErrServiceCredentialHostMismatch):
-				// The API key or issuer resolves to a different Host merchant.
-				// Issuer resolution also uses its sentinel for unregistered/disabled issuers.
+			case errors.Is(err, credential.ErrServiceCredentialHostMismatch):
+				// The API key resolves to a different Host merchant.
 				return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
 			default:
 				return billingauth.Principal{}, billingauth.Refusal(billing.CodeServiceCredentialInvalid)
@@ -92,39 +92,6 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 			return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
 		}
 		return billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Machine, Permissions: resolved.Permissions}, nil
-	}
-	if g.DelegatedResolver != nil && req != nil {
-		if token := authorizationToken(req.Header.Get("Authorization")); credential.LooksLikeJWT(token) {
-			resolved, err := g.DelegatedResolver.ResolveDelegated(req)
-			if err != nil {
-				if errors.Is(err, credential.ErrDelegatedUnavailable) {
-					return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedVerificationUnavailable)
-				}
-				if errors.Is(err, auth.ErrSenderProofRequired) {
-					return billingauth.Principal{}, billingauth.Refusal(billing.CodeSenderProofRequired)
-				}
-				if g.Authenticator == nil || !errors.Is(err, credential.ErrDelegatedInvalid) {
-					return billingauth.Principal{}, billingauth.Refusal(billing.CodeDelegatedTokenInvalid)
-				}
-			} else {
-				if !resolved.HasPermission(perm) {
-					return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
-				}
-				return billingauth.Principal{
-					MerchantID: resolved.MerchantID,
-					Kind:       billingauth.Delegated,
-					Subject:    resolved.DelegatedSubject,
-					UserContext: billingauth.UserContext{
-						UserID:        resolved.DelegatedSubject,
-						Email:         resolved.Email,
-						EmailVerified: resolved.EmailVerified,
-						Username:      resolved.Username,
-						Merchant:      resolved.Merchant,
-					},
-					Permissions: resolved.Permissions,
-				}, nil
-			}
-		}
 	}
 	if g.DelegatedAuthenticator != nil && req != nil {
 		principal, err := g.DelegatedAuthenticator.AuthenticateDelegated(ctx, req)
@@ -218,6 +185,34 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	return billingauth.Principal{MerchantID: mid, Kind: billingauth.User, Subject: uc.UserID, UserContext: uc}, nil
 }
 
+// authorizeResourceToken gates an RFC 9068 access token: only its own
+// verifier sees it, and it never falls through to another credential kind.
+func (g legacyGate) authorizeResourceToken(req *http.Request, perm string) (billingauth.Principal, error) {
+	if g.ResourceTokenResolver == nil {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeAccessTokenIssuerUnknown)
+	}
+	resolved, err := g.ResourceTokenResolver.ResolveResourceToken(req)
+	if err != nil {
+		return billingauth.Principal{}, credential.ResourceTokenRefusal(err)
+	}
+	if !resolved.HasPermission(perm) {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodePermissionRequired)
+	}
+	if hostMID, ok := merchant.HostMerchant(req.Context()); ok && hostMID != resolved.MerchantID {
+		return billingauth.Principal{}, billingauth.Refusal(billing.CodeHostMerchantMismatch)
+	}
+	principal := billingauth.Principal{MerchantID: resolved.MerchantID, Kind: billingauth.Delegated, Subject: resolved.Subject, Permissions: resolved.Permissions}
+	if resolved.Machine {
+		principal.Kind = billingauth.Machine
+		return principal, nil
+	}
+	principal.UserContext = billingauth.UserContext{
+		UserID: resolved.Subject, Email: resolved.Email, EmailVerified: resolved.EmailVerified,
+		Username: resolved.Username, Merchant: resolved.MerchantSlug,
+	}
+	return principal, nil
+}
+
 // RequireRecentSignIn implements billingauth.Gate with the control plane's
 // AuthKit Sensitive check.
 func (g legacyGate) RequireRecentSignIn(ctx context.Context, req *http.Request, p billingauth.Principal) error {
@@ -228,55 +223,19 @@ func (g legacyGate) RequireRecentSignIn(ctx context.Context, req *http.Request, 
 	return billingauth.RequireRecentSignIn(ctx, p, check)
 }
 
-func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*credential.ResolvedServiceCredential, error, bool) {
+// resolveAPIKey resolves an API key; handled is false for any other
+// credential.
+func (g legacyGate) resolveAPIKey(ctx context.Context, r *http.Request) (*credential.ResolvedServiceCredential, error, bool) {
 	resolver := g.ServiceCredentialResolver
 	if resolver == nil || r == nil {
 		return nil, nil, false
 	}
 	token := bearerToken(r.Header.Get("Authorization"))
-	if token == "" {
+	if token == "" || !resolver.LooksLikeAPIKey(token) {
 		return nil, nil, false
 	}
-	if resolver.LooksLikeAPIKey(token) {
-		resolved, err := resolver.ResolveAPIKey(ctx, token)
-		if err != nil {
-			return nil, err, true
-		}
-		return resolved, nil, true
-	}
-	if !credential.LooksLikeJWT(token) {
-		return nil, nil, false
-	}
-	if raResolver, ok := resolver.(remoteApplicationResolver); ok {
-		resolved, err := raResolver.ResolveRemoteApplication(ctx, token)
-		if err == nil {
-			return resolved, nil, true
-		}
-		if allowJWTFallthrough && errors.Is(err, credential.ErrDelegatedInvalid) {
-			return nil, nil, false
-		}
-		if !errors.Is(err, credential.ErrNotRemoteApplicationToken) {
-			return nil, err, true
-		}
-	}
-	if jwtResolver, ok := resolver.(serviceJWTResolver); ok {
-		resolved, err := jwtResolver.ResolveServiceJWT(ctx, token)
-		if err == nil {
-			return resolved, nil, true
-		}
-		// A VERIFIED service JWT that is definitively rejected (cross-merchant
-		// resource scope, its issuer owns no merchant, or — #734 — its issuer's
-		// merchant disagrees with the request's Host-pinned merchant) must surface
-		// as 403 — not fall through to the delegated/user-session paths, which
-		// would mislabel it 401 access_token_wrong_typ. A wrong-typ (not-a-service-JWT)
-		// error still falls through so delegated/user tokens reach their own resolvers.
-		if errors.Is(err, credential.ErrServiceCredentialScopeDenied) ||
-			errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved) ||
-			errors.Is(err, credential.ErrDelegatedIssuerUnknown) {
-			return nil, err, true
-		}
-	}
-	return nil, nil, false
+	resolved, err := resolver.ResolveAPIKey(ctx, token)
+	return resolved, err, true
 }
 
 // credentialFailure is the 401 for a credential a live check refused.

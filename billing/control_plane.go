@@ -69,12 +69,15 @@ type MerchantRef struct {
 	DisplayName string     `json:"display_name"`
 }
 
-// UserMerchant is a merchant a user holds a role in, with that role.
+// UserMerchant is a merchant a user may act on: the role they hold
+// (owner, support or viewer; custom for an issuer's permissions that match
+// no role) and its permissions.
 type UserMerchant struct {
 	ID          MerchantID `json:"id"`
 	Slug        string     `json:"slug"`
 	DisplayName string     `json:"display_name"`
 	Role        string     `json:"role"`
+	Permissions []string   `json:"permissions"`
 }
 
 // FleetMerchantFunnel counts merchants by lifecycle stage: provisioned, armed
@@ -267,6 +270,32 @@ type TeamInviteResult struct {
 	Member *TeamMember `json:"member"`
 	Invite *TeamInvite `json:"invite"`
 	URL    *string     `json:"url"`
+}
+
+// FederatedGrant is a merchant role granted to a trusted issuer's user by
+// invitation: pending until a user of an issuer trusted for the merchant
+// accepts it with the invited, verified email, then bound to that user.
+type FederatedGrant struct {
+	ID         FederatedGrantID `json:"id"`
+	Email      string           `json:"email"`
+	Role       string           `json:"role"`
+	Issuer     *string          `json:"issuer"`
+	Subject    *string          `json:"subject"`
+	AcceptedAt *time.Time       `json:"accepted_at"`
+	CreatedAt  time.Time        `json:"created_at"`
+}
+
+// CreateFederatedGrantParams invites an email address with a merchant role.
+type CreateFederatedGrantParams struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+// FederatedInvite is a pending grant the signed-in user may accept.
+type FederatedInvite struct {
+	ID       FederatedGrantID `json:"id"`
+	Merchant MerchantRef      `json:"merchant"`
+	Role     string           `json:"role"`
 }
 
 // SetTeamRoleParams changes a member's role.

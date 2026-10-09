@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -23,9 +22,13 @@ type fakeResolver struct {
 	err      error
 }
 
-func (f fakeResolver) ResolveDelegated(*http.Request) (*credential.ResolvedDelegated, error) {
+func (f fakeResolver) ResolveResourceCustomer(*http.Request) (*credential.ResolvedDelegated, error) {
 	return f.resolved, f.err
 }
+
+// resourceToken has RFC 9068's typ, so the customer middleware hands it to
+// its resolver.
+const resourceToken = "eyJ0eXAiOiJhdCtqd3QifQ.e30.sig"
 
 var (
 	testMerchant = billing.MerchantID(uuid.MustParse("00000000-0000-4000-8000-00000000abcd"))
@@ -43,7 +46,7 @@ func serveNeutral(t *testing.T, path string, setup func(*http.Request), mw ...ro
 		r.Status(http.StatusOK)
 	}, mw...)
 	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req.Header.Set("Authorization", "Bearer eyJ.delegated.jwt")
+	req.Header.Set("Authorization", "DPoP "+resourceToken)
 	if setup != nil {
 		setup(req)
 	}
@@ -66,7 +69,7 @@ type mws = []router.Middleware
 // permission. Invoker-scoped principals (or#930) never reach payer surfaces.
 func TestDelegatedAuthRefusals(t *testing.T) {
 	self := func(r *credential.ResolvedDelegated, err error) router.Middleware {
-		return DelegatedSelfRequired(fakeResolver{resolved: r, err: err})
+		return ResourceCustomerRequired(fakeResolver{resolved: r, err: err})
 	}
 	host := func(p *billingauth.DelegatedPrincipal, err error) router.Middleware {
 		return DelegatedPrincipalRequired(billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) { return p, err }))
@@ -79,32 +82,32 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 		status      int
 		body        string
 	}{
-		{"nil resolver", "Bearer x", mws{DelegatedSelfRequired(nil)}, 500, "not configured"},
-		{"no bearer", "", mws{self(delegated(), nil)}, 401, "delegated bearer token required"},
-		{"wrong scheme", "Basic eA==", mws{self(delegated(), nil)}, 401, "delegated bearer token required"},
-		{"expired", "Bearer x", mws{self(nil, auth.ErrExpired)}, 401, "delegated_token_expired"},
-		{"revoked", "DPoP x", mws{self(nil, auth.ErrRevoked)}, 401, "delegated_token_revoked"},
-		{"cross merchant", "Bearer x", mws{self(nil, credential.ErrServiceCredentialMerchantUnresolved)}, 403, "delegated_merchant_unresolved"},
-		{"unknown issuer", "Bearer x", mws{self(nil, credential.ErrDelegatedIssuerUnknown)}, 403, "delegated_merchant_unresolved"},
-		{"missing proof", "Bearer x", mws{self(nil, auth.ErrSenderProofRequired)}, 401, "sender_proof_required"},
-		{"verifier down", "Bearer x", mws{self(nil, credential.ErrDelegatedUnavailable)}, 503, "delegated_verification_unavailable"},
-		{"verifier unset", "Bearer x", mws{self(nil, credential.ErrDelegatedNotConfigured)}, 500, "not configured"},
-		{"service credential or normal sub", "Bearer openrails_st_x", mws{self(nil, credential.ErrDelegatedInvalid)}, 401, "delegated_token_invalid"},
+		{"nil resolver", "DPoP " + resourceToken, mws{ResourceCustomerRequired(nil)}, 500, "not configured"},
+		{"no bearer", "", mws{self(delegated(), nil)}, 401, "access token required"},
+		{"wrong scheme", "Basic eA==", mws{self(delegated(), nil)}, 401, "access token required"},
+		{"not an access token", "Bearer openrails_st_x", mws{self(delegated(), nil)}, 401, "access_token_invalid"},
+		{"expired", "DPoP " + resourceToken, mws{self(nil, credential.ChallengeError{Code: billing.CodeCredentialExpired})}, 401, "credential_expired"},
+		{"merchant not bound", "DPoP " + resourceToken, mws{self(nil, credential.ErrResourceTokenMerchantNotBound)}, 403, "access_token_merchant_not_bound"},
+		{"unknown issuer", "DPoP " + resourceToken, mws{self(nil, credential.ErrResourceTokenIssuerUnknown)}, 401, "access_token_issuer_unknown"},
+		{"wrong scope", "DPoP " + resourceToken, mws{self(nil, credential.ChallengeError{Code: billing.CodeInsufficientScope})}, 403, "insufficient_scope"},
+		{"missing proof", "Bearer " + resourceToken, mws{self(nil, credential.ChallengeError{Code: billing.CodeSenderProofRequired, Headers: map[string]string{"WWW-Authenticate": `DPoP error="invalid_token"`}})}, 401, "sender_proof_required"},
+		{"verifier down", "DPoP " + resourceToken, mws{self(nil, credential.ErrResourceTokenUnavailable)}, 503, "authentication_unavailable"},
+		{"invalid", "DPoP " + resourceToken, mws{self(nil, credential.ErrResourceTokenInvalid)}, 401, "access_token_invalid"},
 		{"host: nil authenticator", "", mws{DelegatedPrincipalRequired(nil)}, 500, "not configured"},
 		{"host: gate error keeps status", "", mws{host(nil, billingauth.GateError{Status: 403, Message: "host says no"})}, 403, "host says no"},
 		{"host: unauthenticated", "", mws{host(nil, billingauth.ErrUnauthenticated)}, 401, "authentication required"},
 		{"host: non-uuid subject", "", mws{host(&billingauth.DelegatedPrincipal{MerchantID: billing.MerchantID(testMerchant), SubjectID: "user-123"}, nil)}, 401, "delegated_principal_invalid"},
 		{"host: no merchant", "", mws{host(&billingauth.DelegatedPrincipal{SubjectID: payerID.String()}, nil)}, 401, "delegated_principal_invalid"},
 		{"no principal, payer gate", "", mws{PayerScopedRequired()}, 401, "bearer principal required"},
-		{"invoker on payer surface", "Bearer x", mws{self(invoker, nil), PayerScopedRequired()}, 403, "invoker_scoped_principal"},
+		{"invoker on payer surface", "DPoP " + resourceToken, mws{self(invoker, nil), PayerScopedRequired()}, 403, "invoker_scoped_principal"},
 	} {
 		w, seen := serveNeutral(t, "/v1/customers/acme", func(r *http.Request) { r.Header.Set("Authorization", tc.authz) }, tc.mw...)
 		require.Equal(t, tc.status, w.Code, tc.name)
 		require.Contains(t, w.Body.String(), tc.body, tc.name)
 		require.Nil(t, seen, tc.name)
 	}
-	w, _ := serveNeutral(t, "/v1/customers/x", nil, self(nil, auth.ErrSenderProofRequired))
-	require.Contains(t, w.Header().Get("WWW-Authenticate"), `DPoP error="invalid_dpop_proof"`)
+	w, _ := serveNeutral(t, "/v1/customers/x", nil, self(nil, credential.ChallengeError{Code: billing.CodeDPoPNonceRequired, Headers: map[string]string{"DPoP-Nonce": "n1"}}))
+	require.Equal(t, "n1", w.Header().Get("DPoP-Nonce"), "the challenge reaches the client")
 
 	for _, mw := range []mws{
 		{self(delegated(), nil), PayerScopedRequired()},
@@ -127,7 +130,7 @@ func TestDelegatedAuthRefusals(t *testing.T) {
 }
 
 func TestDelegatedBinding(t *testing.T) {
-	w, seen := serveNeutral(t, "/v1/customers/x", nil, DelegatedSelfRequired(fakeResolver{resolved: delegated()}))
+	w, seen := serveNeutral(t, "/v1/customers/x", nil, ResourceCustomerRequired(fakeResolver{resolved: delegated()}))
 	require.Equal(t, http.StatusOK, w.Code)
 	got, _ := merchant.FromContext(seen.Request.Context())
 	require.Equal(t, testMerchant, got)
@@ -154,7 +157,7 @@ func TestDelegatedBinding(t *testing.T) {
 				r.Header.Set(merchant.SelectorHeader, tc.header)
 			}
 			*r = *r.WithContext(merchant.WithID(r.Context(), tc.bound))
-		}, DelegatedSelfRequired(fakeResolver{resolved: delegated()}))
+		}, ResourceCustomerRequired(fakeResolver{resolved: delegated()}))
 		require.Equal(t, tc.want, w.Code, "%s: %s", tc.header, w.Body.String())
 	}
 }

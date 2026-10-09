@@ -6,6 +6,9 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 
 | Code | Status | Type | Meaning |
 |---|---|---|---|
+| `access_token_invalid` | 401 | `authentication_error` | The access token is invalid, expired or not issued for this deployment. |
+| `access_token_issuer_unknown` | 401 | `authentication_error` | The access token's issuer is not trusted by this deployment. |
+| `access_token_merchant_not_bound` | 403 | `authorization_error` | The access token's issuer is not trusted for this merchant. |
 | `admission_captured` | 409 | `invalid_request_error` | The admission was captured; it can no longer be released. |
 | `admission_not_found` | 404 | `invalid_request_error` | No admission was made under this request id. |
 | `allowance_meter_not_found` | 404 | `invalid_request_error` | The rate card's allowance meter does not exist. |
@@ -69,13 +72,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `default_rate_card_required` | 409 | `invalid_request_error` | The meter needs a default rate card. |
-| `delegated_merchant_unresolved` | 403 | `authorization_error` | The delegated token's issuer resolves to no merchant. |
 | `delegated_principal_invalid` | 401 | `authentication_error` | The host's delegated principal names no usable merchant or subject. |
-| `delegated_token_expired` | 401 | `authentication_error` | The delegated access token has expired. |
-| `delegated_token_invalid` | 401 | `authentication_error` | The delegated access token is invalid. |
-| `delegated_token_revoked` | 401 | `authentication_error` | The delegated access token was revoked. |
-| `delegated_verification_unavailable` | 503 | `api_error` | Delegated tokens cannot be verified right now; retry. |
-| `email_unverified` | 403 | `authorization_error` | Creating a merchant needs a verified email. |
+| `email_unverified` | 403 | `authorization_error` | The operation needs a verified email. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
@@ -86,6 +84,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `idempotency_key_reused` | 409 | `invalid_request_error` | The idempotency key already committed with different terms. |
 | `insufficient_credits` | 402 | `card_error` | The customer's credit balance does not cover the operation. |
 | `insufficient_funds` | 402 | `card_error` | The payment instrument lacks funds. |
+| `insufficient_scope` | 403 | `authorization_error` | The access token was not granted the scope this surface requires. |
 | `internal_error` | 500 | `api_error` | OpenRails failed; request_id identifies the failure in its logs. |
 | `invalid_api_host` | 400 | `invalid_request_error` | api_host must be a bare lowercase domain name. |
 | `invalid_cursor` | 400 | `invalid_request_error` | The cursor is not one this list issued. |
@@ -231,6 +230,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |
 | `usage_rate_card_invalid` | 400 | `invalid_request_error` | The usage rate card is invalid. |
+| `use_dpop_nonce` | 401 | `authentication_error` | The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value. |
 | `webhook_account_mismatch` | 400 | `invalid_request_error` | The webhook's account does not match its payload. |
 | `webhook_invalid` | 400 | `invalid_request_error` | The outbound webhook is invalid. |
 | `widget_generation_invalid` | 422 | `invalid_request_error` | The model could not produce a valid query for the prompt. |
