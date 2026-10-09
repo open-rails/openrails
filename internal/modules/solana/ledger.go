@@ -428,3 +428,24 @@ func toInt64(v uint64) (int64, error) {
 	}
 	return int64(v), nil
 }
+
+// RecordOrphanedFirstPull surfaces a recurring first pull that landed for a
+// slot another subscription already holds: no membership is created for it,
+// so the operator refunds it and closes the on-chain subscription. Idempotent
+// per signature.
+func RecordOrphanedFirstPull(ctx context.Context, database *db.DB, now time.Time, signature string, late LateSettlement) error {
+	return alerting.RecordLedgerRepair(ctx, database, now, alerting.LedgerRepair{
+		Provider:       string(models.RailSolana),
+		Operation:      "solana_subscribe_slot_taken",
+		TransactionID:  signature,
+		CustomerID:     late.UserID,
+		IdempotencyKey: "solana-subscribe-slot-taken:" + signature,
+		Err:            fmt.Errorf("first pull %s landed but the customer already holds this product's subscription; refund it", signature),
+		Metadata: map[string]any{
+			"checkout_attempt_id": strings.TrimSpace(late.SessionID),
+			"price_id":            late.PriceID,
+			"token":               late.Token,
+			"token_amount":        strconv.FormatUint(late.TokenAmount, 10),
+		},
+	})
+}

@@ -1,10 +1,12 @@
 package subscriptions
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -185,4 +187,15 @@ func PaidRunwayRefusal(sub *models.Subscription, now time.Time) error {
 		return apperr.New(http.StatusConflict, billing.CodeSubscriptionResumable, fmt.Sprintf("the customer's canceled subscription %s to this product is paid through %s; resume it instead of buying again", billing.SubscriptionID(sub.ID), end))
 	}
 	return apperr.New(http.StatusConflict, billing.CodeSubscriptionPaidThrough, fmt.Sprintf("the customer's canceled subscription %s to this product is paid through %s; buy again once it ends", billing.SubscriptionID(sub.ID), end))
+}
+
+// IsMembershipSlotTaken reports whether creating a membership failed because
+// the customer's product or tier-group slot is already held.
+func IsMembershipSlotTaken(err error) bool {
+	if errors.Is(err, ErrMembershipSlotTaken) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		(pgErr.ConstraintName == "subscriptions_customer_id_product_id_key" || pgErr.ConstraintName == "subscriptions_customer_id_tier_group_key")
 }

@@ -1,6 +1,7 @@
 package subscriptions
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -18,6 +19,10 @@ var (
 	// ErrRebillTermsCommitted prevents a price mutation from revoking an accepted
 	// renewal whose provider preparation or money submission may have occurred.
 	ErrRebillTermsCommitted = apperr.New(http.StatusConflict, "rebill_terms_committed", "accepted recurring payment owns the pending price terms")
+
+	// ErrMembershipSlotTaken: the customer already holds a subscription of the
+	// product or its tier group (or one whose provider stop is pending).
+	ErrMembershipSlotTaken = errors.New("membership slot taken")
 
 	// ErrRenewalInProgress refuses a cancel while an accepted renewal payment is
 	// unresolved; the cancel succeeds once the payment resolves.

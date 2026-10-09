@@ -441,7 +441,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"existing_rail":            activeSub.Rail,
 			"rail_subscription_id":     activeSub.RailSubscriptionID,
 		}).Warn("User already has an active, pending, or past_due subscription for this product; aborting membership creation")
-		return nil, nil, fmt.Errorf("user already has an active, pending, or past_due subscription for this product")
+		return nil, nil, fmt.Errorf("%w: user already has an active, pending, or past_due subscription for this product", ErrMembershipSlotTaken)
 	}
 
 	now := s.now()

@@ -31,3 +31,17 @@ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(custo
  AND s.status='canceled' AND s.current_period_ends_at > sqlc.arg(now)::timestamptz AND s.deleted_at IS NULL
  AND s.cancel_type NOT IN ('chargeback','upgrade')
 ORDER BY s.current_period_ends_at DESC, s.id LIMIT 1;
+
+-- name: GetConflictingSubscribeAttempt :one
+-- A Solana subscribe awaiting its wallet's signature for the same product or
+-- tier group: its first pull may still land, so it holds the customer's slot
+-- while its quote can still settle.
+SELECT ca.id FROM billing.checkout_attempts ca
+JOIN billing.prices pr ON pr.merchant_id=ca.merchant_id AND pr.id=ca.price_id
+JOIN billing.products existing ON existing.merchant_id=pr.merchant_id AND existing.id=pr.product_id
+JOIN billing.products accepted ON accepted.merchant_id=ca.merchant_id AND accepted.id=sqlc.arg(product_id)::uuid
+WHERE ca.merchant_id=sqlc.arg(merchant_id)::uuid AND ca.customer_id=sqlc.arg(customer_id)::uuid
+ AND ca.mode='subscription' AND ca.rail='solana' AND ca.status IN ('created','requires_action')
+ AND ca.expires_at > sqlc.arg(open_after)::timestamptz AND ca.id <> sqlc.arg(except_id)::uuid AND ca.deleted_at IS NULL
+ AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
+ORDER BY ca.id LIMIT 1;

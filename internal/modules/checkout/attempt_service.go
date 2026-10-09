@@ -655,8 +655,11 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 			return NewCheckoutAttemptRepo(s.db.NewWithPgxTx(tx)).Create(ctx, session)
 		})
 	}
-	if mode == models.CheckoutAttemptModeOneOff {
+	switch {
+	case mode == models.CheckoutAttemptModeOneOff:
 		create = s.admitPurchaseSession
+	case mode == models.CheckoutAttemptModeSubscription && rail == string(models.RailSolana):
+		create = s.admitSolanaSubscribeSession
 	}
 	if err := create(ctx, session); err != nil {
 		s.discardEnrollmentCard(ctx, vaulted)
@@ -1342,7 +1345,8 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		}
 		session.Status = models.CheckoutAttemptStatusRequiresAction
 		session.Reference = &result.Reference
-		session.ExpiresAt = &result.ExpiresAt
+		open := solanaSettleDeadline(result.QuoteExpiresAt)
+		session.ExpiresAt = &open
 		if session.RailState == nil {
 			session.RailState = map[string]any{}
 		}
@@ -1393,7 +1397,8 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		}
 		session.Status = models.CheckoutAttemptStatusRequiresAction
 		expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
-		session.ExpiresAt = &expiresAt
+		open := solanaSettleDeadline(expiresAt)
+		session.ExpiresAt = &open
 		if session.RailState == nil {
 			session.RailState = map[string]any{}
 		}
@@ -1745,6 +1750,13 @@ func (s *CheckoutAttemptService) enrollSolanaSubscription(ctx context.Context, s
 		in.ValidUntil = *session.ExpiresAt
 	}
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, in)
+	if subscriptions.IsMembershipSlotTaken(err) && s.db != nil {
+		if aerr := solanamodule.RecordOrphanedFirstPull(ctx, s.db, s.now().UTC(), signature, solanamodule.LateSettlement{
+			UserID: in.UserID, PriceID: in.PriceID.String(), SessionID: session.ID.String(), Token: in.MintSymbol, TokenAmount: in.AmountBaseUnits,
+		}); aerr != nil {
+			return nil, errors.Join(err, aerr)
+		}
+	}
 	var late *recurring.LatePaymentError
 	if errors.As(err, &late) && s.db != nil {
 		if aerr := solanamodule.RecordLateSettlement(ctx, s.db, late.LandedAt, in.Reference, signature, solanamodule.LateSettlement{
@@ -1984,6 +1996,16 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 			resp.ExpiresAt = nil
 			resp.Message = "The original payment outcome is being verified. Keep this checkout attempt."
 		}
+	}
+
+	// A one-off Solana quote that expired unpaid offers nothing more, but its
+	// reference still credits a transfer already sent: the buyer waits rather
+	// than paying again.
+	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Rail == models.RailSolana && session.Mode != models.CheckoutAttemptModeSubscription &&
+		session.Status == models.CheckoutAttemptStatusRequiresAction && s.now().After(quote) {
+		resp.Status = "processing"
+		resp.Message = "Waiting for a transfer that may still arrive. Do not pay again."
+		return resp
 	}
 
 	if action := s.buildNextAction(resp); action != nil {
@@ -2522,8 +2544,12 @@ func (s *CheckoutAttemptService) GetSessionForSolanaPay(ctx context.Context, ses
 		return nil, ErrCheckoutAttemptNotSolana
 	}
 
-	// Check if expired
+	// Check if expired: a one-off quote is offered only until it expires,
+	// though its reference keeps crediting a transfer already sent.
 	if session.ExpiresAt != nil && s.now().After(*session.ExpiresAt) {
+		return nil, ErrCheckoutAttemptExpired
+	}
+	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Mode != models.CheckoutAttemptModeSubscription && s.now().After(quote) {
 		return nil, ErrCheckoutAttemptExpired
 	}
 
@@ -2579,8 +2605,12 @@ func (s *CheckoutAttemptService) BuildSolanaPayTransaction(ctx context.Context, 
 		return nil, ErrCheckoutAttemptNotSolana
 	}
 
-	// Check if expired
+	// Check if expired: a one-off quote is offered only until it expires,
+	// though its reference keeps crediting a transfer already sent.
 	if session.ExpiresAt != nil && s.now().After(*session.ExpiresAt) {
+		return nil, ErrCheckoutAttemptExpired
+	}
+	if quote, ok := solanaQuoteExpiresAt(session); ok && session.Mode != models.CheckoutAttemptModeSubscription && s.now().After(quote) {
 		return nil, ErrCheckoutAttemptExpired
 	}
 
@@ -2703,7 +2733,9 @@ func (s *CheckoutAttemptService) registerSolanaReference(ctx context.Context, ki
 		return gen.BillingSolanaPayReference{}, fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutAttemptValidation)
 	}
 	expires := s.now().Add(defaultCheckoutAttemptTTL)
-	if session.ExpiresAt != nil {
+	if quote, ok := solanaQuoteExpiresAt(session); ok {
+		expires = quote
+	} else if session.ExpiresAt != nil {
 		expires = *session.ExpiresAt
 	}
 	ref, err := s.solanaPayService.RegisterReference(ctx, kind, session.ID, *session.Reference, expires)
@@ -2881,4 +2913,21 @@ func (s *CheckoutAttemptService) ConfirmSolanaSubscribeSession(ctx context.Conte
 		return err
 	}
 	return s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, sub.ID, true)
+}
+
+// solanaSettleDeadline: a Solana one-off attempt stays open while its
+// reference still credits a transfer, so it never reads expired while it can
+// still be paid.
+func solanaSettleDeadline(quoteExpiresAt time.Time) time.Time {
+	return quoteExpiresAt.Add(solana.LateSettlementWindow)
+}
+
+// solanaQuoteExpiresAt is when the attempt's Solana quote stops being offered.
+func solanaQuoteExpiresAt(session *models.CheckoutAttempt) (time.Time, bool) {
+	raw := getStringField(session.RailState, "quote_expires_at")
+	if raw == "" {
+		return time.Time{}, false
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	return at, err == nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -97,6 +98,11 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
+		}
+		if _, err := d.Gen(ctx).GetConflictingSubscribeAttempt(ctx, gen.GetConflictingSubscribeAttemptParams{ProductID: terms.Terms.ProductID, MerchantID: p.MerchantID, CustomerID: customer, OpenAfter: terms.Terms.AcceptedAt.Add(-solana.LateSettlementWindow), ExceptID: uuid.Nil}); err == nil {
+			return apperr.Conflictf("a Solana subscription to this product or tier group awaits its first payment")
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return err
 		}
 		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
 		if err == nil {

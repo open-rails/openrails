@@ -129,6 +129,42 @@ func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Contex
 	return i, err
 }
 
+const getConflictingSubscribeAttempt = `-- name: GetConflictingSubscribeAttempt :one
+SELECT ca.id FROM billing.checkout_attempts ca
+JOIN billing.prices pr ON pr.merchant_id=ca.merchant_id AND pr.id=ca.price_id
+JOIN billing.products existing ON existing.merchant_id=pr.merchant_id AND existing.id=pr.product_id
+JOIN billing.products accepted ON accepted.merchant_id=ca.merchant_id AND accepted.id=$1::uuid
+WHERE ca.merchant_id=$2::uuid AND ca.customer_id=$3::uuid
+ AND ca.mode='subscription' AND ca.rail='solana' AND ca.status IN ('created','requires_action')
+ AND ca.expires_at > $4::timestamptz AND ca.id <> $5::uuid AND ca.deleted_at IS NULL
+ AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
+ORDER BY ca.id LIMIT 1
+`
+
+type GetConflictingSubscribeAttemptParams struct {
+	ProductID  uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	OpenAfter  time.Time
+	ExceptID   uuid.UUID
+}
+
+// A Solana subscribe awaiting its wallet's signature for the same product or
+// tier group: its first pull may still land, so it holds the customer's slot
+// while its quote can still settle.
+func (q *Queries) GetConflictingSubscribeAttempt(ctx context.Context, arg GetConflictingSubscribeAttemptParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getConflictingSubscribeAttempt,
+		arg.ProductID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.OpenAfter,
+		arg.ExceptID,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getPaidRunwaySubscription = `-- name: GetPaidRunwaySubscription :one
 SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.scheduled_price_id, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity FROM billing.subscriptions s
 JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
