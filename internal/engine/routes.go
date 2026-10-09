@@ -107,5 +107,6 @@ func console(cfg *config.Config, assets fs.FS) (http.Handler, error) {
 		AskEnabled:             config.LLMAskConfigured(cfg.LLM),
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
+		NewMerchantURL:         cfg.AdminConsole.NewMerchantURL,
 	}, assets)
 }

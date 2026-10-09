@@ -27,6 +27,9 @@ export interface BootstrapConfig {
   // #779 Phase 2 gate (llm.catalog_drafting_enabled): false hides the
   // drafting affordances and leaves the copilot panel in Q&A-only mode.
   catalog_drafting_enabled: boolean
+  // The host page behind "New merchant" (AdminConsoleConfig.NewMerchantURL);
+  // empty hides the action, as on a standalone deployment.
+  new_merchant_url: string
 }
 
 let bootstrapConfig: BootstrapConfig | null = null
@@ -60,6 +63,26 @@ export function selectedMerchant(): string | undefined {
 export function setSelectedMerchant(slug: string | undefined) {
   if (slug) sessionStorage.setItem(MERCHANT_KEY, slug)
   else sessionStorage.removeItem(MERCHANT_KEY)
+}
+
+// takeMerchantFromHash consumes #merchant=<slug>, the link a host opens the
+// console with (e.g. right after creating that merchant), and drops it from
+// the address bar. Membership is checked by the caller.
+export function takeMerchantFromHash(
+  location: Location = window.location,
+  history: History = window.history
+): string | undefined {
+  const params = new URLSearchParams(location.hash.slice(1))
+  const slug = params.get("merchant")?.trim()
+  if (!params.has("merchant")) return undefined
+  params.delete("merchant")
+  const rest = params.toString()
+  history.replaceState(
+    history.state,
+    "",
+    `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`
+  )
+  return slug || undefined
 }
 
 const unguarded: Guard = (action) => action()

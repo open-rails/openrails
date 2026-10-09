@@ -44,6 +44,9 @@ type Config struct {
 	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
 	// the copilot panel stays Q&A-only.
 	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
+	// NewMerchantURL is AdminConsoleConfig.NewMerchantURL: the host page behind
+	// the console's "New merchant" action. Empty hides the action.
+	NewMerchantURL string `json:"new_merchant_url"`
 }
 
 // Present reports whether assets hold a servable console build: a non-nil

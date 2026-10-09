@@ -6,7 +6,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useAuth as useSession } from "@openrails/auth-ui/react"
 import type { UserProfile } from "@openrails/auth-ui/client"
 
-import { api, selectedMerchant, setSelectedMerchant } from "@/lib/api/client"
+import {
+  api,
+  selectedMerchant,
+  setSelectedMerchant,
+  takeMerchantFromHash,
+} from "@/lib/api/client"
 import type {
   MerchantMembership,
   MerchantMembershipList,
@@ -17,6 +22,8 @@ export interface ConsoleAuth {
   // The session has settled and, when signed in, the merchants are known.
   ready: boolean
   signedIn: boolean
+  // The merchant list could not be loaded: not the same as having none.
+  merchantsFailed: boolean
   me: UserProfile | null
   merchants: MerchantMembership[]
   activeMerchant?: MerchantMembership
@@ -29,11 +36,21 @@ const EMPTY_MERCHANTS: MerchantMembership[] = []
 export const clearMerchantQueries = () =>
   queryClient.removeQueries({ queryKey: ["merchant"] })
 
-// The user's merchants, sorted; the selected one is kept when it is still
-// theirs, else the first becomes the merchant requests are made as.
+// A merchant the console was opened on (#merchant=<slug>), read before any
+// redirect drops the hash and applied once the user's merchants are known.
+let requestedMerchant =
+  typeof window === "undefined" ? undefined : takeMerchantFromHash()
+
+// The user's merchants, sorted; a requested merchant wins when it is theirs,
+// then the selected one, else the first becomes the merchant requests are made
+// as.
 export async function loadMerchants(): Promise<MerchantMembership[]> {
   const list = await api<MerchantMembershipList>("/merchants")
   const merchants = [...list.data].sort((a, b) => a.slug.localeCompare(b.slug))
+  if (merchants.some((merchant) => merchant.slug === requestedMerchant)) {
+    setSelectedMerchant(requestedMerchant)
+  }
+  requestedMerchant = undefined
   const selected = selectedMerchant()
   if (!merchants.some((merchant) => merchant.slug === selected)) {
     setSelectedMerchant(merchants[0]?.slug)
@@ -76,6 +93,7 @@ export function useAuth(): ConsoleAuth {
     ready:
       session.status === "signed_out" || (signedIn && !membership.isPending),
     signedIn,
+    merchantsFailed: membership.isError,
     me: signedIn ? session.user : null,
     merchants,
     activeMerchant: merchants.find((merchant) => merchant.slug === active),

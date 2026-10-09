@@ -386,6 +386,11 @@ type AdminConsoleConfig struct {
 	// APIBaseURL is the base of the merchant API. Empty is "/v1"; embedded
 	// hosts typically use "/billing/v1".
 	APIBaseURL string
+	// NewMerchantURL is where the console's "New merchant" action sends the
+	// user: a host page that creates a merchant and returns to the console
+	// with #merchant=<slug>. Empty hides the action; the engine has no
+	// self-service merchant creation, so standalone leaves it unset.
+	NewMerchantURL string
 }
 
 // AdminConsoleEnabled reports whether the admin console SPA should be served.
@@ -403,6 +408,19 @@ func AdminConsoleMountPath(c *AdminConsoleConfig) string {
 }
 
 var adminConsolePathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+// validateNewMerchantURL accepts a same-origin absolute path ("/merchants/new")
+// or an https URL: the console navigates to it, so it must not be a
+// protocol-relative or script URL.
+func validateNewMerchantURL(raw string) error {
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") && !strings.ContainsAny(raw, "\\\r\n") {
+		return nil
+	}
+	if u, err := url.Parse(raw); err == nil && u.Scheme == "https" && u.Host != "" {
+		return nil
+	}
+	return fmt.Errorf("invalid admin_console.new_merchant_url %q: want an absolute path like /merchants/new or an https URL", raw)
+}
 
 // validateAdminConsolePath accepts one or more slash-led segments of RFC 3986
 // unreserved characters, none of them "." or "..": the value lands in route
@@ -1143,6 +1161,11 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.AdminConsole != nil && cfg.AdminConsole.Path != "" {
 		if err := validateAdminConsolePath(cfg.AdminConsole.Path); err != nil {
+			return err
+		}
+	}
+	if cfg.AdminConsole != nil && cfg.AdminConsole.NewMerchantURL != "" {
+		if err := validateNewMerchantURL(cfg.AdminConsole.NewMerchantURL); err != nil {
 			return err
 		}
 	}

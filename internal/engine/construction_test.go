@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -219,7 +220,20 @@ func TestAdminConsoleServesHostAssets(t *testing.T) {
 	require.Equal(t, `<!doctype html><base href="/billing/admin/">host build`, rec.Body.String())
 	rec = httptest.NewRecorder()
 	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/config.json", nil))
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false}`, rec.Body.String())
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"new_merchant_url":""}`, rec.Body.String())
+
+	// A host's merchant-creation page reaches the console only through config.json.
+	hosted := cfg(true)
+	hosted.AdminConsole.NewMerchantURL = "/merchants/new"
+	on, err = console(hosted, assets)
+	require.NoError(t, err)
+	rec = httptest.NewRecorder()
+	on.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/billing/admin/config.json", nil))
+	var boot struct {
+		NewMerchantURL string `json:"new_merchant_url"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &boot))
+	require.Equal(t, "/merchants/new", boot.NewMerchantURL)
 }
 
 // Host transactions run under the engine's merchant; a caller context pinned

@@ -108,6 +108,32 @@ func TestValidateAdminConsolePath(t *testing.T) {
 	}
 }
 
+// The console navigates to NewMerchantURL, so only a same-origin path or an
+// https URL may reach it.
+func TestValidateNewMerchantURL(t *testing.T) {
+	for raw, ok := range map[string]bool{
+		"":                                    true,
+		"/merchants/new":                      true,
+		"/merchants/new?from=console":         true,
+		"https://openrails.dev/merchants/new": true,
+		"merchants/new":                       false,
+		"//evil.example/new":                  false,
+		`/\evil.example`:                      false,
+		"javascript:alert(1)":                 false,
+		"http://openrails.dev/new":            false,
+		"https:///new":                        false,
+		"/new\r\nX: y":                        false,
+	} {
+		cfg := validConfig()
+		cfg.AdminConsole = &AdminConsoleConfig{NewMerchantURL: raw}
+		if err := Validate(cfg); ok {
+			require.NoError(t, err, raw)
+		} else {
+			require.ErrorContains(t, err, "invalid admin_console.new_merchant_url", raw)
+		}
+	}
+}
+
 func TestPostureAccessorsFailClosed(t *testing.T) {
 	for _, row := range []struct {
 		mode              string
