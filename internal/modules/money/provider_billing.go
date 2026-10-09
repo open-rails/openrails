@@ -111,6 +111,7 @@ type normalizedProviderBillingRecord struct {
 }
 
 type preparedProviderBillingObservation struct {
+	rawBody                 []byte // never nil: raw_body_bytes is NOT NULL
 	rawDigest               [sha256.Size]byte
 	rawAvailable            bool
 	normalizedRecords       []byte
@@ -258,7 +259,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		QueryStartsAt:           in.QueryStartsAt,
 		QueryEndsAt:             in.QueryEndsAt,
 		RawBodyAvailable:        prepared.rawAvailable,
-		RawBodyBytes:            in.RawBody,
+		RawBodyBytes:            prepared.rawBody,
 		RawBodyDigest:           prepared.rawDigest[:],
 		NormalizedRecordsBytes:  prepared.normalizedRecords,
 		NormalizedRecordsDigest: nullableDigest(prepared),
@@ -451,9 +452,13 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 
 func prepareProviderBillingObservation(in ProviderBillingObservationInput) (preparedProviderBillingObservation, error) {
 	prepared := preparedProviderBillingObservation{
+		rawBody:        in.RawBody,
 		rawDigest:      sha256.Sum256(in.RawBody),
 		rawAvailable:   len(in.RawBody) > 0,
 		coversLifetime: !in.QueryStartsAt.After(in.Lifecycle.ProviderLifetimeStartsAt) && !in.QueryEndsAt.Before(in.Lifecycle.ProviderLifetimeEndsAt),
+	}
+	if prepared.rawBody == nil {
+		prepared.rawBody = []byte{}
 	}
 	if in.Refusal != nil {
 		kind := string(in.Refusal.Kind)
