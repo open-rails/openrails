@@ -213,6 +213,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |
 | `subscription_not_active` | 409 | `invalid_request_error` | The subscription is not active. |
 | `subscription_not_found` | 404 | `invalid_request_error` | The subscription does not exist. |
+| `subscription_paid_through` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid; buy again once its paid period ends. |
+| `subscription_resumable` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again. |
 | `tier_change_already_scheduled` | 409 | `invalid_request_error` | A different period-end change is already scheduled. |
 | `tier_change_cadence_unsupported` | 409 | `invalid_request_error` | A provider-billed subscription can change only to a price of the same cadence. |
 | `tier_change_credit_exceeds_price` | 409 | `invalid_request_error` | The current plan's unused value exceeds the target price; change at period end. |

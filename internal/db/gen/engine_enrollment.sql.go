@@ -7,6 +7,7 @@ package gen
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -85,6 +86,75 @@ type GetConflictingInitialEnrollmentSubscriptionParams struct {
 // A canceled subscription whose provider stop is unverified still bills.
 func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Context, arg GetConflictingInitialEnrollmentSubscriptionParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getConflictingInitialEnrollmentSubscription, arg.ProductID, arg.MerchantID, arg.CustomerID)
+	var i BillingSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.CollectionPolicy,
+		&i.RailSubscriptionID,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CanceledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.TransientRetries,
+		&i.LifecycleRev,
+		&i.RowVersion,
+		&i.DunningPolicy,
+		&i.AccessDurationHoursSnapshot,
+	)
+	return i, err
+}
+
+const getPaidRunwaySubscription = `-- name: GetPaidRunwaySubscription :one
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.scheduled_price_id, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot FROM billing.subscriptions s
+JOIN billing.products accepted ON accepted.merchant_id=s.merchant_id AND accepted.id=$1::uuid
+JOIN billing.products existing ON existing.merchant_id=s.merchant_id AND existing.id=s.product_id
+WHERE s.merchant_id=$2::uuid AND s.customer_id=$3::uuid
+ AND (s.product_id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
+ AND s.status='canceled' AND s.current_period_ends_at > $4::timestamptz AND s.deleted_at IS NULL
+ AND s.cancel_type NOT IN ('chargeback','upgrade')
+ORDER BY s.current_period_ends_at DESC, s.id LIMIT 1
+`
+
+type GetPaidRunwaySubscriptionParams struct {
+	ProductID  uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+}
+
+// A canceled subscription of the same product or tier group still paid
+// through a later instant: buying again now would pay twice for that runway.
+func (q *Queries) GetPaidRunwaySubscription(ctx context.Context, arg GetPaidRunwaySubscriptionParams) (BillingSubscription, error) {
+	row := q.db.QueryRow(ctx, getPaidRunwaySubscription,
+		arg.ProductID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+	)
 	var i BillingSubscription
 	err := row.Scan(
 		&i.ID,

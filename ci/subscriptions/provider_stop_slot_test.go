@@ -129,7 +129,7 @@ func TestCanceledInUndoWindowResumesInsteadOfBuyingAgain(t *testing.T) {
 
 // The kill switch parks the delete of an account deletion's cancel: checkout
 // stays refused for that product until the operator arms the merchant and the
-// delete runs.
+// delete runs, and then until the paid period ends.
 func TestDisarmedProviderStopHoldsSlot(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -150,9 +150,13 @@ func TestDisarmedProviderStopHoldsSlot(t *testing.T) {
 	w.armDestructive()
 	w.until(func() bool { return !w.nmi.ScheduleLive(l.railSub) }, "the held delete runs once armed")
 	w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the verified stop releases the slot")
+	_, err = l.reenroll(method)
+	requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionPaidThrough)
+	w.advanceHealthyTo(l.periodEnd().Add(time.Minute))
 	attempt, err := l.reenroll(method)
 	require.NoError(t, err)
 	require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
+	require.Len(t, w.nmi.Ledger(""), before+1, "one charge, after the paid period")
 }
 
 // A customer's cancel never races an accepted engine renewal whose outcome is

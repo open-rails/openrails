@@ -124,7 +124,11 @@ not cancel locally while the provider would keep charging.
 
 Until the provider confirms its schedule stopped, a canceled subscription keeps
 the customer's place in its product and tier group: buying it again answers
-`409 resource_conflict` (resume it instead, or buy once the stop completes). A
+`409 resource_conflict` (resume it instead, or buy once the stop completes).
+While a canceled subscription is still paid, buying its product or tier group
+again charges nothing: it answers `409 subscription_resumable` when the
+subscription can be resumed, else `409 subscription_paid_through` until its
+paid period ends. A
 charge the provider still takes after the cancel is refunded in full and
 raises a `life.charge_after_cancel` finding. An OpenRails-billed subscription
 whose renewal charge was sent and is not yet settled refuses a cancel with

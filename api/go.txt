@@ -753,6 +753,8 @@ pkg openrails/billing, const CodeServiceCredentialResourceScopeDenied untyped st
 pkg openrails/billing, const CodeServiceUnavailable untyped string = "service_unavailable"
 pkg openrails/billing, const CodeStepUpRequired untyped string = "step_up_required"
 pkg openrails/billing, const CodeStepUpUnavailable untyped string = "step_up_unavailable"
+pkg openrails/billing, const CodeSubscriptionPaidThrough untyped string = "subscription_paid_through"
+pkg openrails/billing, const CodeSubscriptionResumable untyped string = "subscription_resumable"
 pkg openrails/billing, const CodeTierChangeAlreadyScheduled untyped string = "tier_change_already_scheduled"
 pkg openrails/billing, const CodeTierChangeCadenceUnsupported untyped string = "tier_change_cadence_unsupported"
 pkg openrails/billing, const CodeTierChangeCreditExceedsPrice untyped string = "tier_change_credit_exceeds_price"

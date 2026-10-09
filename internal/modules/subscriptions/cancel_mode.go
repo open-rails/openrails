@@ -1,10 +1,14 @@
 package subscriptions
 
 import (
+	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // CancelMode describes how a subscription's cancellation behaves for a given
@@ -170,4 +174,15 @@ func CancelPortalURL(sub *models.Subscription, now time.Time) *string {
 		return nil
 	}
 	return &url
+}
+
+// PaidRunwayRefusal refuses buying a product again while a canceled
+// subscription of it is still paid: a resumable one is resumed instead, any
+// other is bought again once its paid period ends.
+func PaidRunwayRefusal(sub *models.Subscription, now time.Time) error {
+	end := sub.CurrentPeriodEndsAt.UTC().Format(time.RFC3339)
+	if Resumable(sub, now) {
+		return apperr.New(http.StatusConflict, billing.CodeSubscriptionResumable, fmt.Sprintf("the customer's canceled subscription %s to this product is paid through %s; resume it instead of buying again", billing.SubscriptionID(sub.ID), end))
+	}
+	return apperr.New(http.StatusConflict, billing.CodeSubscriptionPaidThrough, fmt.Sprintf("the customer's canceled subscription %s to this product is paid through %s; buy again once it ends", billing.SubscriptionID(sub.ID), end))
 }

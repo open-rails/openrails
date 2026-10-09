@@ -44,6 +44,15 @@ const (
 	CodeModelUnavailable = "model_unavailable"
 )
 
+// Refusals of buying a product again while a canceled subscription to it is
+// still paid; nothing is charged.
+const (
+	// CodeSubscriptionResumable: resume the canceled subscription instead.
+	CodeSubscriptionResumable = "subscription_resumable"
+	// CodeSubscriptionPaidThrough: buy again once its paid period ends.
+	CodeSubscriptionPaidThrough = "subscription_paid_through"
+)
+
 // Request-shape codes: the request never reached its operation.
 const (
 	// CodeUnknownField: the JSON body names a field the route does not
@@ -218,6 +227,8 @@ var errorCodes = []ErrorCode{
 	{"subscription_not_active", 409, invalid, "The subscription is not active."},
 	{"cancel_unsupported_on_rail", 400, invalid, "This rail has no cancel operation."},
 	{CodeProviderCancelHeld, 409, invalid, "Cancelling needs a destructive provider action that is not armed for this merchant."},
+	{CodeSubscriptionResumable, 409, invalid, "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again."},
+	{CodeSubscriptionPaidThrough, 409, invalid, "A canceled subscription to this product is still paid; buy again once its paid period ends."},
 	{"rebill_terms_committed", 409, invalid, "An accepted recurring payment owns the pending price terms."},
 	{CodeTierChangeInFlight, 409, invalid, "Another unresolved tier change owns the subscription; metadata.operation_id names it."},
 	{CodeTierChangeRefused, 409, invalid, "The tier change was refused and not executed."},

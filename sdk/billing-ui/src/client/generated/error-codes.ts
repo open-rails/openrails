@@ -208,6 +208,8 @@ export type OpenRailsErrorCode =
   | "step_up_unavailable"
   | "subscription_not_active"
   | "subscription_not_found"
+  | "subscription_paid_through"
+  | "subscription_resumable"
   | "tier_change_already_scheduled"
   | "tier_change_cadence_unsupported"
   | "tier_change_credit_exceeds_price"
@@ -448,6 +450,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   step_up_unavailable: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in and this credential cannot prove one." },
   subscription_not_active: { status: 409, type: "invalid_request_error", meaning: "The subscription is not active." },
   subscription_not_found: { status: 404, type: "invalid_request_error", meaning: "The subscription does not exist." },
+  subscription_paid_through: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid; buy again once its paid period ends." },
+  subscription_resumable: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again." },
   tier_change_already_scheduled: { status: 409, type: "invalid_request_error", meaning: "A different period-end change is already scheduled." },
   tier_change_cadence_unsupported: { status: 409, type: "invalid_request_error", meaning: "A provider-billed subscription can change only to a price of the same cadence." },
   tier_change_credit_exceeds_price: { status: 409, type: "invalid_request_error", meaning: "The current plan's unused value exceeds the target price; change at period end." },

@@ -283,7 +283,9 @@
           "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
-          "service_unavailable"
+          "service_unavailable",
+          "subscription_paid_through",
+          "subscription_resumable"
         ],
         "x-openrails-error-sets": [
           "tier:checkout_session"
@@ -360,7 +362,9 @@
           "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
-          "service_unavailable"
+          "service_unavailable",
+          "subscription_paid_through",
+          "subscription_resumable"
         ],
         "x-openrails-error-sets": [
           "tier:checkout_session",
@@ -572,7 +576,9 @@
           "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
-          "service_unavailable"
+          "service_unavailable",
+          "subscription_paid_through",
+          "subscription_resumable"
         ],
         "x-openrails-error-sets": [
           "tier:customer"
@@ -650,7 +656,9 @@
           "resource_access_denied",
           "resource_conflict",
           "resource_not_found",
-          "service_unavailable"
+          "service_unavailable",
+          "subscription_paid_through",
+          "subscription_resumable"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -27056,6 +27064,16 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The subscription does not exist."
+    },
+    "subscription_paid_through": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A canceled subscription to this product is still paid; buy again once its paid period ends."
+    },
+    "subscription_resumable": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again."
     },
     "tier_change_already_scheduled": {
       "status": 409,

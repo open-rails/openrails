@@ -85,6 +85,19 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if !terms.Upgrade() {
+			runway, err := d.Gen(ctx).GetPaidRunwaySubscription(ctx, gen.GetPaidRunwaySubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID, Now: terms.Terms.AcceptedAt})
+			if err == nil {
+				sub, err := models.SubscriptionFromGen(runway)
+				if err != nil {
+					return err
+				}
+				return subscriptions.PaidRunwayRefusal(sub, terms.Terms.AcceptedAt)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
 		if err == nil {
 			return apperr.Conflictf("another enrollment of this product or tier group is unresolved")
