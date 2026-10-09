@@ -18,6 +18,7 @@ pkg openrails, const SecretBackendSnapshot untyped string = "snapshot"
 pkg openrails, const SecretBackendVault untyped string = "vault"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
+pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
 pkg openrails, func ForMerchantID(billing.MerchantID) RequestOption
 pkg openrails, func MachinePermissions() []string
 pkg openrails, func New(context.Context, Config, Deps, ...ClientOption) (*Client, error)
@@ -472,6 +473,10 @@ pkg openrails/adapters/gin, func Mount(*gin.Engine, *openrails.Client, openrails
 pkg openrails/adapters/gin, func MountRoutes(*gin.Engine, []openrails.Route) error
 pkg openrails/adapters/http, func CheckoutFramePolicy(*openrails.Client) func(http.Handler) http.Handler
 pkg openrails/adapters/http, func Mount(any, *openrails.Client, openrails.Routes) error
+pkg openrails/billing, const AccessChangeGained AccessChangeKind = "gained"
+pkg openrails/billing, const AccessChangeLost AccessChangeKind = "lost"
+pkg openrails/billing, const AccessNoteMixedDuration AccessNoteKind = "mixed_duration"
+pkg openrails/billing, const AccessNoteUnmapped AccessNoteKind = "unmapped"
 pkg openrails/billing, const AdmissionBlockedByAbuse AdmissionBlock = "abuse"
 pkg openrails/billing, const AdmissionBlockedByBudget AdmissionBlock = "budget"
 pkg openrails/billing, const AdmissionBlockedByMoney AdmissionBlock = "money"
@@ -930,6 +935,7 @@ pkg openrails/billing, method (*StatusError) Error() string
 pkg openrails/billing, method (*StatusError) Is(error) bool
 pkg openrails/billing, method (*SubscriptionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*UsageEventID) UnmarshalText([]byte) error
+pkg openrails/billing, method (AccessCutoverReport) Unapproved() int
 pkg openrails/billing, method (AdmissionVerdict) Allowed() bool
 pkg openrails/billing, method (AlertWebhookID) IsZero() bool
 pkg openrails/billing, method (AlertWebhookID) MarshalText() ([]byte, error)
@@ -1072,6 +1078,24 @@ pkg openrails/billing, type APIKey struct, Name string `json:"name"`
 pkg openrails/billing, type APIKey struct, Prefix string `json:"prefix"`
 pkg openrails/billing, type APIKey struct, RevokedAt *time.Time `json:"revoked_at"`
 pkg openrails/billing, type APIKey struct, Role string `json:"role"`
+pkg openrails/billing, type AccessChange struct
+pkg openrails/billing, type AccessChange struct, Approved bool `json:"approved"`
+pkg openrails/billing, type AccessChange struct, Change AccessChangeKind `json:"change"`
+pkg openrails/billing, type AccessChange struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type AccessChange struct, Entitlement string `json:"entitlement"`
+pkg openrails/billing, type AccessChange struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type AccessChangeKind string
+pkg openrails/billing, type AccessCutoverReport struct
+pkg openrails/billing, type AccessCutoverReport struct, Changes []AccessChange `json:"changes"`
+pkg openrails/billing, type AccessCutoverReport struct, Notes []AccessNote `json:"notes"`
+pkg openrails/billing, type AccessNote struct
+pkg openrails/billing, type AccessNote struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type AccessNote struct, Entitlements []string `json:"entitlements"`
+pkg openrails/billing, type AccessNote struct, MerchantID MerchantID `json:"merchant_id"`
+pkg openrails/billing, type AccessNote struct, Note AccessNoteKind `json:"note"`
+pkg openrails/billing, type AccessNote struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type AccessNote struct, SourceType string `json:"source_type"`
+pkg openrails/billing, type AccessNoteKind string
 pkg openrails/billing, type AcknowledgeHostEventsParams struct
 pkg openrails/billing, type AcknowledgeHostEventsParams struct, HostEventIDs []HostEventID `json:"host_event_ids"`
 pkg openrails/billing, type Admission struct

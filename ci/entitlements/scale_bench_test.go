@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/migrate"
 )
 
 // timing is p50 and p99 of a path's wall time, through the embedded client.
@@ -181,7 +181,8 @@ func TestAccessCutoverScaleBenchmark(t *testing.T) {
 	}
 	ctx := t.Context()
 	pool, schema := cutoverSchema(t, os.Getenv("OPENRAILS_E2E_DSN"))
-	_, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "")
+	database := openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}
+	_, err := openrails.AccessCutoverPreflight(ctx, pool, database, "")
 	require.NoError(t, err)
 	s := pgx.Identifier{schema}.Sanitize()
 	merchant := uuid.New()
@@ -219,7 +220,7 @@ func TestAccessCutoverScaleBenchmark(t *testing.T) {
 	var windows int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM "+s+".entitlements").Scan(&windows))
 	began := time.Now()
-	report, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "")
+	report, err := openrails.AccessCutoverPreflight(ctx, pool, database, "")
 	require.NoError(t, err)
 	preflight := time.Since(began)
 	require.Empty(t, report.Changes)

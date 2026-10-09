@@ -7,11 +7,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -21,53 +21,14 @@ import (
 // truth. It refuses any access change an operator has not approved.
 const accessCutover = "0020_product_access_cutover.up.sql"
 
-// AccessChange is one key whose access the cutover changes for a customer
-// from now on: lost (their product dropped it after they got it) or gained.
-type AccessChange struct {
-	MerchantID  uuid.UUID `json:"merchant_id"`
-	CustomerID  uuid.UUID `json:"customer_id"`
-	Entitlement string    `json:"entitlement"`
-	Change      string    `json:"change"`
-	Approved    bool      `json:"approved"`
-}
-
-// AccessNote explains a conversion besides key changes: live windows it could
-// not carry (unmapped) and purchases whose keys had different durations
-// (mixed_duration: they keep the longest).
-type AccessNote struct {
-	MerchantID   uuid.UUID `json:"merchant_id"`
-	CustomerID   uuid.UUID `json:"customer_id"`
-	Note         string    `json:"note"`
-	SourceType   string    `json:"source_type"`
-	SourceID     string    `json:"source_id"`
-	Entitlements []string  `json:"entitlements"`
-}
-
-// AccessCutoverReport is what the cutover would change, per customer and key.
-type AccessCutoverReport struct {
-	Changes []AccessChange `json:"changes"`
-	Notes   []AccessNote   `json:"notes"`
-}
-
-// Unapproved counts the changes the cutover would refuse.
-func (r AccessCutoverReport) Unapproved() int {
-	n := 0
-	for _, c := range r.Changes {
-		if !c.Approved {
-			n++
-		}
-	}
-	return n
-}
-
 var errDryRun = errors.New("dry run")
 
 // AccessCutoverPreflight applies the migrations before the cutover and
 // dry-runs it for every merchant, in transactions it rolls back. With
 // approvedBy, it records every listed change as approved, so the cutover
 // applies exactly this report.
-func AccessCutoverPreflight(ctx context.Context, pool *pgxpool.Pool, schema, approvedBy string) (AccessCutoverReport, error) {
-	report := AccessCutoverReport{Changes: []AccessChange{}, Notes: []AccessNote{}}
+func AccessCutoverPreflight(ctx context.Context, pool *pgxpool.Pool, schema, approvedBy string) (billing.AccessCutoverReport, error) {
+	report := billing.AccessCutoverReport{Changes: []billing.AccessChange{}, Notes: []billing.AccessNote{}}
 	if pool == nil {
 		return report, fmt.Errorf("missing postgres pool")
 	}
@@ -131,11 +92,11 @@ func AccessCutoverPreflight(ctx context.Context, pool *pgxpool.Pool, schema, app
 				approved[[3]string{a.CustomerID.String(), a.Entitlement, a.Change}] = true
 			}
 			for _, c := range changes {
-				report.Changes = append(report.Changes, AccessChange{MerchantID: merchant, CustomerID: c.CustomerID, Entitlement: c.Entitlement, Change: c.Change,
+				report.Changes = append(report.Changes, billing.AccessChange{MerchantID: billing.MerchantID(merchant), CustomerID: billing.CustomerID(c.CustomerID), Entitlement: c.Entitlement, Change: billing.AccessChangeKind(c.Change),
 					Approved: approved[[3]string{c.CustomerID.String(), c.Entitlement, c.Change}]})
 			}
 			for _, n := range notes {
-				report.Notes = append(report.Notes, AccessNote{MerchantID: merchant, CustomerID: n.CustomerID, Note: n.Note, SourceType: n.SourceType, SourceID: n.SourceID, Entitlements: n.Entitlements})
+				report.Notes = append(report.Notes, billing.AccessNote{MerchantID: billing.MerchantID(merchant), CustomerID: billing.CustomerID(n.CustomerID), Note: billing.AccessNoteKind(n.Note), SourceType: n.SourceType, SourceID: n.SourceID, Entitlements: n.Entitlements})
 			}
 			return errDryRun
 		})
@@ -151,7 +112,7 @@ func AccessCutoverPreflight(ctx context.Context, pool *pgxpool.Pool, schema, app
 		if c.Approved {
 			continue
 		}
-		if err := q.ApproveAccessCutoverChange(ctx, gen.ApproveAccessCutoverChangeParams{MerchantID: c.MerchantID, CustomerID: c.CustomerID, Entitlement: c.Entitlement, Change: c.Change, ApprovedBy: approvedBy}); err != nil {
+		if err := q.ApproveAccessCutoverChange(ctx, gen.ApproveAccessCutoverChangeParams{MerchantID: c.MerchantID.UUID(), CustomerID: c.CustomerID.UUID(), Entitlement: c.Entitlement, Change: string(c.Change), ApprovedBy: approvedBy}); err != nil {
 			return report, err
 		}
 		report.Changes[i].Approved = true

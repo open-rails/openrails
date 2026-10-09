@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/migrate"
 )
@@ -27,4 +29,17 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg config.Config) error {
 		return err
 	}
 	return migrate.Apply(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema})
+}
+
+// AccessCutoverPreflight dry-runs, and with approvedBy approves, the cutover to
+// product access in the schema cfg names (migrate.AccessCutoverPreflight).
+func AccessCutoverPreflight(ctx context.Context, pool *pgxpool.Pool, cfg config.Config, approvedBy string) (billing.AccessCutoverReport, error) {
+	if pool == nil {
+		return billing.AccessCutoverReport{}, fmt.Errorf("openrails: AccessCutoverPreflight requires a Postgres pool")
+	}
+	schema := config.SchemaName(&cfg)
+	if !validIdentifier(schema) {
+		return billing.AccessCutoverReport{}, fmt.Errorf("openrails: invalid database schema %q", schema)
+	}
+	return migrate.AccessCutoverPreflight(ctx, pool, schema, strings.TrimSpace(approvedBy))
 }

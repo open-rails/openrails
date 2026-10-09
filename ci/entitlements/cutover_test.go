@@ -16,20 +16,29 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/migrate"
 )
 
 // The cutover to product access runs only as its preflight listed and an
-// operator approved: it lists exactly whose access changes, refuses while a
-// change is unapproved, and then converts per-key windows to the products
-// that grant them.
+// operator approved: a host's binary runs the preflight, which lists exactly
+// whose access changes; New refuses to boot while a change is unapproved,
+// including one that appeared after the approval, and then converts per-key
+// windows to the products that grant them.
 func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	ctx := t.Context()
 	pool, schema := cutoverSchema(t, os.Getenv("OPENRAILS_E2E_DSN"))
-	empty, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "")
+	database := openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}
+	boot := func() error {
+		client, err := openrails.New(ctx, openrails.Config{Database: database, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}, openrails.Deps{Postgres: pool})
+		if err == nil {
+			require.NoError(t, client.Close(context.Background()))
+		}
+		return err
+	}
+	empty, err := openrails.AccessCutoverPreflight(ctx, pool, database, "")
 	require.NoError(t, err, "the preflight brings a fresh database to the cutover")
 	require.Empty(t, empty.Changes)
 
@@ -68,42 +77,64 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	window(buyer, "purchase", payment, &product, "course:101", "course:102", "course:099")
 	window(comped, "admin", uuid.New(), nil, "vip")
 
-	report, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "")
-	require.NoError(t, err)
 	type change struct {
 		customer uuid.UUID
 		key      string
-		change   string
+		change   billing.AccessChangeKind
 	}
-	var listed []change
-	for _, c := range report.Changes {
-		require.Equal(t, merchant, c.MerchantID)
-		require.False(t, c.Approved)
-		listed = append(listed, change{c.CustomerID, c.Entitlement, c.Change})
+	listed := func(report *billing.AccessCutoverReport) []change {
+		var out []change
+		for _, c := range report.Changes {
+			require.Equal(t, merchant, c.MerchantID.UUID())
+			out = append(out, change{c.CustomerID.UUID(), c.Entitlement, c.Change})
+		}
+		return out
 	}
-	require.ElementsMatch(t, []change{{buyer, "course:099", "lost"}, {buyer, "course:103", "gained"}, {comped, "vip", "lost"}}, listed)
-	require.True(t, slices.ContainsFunc(report.Notes, func(n migrate.AccessNote) bool {
-		return n.CustomerID == comped && n.Note == "unmapped" && slices.Equal(n.Entitlements, []string{"vip"})
+	report, err := openrails.AccessCutoverPreflight(ctx, pool, database, "")
+	require.NoError(t, err)
+	require.Equal(t, 3, report.Unapproved())
+	require.ElementsMatch(t, []change{{buyer, "course:099", billing.AccessChangeLost}, {buyer, "course:103", billing.AccessChangeGained}, {comped, "vip", billing.AccessChangeLost}}, listed(report))
+	require.True(t, slices.ContainsFunc(report.Notes, func(n billing.AccessNote) bool {
+		return n.CustomerID.UUID() == comped && n.Note == billing.AccessNoteUnmapped && slices.Equal(n.Entitlements, []string{"vip"})
 	}), "%+v", report.Notes)
+	again, err := openrails.AccessCutoverPreflight(ctx, pool, database, "")
+	require.NoError(t, err)
+	require.Equal(t, 3, again.Unapproved(), "a dry run approves nothing")
 
-	err = migrateAll(ctx, pool, schema)
-	require.ErrorContains(t, err, "unapproved access changes", "the cutover refuses a change no one approved")
+	require.ErrorContains(t, boot(), "unapproved access changes", "New refuses a change no one approved")
 	var converted int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{schema}.Sanitize()+".product_access").Scan(&converted))
 	require.Zero(t, converted, "a refused cutover leaves nothing converted")
 
-	approved, err := migrate.AccessCutoverPreflight(ctx, pool, schema, "operator@example.test")
+	approved, err := openrails.AccessCutoverPreflight(ctx, pool, database, "operator@example.test")
 	require.NoError(t, err)
 	require.Zero(t, approved.Unapproved())
-	require.NoError(t, migrateAll(ctx, pool, schema))
-	_, err = migrate.AccessCutoverPreflight(ctx, pool, schema, "")
+	require.ElementsMatch(t, listed(report), listed(approved))
+
+	// A change that appears after the approval is not on the approved list.
+	late := uuid.New()
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, merchant, late)
+	window(late, "admin", uuid.New(), nil, "vip")
+	require.ErrorContains(t, boot(), "unapproved access changes", "New refuses what the approval did not list")
+	approved, err = openrails.AccessCutoverPreflight(ctx, pool, database, "operator@example.test")
+	require.NoError(t, err)
+	require.Equal(t, []change{{late, "vip", billing.AccessChangeLost}}, func() (out []change) {
+		for _, c := range listed(approved) {
+			if c.customer == late {
+				out = append(out, c)
+			}
+		}
+		return out
+	}())
+	require.NoError(t, boot(), "New boots once every change is approved")
+	_, err = openrails.AccessCutoverPreflight(ctx, pool, database, "")
 	require.ErrorContains(t, err, "already ran")
 
-	database, err := db.NewWithPGXPool(pool, schema)
+	data, err := db.NewWithPGXPool(pool, schema)
 	require.NoError(t, err)
 	held := func(customer uuid.UUID, keys ...string) map[string]bool {
 		t.Helper()
-		rows, err := database.GenDirectory().CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: merchant, CustomerID: customer, AtTime: time.Now(), Entitlements: keys})
+		rows, err := data.GenDirectory().CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: merchant, CustomerID: customer, AtTime: time.Now(), Entitlements: keys})
 		require.NoError(t, err)
 		out := map[string]bool{}
 		for _, row := range rows {

@@ -177,6 +177,7 @@
       "func (p NMIPSP) PSPConfig() PSPConfig",
       "func (p SolanaPSP) PSPConfig() PSPConfig",
       "func (p StripePSP) PSPConfig() PSPConfig",
+      "func AccessCutoverPreflight(ctx context.Context, db *pgxpool.Pool, database DatabaseConfig, approvedBy string) (*billing.AccessCutoverReport, error)",
       "func ForMerchantID(id billing.MerchantID) RequestOption",
       "func MachinePermissions() []string",
       "func New(ctx context.Context, cfg Config, deps Deps, opts ...ClientOption) (*Client, error)",
@@ -261,6 +262,8 @@
       "func Mount(target any, client *openrails.Client, selection openrails.Routes) error"
     ],
     "billing": [
+      "const (\n\tAccessChangeLost AccessChangeKind = \"lost\"\n\n\tAccessChangeGained AccessChangeKind = \"gained\"\n)",
+      "const (\n\tAccessNoteUnmapped AccessNoteKind = \"unmapped\"\n\n\tAccessNoteMixedDuration AccessNoteKind = \"mixed_duration\"\n)",
       "const (\n\tAdmissionBlockedByMoney  AdmissionBlock = \"money\"\n\tAdmissionBlockedByBudget AdmissionBlock = \"budget\"\n\tAdmissionBlockedByAbuse  AdmissionBlock = \"abuse\"\n)",
       "const (\n\tAdmissionOpen     AdmissionState = \"open\"\n\tAdmissionCaptured AdmissionState = \"captured\"\n\tAdmissionReleased AdmissionState = \"released\"\n\n\tAdmissionExpired AdmissionState = \"expired\"\n)",
       "const (\n\tAlertSeverityWarning  AlertSeverity = \"warning\"\n\tAlertSeverityCritical AlertSeverity = \"critical\"\n)",
@@ -491,6 +494,7 @@
       "func (p *ListPage[T]) UnmarshalJSON(raw []byte) error",
       "func (p ApplyMerchantConfigurationParams) MarshalJSON() ([]byte, error)",
       "func (p ListPage[T]) MarshalJSON() ([]byte, error)",
+      "func (r AccessCutoverReport) Unapproved() int",
       "func (r DeclineReason) Failure() PaymentFailure",
       "func (r DeclineReason) FraudSignal() bool",
       "func (r PSPRef) IsZero() bool",
@@ -541,6 +545,11 @@
       "type APIHostClaim struct {\n\tAPIHost   string        `json:\"api_host\"`\n\tCreatedAt time.Time     `json:\"created_at\"`\n\tDNSRecord APIHostRecord `json:\"dns_record\"`\n}",
       "type APIHostRecord struct {\n\tType  string `json:\"type\"`\n\tName  string `json:\"name\"`\n\tValue string `json:\"value\"`\n}",
       "type APIKey struct {\n\tID         string     `json:\"id\"`\n\tName       string     `json:\"name\"`\n\tRole       string     `json:\"role\"`\n\tPrefix     string     `json:\"prefix\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tLastUsedAt *time.Time `json:\"last_used_at\"`\n\tExpiresAt  *time.Time `json:\"expires_at\"`\n\tRevokedAt  *time.Time `json:\"revoked_at\"`\n}",
+      "type AccessChange struct {\n\tMerchantID  MerchantID       `json:\"merchant_id\"`\n\tCustomerID  CustomerID       `json:\"customer_id\"`\n\tEntitlement string           `json:\"entitlement\"`\n\tChange      AccessChangeKind `json:\"change\"`\n\tApproved    bool             `json:\"approved\"`\n}",
+      "type AccessChangeKind string",
+      "type AccessCutoverReport struct {\n\tChanges []AccessChange `json:\"changes\"`\n\tNotes   []AccessNote   `json:\"notes\"`\n}",
+      "type AccessNote struct {\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tCustomerID   CustomerID     `json:\"customer_id\"`\n\tNote         AccessNoteKind `json:\"note\"`\n\tSourceType   string         `json:\"source_type\"`\n\tSourceID     string         `json:\"source_id\"`\n\tEntitlements []string       `json:\"entitlements\"`\n}",
+      "type AccessNoteKind string",
       "type AcknowledgeHostEventsParams struct {\n\tHostEventIDs []HostEventID `json:\"host_event_ids\"`\n}",
       "type Admission struct {\n\tRequestID  string     `json:\"request_id\"`\n\tCustomerID CustomerID `json:\"customer_id\"`\n\tAllowed    bool       `json:\"allowed\"`\n\n\tBlockedBy         *AdmissionBlock `json:\"blocked_by\"`\n\tDenyCode          *string         `json:\"deny_code\"`\n\tRetryAfterSeconds *int64          `json:\"retry_after_seconds\"`\n\tCurrency          string          `json:\"currency\"`\n\tEstimatedAmount   int64           `json:\"estimated_amount,string\"`\n\n\tStartCapacityAmount int64 `json:\"start_capacity_amount,string\"`\n\n\tState          *AdmissionState `json:\"state\"`\n\tExpiresAt      *time.Time      `json:\"expires_at\"`\n\tCapturedAmount *int64          `json:\"captured_amount,string\"`\n\n\tReplayed bool `json:\"replayed\"`\n}",
       "type AdmissionBlock string",
@@ -1394,11 +1403,6 @@
       "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
       "type SecretRef struct {\n\tRetired    bool   `json:\"-\"`\n\tName       string `json:\"name\"`\n\tMinVersion int    `json:\"version\"`\n\tCustody    string `json:\"custody,omitempty\"`\n}"
     ],
-    "internal/migrate": [
-      "type AccessChange struct {\n\tMerchantID  uuid.UUID `json:\"merchant_id\"`\n\tCustomerID  uuid.UUID `json:\"customer_id\"`\n\tEntitlement string    `json:\"entitlement\"`\n\tChange      string    `json:\"change\"`\n\tApproved    bool      `json:\"approved\"`\n}",
-      "type AccessCutoverReport struct {\n\tChanges []AccessChange `json:\"changes\"`\n\tNotes   []AccessNote   `json:\"notes\"`\n}",
-      "type AccessNote struct {\n\tMerchantID   uuid.UUID `json:\"merchant_id\"`\n\tCustomerID   uuid.UUID `json:\"customer_id\"`\n\tNote         string    `json:\"note\"`\n\tSourceType   string    `json:\"source_type\"`\n\tSourceID     string    `json:\"source_id\"`\n\tEntitlements []string  `json:\"entitlements\"`\n}"
-    ],
     "internal/modules/abuse": [
       "type WindowUsage struct {\n\tKey        string `json:\"key\"`\n\tCurrency   string `json:\"currency\"`\n\tWindow     string `json:\"window\"`\n\tUsed       int64  `json:\"used\"`\n\tLimit      int64  `json:\"limit\"`\n\tOverBudget bool   `json:\"over_budget\"`\n}"
     ],
@@ -1682,6 +1686,12 @@
     ]
   },
   "declaring_file_imports": {
+    "access_cutover.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "engine": "github.com/open-rails/openrails/internal/engine",
+      "pgxpool": "github.com/jackc/pgx/v5/pgxpool"
+    },
     "adapters/fiber/fiber.go": {
       "adaptor": "github.com/gofiber/fiber/v3/middleware/adaptor",
       "fmt": "fmt",
@@ -3006,20 +3016,6 @@
       "strings": "strings",
       "url": "net/url",
       "uuid": "github.com/google/uuid"
-    },
-    "internal/migrate/access_cutover.go": {
-      "config": "github.com/open-rails/openrails/internal/config",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "migratekit": "github.com/open-rails/migratekit",
-      "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
-      "slices": "slices",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/abuse/wasted_spend.go": {
       "context": "context",

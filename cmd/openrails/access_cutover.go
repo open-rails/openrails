@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/migrate"
 )
 
 var errAccessCutoverUnapproved = errors.New("the product access cutover has unapproved access changes")
@@ -39,7 +38,7 @@ func newAccessCutoverCmd() *cobra.Command {
 				return fmt.Errorf("open postgres: %w", err)
 			}
 			defer pool.Close()
-			report, err := migrate.AccessCutoverPreflight(cmd.Context(), pool, config.SchemaName(cfg), strings.TrimSpace(approve))
+			report, err := openrails.AccessCutoverPreflight(cmd.Context(), pool, cfg.Database, approve)
 			if err != nil {
 				return err
 			}

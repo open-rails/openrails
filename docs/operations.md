@@ -884,6 +884,12 @@ change:
    migration. The migration refuses any change that is not on the approved
    list, and the version's boot fails until it is approved.
 
+A host that embeds OpenRails runs the same steps from its own binary, built
+with the new version, before starting it: `openrails.AccessCutoverPreflight`
+takes the host's pool and `Config.Database` and returns the report the command
+prints (`billing.AccessCutoverReport`). An empty `approvedBy` is the dry run of
+step 2; a name approves the list as in step 4, and `openrails.New` then boots.
+
 A billing archive exported before the cutover restores through the same
 conversion. It is refused (`unsupported_state`, table `entitlements`) if the
 conversion would change anyone's access; cut over the source first.
