@@ -12,8 +12,7 @@ gates: `TestGoAPISurface`, `TestGeneratedContractIsFresh`,
 **The end-to-end suite** (`ci/`, the `End-to-end` job) is the only database and
 provider test lane. It drives the public Client and the mounted HTTP routes
 against a real PostgreSQL 18, with deterministic NMI and Stripe transports.
-Every test migrates its own random schema, so tests and shards never share
-state. It needs no browser and no real PSP credentials, and it fails when its
+Every test migrates its own random schema, so tests never share state. It needs no browser and no real PSP credentials, and it fails when its
 database is missing.
 
 ```bash
@@ -22,9 +21,12 @@ OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
   bash scripts/e2e.sh
 ```
 
-`scripts/e2e.sh` builds each package under `./ci/...` once (tags
-`e2e,integration`, `-race`) and runs its tests in `OPENRAILS_E2E_SHARDS`
-concurrent processes. Redis is needed by the card-attack captcha test only.
+`scripts/e2e.sh` builds the packages under `./ci/...` once (tags
+`e2e,integration`, `-race`) and runs each top-level test in its own process,
+`OPENRAILS_E2E_JOBS` at a time, longest first. CI splits the suite across
+`OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`;
+a test missing from it counts as the median. Redis is needed by the
+card-attack captcha test only.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
   catalog and merchant isolation, checkout sessions and attempts, signed
