@@ -29,7 +29,7 @@ Window identity includes merchant, customer, applicable scope/invoker and stable
 
 Capture returns one shared `CaptureReceipt` in Go and HTTP: request ID, original customer UUID/unit, nonnegative actual amount, optional real ledger-transfer ID, and replay status. A zero-actual receipt creates no ledger transfer. HTTP monetary amounts are decimal strings; Go fields remain `int64`.
 
-All spending paths use one held total: live request estimates plus open provider-operation authorizations. Each is counted once. Capture transitions its own request out of held state before posting the charge in the same transaction, preserving every other reservation. Provider-operation authorizations retain their distinct lifetime and settlement rules.
+All spending paths use one held total: live request estimates plus the `authorized_amount` of open provider-operation authorizations (the opening amount plus every extension grant). Each is counted once. Capture transitions its own request out of held state before posting the charge in the same transaction, preserving every other reservation. Provider-operation authorizations retain their distinct lifetime and settlement rules.
 
 The separate accrual-rate policy compares observed, reported usage with the requested prospective delta. Zero-estimate requests still pass this policy. It is not a strict instantaneous concurrency quota: newly started work can be ahead of the usage meter, and live rate ownership requires its own provider-obligation contract. Durable request spend windows do not claim to solve that separate policy.
 

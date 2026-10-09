@@ -82,6 +82,8 @@ pkg openrails, method (*Client) EnsureCustomerPermissionGroup(context.Context, s
 pkg openrails, method (*Client) EnsureProduct(context.Context, billing.CreateProductParams, ...RequestOption) (*billing.Product, error)
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmission(context.Context, string, billing.ExtendAdmissionParams, ...RequestOption) (*billing.Admission, error)
+pkg openrails, method (*Client) ExtendOperationAuthorization(context.Context, billing.ExtendOperationAuthorizationParams, ...RequestOption) (*billing.OperationAuthorizationExtension, error)
+pkg openrails, method (*Client) ExtendOperationAuthorizationTx(context.Context, pgx.Tx, billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error)
 pkg openrails, method (*Client) FleetAnalytics(context.Context, billing.MerchantID, int) (*billing.FleetSnapshot, error)
 pkg openrails, method (*Client) FleetTimeseries(context.Context, billing.MerchantID, int) (*billing.FleetSeries, error)
 pkg openrails, method (*Client) GenerateDashboardWidget(context.Context, billing.GenerateDashboardWidgetParams, ...RequestOption) (*billing.GeneratedWidget, error)
@@ -1885,6 +1887,11 @@ pkg openrails/billing, type ErrorDetails struct, RequestID string `json:"request
 pkg openrails/billing, type ErrorDetails struct, Type string `json:"type"`
 pkg openrails/billing, type ExtendAdmissionParams struct
 pkg openrails/billing, type ExtendAdmissionParams struct, ExpiresAt time.Time `json:"expires_at"`
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct, MinimumAmount int64 `json:"minimum_amount,string"`
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct, OperationID string `json:"-"`
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct, Ordinal int64 `json:"ordinal"`
 pkg openrails/billing, type FederatedGrant struct
 pkg openrails/billing, type FederatedGrant struct, AcceptedAt *time.Time `json:"accepted_at"`
 pkg openrails/billing, type FederatedGrant struct, CreatedAt time.Time `json:"created_at"`
@@ -2355,6 +2362,7 @@ pkg openrails/billing, type OperationAuthorization struct
 pkg openrails/billing, type OperationAuthorization struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type OperationAuthorization struct, AuthorizationBody []byte `json:"authorization_body"`
 pkg openrails/billing, type OperationAuthorization struct, AuthorizationBodySHA256 SHA256 `json:"authorization_body_sha256"`
+pkg openrails/billing, type OperationAuthorization struct, AuthorizedAmount int64 `json:"authorized_amount,string"`
 pkg openrails/billing, type OperationAuthorization struct, ClaimReference string `json:"claim_reference"`
 pkg openrails/billing, type OperationAuthorization struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type OperationAuthorization struct, Currency string `json:"currency"`
@@ -2373,6 +2381,12 @@ pkg openrails/billing, type OperationAuthorization struct, State OperationAuthor
 pkg openrails/billing, type OperationAuthorization struct, TerminalReference string `json:"terminal_reference"`
 pkg openrails/billing, type OperationAuthorizationConflict struct
 pkg openrails/billing, type OperationAuthorizationConflict struct, Field string
+pkg openrails/billing, type OperationAuthorizationExtension struct
+pkg openrails/billing, type OperationAuthorizationExtension struct, AuthorizedAmount int64 `json:"authorized_amount,string"`
+pkg openrails/billing, type OperationAuthorizationExtension struct, GrantedAmount int64 `json:"granted_amount,string"`
+pkg openrails/billing, type OperationAuthorizationExtension struct, OperationID string `json:"operation_id"`
+pkg openrails/billing, type OperationAuthorizationExtension struct, Ordinal int64 `json:"ordinal"`
+pkg openrails/billing, type OperationAuthorizationExtension struct, Replayed bool `json:"replayed"`
 pkg openrails/billing, type OperationAuthorizationState string
 pkg openrails/billing, type PSP struct
 pkg openrails/billing, type PSP struct, AccountID string `json:"account_id"`

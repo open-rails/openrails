@@ -63,11 +63,12 @@ type OpenOperationAuthorizationParams struct {
 	AuthorizationBodySHA256 SHA256     `json:"authorization_body_sha256"`
 }
 
-// OperationAuthorization is the durable reservation. Settlement fields are
-// null until OpenRails settles qualified provider evidence:
-// SettlementCostAmount is the qualified provider cost, SettlementAmount what
-// the customer is charged (equal under the pass-through contract, and never
-// clamped to Amount).
+// OperationAuthorization is the durable reservation. Amount is the opening
+// hold and AuthorizedAmount the hold now: Amount plus every extension grant.
+// Settlement fields are null until OpenRails settles qualified provider
+// evidence: SettlementCostAmount is the qualified provider cost,
+// SettlementAmount what the customer is charged (equal under the pass-through
+// contract, and never clamped to AuthorizedAmount).
 type OperationAuthorization struct {
 	OperationID             string                      `json:"operation_id"`
 	MerchantID              MerchantID                  `json:"merchant_id"`
@@ -75,6 +76,7 @@ type OperationAuthorization struct {
 	RecordOwner             string                      `json:"record_owner"`
 	Currency                string                      `json:"currency"`
 	Amount                  int64                       `json:"amount,string"`
+	AuthorizedAmount        int64                       `json:"authorized_amount,string"`
 	ClaimReference          string                      `json:"claim_reference"`
 	AuthorizationBody       []byte                      `json:"authorization_body"`
 	AuthorizationBodySHA256 SHA256                      `json:"authorization_body_sha256"`
@@ -88,6 +90,28 @@ type OperationAuthorization struct {
 	ReleasedAt              *time.Time                  `json:"released_at"`
 	SettledAt               *time.Time                  `json:"settled_at"`
 	Replayed                bool                        `json:"replayed"`
+}
+
+// ExtendOperationAuthorizationParams grows an open reservation by up to Amount,
+// accepting no less than MinimumAmount (0 < MinimumAmount <= Amount), under the
+// same capacity rule as opening it. Ordinal numbers the operation's extensions
+// from 1 without gaps; repeating a committed ordinal with the same amounts
+// replays its grant.
+type ExtendOperationAuthorizationParams struct {
+	OperationID   string `json:"-"` // carried by the route path
+	Ordinal       int64  `json:"ordinal"`
+	Amount        int64  `json:"amount,string"`
+	MinimumAmount int64  `json:"minimum_amount,string"`
+}
+
+// OperationAuthorizationExtension is one committed grant. AuthorizedAmount is
+// the reservation's total after it: the opening Amount plus every grant.
+type OperationAuthorizationExtension struct {
+	OperationID      string `json:"operation_id"`
+	Ordinal          int64  `json:"ordinal"`
+	GrantedAmount    int64  `json:"granted_amount,string"`
+	AuthorizedAmount int64  `json:"authorized_amount,string"`
+	Replayed         bool   `json:"replayed"`
 }
 
 // ReleaseOperationAuthorizationParams releases an open reservation after the

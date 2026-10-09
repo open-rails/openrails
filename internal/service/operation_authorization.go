@@ -91,6 +91,44 @@ func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, op
 	return operationAuthorizationFromMoney(auth), nil
 }
 
+func (s *Service) ExtendOperationAuthorization(ctx context.Context, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *billing.OperationAuthorizationExtension
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.ExtendOperationAuthorizationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
+}
+
+func (s *Service) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	ext, err := s.moneyService().ExtendOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationExtensionInput{
+		OperationID: req.OperationID, Ordinal: req.Ordinal, Amount: req.Amount, MinimumAmount: req.MinimumAmount,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &billing.OperationAuthorizationExtension{
+		OperationID: ext.OperationID, Ordinal: ext.Ordinal, GrantedAmount: ext.GrantedAmount,
+		AuthorizedAmount: ext.AuthorizedAmount, Replayed: ext.Replayed,
+	}, nil
+}
+
 func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
@@ -132,6 +170,7 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billin
 		RecordOwner:             auth.RecordOwner,
 		Currency:                auth.Currency,
 		Amount:                  auth.Amount,
+		AuthorizedAmount:        auth.AuthorizedAmount,
 		ClaimReference:          auth.ClaimReference,
 		AuthorizationBody:       auth.AuthorizationBody,
 		AuthorizationBodySHA256: auth.AuthorizationBodySHA256,

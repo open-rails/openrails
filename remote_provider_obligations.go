@@ -50,6 +50,21 @@ func (c *Client) GetOperationAuthorization(ctx context.Context, operationID stri
 	return &out, nil
 }
 
+// ExtendOperationAuthorization grows an open reservation by up to Amount and
+// no less than MinimumAmount, or refuses with nothing written. Repeating an
+// ordinal with the same amounts replays its grant.
+func (c *Client) ExtendOperationAuthorization(ctx context.Context, req billing.ExtendOperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorizationExtension, error) {
+	path, err := providerOperationPath(req.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.OperationAuthorizationExtension
+	if err := c.do(ctx, http.MethodPost, path+"/extend", req, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ReleaseOperationAuthorization releases an open reservation after proven
 // provider non-creation. It is refused once billing evidence exists.
 func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {

@@ -864,6 +864,22 @@ type BillingOperationAuthorization struct {
 	SettlementBodyBytes []byte
 	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
 	SettlementBodyDigest []byte
+	// Sum of granted_amount over the authorization's extensions; grows only while open.
+	ExtendedAmount int64
+	// The hold: the opening amount plus every extension grant.
+	AuthorizedAmount int64
+}
+
+// Each granted growth of an open operation authorization's hold, gapless by ordinal from 1: what the host asked for, the least it accepted, what was granted, and the authorized total after the grant. Immutable. Retention: permanent, never pruned.
+type BillingOperationAuthorizationExtension struct {
+	MerchantID       uuid.UUID
+	OperationID      string
+	Ordinal          int64
+	RequestedAmount  int64
+	MinimumAmount    int64
+	GrantedAmount    int64
+	AuthorizedAmount int64
+	CreatedAt        time.Time
 }
 
 // Records of all payment transactions. Retention: permanent, never pruned.

@@ -996,6 +996,12 @@ export type ExtendAdmissionParams = {
   expires_at?: string
 }
 
+export type ExtendOperationAuthorizationParams = {
+  ordinal?: number
+  amount?: string
+  minimum_amount?: string
+}
+
 export type FederatedGrant = {
   id: string
   email: string
@@ -1490,6 +1496,7 @@ export type OperationAuthorization = {
   record_owner: string
   currency: string
   amount: string
+  authorized_amount: string
   claim_reference: string
   authorization_body: string | null
   authorization_body_sha256: string
@@ -1502,6 +1509,14 @@ export type OperationAuthorization = {
   created_at: string
   released_at: string | null
   settled_at: string | null
+  replayed: boolean
+}
+
+export type OperationAuthorizationExtension = {
+  operation_id: string
+  ordinal: number
+  granted_amount: string
+  authorized_amount: string
   replayed: boolean
 }
 

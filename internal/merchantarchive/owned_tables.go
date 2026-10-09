@@ -54,6 +54,7 @@ var ownedTables = []string{
 	"nmi_history_months",
 	"nmi_history_reads",
 	"notifications",
+	"operation_authorization_extensions",
 	"operation_authorizations",
 	"payment_attempts",
 	"payment_method_updates",

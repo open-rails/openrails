@@ -328,6 +328,16 @@ func (c *Client) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, ope
 	return e.GetOperationAuthorizationTx(ctx, tx, operationID)
 }
 
+// ExtendOperationAuthorizationTx is ExtendOperationAuthorization inside tx
+// (see OpenOperationAuthorizationTx). Embedded only.
+func (c *Client) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.ExtendOperationAuthorizationTx(ctx, tx, req)
+}
+
 // ReleaseOperationAuthorizationTx is ReleaseOperationAuthorization inside tx
 // (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {

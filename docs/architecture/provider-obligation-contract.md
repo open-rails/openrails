@@ -5,7 +5,7 @@ authorizes the spend before the provider creates anything, then reports what
 the provider billed. OpenRails holds the authorization, qualifies the evidence
 and settles the customer's reservation at the provider's cost.
 
-## The five commands
+## The six commands
 
 Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
@@ -15,6 +15,7 @@ error classes; the embedded Client dispatches to the same handlers.
 |---|---|---|
 | `OpenOperationAuthorization` | `POST /v1/merchant/provider-operations` | `merchant:admissions:create` |
 | `GetOperationAuthorization` | `GET /v1/merchant/provider-operations/{operation_id}` | `merchant:usage:read` |
+| `ExtendOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/extend` | `merchant:admissions:create` |
 | `ReleaseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` |
 | `RecordProviderBillingObservation` | `POST /v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` |
 | `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` |
@@ -27,6 +28,26 @@ provider creation leaves the authorization open. Release requires proven
 non-creation and is refused once billing evidence exists
 (`operation_authorization_has_billing_evidence`). Its state is `open`,
 `released` or `settled`; there are no partial captures.
+
+## Growing a hold
+
+Work billed by the second holds one tranche when it starts and grows the hold
+while it runs. `ExtendOperationAuthorization` asks for up to `amount` and
+accepts no less than `minimum_amount`, under the same customer lock and
+capacity rule as opening: it grants `min(amount, capacity)` when capacity
+covers `minimum_amount`, and otherwise refuses with 402 `insufficient_credits`
+and writes nothing. A refusal is the host's signal to stop the work while the
+hold still covers it. Only an `open` authorization grows; released and settled
+ones answer `operation_authorization_not_open`. `authorized_amount` plus
+`amount` must fit in an int64.
+
+Extensions are numbered by `ordinal` from 1 without gaps. Repeating a committed
+ordinal with the same amounts replays its grant (`replayed`); other amounts are
+409 `operation_authorization_conflict` with the field as `param`, and a skipped
+ordinal is the same conflict on `ordinal`. The authorization keeps its opening
+`amount`; `authorized_amount` is the opening amount plus every grant. Held and
+available balance, admission capacity and settlement use `authorized_amount`,
+and the settlement body lists the opening amount and each grant.
 
 Observations carry immutable facts: provider lifecycle evidence, the normalized
 query, the exact raw response and typed records, or a typed adapter refusal.
@@ -57,7 +78,8 @@ qualifications are permanent.
 ## Host transaction extension
 
 The embedded Client's `Tx` operations (`OpenOperationAuthorizationTx`,
-`GetOperationAuthorizationTx`, `ReleaseOperationAuthorizationTx`,
+`GetOperationAuthorizationTx`, `ExtendOperationAuthorizationTx`,
+`ReleaseOperationAuthorizationTx`,
 `RecordProviderBillingObservationTx`, `GetProviderBillingQualificationTx`) are
 for a host that must commit its own provider obligation, absence fact or
 billing fact atomically with OpenRails. They take a `pgx.Tx` from the host's

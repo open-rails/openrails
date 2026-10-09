@@ -16,7 +16,7 @@ const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     -- Same hold total as GetFinancialHeldAmount.
-    (COALESCE((SELECT SUM(oa.amount)
+    (COALESCE((SELECT SUM(oa.authorized_amount)
               FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = a.merchant_id AND oa.customer_id = a.customer_id AND oa.currency = a.currency AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)
