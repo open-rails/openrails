@@ -88,7 +88,7 @@ func TestRefreshedBookStaysPayableUntilACycleIsMissed(t *testing.T) {
 	method := c.saveCard("nmi", visa)
 	w.advance(5 * 24 * time.Hour) // an established book
 	w.refreshProviders()
-	w.settleCollectionScans()
+	w.settleRefreshes() // the startup refresh too, or its coverage lands later
 	refreshed := w.clock.Now()
 
 	onSchedule := observedInvoice(t, w, c, 50_000_000)
