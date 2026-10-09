@@ -50,6 +50,7 @@ func TestClientRequestShapes(t *testing.T) {
 		"/v1/merchant/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
 		"/v1/merchant/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
 		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
+		"/v1/merchant/customers/" + customer + "/entitlements/check":   `{"entitlements":{"pro":true,"team":false}}`,
 	})
 	key := "operation-key"
 	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
@@ -154,6 +155,21 @@ func TestClientRequestShapes(t *testing.T) {
 		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{"pro plan&x"}, b["product_keys"])
 		}},
+		{"entitlement check", func() error {
+			got, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", "team"}})
+			if err == nil && (!got["pro"] || got["team"] || len(got) != 2) {
+				err = errors.New("check not decoded")
+			}
+			return err
+		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, map[string]any{"entitlements": []any{"pro", "team"}}, b, "a zero At is omitted")
+		}},
+		{"entitlement check empty", func() error {
+			_, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{})
+			return err
+		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, []any{}, b["entitlements"], "an empty check sends a list, not null")
+		}},
 		{"access list pages", func() error {
 			page, err := client.ListProductAccess(t.Context(), customerID, billing.PageRequest{Limit: 7, Cursor: "cursor"})
 			if err == nil && page.Next != "next" {
@@ -252,7 +268,10 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateEntitlement(ctx, customerID, billing.CreateEntitlementParams{Entitlement: id})
 			return err
 		},
-		"entitlement check key": func(id string) error { _, err := c.HasEntitlement(ctx, customerID, id, now); return err },
+		"entitlement check key": func(id string) error {
+			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", id}, At: now})
+			return err
+		},
 		"entitled customers": func(id string) error {
 			_, err := c.ListEntitlementCustomers(ctx, id, billing.EntitlementCustomerListParams{})
 			return err
@@ -360,9 +379,16 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateEntitlement(ctx, billing.CustomerID{}, billing.CreateEntitlementParams{Entitlement: "pro"})
 			return err
 		},
-		"entitlement check customer": func() error { _, err := c.HasEntitlement(ctx, billing.CustomerID{}, "pro", now); return err },
-		"effective tier customer":    func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },
-		"list entitlements empty":    func() error { _, err := c.ListEntitlements(ctx, billing.EntitlementListParams{}); return err },
+		"entitlement check customer": func() error {
+			_, err := c.CheckEntitlements(ctx, billing.CustomerID{}, billing.CheckEntitlementsParams{Entitlements: []string{"pro"}})
+			return err
+		},
+		"entitlement check over bound": func() error {
+			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: make([]string, billing.MaxEntitlementChecks+1)})
+			return err
+		},
+		"effective tier customer": func() error { _, err := c.GetEffectiveTier(ctx, billing.CustomerID{}, "group"); return err },
+		"list entitlements empty": func() error { _, err := c.ListEntitlements(ctx, billing.EntitlementListParams{}); return err },
 		"subscription payment method": func() error {
 			_, err := c.SetSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: method})
 			return err

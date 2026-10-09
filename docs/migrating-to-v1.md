@@ -139,11 +139,11 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `HasEntitlement(ctx, subject string, key, at)` | `client.HasEntitlement(` with a `billing.CustomerID` |
+| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.CheckEntitlements(` with a `billing.CustomerID` and `billing.CheckEntitlementsParams` (`Entitlements`, at most 100, and `At`), answering `map[string]bool` |
 | `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `At`), answering `billing.EntitlementLookup` |
 | `ListCustomersWithEntitlement` | `client.ListEntitlementCustomers(` |
 | `GrantEntitlement`, `RevokeEntitlement` | `client.CreateEntitlement(`, `client.DeleteEntitlement(` |
-| `ResolveEffectiveTier`, `CheckEntitlements` | `client.GetEffectiveTier(`; `Tier` is nil when the customer holds none |
+| `ResolveEffectiveTier` | `client.GetEffectiveTier(`; `Tier` is nil when the customer holds none |
 | `client.ProductAccess.Check`, `CheckMany`, `List` | `client.CheckProductAccess(`, `client.ListProductAccess(`, `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 
 Every entitlement now derives from a grant; `source_type` is `purchase`,

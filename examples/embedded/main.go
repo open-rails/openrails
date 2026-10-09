@@ -212,12 +212,12 @@ func run(ctx context.Context) error {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
+		held, err := bill.CheckEntitlements(c, customer, billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: time.Now()})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !allowed {
+		if !held[entitlement] {
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
 			return
 		}

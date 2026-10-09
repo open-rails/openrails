@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -131,9 +132,9 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 				key  string
 				want bool
 			}{{" private key ", true}, {"private key", false}} {
-				has, err := client.HasEntitlement(t.Context(), customer.customerID(), check.key, w.clock.Now())
+				has, err := client.CheckEntitlements(t.Context(), customer.customerID(), billing.CheckEntitlementsParams{Entitlements: []string{check.key}, At: w.clock.Now()})
 				require.NoError(t, err)
-				require.Equal(t, check.want, has, "both transports preserve exact names")
+				require.Equal(t, map[string]bool{check.key: check.want}, has, "both transports preserve exact names")
 				members, err := client.ListEntitlementCustomers(t.Context(), check.key, billing.EntitlementCustomerListParams{})
 				require.NoError(t, err)
 				if check.want {
@@ -184,5 +185,81 @@ func TestEntitlementListsKeepAcceptedPurchaseBenefits(t *testing.T) {
 			require.False(t, empty.entitled("post:202"))
 			require.False(t, empty.entitled(product.Key), "an empty list must not imply the product key")
 		})
+	}
+}
+
+// One check answers every requested key from one query, on both transports:
+// held, expired, revoked and never granted keys, another customer's view, a
+// past instant, an empty list, and the 100-key bound.
+func TestCheckEntitlementsAnswersEveryKey(t *testing.T) {
+	w := newWorld(t)
+	c, other := w.newCustomer(), w.newCustomer()
+	staff := w.client[embedded]
+	start := w.clock.Now()
+	day, soon := 24, start.Add(time.Hour)
+	grant := func(params billing.CreateEntitlementParams) billing.EntitlementID {
+		record, err := staff.CreateEntitlement(t.Context(), c.customerID(), params)
+		require.NoError(t, err)
+		return record.ID
+	}
+	grant(billing.CreateEntitlementParams{Entitlement: "check:active", Hours: &day})
+	grant(billing.CreateEntitlementParams{Entitlement: "check:expired", EndsAt: &soon})
+	revoked := grant(billing.CreateEntitlementParams{Entitlement: "check:revoked", Hours: &day})
+	require.NoError(t, staff.DeleteEntitlement(t.Context(), c.customerID(), revoked))
+	w.advance(2 * time.Hour)
+
+	keys := []string{"check:active", "check:expired", "check:revoked", "check:unknown", "check:active"}
+	none := map[string]bool{"check:active": false, "check:expired": false, "check:revoked": false, "check:unknown": false}
+	for _, tp := range []topology{embedded, remote} {
+		client := w.client[tp]
+		var got map[string]bool
+		queries := w.count(func() {
+			var err error
+			got, err = client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys})
+			require.NoError(t, err)
+		})
+		require.Equal(t, map[string]bool{"check:active": true, "check:expired": false, "check:revoked": false, "check:unknown": false}, got, tp)
+		require.Equal(t, 1, queries["CheckResourceEntitlements"], "every key in one query: %v", queries)
+
+		past, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys, At: start.Add(30 * time.Minute)})
+		require.NoError(t, err)
+		require.Equal(t, map[string]bool{"check:active": true, "check:expired": true, "check:revoked": false, "check:unknown": false}, past, "At reads that instant; a revocation is not undone")
+
+		foreign, err := client.CheckEntitlements(t.Context(), other.customerID(), billing.CheckEntitlementsParams{Entitlements: keys})
+		require.NoError(t, err)
+		require.Equal(t, none, foreign, "another customer's grants never answer")
+
+		for _, empty := range [][]string{nil, {}} {
+			answer, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: empty})
+			require.NoError(t, err)
+			require.NotNil(t, answer)
+			require.Empty(t, answer)
+		}
+
+		full := make([]string, billing.MaxEntitlementChecks)
+		for i := range full {
+			full[i] = fmt.Sprintf("check:bulk-%d", i)
+		}
+		full[0] = "check:active"
+		bulk, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: full})
+		require.NoError(t, err)
+		require.Len(t, bulk, billing.MaxEntitlementChecks)
+		require.True(t, bulk["check:active"])
+		require.False(t, bulk["check:bulk-1"])
+
+		_, err = client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: append(full, "check:one-more")})
+		require.ErrorIs(t, err, billing.ErrInvalid, "the client refuses past the bound before any I/O")
+	}
+
+	path := "/v1/merchant/customers/" + c.id + "/entitlements/check"
+	for _, body := range []map[string]any{
+		{"entitlements": append(make([]string, billing.MaxEntitlementChecks), "one-more")},
+		{"entitlements": []string{"check:active", " "}},
+	} {
+		status, refused := w.staffJSON(http.MethodPost, path, body)
+		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
+		detail := refused["error"].(map[string]any)
+		require.Equal(t, billing.CodeInvalidParam, detail["code"])
+		require.Equal(t, "entitlements", detail["param"])
 	}
 }

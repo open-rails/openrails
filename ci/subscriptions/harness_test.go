@@ -887,9 +887,7 @@ func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (
 
 func (c *customer) entitled(entitlement string) bool {
 	c.w.t.Helper()
-	got, err := c.w.client[embedded].HasEntitlement(c.w.t.Context(), c.customerID(), entitlement, c.w.clock.Now())
-	require.NoError(c.w.t, err)
-	return got
+	return c.entitledAt(entitlement, c.w.clock.Now())
 }
 
 // customerID is the customer's typed id.

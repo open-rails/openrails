@@ -53,6 +53,7 @@ pkg openrails, method (*Client) CancelRepriceBatch(context.Context, billing.Repr
 pkg openrails, method (*Client) CancelSubscription(context.Context, billing.SubscriptionID, billing.CancelSubscriptionParams, ...RequestOption) (*billing.Subscription, error)
 pkg openrails, method (*Client) CaptureAdmission(context.Context, string, billing.CaptureAdmissionParams, ...RequestOption) (*billing.CaptureReceipt, error)
 pkg openrails, method (*Client) ChangeTier(context.Context, billing.SubscriptionID, billing.ChangeTierParams, ...RequestOption) (*billing.TierChange, error)
+pkg openrails, method (*Client) CheckEntitlements(context.Context, billing.CustomerID, billing.CheckEntitlementsParams, ...RequestOption) (map[string]bool, error)
 pkg openrails, method (*Client) CheckProductAccess(context.Context, billing.CustomerID, billing.CheckProductAccessParams, ...RequestOption) (map[string]bool, error)
 pkg openrails, method (*Client) CheckoutFrameAncestors() string
 pkg openrails, method (*Client) Close(context.Context) error
@@ -129,7 +130,6 @@ pkg openrails, method (*Client) GetSubscription(context.Context, billing.Subscri
 pkg openrails, method (*Client) GetTrustLevel(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.TrustLevel, error)
 pkg openrails, method (*Client) GetUnreadNotificationCount(context.Context, ...RequestOption) (*billing.UnreadCount, error)
 pkg openrails, method (*Client) GetUsage(context.Context, billing.CustomerID, billing.GetUsageParams, ...RequestOption) (*billing.Usage, error)
-pkg openrails, method (*Client) HasEntitlement(context.Context, billing.CustomerID, string, time.Time, ...RequestOption) (bool, error)
 pkg openrails, method (*Client) HasRootPermission(context.Context, *http.Request, string) (bool, error)
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)

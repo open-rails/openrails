@@ -66,9 +66,9 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	}
 	entitled := func() bool {
 		t.Helper()
-		got, err := client.HasEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(userID)), "content:refunded", time.Time{})
+		got, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckEntitlementsParams{Entitlements: []string{"content:refunded"}})
 		require.NoError(t, err)
-		return got
+		return got["content:refunded"]
 	}
 
 	now := time.Now()

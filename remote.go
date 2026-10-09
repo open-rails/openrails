@@ -253,21 +253,35 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 	return &out, nil
 }
 
-// HasEntitlement reports whether the customer holds entitlement at at (zero:
-// now). It reads that one key.
-func (c *Client) HasEntitlement(ctx context.Context, customerID billing.CustomerID, entitlement string, at time.Time, requestOptions ...RequestOption) (bool, error) {
+// CheckEntitlements answers which of params.Entitlements the customer holds at
+// params.At (zero: now); every requested key is in the result and an empty
+// list answers an empty map. One call checks at most
+// billing.MaxEntitlementChecks keys; more is refused with invalid_param, not
+// split, so every answer reads one instant.
+func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (map[string]bool, error) {
 	path, err := customerIDPath(customerID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if strings.TrimSpace(entitlement) == "" {
-		return false, invalidErr("entitlement is required")
+	if len(params.Entitlements) > billing.MaxEntitlementChecks {
+		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per check", billing.MaxEntitlementChecks))
+	}
+	for _, key := range params.Entitlements {
+		if strings.TrimSpace(key) == "" {
+			return nil, invalidErr("entitlements must not contain a blank key")
+		}
+	}
+	if params.Entitlements == nil {
+		params.Entitlements = []string{}
 	}
 	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: at}, &out, requestOptions...); err != nil {
-		return false, err
+	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", params, &out, requestOptions...); err != nil {
+		return nil, err
 	}
-	return out.Entitlements[entitlement], nil
+	if out.Entitlements == nil {
+		out.Entitlements = map[string]bool{}
+	}
+	return out.Entitlements, nil
 }
 
 // ListEntitlementCustomers returns one page of the customers holding

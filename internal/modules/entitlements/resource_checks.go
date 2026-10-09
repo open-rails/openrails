@@ -18,11 +18,11 @@ import (
 // customer's complete entitlement history or consults mutable product contents.
 func (s *EntitlementService) CheckMany(ctx context.Context, customerID string, keys []string, at time.Time) (map[string]bool, error) {
 	if len(keys) > billing.MaxEntitlementChecks {
-		return nil, apperr.Invalidf("at most 100 entitlements are allowed")
+		return nil, apperr.Invalidf("at most %d entitlements per check", billing.MaxEntitlementChecks).WithParam("entitlements")
 	}
 	for _, key := range keys {
 		if strings.TrimSpace(key) == "" || len(key) > catalog.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
-			return nil, apperr.Invalidf("invalid entitlement key")
+			return nil, apperr.Invalidf("invalid entitlement key").WithParam("entitlements")
 		}
 	}
 	mid, err := merchant.Require(ctx)

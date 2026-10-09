@@ -337,7 +337,7 @@ merchant := openrails.MerchantDeclaration{
 #### Integrate OpenRails into your server
 
 Start OpenRails' background work, mount the billing routes next to AuthKit's,
-and gate your content with `HasEntitlement`:
+and gate your content with `CheckEntitlements`:
 
 ```go
 func main() { log.Fatal(run(context.Background())) }
@@ -407,12 +407,12 @@ func run(ctx context.Context) error {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		allowed, err := bill.HasEntitlement(c, customer, entitlement, time.Now())
+		held, err := bill.CheckEntitlements(c, customer, billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: time.Now()})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !allowed {
+		if !held[entitlement] {
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
 			return
 		}
@@ -448,7 +448,7 @@ That is the whole server integration, and it is the program in
 [`examples/embedded`](examples/embedded). Your server never touches a card
 number: the browser hands the card to the processor's tokenization iframe, and
 OpenRails charges the stored token, rebills memberships at their interval,
-retries failed renewals, and keeps `HasEntitlement` current. A rental's access
+retries failed renewals, and keeps `CheckEntitlements` current. A rental's access
 ends after its 3 days; a canceled membership keeps access until its paid term ends.
 
 #### Admin dashboard
@@ -696,7 +696,7 @@ What you will set next:
 ### How access and billing work
 
 
-**Access and ownership.** Use `HasEntitlement` to check whether the customer may
+**Access and ownership.** Use `CheckEntitlements` to check whether the customer may
 access content now. That includes individual purchases, bundles and unexpired
 rentals. `ListProductAccess` identifies the product actually acquired and its
 expiry: a bundle purchase records the bundle product, while its entitlement
@@ -1118,7 +1118,7 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
 | `CreateCheckoutAttempt` | Either `PriceID` or the pair `ProductKey` + `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions; the same `IdempotencyKey` and request replays the accepted attempt |
 | `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
-| `HasEntitlement` / `ListEntitlements` | Exact grant-backed access; `ListEntitlements` reads up to 500 customers at once |
+| `CheckEntitlements` / `ListEntitlements` | Exact grant-backed access; `CheckEntitlements` checks up to 100 keys of one customer, `ListEntitlements` reads up to 500 customers at once |
 | `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `GetCheckoutConfig` | `GetCheckoutConfigParams`: `PriceID` or `ProductKey` + `PriceKey` lists the options that can sell it |

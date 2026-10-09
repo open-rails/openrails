@@ -30,7 +30,7 @@ prefix `/v1` standalone, `/billing/v1` embedded):
   the primary host read (max 500 customers); `{"customers": {id: [EntitlementRecord]}}`,
   a customer with none maps to `[]`. Omitted `at` = now.
 - `POST /v1/merchant/customers/{customer_id}/entitlements/check` body `{"entitlements": [...], "at"}` —
-  `{"entitlements": {key: bool}}` for up to 100 keys (Go: `HasEntitlement`).
+  `{"entitlements": {key: bool}}` for up to 100 keys (Go: `CheckEntitlements`).
 - `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — reverse lookup:
   one page of customer ids holding an active window (`{data, next_cursor}`).
 - `GET /v1/me/entitlements?at=` — the signed-in customer's own active windows.
