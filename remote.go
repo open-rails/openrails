@@ -194,6 +194,24 @@ func batchIDs[T interface{ IsZero() bool }](field string, ids []T, limit int) er
 	return nil
 }
 
+// setIDs adds a List's ids filter to q: 1 to billing.MaxBatchItems nonzero
+// ids, or nothing when ids is nil. The server refuses ids beside any other
+// parameter.
+func setIDs[T wireID](q url.Values, ids []T) error {
+	if ids == nil {
+		return nil
+	}
+	if err := batchIDs("ids", ids, billing.MaxBatchItems); err != nil {
+		return err
+	}
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = id.String()
+	}
+	q.Set("ids", strings.Join(parts, ","))
+	return nil
+}
+
 // requireID trims a caller-supplied identifier and refuses a blank one with
 // the server's invalid_param refusal before any I/O, so embedded and remote
 // callers observe the same error. Dot segments name nothing and would be

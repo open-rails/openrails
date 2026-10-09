@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -13,7 +12,6 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 var (
@@ -140,86 +138,6 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
 		return err
 	})
-}
-
-// SetCreditLimit sets how much a customer may owe in arrears in one
-// currency. Merchant-only: a customer cannot raise its own credit line.
-func (s *Service) SetCreditLimit(ctx context.Context, customer identity.CustomerID, params billing.SetCreditLimitParams) (*billing.CreditLimit, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if customer.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	currency, err := requireCurrency(params.Currency)
-	if err != nil {
-		return nil, err
-	}
-	if params.Amount < 0 {
-		return nil, apperr.Invalidf("amount must be nonnegative").WithParam("amount")
-	}
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return s.moneyService().SetCreditLimit(ctx, customer, currency, params.Amount)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &billing.CreditLimit{CustomerID: customer, Currency: currency, Amount: params.Amount}, nil
-}
-
-// GetCreditLimit returns how much a customer may owe in arrears.
-func (s *Service) GetCreditLimit(ctx context.Context, customer identity.CustomerID, currency string) (*billing.CreditLimit, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-	if customer.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	currency, err := requireCurrency(currency)
-	if err != nil {
-		return nil, err
-	}
-	amount, err := s.moneyService().GetCreditLimit(ctx, customer, currency)
-	if err != nil {
-		return nil, err
-	}
-	return &billing.CreditLimit{CustomerID: customer, Currency: currency, Amount: amount}, nil
-}
-
-// GetCustomerTrustLevel returns the trust level stored for a customer.
-func (s *Service) GetCustomerTrustLevel(ctx context.Context, customer identity.CustomerID, currency string) (*billing.TrustLevel, error) {
-	level, err := s.GetTrustLevel(ctx, customer, currency)
-	if err != nil {
-		return nil, err
-	}
-	return &billing.TrustLevel{CustomerID: customer, Currency: money.NormalizeCurrency(currency), TrustLevel: level}, nil
-}
-
-// SetTrustLevel stores the trust level a customer's admissions use when a
-// request names none; empty clears it.
-func (s *Service) SetTrustLevel(ctx context.Context, customer identity.CustomerID, params billing.SetTrustLevelParams) (*billing.TrustLevel, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-	if customer.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	currency, err := requireCurrency(params.Currency)
-	if err != nil {
-		return nil, err
-	}
-	level := strings.TrimSpace(params.TrustLevel)
-	if len(level) > 64 {
-		return nil, apperr.Invalidf("trust_level exceeds 64 bytes").WithParam("trust_level")
-	}
-	if err := s.moneyService().SetTrustLevelOverride(ctx, customer, currency, level); err != nil {
-		return nil, err
-	}
-	return &billing.TrustLevel{CustomerID: customer, Currency: currency, TrustLevel: level}, nil
 }
 
 // GetCreditAccountSettings returns a payer's stored account settings

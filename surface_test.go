@@ -57,16 +57,17 @@ var embeddedMethods = map[string]string{
 // routeArguments are the arguments of the methods that refuse a request with
 // every field set (they take one of several).
 var routeArguments = map[string][]any{
-	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
-	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
-	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
-	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
-	"GetCheckoutConfig":     {billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "monthly"}},
-	"ListOffers":            {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
-	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
-	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
-	"UpdatePrice":           {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
-	"UpdateProduct":         {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
+	"ApplyCatalog":           {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
+	"CheckProductAccess":     {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
+	"CreateCheckoutSession":  {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
+	"CreatePrice":            {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
+	"GetCheckoutConfig":      {billing.GetCheckoutConfigParams{ProductKey: "pro", PriceKey: "monthly"}},
+	"ListOffers":             {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
+	"RefundPayment":          {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
+	"ArchiveProduct":         {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
+	"UpdatePrice":            {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
+	"UpdateProduct":          {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
+	"UpdateCustomerSettings": {[]billing.UpdateCustomerSettingsParams{{CustomerID: billing.CustomerID(uuid.New()), BillingPolicy: catalog.Null[string]()}}},
 }
 
 // verbs are the first words a method on each HTTP method may start with; a

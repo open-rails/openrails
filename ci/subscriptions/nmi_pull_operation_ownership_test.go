@@ -49,7 +49,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			})
 			var invoice billing.InvoiceID
 			if invoiceMode {
-				_, err := w.client[remote].SetCreditLimit(t.Context(), e.c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 50_000_000})
+				_, err := w.client[remote].UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: e.c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}}})
 				require.NoError(t, err)
 				_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)

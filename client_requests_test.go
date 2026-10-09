@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 type recordedRequest struct {
@@ -46,7 +47,7 @@ func TestClientRequestShapes(t *testing.T) {
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
 		"/v1/merchant/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
-		"/v1/merchant/customers/" + customer + "/trust-level":          `{"customer_id":"` + customer + `","currency":"USD","trust_level":"gold"}`,
+		"/v1/merchant/customers/settings":                              `{"data":[{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}],"next_cursor":null}`,
 		"/v1/merchant/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
 		"/v1/merchant/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
 		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
@@ -100,13 +101,19 @@ func TestClientRequestShapes(t *testing.T) {
 			require.Equal(t, "gold", item["trust_level"])
 			require.Equal(t, "42", item["accrual_rate_delta_per_hour"])
 		}},
-		{"trust level read", func() error {
-			level, err := client.GetTrustLevel(t.Context(), typedCustomer, " USD ")
-			if err == nil && level.TrustLevel != "gold" {
-				err = errors.New("trust level not decoded: " + level.TrustLevel)
+		{"settings read names each customer", func() error {
+			page, err := client.ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{typedCustomer, typedCustomer}})
+			if err == nil && page.Items[0].TrustLevels[0].TrustLevel != "gold" {
+				err = errors.New("settings not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/trust-level", "currency=USD", nil},
+		}, http.MethodGet, "/v1/merchant/customers/settings", "ids=" + customer + "%2C" + customer, nil},
+		{"settings write sends only the named fields", func() error {
+			_, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: typedCustomer, BillingPolicy: catalog.Null[string]()}})
+			return err
+		}, http.MethodPatch, "/v1/merchant/customers/settings", "", func(t *testing.T, b map[string]any) {
+			require.Equal(t, map[string]any{"items": []any{map[string]any{"customer_id": customer, "billing_policy": nil}}}, b)
+		}},
 		{"credit grant source ids are opaque query values", func() error {
 			page, err := client.ListCreditGrants(t.Context(), typedCustomer, billing.CreditGrantListParams{SourceID: "../source/receipt?part=1&currency=JPY"})
 			if err == nil && page.Items[0].Amount != 1 {
@@ -288,11 +295,19 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ListPaymentMethods(ctx, billing.CustomerID{}, billing.PageRequest{})
 			return err
 		},
-		"invoice profile customer": func() error { _, err := c.GetInvoiceProfile(ctx, billing.CustomerID{}); return err },
-		"set invoice profile customer": func() error {
-			_, err := c.SetInvoiceProfile(ctx, billing.CustomerID{}, billing.SetInvoiceProfileParams{IfAbsent: true})
+		"settings customer": func() error {
+			_, err := c.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{{}}})
 			return err
 		},
+		"empty settings ids": func() error {
+			_, err := c.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{}})
+			return err
+		},
+		"settings update customer": func() error {
+			_, err := c.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{}})
+			return err
+		},
+		"empty settings update": func() error { _, err := c.UpdateCustomerSettings(ctx, nil); return err },
 		"settled payment customer": func() error {
 			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID{}, price)
 			return err
@@ -442,21 +457,12 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	// Typed customer ids: the zero id names nobody.
 	zero := billing.CustomerID{}
 	typedCustomerScoped := map[string]func() error{
-		"balance":          func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
-		"usage":            func() error { _, err := c.GetUsage(ctx, zero, billing.GetUsageParams{Currency: "USD"}); return err },
-		"trust level":      func() error { _, err := c.GetTrustLevel(ctx, zero, "USD"); return err },
-		"set trust level":  func() error { _, err := c.SetTrustLevel(ctx, zero, billing.SetTrustLevelParams{}); return err },
-		"credit limit":     func() error { _, err := c.GetCreditLimit(ctx, zero, "USD"); return err },
-		"set credit limit": func() error { _, err := c.SetCreditLimit(ctx, zero, billing.SetCreditLimitParams{}); return err },
-		"credit grants":    func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
-		"create credit":    func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreateCreditGrantParams{}); return err },
+		"balance":       func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
+		"usage":         func() error { _, err := c.GetUsage(ctx, zero, billing.GetUsageParams{Currency: "USD"}); return err },
+		"credit grants": func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
+		"create credit": func() error { _, err := c.CreateCreditGrant(ctx, zero, billing.CreateCreditGrantParams{}); return err },
 		"transactions": func() error {
 			_, err := c.ListCreditTransactions(ctx, zero, billing.CreditTransactionListParams{})
-			return err
-		},
-		"billing policy": func() error { _, err := c.GetCustomerBillingPolicy(ctx, zero); return err },
-		"set billing policy": func() error {
-			_, err := c.SetCustomerBillingPolicy(ctx, zero, billing.SetCustomerBillingPolicyParams{})
 			return err
 		},
 		"delegations": func() error { _, err := c.ListSpendDelegations(ctx, zero); return err },

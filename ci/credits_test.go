@@ -132,11 +132,11 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	require.EqualValues(t, 2, usage.Rows[0].EventCount)
 	require.EqualValues(t, 300_000, usage.Rows[0].Amount)
 
-	_, err = client.SetTrustLevel(ctx, customer, billing.SetTrustLevelParams{Currency: "USD", TrustLevel: "trusted"})
+	_, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer, TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}}})
 	require.NoError(t, err)
-	trust, err := client.GetTrustLevel(ctx, customer, "USD")
+	settings, err := client.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{customer}})
 	require.NoError(t, err)
-	require.Equal(t, "trusted", trust.TrustLevel)
+	require.Equal(t, []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}, settings.Items[0].TrustLevels)
 
 	revoked, err := client.RevokeCreditGrant(ctx, customer, grant.ID, billing.RevokeCreditGrantParams{Reason: "support correction"})
 	require.NoError(t, err)

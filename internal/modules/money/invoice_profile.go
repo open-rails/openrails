@@ -3,18 +3,15 @@ package money
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
+	"github.com/google/uuid"
 
-	"github.com/jackc/pgx/v5"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // MaxInvoiceNetTermsDays prevents overflow when terms become a due-date duration.
@@ -54,129 +51,53 @@ func normalizeCollectionMethod(s string) (string, error) {
 	}
 }
 
-// SetInvoiceProfile upserts a payer's invoice profile. Operator
-// surface — a payer must not grant itself credit terms.
-func (s *MoneyService) SetInvoiceProfile(ctx context.Context, payer identity.CustomerID, p CustomerInvoiceProfile) error {
-	_, err := s.writeCustomerInvoiceProfile(ctx, payer, p, false)
-	return err
-}
-
-// EnsureCustomerInvoiceProfile inserts a payer's invoice profile when none is
-// stored. It never overwrites an operator-configured profile.
-func (s *MoneyService) EnsureCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p CustomerInvoiceProfile) (bool, error) {
-	return s.writeCustomerInvoiceProfile(ctx, payer, p, true)
-}
-
-func (s *MoneyService) writeCustomerInvoiceProfile(ctx context.Context, payer identity.CustomerID, p CustomerInvoiceProfile, insertOnly bool) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, fmt.Errorf("money service not initialized")
+// PutInvoiceProfileTx replaces a customer's invoice profile, or with nil
+// removes it, inside the caller's merchant transaction. The caller validated
+// p and holds the customer's lock.
+func PutInvoiceProfileTx(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, p *CustomerInvoiceProfile, now time.Time) error {
+	if p == nil {
+		return q.DeleteCustomerInvoiceProfile(ctx, gen.DeleteCustomerInvoiceProfileParams{MerchantID: merchantID, CustomerID: customerID})
 	}
-	if payer.IsZero() {
-		return false, fmt.Errorf("payer required")
-	}
-	netTerms, castErr := safecast.Convert[int32](p.NetTermsDays)
-	if castErr != nil || netTerms < 0 || int64(netTerms) > MaxInvoiceNetTermsDays {
-		return false, fmt.Errorf("net_terms_days must be between 0 and %d", MaxInvoiceNetTermsDays)
+	netTerms, err := safecast.Convert[int32](p.NetTermsDays)
+	if err != nil || netTerms < 0 || int64(netTerms) > MaxInvoiceNetTermsDays {
+		return fmt.Errorf("net_terms_days must be between 0 and %d", MaxInvoiceNetTermsDays)
 	}
 	method, err := normalizeCollectionMethod(p.CollectionMethod)
 	if err != nil {
-		return false, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
+		return err
 	}
 	taxJSON, err := toJSONBC(p.Tax)
 	if err != nil {
-		return false, fmt.Errorf("encode invoice profile tax: %w", err)
+		return fmt.Errorf("encode invoice profile tax: %w", err)
 	}
-	contactsJSON, err := json.Marshal(p.BillingContacts)
-	if err != nil {
-		return false, fmt.Errorf("encode invoice profile billing_contacts: %w", err)
+	contactsJSON := []byte("[]")
+	if p.BillingContacts != nil {
+		if contactsJSON, err = json.Marshal(p.BillingContacts); err != nil {
+			return fmt.Errorf("encode invoice profile billing_contacts: %w", err)
+		}
 	}
-	if p.BillingContacts == nil {
-		contactsJSON = []byte("[]")
-	}
-	created := false
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		if err := ensureCustomer(ctx, q, tid.UUID(), payer.UUID()); err != nil {
-			return err
-		}
-		_, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
-			ID: payer.UUID(), MerchantID: tid.UUID(),
-		})
-		if err != nil {
-			return fmt.Errorf("lock invoice profile payer: %w", err)
-		}
-		if insertOnly {
-			rows, err := q.InsertCustomerInvoiceProfileIfAbsent(ctx, gen.InsertCustomerInvoiceProfileIfAbsentParams{
-				MerchantID:       tid.UUID(),
-				CustomerID:       payer.UUID(),
-				NetTermsDays:     netTerms,
-				CollectionMethod: method,
-				PoNumber:         nilIfEmpty(p.PONumber),
-				Tax:              taxJSON,
-				BillingContacts:  contactsJSON,
-				Memo:             nilIfEmpty(p.Memo),
-				Now:              s.now(),
-			})
-			if err != nil {
-				return err
-			}
-			created = rows == 1
-			return nil
-		}
-		return q.UpsertCustomerInvoiceProfile(ctx, gen.UpsertCustomerInvoiceProfileParams{
-			MerchantID:       tid.UUID(),
-			CustomerID:       payer.UUID(),
-			NetTermsDays:     netTerms,
-			CollectionMethod: method,
-			PoNumber:         nilIfEmpty(p.PONumber),
-			Tax:              taxJSON,
-			BillingContacts:  contactsJSON,
-			Memo:             nilIfEmpty(p.Memo),
-			Now:              s.now(),
-		})
+	return q.UpsertCustomerInvoiceProfile(ctx, gen.UpsertCustomerInvoiceProfileParams{
+		MerchantID: merchantID, CustomerID: customerID, NetTermsDays: netTerms, CollectionMethod: method,
+		PoNumber: nilIfEmpty(p.PONumber), Tax: taxJSON, BillingContacts: contactsJSON, Memo: nilIfEmpty(p.Memo), Now: now,
 	})
-	if err != nil {
-		return false, err
-	}
-	return created, nil
 }
 
-// GetInvoiceProfile returns the payer's invoice profile, or nil when
-// none is stored.
-func (s *MoneyService) GetInvoiceProfile(ctx context.Context, payer identity.CustomerID) (*CustomerInvoiceProfile, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	tid, err := merchant.Require(ctx)
+// InvoiceProfilesTx reads the customers' invoice profiles; one with none is
+// absent.
+func InvoiceProfilesTx(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customers []uuid.UUID) (map[uuid.UUID]*CustomerInvoiceProfile, error) {
+	rows, err := q.ListInvoiceProfiles(ctx, gen.ListInvoiceProfilesParams{MerchantID: merchantID, CustomerIds: customers})
 	if err != nil {
 		return nil, err
 	}
-	var out *CustomerInvoiceProfile
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, err := s.db.Gen(ctx).GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(),
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			return err
-		}
+	out := make(map[uuid.UUID]*CustomerInvoiceProfile, len(rows))
+	for _, row := range rows {
 		p, err := invoiceProfileFromGen(row)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		out = p
-		return nil
-	})
-	return out, err
+		out[row.CustomerID] = p
+	}
+	return out, nil
 }
 
 func invoiceProfileFromGen(row gen.BillingCustomerInvoiceProfile) (*CustomerInvoiceProfile, error) {

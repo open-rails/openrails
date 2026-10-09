@@ -117,24 +117,27 @@ customer is refused. `customer_id` is not accepted in a declaration binding.
 
 ### Assigning a customer
 
-The same Go Client operations work embedded and remotely:
+A customer's policy is its `billing_policy` customer setting
+([customer settings](api/merchant-settings.md#customer-settings)), the same
+embedded and remotely:
 
 ```go
-name := "cloud_monthly"
-assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, billing.SetCustomerBillingPolicyParams{PolicyName: &name})
-assignment, err = client.GetCustomerBillingPolicy(ctx, customerID)
-assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, billing.SetCustomerBillingPolicyParams{}) // inherit again
+settings, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{
+	{CustomerID: customerID, BillingPolicy: catalog.Value("cloud_monthly")},
+})
+settings, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{
+	{CustomerID: customerID, BillingPolicy: catalog.Null[string]()}, // inherit again
+})
 ```
 
-HTTP uses `GET` and `PUT` on
-`/v1/merchant/customers/{customer_id}/billing-policy`. PUT requires
-`{"policy_name":"cloud_monthly"}` to assign, or `{"policy_name":null}` to clear.
-Both operations return `{"customer_id":"…","policy_name":"cloud_monthly"}`;
-an unassigned customer returns an explicit `null` policy name. This reads the
-explicit assignment, not the effective tier or default policy.
+Over HTTP, `PATCH /v1/merchant/customers/settings` with
+`{"items":[{"customer_id":"…","billing_policy":"cloud_monthly"}]}` assigns
+it, and `"billing_policy": null` clears it. `GET
+/v1/merchant/customers/settings?ids=…` reads it. This is the explicit
+assignment, not the effective tier or default policy.
 
-GET is a staff read (`openrails.StaffReads`); PUT a staff write
-(`openrails.StaffWrites`); both are in `openrails.Customers`. Customer
+The read is a staff read (`openrails.StaffReads`) and the write a staff write
+(`openrails.StaffWrites`); both are in `openrails.CustomerSettings`. Customer
 self-service cannot change this resource. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer

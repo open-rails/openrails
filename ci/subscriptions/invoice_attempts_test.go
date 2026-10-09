@@ -30,7 +30,7 @@ func TestInvoiceCollectionAttempts(t *testing.T) {
 	ctx, client, c := t.Context(), w.client[embedded], w.newCustomer()
 	const owed = 50_000_000 // the default invoice threshold
 	customer := billing.CustomerID(uuid.MustParse(c.id))
-	_, err := client.SetCreditLimit(ctx, customer, billing.SetCreditLimitParams{Currency: "USD", Amount: owed})
+	_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: customer, CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: owed}}}})
 	require.NoError(t, err)
 	request, expires := uuid.NewString(), w.clock.Now().Add(time.Hour)
 	admitted, err := client.Admit(ctx, []billing.AdmitParams{{CustomerID: customer, Invoker: c.id, InvokerType: billing.InvokerTypeCustomer, Currency: "USD", EstimatedAmount: owed, RequestID: request, ExpiresAt: &expires}})

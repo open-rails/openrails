@@ -136,6 +136,7 @@ const (
 	ResCheckoutSessions Resource = "checkout_sessions"
 	ResCredits          Resource = "credits"
 	ResCustomers        Resource = "customers"
+	ResCustomerSettings Resource = "customer_settings"
 	ResDashboard        Resource = "dashboard"
 	ResFindings         Resource = "findings"
 	ResHostEvents       Resource = "host_events"
@@ -153,7 +154,7 @@ const (
 // Resources is every resource group, with its Go name (openrails.<Name>).
 var Resources = map[Resource]string{
 	ResAccess: "Access", ResBillingData: "BillingData", ResCatalog: "Catalog", ResCheckout: "Checkout", ResCheckoutSessions: "CheckoutSessions",
-	ResCredits: "Credits", ResCustomers: "Customers", ResDashboard: "Dashboard", ResFindings: "Findings",
+	ResCredits: "Credits", ResCustomers: "Customers", ResCustomerSettings: "CustomerSettings", ResDashboard: "Dashboard", ResFindings: "Findings",
 	ResHostEvents: "HostEvents", ResInvoices: "Invoices", ResMetrics: "Metrics", ResOperations: "Operations",
 	ResPayments: "Payments", ResPSPs: "PSPs", ResRefunds: "Refunds", ResSettings: "Settings",
 	ResSubscriptions: "Subscriptions", ResUsage: "Usage",
@@ -198,6 +199,11 @@ func integer(name string) Param { return Param{Name: name, Kind: "integer", Chec
 
 // pageParams are a cursor-paged list's query: Request.Page reads them.
 var pageParams = []Param{text("cursor"), integer("limit")}
+
+// idsParam names up to billing.MaxBatchItems records of a list, comma
+// separated. The mount refuses a longer list, and any other parameter beside
+// it: the answer is the named records, whatever their state, in one page.
+var idsParam = Param{Name: "ids", Kind: "ids"}
 
 // params lists a route's query parameters, sorted by name.
 func params(parts ...any) []Param {

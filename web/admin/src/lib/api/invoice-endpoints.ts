@@ -1,4 +1,5 @@
-import { api, ApiError, type PageRequest } from "./client"
+import { api, type PageRequest } from "./client"
+import { getCustomerSettings, updateCustomerSettings } from "./endpoints"
 import type {
   CreateInvoicePaymentParams,
   Invoice,
@@ -40,30 +41,21 @@ export const listInvoicePayments = (
     query: { ...page },
     signal,
   })
-// getInvoiceProfile is null while the customer has none.
+// getInvoiceProfile is the customer's invoice_profile setting; null while it
+// has none.
 export const getInvoiceProfile = async (
   customerId: string,
   signal?: AbortSignal
-) => {
-  try {
-    return await api<InvoiceProfile>(
-      `/merchant/customers/${customerId}/invoice-profile`,
-      { signal }
-    )
-  } catch (error) {
-    if (error instanceof ApiError && error.code === "resource_not_found")
-      return null
-    throw error
-  }
-}
-export const putInvoiceProfile = (
+) => (await getCustomerSettings(customerId, signal))?.invoice_profile ?? null
+export const putInvoiceProfile = async (
   customerId: string,
   profile: InvoiceProfile
-) =>
-  api<InvoiceProfile>(`/merchant/customers/${customerId}/invoice-profile`, {
-    method: "PUT",
-    body: profile,
-  })
+) => {
+  const { items } = await updateCustomerSettings([
+    { customer_id: customerId, invoice_profile: profile },
+  ])
+  return items[0].invoice_profile
+}
 export interface InvoiceActionRequest {
   id: string
   action: InvoiceAction

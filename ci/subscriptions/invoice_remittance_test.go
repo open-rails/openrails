@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -27,9 +28,10 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			w := newWorld(t)
 			ctx, client, payer := t.Context(), w.client[remote], w.newCustomer()
 			const owed = int64(50_000_000)
-			_, err := client.SetInvoiceProfile(ctx, payer.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice, NetTermsDays: 30}})
-			require.NoError(t, err)
-			_, err = client.SetCreditLimit(ctx, payer.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 2 * owed})
+			_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{
+				CustomerID: payer.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 2 * owed}},
+				InvoiceProfile: catalog.Value(billing.InvoiceProfile{CollectionMethod: billing.CollectSendInvoice, NetTermsDays: 30}),
+			}})
 			require.NoError(t, err)
 			invoice := func() *billing.Invoice {
 				_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})

@@ -16,6 +16,3 @@ LIMIT sqlc.arg(row_limit)::int;
 -- name: GetMerchantInvoice :one
 SELECT * FROM billing.invoices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
-
--- name: InvoiceProfileCustomerExists :one
-SELECT EXISTS (SELECT 1 FROM billing.customers WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(customer_id)::uuid);

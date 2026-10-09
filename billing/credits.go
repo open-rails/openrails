@@ -179,33 +179,6 @@ type Balance struct {
 	OwedAmount      int64       `json:"owed_amount,string"`
 }
 
-// CreditLimit is how much a customer may owe in arrears in one currency.
-type CreditLimit struct {
-	CustomerID CustomerID `json:"customer_id"`
-	Currency   string     `json:"currency"`
-	Amount     int64      `json:"amount,string"`
-}
-
-// SetCreditLimitParams sets a customer's credit limit; zero allows no arrears.
-type SetCreditLimitParams struct {
-	Currency string `json:"currency"`
-	Amount   int64  `json:"amount,string"`
-}
-
-// TrustLevel is the trust tier a customer's admissions are judged at in one
-// currency when a request names none. Empty is the default tier.
-type TrustLevel struct {
-	CustomerID CustomerID `json:"customer_id"`
-	Currency   string     `json:"currency"`
-	TrustLevel string     `json:"trust_level"`
-}
-
-// SetTrustLevelParams sets a customer's trust level; empty clears it.
-type SetTrustLevelParams struct {
-	Currency   string `json:"currency"`
-	TrustLevel string `json:"trust_level"`
-}
-
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the
 // request's currency when empty). A spend window is at most 31 days.
 type BudgetWindow struct {

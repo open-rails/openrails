@@ -24,10 +24,9 @@ import {
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
-  getCreditLimit,
+  getCustomerSettings,
   getPriceByKey,
   getProduct,
-  getTrustLevel,
   grantProductAccess,
   inviteTeamMember,
   listCustomers,
@@ -51,7 +50,7 @@ import {
   revokeApiKey,
   revokeProductAccess,
   revokeTeamInvite,
-  setCreditLimit,
+  updateCustomerSettings,
   updatePrice,
   updateProduct,
   type DefaultUsageRateCardRequest,
@@ -861,7 +860,10 @@ export const adminMutations = {
         customerId: string
         currency: string
         amount: string
-      }) => setCreditLimit(customerId, currency, amount),
+      }) =>
+        updateCustomerSettings([
+          { customer_id: customerId, credit_limits: [{ currency, amount }] },
+        ]),
     })
   },
   lookupCustomerControls: () => {
@@ -875,11 +877,18 @@ export const adminMutations = {
         customerId: string
         currency: string
       }) => {
-        const [credit, trust] = await Promise.all([
-          getCreditLimit(customerId, currency),
-          getTrustLevel(customerId, currency),
-        ])
-        return { credit, trust }
+        const settings = await getCustomerSettings(customerId)
+        if (!settings) throw new Error("No customer has this ID")
+        const code = currency.toUpperCase()
+        return {
+          currency: code,
+          creditLimit:
+            settings.credit_limits.find((l) => l.currency === code)?.amount ??
+            "0",
+          trustLevel:
+            settings.trust_levels.find((l) => l.currency === code)
+              ?.trust_level ?? "",
+        }
       },
     })
   },

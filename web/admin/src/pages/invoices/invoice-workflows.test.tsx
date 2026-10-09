@@ -104,23 +104,38 @@ it("pages the payment history by cursor", async () => {
 })
 
 it("creates the profile of a customer who has none", async () => {
-  routes["GET /merchant/customers/cus_1/invoice-profile"] = () =>
-    Response.json(
-      { error: { code: "resource_not_found", message: "none" } },
-      { status: 404 }
-    )
-  routes["PUT /merchant/customers/cus_1/invoice-profile"] = (request) =>
-    Response.json(request.body, { status: 201 })
+  routes["GET /merchant/customers/settings"] = {
+    data: [
+      {
+        customer_id: "cus_1",
+        credit_limits: [],
+        trust_levels: [],
+        billing_policy: null,
+        invoice_profile: null,
+      },
+    ],
+    next_cursor: null,
+  }
+  routes["PATCH /merchant/customers/settings"] = (request) => ({
+    items: (request.body as { items: unknown[] }).items,
+  })
   await show(<CustomerInvoiceProfileSection customerId="cus_1" />)
   await vi.waitFor(() => expect(text()).toContain("Save invoice profile"))
   await click("Save invoice profile")
   await vi.waitFor(() => expect(text()).toContain("Invoice profile saved"))
-  expect(requests.find((r) => r.method === "PUT")!.body).toEqual({
-    net_terms_days: 0,
-    collection_method: "charge_automatically",
-    po_number: "",
-    memo: "",
-    billing_contacts: [],
-    tax: {},
+  expect(requests.find((r) => r.method === "PATCH")!.body).toEqual({
+    items: [
+      {
+        customer_id: "cus_1",
+        invoice_profile: {
+          net_terms_days: 0,
+          collection_method: "charge_automatically",
+          po_number: "",
+          memo: "",
+          billing_contacts: [],
+          tax: {},
+        },
+      },
+    ],
   })
 })

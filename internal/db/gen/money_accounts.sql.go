@@ -211,6 +211,54 @@ func (q *Queries) ListCustomerBalanceCurrencies(ctx context.Context, arg ListCus
 	return items, nil
 }
 
+const listCustomerSettingsAccounts = `-- name: ListCustomerSettingsAccounts :many
+SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
+WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
+  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
+ORDER BY customer_id, currency
+LIMIT $3::int
+`
+
+type ListCustomerSettingsAccountsParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
+}
+
+type ListCustomerSettingsAccountsRow struct {
+	CustomerID        uuid.UUID
+	Currency          string
+	CreditLimitAmount int64
+	Tier              *string
+}
+
+// The customers' credit limits and trust levels, by currency. A customer has
+// at most one row per registered currency, which bounds row_limit.
+func (q *Queries) ListCustomerSettingsAccounts(ctx context.Context, arg ListCustomerSettingsAccountsParams) ([]ListCustomerSettingsAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerSettingsAccounts, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomerSettingsAccountsRow
+	for rows.Next() {
+		var i ListCustomerSettingsAccountsRow
+		if err := rows.Scan(
+			&i.CustomerID,
+			&i.Currency,
+			&i.CreditLimitAmount,
+			&i.Tier,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
 SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2

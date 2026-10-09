@@ -42,12 +42,12 @@ var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
 
 // documents are the request bodies not named ...Params: what the route
 // stores or runs, sent whole, and the Solana Pay transaction request.
-var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "MetricsQuery", "CollectionPaymentMethod", "SolanaPayPostRequest"}
+var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "CollectionPaymentMethod", "SolanaPayPostRequest"}
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 225)
+	require.Len(t, Catalog(), 219)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -97,7 +97,7 @@ func TestCatalogDeclarations(t *testing.T) {
 			require.True(t, ok, "%s: %s is not a registered error code", key, code)
 		}
 		for _, p := range r.Query {
-			require.Contains(t, []string{"string", "integer", "boolean", "date-time"}, p.Kind, key)
+			require.Contains(t, []string{"string", "integer", "boolean", "date-time", "ids"}, p.Kind, key)
 		}
 		got, ok := Lookup(r.Method, r.Path)
 		require.True(t, ok, key)

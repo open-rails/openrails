@@ -49,14 +49,6 @@ ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE
     policy_name = EXCLUDED.policy_name,
     updated_at = EXCLUDED.updated_at;
 
--- name: GetCustomerBillingPolicyAssignment :one
--- The left join distinguishes an existing unassigned customer from a missing one.
-SELECT c.id AS customer_id, b.policy_name
-FROM billing.customers c
-LEFT JOIN billing.billing_policy_bindings b
-  ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
-WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id);
-
 -- name: LockBillingPolicyName :one
 SELECT name FROM billing.billing_policies
 WHERE merchant_id = sqlc.arg(merchant_id) AND name = sqlc.arg(name)
@@ -126,3 +118,9 @@ WHERE merchant_id = $1 AND customer_id = $2;
 -- Serializes one payer's spend-limit document writes.
 -- name: LockInvokerSpendLimits :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
+
+-- name: ListCustomerBillingPolicyAssignments :many
+-- One binding per customer at most (the customer rung's unique index).
+SELECT customer_id, policy_name FROM billing.billing_policy_bindings
+WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+LIMIT sqlc.arg(row_limit)::int;

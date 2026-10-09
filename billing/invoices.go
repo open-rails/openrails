@@ -252,10 +252,3 @@ type InvoiceProfile struct {
 	BillingContacts  []InvoiceContact        `json:"billing_contacts"`
 	Memo             string                  `json:"memo"`
 }
-
-// SetInvoiceProfileParams replaces a customer's invoice profile. IfAbsent
-// only creates it: an existing profile is answered unchanged.
-type SetInvoiceProfileParams struct {
-	InvoiceProfile
-	IfAbsent bool `json:"-"`
-}

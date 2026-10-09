@@ -13,7 +13,8 @@ import type {
   CatalogDriftRefresh,
   CreateOffChannelPaymentParams,
   CreatePriceParams,
-  CreditLimit,
+  CustomerSettings,
+  CustomerSettingsBatch,
   Customer,
   ListPage,
   Meter,
@@ -27,7 +28,7 @@ import type {
   RatePrice,
   RebillCycle,
   RefundPaymentParams,
-  TrustLevel,
+  UpdateCustomerSettingsParams,
   UpdatePriceParams,
   UpdateProductParams,
 } from "./generated/wire"
@@ -757,27 +758,26 @@ export const changeTeamRole = (userId: string, role: string) =>
 export const removeTeamMember = (userId: string) =>
   api<void>(`/merchant/team/${userId}`, { method: "DELETE" })
 
-export const getCreditLimit = (customerId: string, currency: string) =>
-  api<CreditLimit>(
-    `/merchant/customers/${encodeURIComponent(customerId)}/credit-limit`,
-    { query: { currency } }
-  )
-
-export const setCreditLimit = (
+// getCustomerSettings is one customer's settings; null when the customer
+// does not exist.
+export const getCustomerSettings = async (
   customerId: string,
-  currency: string,
-  amount: string
-) =>
-  api<CreditLimit>(
-    `/merchant/customers/${encodeURIComponent(customerId)}/credit-limit`,
-    { method: "PUT", body: { currency, amount } }
+  signal?: AbortSignal
+) => {
+  const page = await api<ListPage<CustomerSettings>>(
+    "/merchant/customers/settings",
+    { query: { ids: customerId }, signal }
   )
+  return page.data[0] ?? null
+}
 
-export const getTrustLevel = (customerId: string, currency: string) =>
-  api<TrustLevel>(
-    `/merchant/customers/${encodeURIComponent(customerId)}/trust-level`,
-    { query: { currency } }
-  )
+// updateCustomerSettings changes only the fields each item names, all or
+// none.
+export const updateCustomerSettings = (items: UpdateCustomerSettingsParams[]) =>
+  api<CustomerSettingsBatch>("/merchant/customers/settings", {
+    method: "PATCH",
+    body: { items },
+  })
 
 // --- Alerting: webhooks (#736) ---
 

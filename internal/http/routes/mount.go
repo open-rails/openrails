@@ -1,7 +1,9 @@
 package routes
 
 import (
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -219,7 +221,42 @@ func (e *Env) gates(route Route) []router.Middleware {
 	if checked := checkedParams(route.Query); len(checked) > 0 {
 		mw = append(mw, strictQueryMW(checked))
 	}
+	if slices.Contains(route.Query, idsParam) {
+		mw = append(mw, idsMW)
+	}
 	return mw
+}
+
+// idsMW bounds a list's ids filter and refuses any other parameter beside it,
+// so every list reads named records the same way.
+func idsMW(next router.Handler) router.Handler {
+	return func(r *httprequest.Request) {
+		query := r.Request.URL.Query()
+		raw, named := query["ids"]
+		if !named {
+			next(r)
+			return
+		}
+		refuse := func(message string) {
+			r.AbortAPIError(api.Coded(billing.CodeInvalidQuery, message).WithParam("ids"))
+		}
+		if len(raw) != 1 {
+			refuse("ids is one comma-separated list")
+			return
+		}
+		ids := strings.Split(raw[0], ",")
+		if len(ids) > billing.MaxBatchItems || strings.TrimSpace(raw[0]) == "" {
+			refuse(fmt.Sprintf("ids must hold 1 to %d ids", billing.MaxBatchItems))
+			return
+		}
+		for name := range query {
+			if name != "ids" {
+				refuse("ids takes no other parameter: " + name)
+				return
+			}
+		}
+		next(r)
+	}
 }
 
 func checkedParams(params []Param) []string {

@@ -125,58 +125,6 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 	})
 }
 
-// SetCreditLimit sets the admin/operator arrears credit line for a payer (#489):
-// under billing_mode=arrears the balance may go negative up to creditLimit;
-// AdmitHold denies insufficient_credit when a new hold would exceed remaining
-// capacity. 0 means no arrears capacity, although prepaid balance may still be
-// spent. This is OPERATOR-only — deliberately NOT part of the self-serve
-// UpsertAccountSettings surface. It ensures a settings row exists, then stamps
-// the limit.
-func (s *MoneyService) SetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string, creditLimit int64) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	if creditLimit < 0 {
-		return fmt.Errorf("credit_limit_amount must be >= 0")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	tenantID := tid.UUID()
-	now := s.now()
-	cur := normalizeCurrency(currency)
-	if err := RequireBillingCurrency(cur); err != nil {
-		return err
-	}
-	// or#868 B2: merchant-pinned, not a bare RunInTx (under the since-removed RLS
-	// the ensureCustomer inside ensureSettingsRowTx was denied 42501 without it).
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		// Ensure a settings row exists (arrears mode if creating — a credit line
-		// only matters for arrears; no-op when the row already exists).
-		if err := s.ensureSettingsRowTx(ctx, q, tenantID, payer.UUID(), cur, BillingModeArrears, now); err != nil {
-			return err
-		}
-		return q.SetMoneyAccountCreditLimit(ctx, gen.SetMoneyAccountCreditLimitParams{
-			MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur,
-			CreditLimit: creditLimit, Now: now,
-		})
-	})
-}
-
-// GetCreditLimit returns the admin-set arrears credit line for a payer (#489).
-func (s *MoneyService) GetCreditLimit(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
-	settings, err := s.GetAccountSettings(ctx, payer, currency)
-	if err != nil {
-		return 0, err
-	}
-	return settings.CreditLimitAmount, nil
-}
-
 // GetOutstandingOwed returns the payer's current arrears exposure in currency,
 // read O(1) from their arrears-liability account (or#897).
 //

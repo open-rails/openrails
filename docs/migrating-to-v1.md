@@ -222,7 +222,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; invoices use the per-currency collection card |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListInvoicePayments(`, `client.CreateInvoicePayment(` |
-| `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.SetInvoiceProfile(` with `IfAbsent`; `client.GetInvoiceProfile(` |
+| `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomerSettings(` with `InvoiceProfile`; `client.ListCustomerSettings(`. No profile already means net 0, charged automatically |
 | `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
@@ -289,7 +289,7 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/merchant/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
-| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`, `/v1/merchant/customers/{customer_id}/credit-limit`, `/v1/merchant/customers/{customer_id}/trust-level` |
+| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/merchant/customers/settings` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/transactions` |
 | `PUT …/spend-delegations:upsert` | `/v1/merchant/customers/{customer_id}/spend-delegations` and `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
 | `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}` |

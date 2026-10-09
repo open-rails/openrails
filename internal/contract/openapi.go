@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/routes"
 )
@@ -185,6 +186,10 @@ func (m *model) operation(r routes.Route) *obj {
 			schema = newObj("type", q.Kind)
 		case "date-time":
 			schema = newObj("type", "string", "format", "date-time")
+		case "ids":
+			schema = newObj("type", "array", "items", newObj("type", "string"), "minItems", 1, "maxItems", billing.MaxBatchItems)
+			params = append(params, newObj("name", q.Name, "in", "query", "style", "form", "explode", false, "schema", schema))
+			continue
 		}
 		params = append(params, newObj("name", q.Name, "in", "query", "schema", schema))
 	}

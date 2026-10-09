@@ -24,9 +24,11 @@ const (
 	Checkout RouteSet = "resource:checkout"
 	// CheckoutSessions covers CreateCheckoutSession.
 	CheckoutSessions RouteSet = "resource:checkout_sessions"
-	// Credits covers CreateCreditGrant, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, GetCreditLimit, SetCreditLimit, GetTrustLevel, SetTrustLevel, ListSpendDelegations, SetSpendDelegations, SetSpendDelegation, DeleteSpendDelegation.
+	// Credits covers CreateCreditGrant, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, SetSpendDelegation, DeleteSpendDelegation.
 	Credits RouteSet = "resource:credits"
-	// Customers covers ListCustomers, GetCustomers, EnsureCustomers, GetCustomerBillingProfile, GetCustomerBillingPolicy, SetCustomerBillingPolicy, ListCustomerDelinquency, ListDelinquency, ListPaymentMethods, DeletePaymentMethod.
+	// CustomerSettings covers ListCustomerSettings, UpdateCustomerSettings.
+	CustomerSettings RouteSet = "resource:customer_settings"
+	// Customers covers ListCustomers, GetCustomers, EnsureCustomers, GetCustomerBillingProfile, ListCustomerDelinquency, ListDelinquency, ListPaymentMethods, DeletePaymentMethod.
 	Customers RouteSet = "resource:customers"
 	// Dashboard covers SetDashboard, GenerateDashboardWidget.
 	Dashboard RouteSet = "resource:dashboard"
@@ -34,7 +36,7 @@ const (
 	Findings RouteSet = "resource:findings"
 	// HostEvents covers ListHostEvents, AcknowledgeHostEvents.
 	HostEvents RouteSet = "resource:host_events"
-	// Invoices covers ListInvoices, GetInvoice, ListInvoicePayments, CreateInvoicePayment, VoidInvoice, MarkInvoiceUncollectible, RetryInvoiceCollection, GetInvoiceProfile, SetInvoiceProfile.
+	// Invoices covers ListInvoices, GetInvoice, ListInvoicePayments, CreateInvoicePayment, VoidInvoice, MarkInvoiceUncollectible, RetryInvoiceCollection.
 	Invoices RouteSet = "resource:invoices"
 	// Metrics covers QueryMetrics, GetMetricsSchema, GetDashboard, AskMetrics.
 	Metrics RouteSet = "resource:metrics"
@@ -144,10 +146,6 @@ const (
 	GetCheckoutConfig RouteSet = "route:GetCheckoutConfig"
 	// GetCreditGrant is GET /v1/merchant/customers/{customer_id}/credit-grants/{id}.
 	GetCreditGrant RouteSet = "route:GetCreditGrant"
-	// GetCreditLimit is GET /v1/merchant/customers/{customer_id}/credit-limit.
-	GetCreditLimit RouteSet = "route:GetCreditLimit"
-	// GetCustomerBillingPolicy is GET /v1/merchant/customers/{customer_id}/billing-policy.
-	GetCustomerBillingPolicy RouteSet = "route:GetCustomerBillingPolicy"
 	// GetCustomerBillingProfile is GET /v1/merchant/customers/{customer_id}/billing-profile.
 	GetCustomerBillingProfile RouteSet = "route:GetCustomerBillingProfile"
 	// GetCustomers is POST /v1/merchant/customers/lookup.
@@ -162,8 +160,6 @@ const (
 	GetFindingSummary RouteSet = "route:GetFindingSummary"
 	// GetInvoice is GET /v1/merchant/invoices/{id}.
 	GetInvoice RouteSet = "route:GetInvoice"
-	// GetInvoiceProfile is GET /v1/merchant/customers/{customer_id}/invoice-profile.
-	GetInvoiceProfile RouteSet = "route:GetInvoiceProfile"
 	// GetMerchantConfiguration is GET /v1/merchant/configuration.
 	GetMerchantConfiguration RouteSet = "route:GetMerchantConfiguration"
 	// GetMeter is GET /v1/merchant/catalog/meters/{key}.
@@ -200,8 +196,6 @@ const (
 	GetRepriceBatch RouteSet = "route:GetRepriceBatch"
 	// GetSubscription is GET /v1/merchant/subscriptions/{id}.
 	GetSubscription RouteSet = "route:GetSubscription"
-	// GetTrustLevel is GET /v1/merchant/customers/{customer_id}/trust-level.
-	GetTrustLevel RouteSet = "route:GetTrustLevel"
 	// GetUnreadNotificationCount is GET /v1/merchant/notifications/unread-count.
 	GetUnreadNotificationCount RouteSet = "route:GetUnreadNotificationCount"
 	// GetUsage is GET /v1/merchant/customers/{customer_id}/usage.
@@ -222,6 +216,8 @@ const (
 	ListCustomerDelinquency RouteSet = "route:ListCustomerDelinquency"
 	// ListCustomerEntitlements is GET /v1/merchant/customers/{customer_id}/entitlements.
 	ListCustomerEntitlements RouteSet = "route:ListCustomerEntitlements"
+	// ListCustomerSettings is GET /v1/merchant/customers/settings.
+	ListCustomerSettings RouteSet = "route:ListCustomerSettings"
 	// ListCustomers is GET /v1/merchant/customers.
 	ListCustomers RouteSet = "route:ListCustomers"
 	// ListDelinquency is GET /v1/merchant/delinquency.
@@ -326,14 +322,8 @@ const (
 	SetAPIHost RouteSet = "route:SetAPIHost"
 	// SetAlertWebhookURL is PUT /v1/merchant/alert-webhooks/{id}/url.
 	SetAlertWebhookURL RouteSet = "route:SetAlertWebhookURL"
-	// SetCreditLimit is PUT /v1/merchant/customers/{customer_id}/credit-limit.
-	SetCreditLimit RouteSet = "route:SetCreditLimit"
-	// SetCustomerBillingPolicy is PUT /v1/merchant/customers/{customer_id}/billing-policy.
-	SetCustomerBillingPolicy RouteSet = "route:SetCustomerBillingPolicy"
 	// SetDashboard is PUT /v1/merchant/dashboard.
 	SetDashboard RouteSet = "route:SetDashboard"
-	// SetInvoiceProfile is PUT /v1/merchant/customers/{customer_id}/invoice-profile.
-	SetInvoiceProfile RouteSet = "route:SetInvoiceProfile"
 	// SetMeter is PUT /v1/merchant/catalog/meters/{key}.
 	SetMeter RouteSet = "route:SetMeter"
 	// SetMeterRateCard is PUT /v1/merchant/catalog/meters/{key}/rate-card.
@@ -346,8 +336,8 @@ const (
 	SetSpendDelegations RouteSet = "route:SetSpendDelegations"
 	// SetSubscriptionPaymentMethod is PUT /v1/merchant/subscriptions/{id}/payment-method.
 	SetSubscriptionPaymentMethod RouteSet = "route:SetSubscriptionPaymentMethod"
-	// SetTrustLevel is PUT /v1/merchant/customers/{customer_id}/trust-level.
-	SetTrustLevel RouteSet = "route:SetTrustLevel"
+	// UpdateCustomerSettings is PATCH /v1/merchant/customers/settings.
+	UpdateCustomerSettings RouteSet = "route:UpdateCustomerSettings"
 	// UpdatePSP is PATCH /v1/merchant/psps/{id}.
 	UpdatePSP RouteSet = "route:UpdatePSP"
 	// UpdatePrice is PATCH /v1/merchant/catalog/prices/{id}.

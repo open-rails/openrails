@@ -100,37 +100,6 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	require.Nil(t, rest["next_cursor"])
 }
 
-// A customer's invoice profile is absent until set; IfAbsent only creates
-// one, and a plain set replaces it.
-func TestCustomerInvoiceProfile(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	c := w.newCustomer()
-	c.saveCard("nmi", visa) // the customer exists
-	client := w.client[remote]
-
-	_, err := client.GetInvoiceProfile(t.Context(), c.cid())
-	require.ErrorIs(t, err, billing.ErrNotFound)
-
-	net30 := billing.InvoiceProfile{NetTermsDays: 30, CollectionMethod: billing.CollectSendInvoice, PONumber: "PO-1", BillingContacts: []billing.InvoiceContact{{Email: "ap@example.com"}}}
-	got, err := client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net30, IfAbsent: true})
-	require.NoError(t, err)
-	require.Equal(t, 30, got.NetTermsDays)
-
-	net60 := net30
-	net60.NetTermsDays = 60
-	got, err = client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60, IfAbsent: true})
-	require.NoError(t, err)
-	require.Equal(t, 30, got.NetTermsDays, "IfAbsent answers the existing profile unchanged")
-
-	got, err = client.SetInvoiceProfile(t.Context(), c.cid(), billing.SetInvoiceProfileParams{InvoiceProfile: net60})
-	require.NoError(t, err)
-	require.Equal(t, 60, got.NetTermsDays)
-	read, err := client.GetInvoiceProfile(t.Context(), c.cid())
-	require.NoError(t, err)
-	require.Equal(t, []any{60, "PO-1"}, []any{read.NetTermsDays, read.PONumber})
-}
-
 // A card a custodian holds names no PSP (D20): the schema refuses one that
 // does, and each charge routes through the one live PSP of the card's rail
 // that reaches its custodian, none when no PSP or two do.

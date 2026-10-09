@@ -76,32 +76,6 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 	return result.RowsAffected(), nil
 }
 
-const getCustomerBillingPolicyAssignment = `-- name: GetCustomerBillingPolicyAssignment :one
-SELECT c.id AS customer_id, b.policy_name
-FROM billing.customers c
-LEFT JOIN billing.billing_policy_bindings b
-  ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
-WHERE c.merchant_id = $1 AND c.id = $2
-`
-
-type GetCustomerBillingPolicyAssignmentParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-type GetCustomerBillingPolicyAssignmentRow struct {
-	CustomerID uuid.UUID
-	PolicyName *string
-}
-
-// The left join distinguishes an existing unassigned customer from a missing one.
-func (q *Queries) GetCustomerBillingPolicyAssignment(ctx context.Context, arg GetCustomerBillingPolicyAssignmentParams) (GetCustomerBillingPolicyAssignmentRow, error) {
-	row := q.db.QueryRow(ctx, getCustomerBillingPolicyAssignment, arg.MerchantID, arg.CustomerID)
-	var i GetCustomerBillingPolicyAssignmentRow
-	err := row.Scan(&i.CustomerID, &i.PolicyName)
-	return i, err
-}
-
 const listBillingPolicies = `-- name: ListBillingPolicies :many
 SELECT id, merchant_id, name, policy, created_at, updated_at FROM billing.billing_policies
 WHERE merchant_id = $1
@@ -126,6 +100,44 @@ func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID)
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCustomerBillingPolicyAssignments = `-- name: ListCustomerBillingPolicyAssignments :many
+SELECT customer_id, policy_name FROM billing.billing_policy_bindings
+WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
+LIMIT $3::int
+`
+
+type ListCustomerBillingPolicyAssignmentsParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	RowLimit    int32
+}
+
+type ListCustomerBillingPolicyAssignmentsRow struct {
+	CustomerID *uuid.UUID
+	PolicyName string
+}
+
+// One binding per customer at most (the customer rung's unique index).
+func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg ListCustomerBillingPolicyAssignmentsParams) ([]ListCustomerBillingPolicyAssignmentsRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerBillingPolicyAssignments, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomerBillingPolicyAssignmentsRow
+	for rows.Next() {
+		var i ListCustomerBillingPolicyAssignmentsRow
+		if err := rows.Scan(&i.CustomerID, &i.PolicyName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

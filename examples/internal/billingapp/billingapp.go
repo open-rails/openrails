@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 )
 
 // Inputs are facts established by merchant setup or earlier customer activity:
@@ -86,14 +87,18 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 			r.PolicyWindows = len(policy.SpendWindows)
 		}
 	}
-	if _, err := client.SetCreditLimit(ctx, payer, billing.SetCreditLimitParams{Currency: in.Currency}); err != nil {
+	if _, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: payer, CreditLimits: []billing.CreditLimit{{Currency: in.Currency}}}}); err != nil {
 		return r, fmt.Errorf("set credit limit: %w", err)
 	}
-	limit, err := client.GetCreditLimit(ctx, payer, in.Currency)
-	if err != nil {
+	settings, err := client.ListCustomerSettings(ctx, billing.CustomerSettingsListParams{IDs: []billing.CustomerID{payer}})
+	if err != nil || len(settings.Items) != 1 {
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
-	r.CreditLimit = limit.Amount
+	for _, limit := range settings.Items[0].CreditLimits {
+		if limit.Currency == in.Currency {
+			r.CreditLimit = limit.Amount
+		}
+	}
 
 	description := "prepaid balance"
 	grant, err := client.CreateCreditGrant(ctx, payer, billing.CreateCreditGrantParams{
@@ -186,13 +191,13 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	profile, err := client.SetInvoiceProfile(ctx, invoice.CustomerID, billing.SetInvoiceProfileParams{
-		InvoiceProfile: billing.InvoiceProfile{NetTermsDays: 14, CollectionMethod: billing.CollectSendInvoice}, IfAbsent: true,
-	})
+	terms, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{
+		CustomerID: invoice.CustomerID, InvoiceProfile: catalog.Value(billing.InvoiceProfile{NetTermsDays: 14, CollectionMethod: billing.CollectSendInvoice}),
+	}})
 	if err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)
 	}
-	r.InvoiceProfileSet = profile.NetTermsDays == 14
+	r.InvoiceProfileSet = terms[0].InvoiceProfile.NetTermsDays == 14
 	payment := billing.CreateInvoicePaymentParams{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
 	paid, err := client.CreateInvoicePayment(ctx, invoiceID, payment)
 	if err != nil {

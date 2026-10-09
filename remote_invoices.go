@@ -83,37 +83,3 @@ func (c *Client) RetryInvoiceCollection(ctx context.Context, id billing.InvoiceI
 	}
 	return invoiceCall[billing.InvoiceCollection](ctx, c, http.MethodPost, id, "/retry-collection", params, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions)
 }
-
-// GetInvoiceProfile reads how a customer is invoiced: payment terms,
-// collection method, PO number, tax details and billing contacts. A customer
-// with none is billing.ErrNotFound.
-func (c *Client) GetInvoiceProfile(ctx context.Context, customerID billing.CustomerID, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.InvoiceProfile
-	if err := c.do(ctx, http.MethodGet, path+"/invoice-profile", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetInvoiceProfile replaces how a customer is invoiced, or with
-// IfAbsent sets it only when none is set, answering an existing profile
-// unchanged.
-func (c *Client) SetInvoiceProfile(ctx context.Context, customerID billing.CustomerID, params billing.SetInvoiceProfileParams, requestOptions ...RequestOption) (*billing.InvoiceProfile, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	var headers http.Header
-	if params.IfAbsent {
-		headers = http.Header{"If-None-Match": {"*"}}
-	}
-	var out billing.InvoiceProfile
-	if err := c.doWithHeaders(ctx, http.MethodPut, path+"/invoice-profile", params.InvoiceProfile, &out, headers, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

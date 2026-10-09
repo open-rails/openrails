@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"net/mail"
 	"slices"
 	"strings"
 	"time"
@@ -13,9 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -271,73 +268,6 @@ func PayMyInvoice(r *httprequest.Request) {
 	r.JSON(status, out)
 }
 
-// GetInvoiceProfile (GET /merchant/customers/{customer_id}/invoice-profile)
-// reads a customer's invoice profile; 404 when none is set.
-func GetInvoiceProfile(r *httprequest.Request) {
-	payer, ok := invoiceProfileCustomer(r)
-	if !ok {
-		return
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	profile, err := svc.GetInvoiceProfile(r.Request.Context(), payer)
-	if err != nil {
-		writeInvoiceError(r, err)
-		return
-	}
-	if profile == nil {
-		r.ErrorCode(billing.CodeResourceNotFound, "the customer has no invoice profile")
-		return
-	}
-	r.SuccessJSON(profile)
-}
-
-// SetInvoiceProfile (PUT /merchant/customers/{customer_id}/invoice-profile)
-// replaces a customer's invoice profile; with If-None-Match: * it only
-// creates one (201), answering an existing profile unchanged (200).
-func SetInvoiceProfile(r *httprequest.Request) {
-	payer, ok := invoiceProfileCustomer(r)
-	if !ok {
-		return
-	}
-	var body billing.InvoiceProfile
-	if !r.BindJSON(&body) {
-		return
-	}
-	if body.NetTermsDays < 0 || int64(body.NetTermsDays) > money.MaxInvoiceNetTermsDays {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "net_terms_days is out of range").WithParam("net_terms_days"))
-		return
-	}
-	if body.CollectionMethod != billing.CollectChargeAutomatically && body.CollectionMethod != billing.CollectSendInvoice {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "collection_method is invalid").WithParam("collection_method"))
-		return
-	}
-	for i := range body.BillingContacts {
-		body.BillingContacts[i].Email = strings.TrimSpace(body.BillingContacts[i].Email)
-		address, err := mail.ParseAddress(body.BillingContacts[i].Email)
-		if err != nil || address.Address != body.BillingContacts[i].Email {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "billing contacts need valid email addresses").WithParam("billing_contacts"))
-			return
-		}
-	}
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	profile, created, err := svc.SetInvoiceProfile(r.Request.Context(), payer, billing.SetInvoiceProfileParams{InvoiceProfile: body, IfAbsent: r.Header("If-None-Match") == "*"})
-	if err != nil {
-		writeInvoiceError(r, err)
-		return
-	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	r.JSON(status, profile)
-}
-
 func invoiceIDParam(r *httprequest.Request) (uuid.UUID, bool) {
 	id, err := billing.ParseInvoiceID(r.Param("id"))
 	if err != nil || id.IsZero() {
@@ -385,33 +315,6 @@ func permittedInvoiceActions(r *httprequest.Request, gate StaffCan) map[billing.
 // keepInvoiceActions keeps the invoice's actions the caller may take.
 func keepInvoiceActions(invoice *billing.Invoice, allowed map[billing.InvoiceAction]bool) {
 	invoice.AvailableActions = slices.DeleteFunc(invoice.AvailableActions, func(action billing.InvoiceAction) bool { return !allowed[action] })
-}
-
-func invoiceProfileCustomer(r *httprequest.Request) (identity.CustomerID, bool) {
-	if r.State == nil || r.State.DB == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "invoice profile unavailable")
-		return identity.CustomerID{}, false
-	}
-	id, err := billing.ParseCustomerID(r.Param("customer_id"))
-	if err != nil || id.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid customer_id").WithParam("customer_id"))
-		return identity.CustomerID{}, false
-	}
-	mid, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		writeInvoiceError(r, err)
-		return identity.CustomerID{}, false
-	}
-	exists, err := r.State.DB.Gen(r.Request.Context()).InvoiceProfileCustomerExists(r.Request.Context(), gen.InvoiceProfileCustomerExistsParams{MerchantID: mid.UUID(), CustomerID: id.UUID()})
-	if err != nil {
-		writeInvoiceError(r, err)
-		return identity.CustomerID{}, false
-	}
-	if !exists {
-		r.ErrorCode(billing.CodeResourceNotFound, "customer not found")
-		return identity.CustomerID{}, false
-	}
-	return identity.CustomerID(id.UUID()), true
 }
 
 var invoiceRefusals = []struct {

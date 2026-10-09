@@ -703,7 +703,6 @@ export type CreditGrantSpec = {
 }
 
 export type CreditLimit = {
-  customer_id: string
   currency: string
   amount: string
 }
@@ -746,11 +745,6 @@ export type CustomerAmount = {
   max_amount: string
 }
 
-export type CustomerBillingPolicy = {
-  customer_id: string
-  policy_name: string | null
-}
-
 export type CustomerBillingProfile = {
   customer: Customer
   balances: Balance[]
@@ -781,6 +775,18 @@ export type CustomerLookup = {
 
 export type CustomerLookupParams = {
   customer_ids?: string[]
+}
+
+export type CustomerSettings = {
+  customer_id: string
+  credit_limits: CreditLimit[]
+  trust_levels: TrustLevel[]
+  billing_policy: string | null
+  invoice_profile: InvoiceProfile | null
+}
+
+export type CustomerSettingsBatch = {
+  items: CustomerSettings[]
 }
 
 export type Dashboard = {
@@ -2186,15 +2192,6 @@ export type SetAlertWebhookURLParams = {
   url?: string
 }
 
-export type SetCreditLimitParams = {
-  currency?: string
-  amount?: string
-}
-
-export type SetCustomerBillingPolicyParams = {
-  policy_name?: string | null
-}
-
 export type SetDashboardParams = {
   widgets?: DashboardWidget[]
 }
@@ -2234,11 +2231,6 @@ export type SetSubscriptionPaymentMethodParams = {
 
 export type SetTeamRoleParams = {
   role?: string
-}
-
-export type SetTrustLevelParams = {
-  currency?: string
-  trust_level?: string
 }
 
 export type SolanaCheckoutConfig = {
@@ -2460,13 +2452,24 @@ export type TokenQuote = {
 }
 
 export type TrustLevel = {
-  customer_id: string
   currency: string
   trust_level: string
 }
 
 export type UnreadCount = {
   unread_count: number
+}
+
+export type UpdateCustomerSettingsBatchParams = {
+  items?: UpdateCustomerSettingsParams[]
+}
+
+export type UpdateCustomerSettingsParams = {
+  customer_id?: string
+  credit_limits?: CreditLimit[]
+  trust_levels?: TrustLevel[]
+  billing_policy?: string | null
+  invoice_profile?: InvoiceProfile | null
 }
 
 export type UpdatePSPParams = {

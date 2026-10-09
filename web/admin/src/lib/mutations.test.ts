@@ -104,7 +104,7 @@ const cases: Case[] = [
   ["archives one PSP by id", (c, g) => g(M.archivePSP(c), { id: "psp_1", allowLast: true }),
     "POST /merchant/psps/psp_1/archive", ["psps"], { allow_last: true }],
   ["sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
-    "PUT /merchant/customers/cus_1/credit-limit", [], { currency: "USD", amount: MAX_INT64 }],
+    "PATCH /merchant/customers/settings", [], { items: [{ customer_id: "cus_1", credit_limits: [{ currency: "USD", amount: MAX_INT64 }] }] }],
 ]
 
 let requests: Recorded[]

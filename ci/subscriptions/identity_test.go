@@ -228,7 +228,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.Equal(t, "requires_action", pending.Status)
 	aCard := a.saveCard("nmi", visa)
 	setup := a.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})["id"].(string)
-	_, err = w.client[remote].SetCreditLimit(ctx, a.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 100_000_000})
+	_, err = w.client[remote].UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: a.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}}})
 	require.NoError(t, err)
 	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)

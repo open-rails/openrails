@@ -1180,16 +1180,11 @@ function CustomerControlsTab() {
       const customerID = value.customerID.trim()
       const currency = value.currency.trim().toLowerCase()
       try {
-        const { credit, trust } = await lookupControls.mutateAsync({
+        const controls = await lookupControls.mutateAsync({
           customerId: customerID,
           currency,
         })
-        setResult({
-          customerID,
-          currency: credit.currency || currency,
-          creditLimit: credit.amount,
-          trustLevel: trust.trust_level,
-        })
+        setResult({ customerID, ...controls })
         creditForm.reset()
       } catch (err) {
         toastApiError(err, "Lookup customer controls")

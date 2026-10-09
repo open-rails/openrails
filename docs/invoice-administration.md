@@ -11,7 +11,7 @@ a host may guard one route more strictly (`openrails.VoidInvoice`).
 - `GET /v1/merchant/invoices`: a staff read. Filters: `customer_id`, `currency`, `status`, `period_starts_after`, and `period_starts_before`. Period filters select `period_starts_at` in the half-open range `[period_starts_after, period_starts_before)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
 - `GET /v1/merchant/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/merchant/customers/{customer_id}/payment-methods`.
 - `GET /v1/merchant/invoices/{id}/payments`: payment/collection history, a cursor page, a staff read.
-- `GET` / `PUT /v1/merchant/customers/{customer_id}/invoice-profile`: a staff read and write. `GET` answers `404` when the customer has none; `PUT` with `If-None-Match: *` only creates one. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
+- A customer's invoice profile is its `invoice_profile` customer setting, read and written with `GET` / `PATCH /v1/merchant/customers/settings` ([customer settings](api/merchant-settings.md#customer-settings)). Null means none: net 0, charged automatically. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
 
 `available_actions` lists only the actions whose routes' guards admit the caller. On the standalone server viewers read invoices; support and owners also act on them.
 

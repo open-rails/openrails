@@ -69,22 +69,6 @@ func (q *Queries) GetMerchantInvoice(ctx context.Context, arg GetMerchantInvoice
 	return i, err
 }
 
-const invoiceProfileCustomerExists = `-- name: InvoiceProfileCustomerExists :one
-SELECT EXISTS (SELECT 1 FROM billing.customers WHERE merchant_id = $1::uuid AND id = $2::uuid)
-`
-
-type InvoiceProfileCustomerExistsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-func (q *Queries) InvoiceProfileCustomerExists(ctx context.Context, arg InvoiceProfileCustomerExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, invoiceProfileCustomerExists, arg.MerchantID, arg.CustomerID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const listInvoicesPage = `-- name: ListInvoicesPage :many
 SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
 WHERE merchant_id = $1::uuid

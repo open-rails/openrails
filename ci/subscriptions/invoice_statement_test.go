@@ -41,7 +41,7 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 	payer := func(arrears bool) *customer {
 		c := w.newCustomer()
 		if arrears {
-			_, err := client.SetCreditLimit(ctx, c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 4 * threshold})
+			_, err := client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSettingsParams{{CustomerID: c.cid(), CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 4 * threshold}}}})
 			require.NoError(t, err)
 		}
 		return c

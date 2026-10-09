@@ -74,8 +74,8 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		{http.MethodPost, "/v1/merchant/catalog/prices", map[string]any{}},
 		{http.MethodPatch, "/v1/merchant/catalog/prices/" + price.ID.String(), map[string]any{}},
 		{http.MethodPost, "/v1/merchant/catalog/products", map[string]any{}},
-		{http.MethodPut, "/v1/merchant/customers/" + member.id + "/credit-limit", map[string]any{}},
-		{http.MethodPut, "/v1/merchant/customers/" + member.id + "/trust-level", map[string]any{}},
+		{http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1"}}}}}},
+		{http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
 	} {
 		status, body := call(stale, op.method, op.path, op.body)
 		require.Equal(t, http.StatusForbidden, status, "%s %s: %v", op.method, op.path, body)

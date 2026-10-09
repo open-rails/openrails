@@ -132,3 +132,12 @@ FROM (
       AND status IN ('open', 'past_due') AND amount_due > 0
 ) currencies
 ORDER BY currency;
+
+-- name: ListCustomerSettingsAccounts :many
+-- The customers' credit limits and trust levels, by currency. A customer has
+-- at most one row per registered currency, which bounds row_limit.
+SELECT customer_id, currency, credit_limit_amount, tier FROM billing.money_settings
+WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
+ORDER BY customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;

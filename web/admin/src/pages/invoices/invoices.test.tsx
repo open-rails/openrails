@@ -70,10 +70,13 @@ describe("invoice requests and cache", () => {
 
   it("reads a customer without a profile as none, and any other failure as one", async () => {
     const queries = client()
-    routes["/merchant/customers/customer-1/invoice-profile"] = () =>
-      Response.json({ error: { code: "resource_not_found", message: "no profile" } }, { status: 404 })
+    routes["GET /merchant/customers/settings"] = (request) => ({
+      data: [{ customer_id: "customer-1", credit_limits: [], trust_levels: [], billing_policy: null, invoice_profile: null }],
+      next_cursor: null, query: request.query,
+    })
     expect(await queries.fetchQuery(invoiceQueries.profile("customer-1"))).toBeNull()
-    routes["/merchant/customers/customer-2/invoice-profile"] = () =>
+    expect(requests.at(-1)!.query).toBe("ids=customer-1")
+    routes["GET /merchant/customers/settings"] = () =>
       Response.json({ error: { code: "service_unavailable", message: "down" } }, { status: 503 })
     await expect(queries.fetchQuery(invoiceQueries.profile("customer-2"))).rejects.toThrow("down")
   })
@@ -96,8 +99,9 @@ describe("invoice requests and cache", () => {
     const queries = client()
     const invoiceKey = invoiceKeys.detail("invoice-1")
     queries.setQueryData(invoiceKey, { po_number: "OLD" })
+    routes["PATCH /merchant/customers/settings"] = (request) => ({ items: (request.body as { items: unknown[] }).items })
     await exec(queries, invoiceProfileMutation(queries, "customer-1"), profile({ net_terms_days: 7, po_number: "NEW" }))
-    expect(calls(requests)).toEqual(["PUT /merchant/customers/customer-1/invoice-profile"])
+    expect(calls(requests)).toEqual(["PATCH /merchant/customers/settings"])
     expect(queries.getQueryData(invoiceKey)).toEqual({ po_number: "OLD" })
   })
 })

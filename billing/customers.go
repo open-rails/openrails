@@ -77,20 +77,6 @@ type CustomerBillingProfile struct {
 	ProductAccess  ListPage[ProductAccessGrant]  `json:"product_access"`
 }
 
-// CustomerBillingPolicy is the billing policy assigned to one customer. A
-// null PolicyName means the customer inherits its tier's or the merchant's
-// default policy.
-type CustomerBillingPolicy struct {
-	CustomerID CustomerID `json:"customer_id"`
-	PolicyName *string    `json:"policy_name"`
-}
-
-// SetCustomerBillingPolicyParams assigns a declared billing policy to a
-// customer; a null PolicyName restores inheritance.
-type SetCustomerBillingPolicyParams struct {
-	PolicyName *string `json:"policy_name"`
-}
-
 // DelinquencyState is how overdue a customer's arrears are in one currency.
 type DelinquencyState string
 

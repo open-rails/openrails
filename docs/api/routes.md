@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (225), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -133,9 +133,9 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | GET | `/v1/merchant/customers` | merchant | `ListCustomers` · `Customers` · `StaffReads` | — | 200 `ListPage<Customer>` |  |
 | POST | `/v1/merchant/customers/lookup` | merchant | `GetCustomers` · `Customers` · `StaffReads` | `CustomerLookupParams` | 200 `CustomerLookup` |  |
 | POST | `/v1/merchant/customers/ensure` | merchant | `EnsureCustomers` · `Customers` · `StaffWrites` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` | sensitive |
+| GET | `/v1/merchant/customers/settings` | merchant | `ListCustomerSettings` · `CustomerSettings` · `StaffReads` | — | 200 `ListPage<CustomerSettings>` |  |
+| PATCH | `/v1/merchant/customers/settings` | merchant | `UpdateCustomerSettings` · `CustomerSettings` · `StaffWrites` | `UpdateCustomerSettingsBatchParams` | 200 `CustomerSettingsBatch` | sensitive; limit `grant` |
 | GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `GetCustomerBillingProfile` · `Customers` · `StaffReads` | — | 200 `CustomerBillingProfile` |  |
-| GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `GetCustomerBillingPolicy` · `Customers` · `StaffReads` | — | 200 `CustomerBillingPolicy` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `SetCustomerBillingPolicy` · `Customers` · `StaffWrites` | `SetCustomerBillingPolicyParams` | 200 `CustomerBillingPolicy` | sensitive |
 | GET | `/v1/merchant/customers/{customer_id}/delinquency` | merchant | `ListCustomerDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
 | GET | `/v1/merchant/delinquency` | merchant | `ListDelinquency` · `Customers` · `StaffReads` | — | 200 `ListPage<Delinquency>` |  |
 | POST | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `CreateCreditGrant` · `Credits` · `StaffWrites` | `CreateCreditGrantParams` | 201 `CreditGrant`<br>200 `CreditGrant` | sensitive; limit `grant` |
@@ -144,10 +144,6 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | POST | `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `RevokeCreditGrant` · `Credits` · `StaffWrites` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
 | GET | `/v1/merchant/customers/{customer_id}/transactions` | merchant | `ListCreditTransactions` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditTransaction>` |  |
 | GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `GetBalance` · `Credits` · `StaffReads` | — | 200 `Balance` |  |
-| GET | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `GetCreditLimit` · `Credits` · `StaffReads` | — | 200 `CreditLimit` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/credit-limit` | merchant | `SetCreditLimit` · `Credits` · `StaffWrites` | `SetCreditLimitParams` | 200 `CreditLimit` | sensitive |
-| GET | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `GetTrustLevel` · `Credits` · `StaffReads` | — | 200 `TrustLevel` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/trust-level` | merchant | `SetTrustLevel` · `Credits` · `StaffWrites` | `SetTrustLevelParams` | 200 `TrustLevel` | sensitive |
 | GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `ListSpendDelegations` · `Credits` · `StaffReads` | — | 200 `ListPage<SpendDelegation>` |  |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `SetSpendDelegations` · `Credits` · `StaffWrites` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` | sensitive |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | merchant | `SetSpendDelegation` · `Credits` · `StaffWrites` | `SetSpendDelegationParams` | 200 `SpendDelegation` | sensitive |
@@ -175,8 +171,6 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | POST | `/v1/merchant/invoices/{id}/void` | merchant | `VoidInvoice` · `Invoices` · `StaffWrites` | — | 200 `Invoice` | sensitive; limit `destructive` |
 | POST | `/v1/merchant/invoices/{id}/uncollectible` | merchant | `MarkInvoiceUncollectible` · `Invoices` · `StaffWrites` | — | 200 `Invoice` | sensitive; limit `destructive` |
 | POST | `/v1/merchant/invoices/{id}/retry-collection` | merchant | `RetryInvoiceCollection` · `Invoices` · `StaffWrites` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `GetInvoiceProfile` · `Invoices` · `StaffReads` | — | 200 `InvoiceProfile` |  |
-| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | merchant | `SetInvoiceProfile` · `Invoices` · `StaffWrites` | `InvoiceProfile` | 200 `InvoiceProfile`<br>201 `InvoiceProfile` | sensitive; limit `grant` |
 | GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | merchant | `GetPaymentSettlementStatus` · `Payments` · `StaffReads` | — | 200 `PaymentSettlementStatus` |  |
 | POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | merchant | `CreateOffChannelPayment` · `Payments` · `StaffWrites` | `CreateOffChannelPaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/merchant/payments` | merchant | `ListPayments` · `Payments` · `StaffReads` | — | 200 `ListPage<Payment>` |  |

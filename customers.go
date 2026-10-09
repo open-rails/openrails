@@ -55,6 +55,41 @@ func (c *Client) EnsureCustomers(ctx context.Context, items []billing.EnsureCust
 	return out.Items, nil
 }
 
+// ListCustomerSettings lists customers' settings, newest customer first.
+// IDs instead reads 1 to billing.MaxBatchItems named customers in one page;
+// one the merchant never declared or billed is absent.
+func (c *Client) ListCustomerSettings(ctx context.Context, params billing.CustomerSettingsListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerSettings], error) {
+	q := url.Values{}
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
+	var out billing.ListPage[billing.CustomerSettings]
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/customers/settings", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateCustomerSettings changes 1 to billing.MaxBatchItems distinct
+// customers' settings, all or none; the answer is in request order. Each
+// item changes only the fields it names. A person needs a recent sign-in
+// for it.
+func (c *Client) UpdateCustomerSettings(ctx context.Context, items []billing.UpdateCustomerSettingsParams, requestOptions ...RequestOption) ([]billing.CustomerSettings, error) {
+	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.CustomerID.IsZero() {
+			return nil, invalidErr("customer_id is required")
+		}
+	}
+	var out billing.CustomerSettingsBatch
+	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/customers/settings", billing.UpdateCustomerSettingsBatchParams{Items: items}, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
 // GetCustomerBillingProfile reads one customer's billing at a glance.
 func (c *Client) GetCustomerBillingProfile(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.CustomerBillingProfile, error) {
 	path, err := customerIDPath(id)
@@ -63,34 +98,6 @@ func (c *Client) GetCustomerBillingProfile(ctx context.Context, id billing.Custo
 	}
 	var out billing.CustomerBillingProfile
 	if err := c.do(ctx, http.MethodGet, path+"/billing-profile", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetCustomerBillingPolicy reads the policy assigned to a customer; a null
-// PolicyName means the customer inherits its tier's or the default policy.
-func (c *Client) GetCustomerBillingPolicy(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.CustomerBillingPolicy, error) {
-	path, err := customerIDPath(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CustomerBillingPolicy
-	if err := c.do(ctx, http.MethodGet, path+"/billing-policy", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetCustomerBillingPolicy assigns a declared policy to a customer; a nil
-// PolicyName restores inheritance. It never creates a customer.
-func (c *Client) SetCustomerBillingPolicy(ctx context.Context, id billing.CustomerID, params billing.SetCustomerBillingPolicyParams, requestOptions ...RequestOption) (*billing.CustomerBillingPolicy, error) {
-	path, err := customerIDPath(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CustomerBillingPolicy
-	if err := c.do(ctx, http.MethodPut, path+"/billing-policy", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

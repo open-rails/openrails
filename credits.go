@@ -142,63 +142,6 @@ func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, cu
 	return &out, nil
 }
 
-// GetCreditLimit returns how much a customer may owe in arrears in one
-// currency.
-func (c *Client) GetCreditLimit(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.CreditLimit, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.CreditLimit
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/credit-limit", url.Values{"currency": {normalizeCurrency(currency)}}), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetCreditLimit sets how much a customer may owe in arrears.
-func (c *Client) SetCreditLimit(ctx context.Context, customer billing.CustomerID, params billing.SetCreditLimitParams, requestOptions ...RequestOption) (*billing.CreditLimit, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
-		return nil, err
-	}
-	params.Currency = normalizeCurrency(params.Currency)
-	var out billing.CreditLimit
-	if err := c.do(ctx, http.MethodPut, path+"/credit-limit", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetTrustLevel returns the trust level stored for a customer in one
-// currency.
-func (c *Client) GetTrustLevel(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.TrustLevel, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.TrustLevel
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/trust-level", url.Values{"currency": {normalizeCurrency(currency)}}), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// SetTrustLevel stores the trust level a customer's admissions use when a
-// request names none; an empty level clears it.
-func (c *Client) SetTrustLevel(ctx context.Context, customer billing.CustomerID, params billing.SetTrustLevelParams, requestOptions ...RequestOption) (*billing.TrustLevel, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
-		return nil, err
-	}
-	params.Currency = normalizeCurrency(params.Currency)
-	var out billing.TrustLevel
-	if err := c.do(ctx, http.MethodPut, path+"/trust-level", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListSpendDelegations lists the delegations that let invokers spend a
 // customer's balance.
 func (c *Client) ListSpendDelegations(ctx context.Context, customer billing.CustomerID, requestOptions ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error) {

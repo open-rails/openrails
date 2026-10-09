@@ -12,6 +12,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteCustomerInvoiceProfile = `-- name: DeleteCustomerInvoiceProfile :exec
+DELETE FROM billing.customer_invoice_profiles
+WHERE merchant_id = $1 AND customer_id = $2
+`
+
+type DeleteCustomerInvoiceProfileParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) DeleteCustomerInvoiceProfile(ctx context.Context, arg DeleteCustomerInvoiceProfileParams) error {
+	_, err := q.db.Exec(ctx, deleteCustomerInvoiceProfile, arg.MerchantID, arg.CustomerID)
+	return err
+}
+
 const getInvoiceProfile = `-- name: GetInvoiceProfile :one
 SELECT merchant_id, customer_id, net_terms_days, collection_method, po_number, tax, billing_contacts, memo, created_at, updated_at FROM billing.customer_invoice_profiles
 WHERE merchant_id = $1 AND customer_id = $2
@@ -41,47 +56,45 @@ func (q *Queries) GetInvoiceProfile(ctx context.Context, arg GetInvoiceProfilePa
 	return i, err
 }
 
-const insertCustomerInvoiceProfileIfAbsent = `-- name: InsertCustomerInvoiceProfileIfAbsent :execrows
-INSERT INTO billing.customer_invoice_profiles (
-    merchant_id, customer_id, net_terms_days, collection_method,
-    po_number, tax, billing_contacts, memo, created_at, updated_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, COALESCE($6, '{}'::jsonb),
-    COALESCE($7, '[]'::jsonb), $8,
-    $9::timestamptz, $9::timestamptz
-)
-ON CONFLICT (merchant_id, customer_id) DO NOTHING
+const listInvoiceProfiles = `-- name: ListInvoiceProfiles :many
+SELECT merchant_id, customer_id, net_terms_days, collection_method, po_number, tax, billing_contacts, memo, created_at, updated_at FROM billing.customer_invoice_profiles
+WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
 `
 
-type InsertCustomerInvoiceProfileIfAbsentParams struct {
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	NetTermsDays     int32
-	CollectionMethod string
-	PoNumber         *string
-	Tax              []byte
-	BillingContacts  []byte
-	Memo             *string
-	Now              time.Time
+type ListInvoiceProfilesParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
 }
 
-func (q *Queries) InsertCustomerInvoiceProfileIfAbsent(ctx context.Context, arg InsertCustomerInvoiceProfileIfAbsentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, insertCustomerInvoiceProfileIfAbsent,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.NetTermsDays,
-		arg.CollectionMethod,
-		arg.PoNumber,
-		arg.Tax,
-		arg.BillingContacts,
-		arg.Memo,
-		arg.Now,
-	)
+func (q *Queries) ListInvoiceProfiles(ctx context.Context, arg ListInvoiceProfilesParams) ([]BillingCustomerInvoiceProfile, error) {
+	rows, err := q.db.Query(ctx, listInvoiceProfiles, arg.MerchantID, arg.CustomerIds)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []BillingCustomerInvoiceProfile
+	for rows.Next() {
+		var i BillingCustomerInvoiceProfile
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.NetTermsDays,
+			&i.CollectionMethod,
+			&i.PoNumber,
+			&i.Tax,
+			&i.BillingContacts,
+			&i.Memo,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertCustomerInvoiceProfile = `-- name: UpsertCustomerInvoiceProfile :exec

@@ -83,47 +83,6 @@ func EnsureCustomers(r *httprequest.Request) {
 	r.SuccessJSON(billing.EnsureCustomerBatchResult{Items: out})
 }
 
-// GetCustomerBillingPolicy reads the policy assigned to a customer.
-func GetCustomerBillingPolicy(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.GetCustomerBillingPolicy(r.Request.Context(), customer)
-	if err != nil {
-		writeRefusal(r, err, "customer policy read failed")
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-// SetCustomerBillingPolicy assigns a declared policy to a customer, or
-// clears the assignment.
-func SetCustomerBillingPolicy(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
-	var params billing.SetCustomerBillingPolicyParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.SetCustomerBillingPolicy(r.Request.Context(), customer, params.PolicyName)
-	if err != nil {
-		writeRefusal(r, err, "customer policy assignment failed")
-		return
-	}
-	r.SuccessJSON(out)
-}
-
 // ListCustomerDelinquency lists a customer's delinquency in every currency it
 // has owed in.
 func ListCustomerDelinquency(r *httprequest.Request) {

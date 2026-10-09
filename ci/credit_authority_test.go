@@ -77,19 +77,22 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 			require.Contains(t, w.Body.String(), `"1000000000"`)
 		}
 
-		w = call(t, handler, c.token, http.MethodPut, "/v1/merchant/customers/"+customer+"/credit-limit", c.selector, map[string]any{
-			"currency": "USD", "amount": "1000000000000",
-		})
+		w = call(t, handler, c.token, http.MethodPatch, "/v1/merchant/customers/settings", c.selector, map[string]any{"items": []any{map[string]any{
+			"customer_id": customer, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1000000000000"}},
+		}}})
 		if !writer {
 			require.Equal(t, http.StatusForbidden, w.Code, "%s opens a credit line: %s", name, w.Body.String())
 			require.Contains(t, w.Body.String(), "permission_required")
 		} else {
 			require.Equal(t, http.StatusOK, w.Code, "%s opens a credit line: %s", name, w.Body.String())
 		}
-		w = call(t, handler, c.token, http.MethodGet, "/v1/merchant/customers/"+customer+"/credit-limit?currency=USD", c.selector, nil)
+		w = call(t, handler, c.token, http.MethodGet, "/v1/merchant/customers/settings?ids="+customer, c.selector, nil)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		limit := map[string]any{}
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&limit))
-		require.Equal(t, writer, limit["amount"] == "1000000000000", "%s: %v", name, limit)
+		var settings struct {
+			Data []billing.CustomerSettings `json:"data"`
+		}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&settings))
+		require.Len(t, settings.Data, 1)
+		require.Equal(t, writer, len(settings.Data[0].CreditLimits) == 1 && settings.Data[0].CreditLimits[0].Amount == 1_000_000_000_000, "%s: %v", name, settings.Data)
 	}
 }
