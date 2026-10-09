@@ -222,7 +222,7 @@ products:
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
-	_, err = client.EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{})
+	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid()}})
 	require.NoError(t, err)
 	var provisionedPSP uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))

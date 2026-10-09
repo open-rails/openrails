@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -16,6 +15,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // productAccessGrants enriches grants with their products' key and name from
@@ -131,8 +131,8 @@ func CheckProductAccess(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "exactly one of product_ids and product_keys is required"))
 		return
 	}
-	if len(req.ProductIDs)+len(req.ProductKeys) > billing.MaxProductAccessChecks {
-		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("at most %d products per check", billing.MaxProductAccessChecks)))
+	if n := len(req.ProductIDs) + len(req.ProductKeys); n == 0 || n > billing.MaxProductAccessChecks {
+		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("a check names 1 to %d products", billing.MaxProductAccessChecks)))
 		return
 	}
 	for _, key := range req.ProductKeys {
@@ -177,33 +177,19 @@ func CheckProductAccess(r *httprequest.Request) {
 	r.SuccessJSON(billing.ProductAccessCheck{Access: access})
 }
 
-// CreateProductAccess grants a customer access to a product (support comps,
-// migrations, manual purchases), idempotent per customer and product. One with
-// no end also needs merchant:access:grant-permanent.
+// CreateProductAccess grants a batch of product accesses, across any
+// customers, in one transaction. One admin's grant of a product to a customer
+// is made once: a repeat answers the existing grant.
 func CreateProductAccess(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) { createProductAccess(r, gate) }
 }
 
 func createProductAccess(r *httprequest.Request, gate StaffCan) {
-	customer, ok := productAccessCustomer(r)
-	if !ok {
-		return
-	}
-	var req billing.CreateProductAccessParams
+	var req billing.CreateProductAccessBatchParams
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.ProductID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "product_id is required").WithParam("product_id"))
-		return
-	}
-	productID := req.ProductID.UUID()
-	var endsAt *time.Time
-	if req.EndsAt != nil {
-		e := req.EndsAt.UTC()
-		endsAt = &e
-	}
-	if endsAt == nil && !permitPermanentGrant(r, gate) {
+	if !batchItems(r, len(req.Items), billing.MaxBatchItems) {
 		return
 	}
 	admin, ok := r.Staff()
@@ -211,23 +197,52 @@ func createProductAccess(r *httprequest.Request, gate StaffCan) {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "missing admin identity")
 		return
 	}
+	batch := make([]productaccess.GrantParams, len(req.Items))
+	indefinite := false
+	for i, item := range req.Items {
+		switch {
+		case item.CustomerID.IsZero():
+			r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id is required").WithParam(apperr.ItemParam(i, "customer_id")))
+			return
+		case item.ProductID.IsZero():
+			r.APIError(api.Coded(billing.CodeInvalidParam, "product_id is required").WithParam(apperr.ItemParam(i, "product_id")))
+			return
+		}
+		if !requireServiceCustomerScope(r, item.CustomerID) {
+			return
+		}
+		productID := item.ProductID.UUID()
+		batch[i] = productaccess.GrantParams{
+			UserID:     item.CustomerID.String(),
+			ProductID:  productID,
+			SourceType: models.ProductAccessSourceAdmin,
+			SourceID:   "admin:" + admin.Subject + ":" + productID.String(),
+		}
+		if item.EndsAt != nil {
+			end := item.EndsAt.UTC()
+			batch[i].EndsAt = &end
+		} else {
+			indefinite = true
+		}
+	}
+	if indefinite && !permitPermanentGrant(r, gate) {
+		return
+	}
 	svc := productAccessService(r)
 	if svc == nil {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	grant, _, err := svc.GrantProductAccess(r.Request.Context(), productaccess.GrantParams{
-		UserID:     customer.String(),
-		ProductID:  productID,
-		SourceType: models.ProductAccessSourceAdmin,
-		SourceID:   "admin:" + admin.Subject + ":" + productID.String(),
-		EndsAt:     endsAt,
-	})
+	granted, err := svc.GrantProductAccessBatch(r.Request.Context(), batch)
 	if err != nil {
 		r.InternalError("failed to grant product access", err)
 		return
 	}
-	r.JSON(http.StatusCreated, productAccessGrants(r, []models.ProductAccessGrant{*grant})[0])
+	grants := make([]models.ProductAccessGrant, len(granted))
+	for i, grant := range granted {
+		grants[i] = *grant
+	}
+	r.JSON(http.StatusCreated, billing.CreateProductAccessBatchResult{Items: productAccessGrants(r, grants)})
 }
 
 // DeleteProductAccess revokes one of the customer's product-access grants.

@@ -141,11 +141,11 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | GET | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements` | merchant | `merchant:customer-settings:update` | `CreateEntitlementParams` | 201 `EntitlementRecord` | limit `grant` |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
-| POST | `/v1/merchant/customers/{customer_id}/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessParams` | 201 `ProductAccessGrant` | limit `grant` |
+| POST | `/v1/merchant/product-access` | merchant | `merchant:customer-settings:update` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | limit `grant` |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | merchant | `merchant:customer-settings:update` | — | 204 — | limit `destructive` |
 | GET | `/v1/merchant/customers` | merchant | `merchant:customer-settings:read` | — | 200 `ListPage<Customer>` |  |
-| GET | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:read` | — | 200 `Customer` |  |
-| PUT | `/v1/merchant/customers/{customer_id}` | merchant | `merchant:customer-settings:update` | `EnsureCustomerParams` | 200 `Customer` |  |
+| POST | `/v1/merchant/customers/lookup` | merchant | `merchant:customer-settings:read` | `CustomerLookupParams` | 200 `CustomerLookup` |  |
+| POST | `/v1/merchant/customers/ensure` | merchant | `merchant:customer-settings:update` | `EnsureCustomerBatchParams` | 200 `EnsureCustomerBatchResult` |  |
 | GET | `/v1/merchant/customers/{customer_id}/billing-profile` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingProfile` |  |
 | GET | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:read` | — | 200 `CustomerBillingPolicy` |  |
 | PUT | `/v1/merchant/customers/{customer_id}/billing-policy` | merchant | `merchant:customer-settings:update` | `SetCustomerBillingPolicyParams` | 200 `CustomerBillingPolicy` |  |
@@ -171,7 +171,7 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/admissions/{request_id}/release` | merchant | `merchant:admissions:create` | — | 200 `Admission` |  |
 | POST | `/v1/merchant/admissions/{request_id}/extend` | merchant | `merchant:admissions:create` | `ExtendAdmissionParams` | 200 `Admission` |  |
 | POST | `/v1/merchant/wasted-spend` | merchant | `merchant:admissions:create` | `ReportWastedSpendParams` | 200 `WastedSpendReport` |  |
-| POST | `/v1/merchant/usage-events` | merchant | `merchant:admissions:create` | `RecordUsageParams` | 201 `UsageEvent`<br>200 `UsageEvent` |  |
+| POST | `/v1/merchant/usage-events` | merchant | `merchant:admissions:create` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` |  |
 | GET | `/v1/merchant/customers/{customer_id}/usage` | merchant | `merchant:usage:read` | — | 200 `Usage` |  |
 | POST | `/v1/merchant/provider-operations` | merchant | `merchant:admissions:create` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` |  |
 | GET | `/v1/merchant/provider-operations/{operation_id}` | merchant | `merchant:usage:read` | — | 200 `OperationAuthorization` |  |
@@ -220,14 +220,14 @@ The merchant API: staff, machines and the Go client alike, each route gated by i
 | POST | `/v1/merchant/billing-archive` | merchant | `merchant:billing:import` | `application/x-ndjson` | 200 `BillingArchiveImport` |  |
 | POST | `/v1/merchant/billing-import` | merchant | `merchant:billing:import` | `DeclaredBilling` | 200 `BillingImportResult` |  |
 | GET | `/v1/merchant/host-events` | merchant | `merchant:host-events:read` | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/merchant/host-events/{id}/acknowledge` | merchant | `merchant:host-events:acknowledge` | — | 200 `HostEvent` |  |
+| POST | `/v1/merchant/host-events/acknowledge` | merchant | `merchant:host-events:acknowledge` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
 | POST | `/v1/merchant/metrics/query` | merchant | `merchant:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
 | GET | `/v1/merchant/metrics/schema` | merchant | `merchant:metrics:read` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/merchant/dashboard` | merchant | `merchant:metrics:read` | — | 200 `Dashboard` |  |
 | PUT | `/v1/merchant/dashboard` | merchant | `merchant:dashboard:update` | `SetDashboardParams` | 200 `Dashboard` |  |
 | GET | `/v1/merchant/notifications` | merchant | `merchant:operations:read` | — | 200 `ListPage<MerchantNotification>` |  |
 | GET | `/v1/merchant/notifications/unread-count` | merchant | `merchant:operations:read` | — | 200 `UnreadCount` |  |
-| POST | `/v1/merchant/notifications/{id}/read` | merchant | `merchant:operations:read` | — | 200 `MerchantNotification` |  |
+| POST | `/v1/merchant/notifications/read` | merchant | `merchant:operations:read` | `MarkNotificationsReadParams` | 200 `NotificationLookup` |  |
 | GET | `/v1/merchant/worker-health` | merchant | `merchant:operations:read` | — | 200 `ListPage<WorkerHealth>` |  |
 | GET | `/v1/merchant/findings` | merchant | `merchant:operations:read` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/merchant/findings/summary` | merchant | `merchant:operations:read` | — | 200 `FindingSummary` |  |

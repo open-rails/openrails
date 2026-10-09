@@ -376,7 +376,7 @@ func TestCCBillUsernameIsTheDeclaredOne(t *testing.T) {
 	importCCBill(t, w)
 	buyer, other := w.newCustomer(), w.newCustomer()
 	name := "Buyer" + uuid.NewString()[:8]
-	_, err := w.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Username: &name})
+	_, err := w.client[remote].EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid(), Username: &name}})
 	require.NoError(t, err)
 	failure := func(username string) map[string]string {
 		return map[string]string{"transactionId": ccbillNumericID(), "email": "buyer@example.test", "username": username,
@@ -388,7 +388,7 @@ func TestCCBillUsernameIsTheDeclaredOne(t *testing.T) {
 	require.False(t, other.hasNotification("payment_method_failed"))
 
 	renamed := "Renamed" + uuid.NewString()[:8]
-	_, err = w.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Username: &renamed})
+	_, err = w.client[remote].EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid(), Username: &renamed}})
 	require.NoError(t, err)
 	status, body := w.postCCBill("NewSaleFailure", ccbillSourceIP, failure(name))
 	require.NotEqual(t, http.StatusOK, status, "a username no customer holds names nobody: %v", body)

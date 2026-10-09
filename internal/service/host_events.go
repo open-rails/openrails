@@ -110,9 +110,11 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 	return events, nil
 }
 
-func (s *Service) AcknowledgeHostEvent(ctx context.Context, id billing.HostEventID) (*billing.HostEvent, error) {
-	if id.IsZero() {
-		return nil, invalidHostEventRequest("host event id is required")
+// AcknowledgeHostEvents acknowledges the merchant's host events; one that
+// does not exist maps to nil. Acknowledging again changes nothing.
+func (s *Service) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEventID) (map[billing.HostEventID]*billing.HostEvent, error) {
+	if len(ids) == 0 || len(ids) > billing.MaxBatchItems {
+		return nil, invalidHostEventRequest(fmt.Sprintf("acknowledge 1 to %d host events", billing.MaxBatchItems))
 	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -123,21 +125,25 @@ func (s *Service) AcknowledgeHostEvent(ctx context.Context, id billing.HostEvent
 	if err != nil {
 		return nil, err
 	}
-	count, err := s.rt.DB.Gen(ctx).AcknowledgeHostEvent(ctx, gen.AcknowledgeHostEventParams{MerchantID: mid.UUID(), ID: id.UUID(), Now: s.now().UTC()})
+	keys := make([]uuid.UUID, len(ids))
+	out := make(map[billing.HostEventID]*billing.HostEvent, len(ids))
+	for i, id := range ids {
+		keys[i] = id.UUID()
+		out[id] = nil
+	}
+	acknowledged, err := s.rt.DB.Gen(ctx).AcknowledgeHostEvents(ctx, gen.AcknowledgeHostEventsParams{MerchantID: mid.UUID(), Ids: keys, Now: s.now().UTC()})
 	if err != nil {
 		return nil, err
 	}
-	notFound := apperr.New(http.StatusNotFound, "host_event_not_found", "host event not found")
-	if count == 0 {
-		return nil, notFound
+	if len(acknowledged) == 0 {
+		return out, nil
 	}
-	key := id.UUID()
-	events, err := s.hostEvents(ctx, gen.ListHostEventsParams{ID: &key, IncludeAcknowledged: true, RowLimit: 1})
+	events, err := s.hostEvents(ctx, gen.ListHostEventsParams{Ids: acknowledged, IncludeAcknowledged: true, RowLimit: billing.MaxBatchItems})
 	if err != nil {
 		return nil, err
 	}
-	if len(events) == 0 {
-		return nil, notFound
+	for i := range events {
+		out[events[i].ID] = &events[i]
 	}
-	return &events[0], nil
+	return out, nil
 }

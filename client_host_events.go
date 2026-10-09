@@ -27,15 +27,17 @@ func (c *Client) ListHostEvents(ctx context.Context, req billing.HostEventListPa
 	return &out, nil
 }
 
-// AcknowledgeHostEvent is idempotent. Call only after the host's idempotent
-// processing has committed; an unacknowledged event is redelivered.
-func (c *Client) AcknowledgeHostEvent(ctx context.Context, id billing.HostEventID, options ...RequestOption) (*billing.HostEvent, error) {
-	if id.IsZero() {
-		return nil, invalidErr("host event id is required")
-	}
-	var out billing.HostEvent
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+id.String()+"/acknowledge", nil, &out, options...); err != nil {
+// AcknowledgeHostEvents acknowledges 1 to billing.MaxBatchItems host events.
+// It is idempotent. Call only after the host's idempotent processing of them
+// has committed; an unacknowledged event is redelivered. Every requested event
+// is in the answer; one that does not exist is nil.
+func (c *Client) AcknowledgeHostEvents(ctx context.Context, ids []billing.HostEventID, options ...RequestOption) (map[billing.HostEventID]*billing.HostEvent, error) {
+	if err := batchIDs("host_event_ids", ids, billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	var out billing.HostEventLookup
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/host-events/acknowledge", billing.AcknowledgeHostEventsParams{HostEventIDs: ids}, &out, options...); err != nil {
+		return nil, err
+	}
+	return out.HostEvents, nil
 }

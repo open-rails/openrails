@@ -64,7 +64,7 @@ func copiedStripeBook(t *testing.T) (*engineCase, *engineCase, *clockwork.FakeCl
 			break
 		}
 		for _, event := range events.Items {
-			_, err := a.client[embedded].AcknowledgeHostEvent(t.Context(), event.ID)
+			_, err := a.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 			require.NoError(t, err)
 		}
 	}

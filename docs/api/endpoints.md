@@ -178,18 +178,19 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 
 ## Customers, credit and usage
 
-- A **customer** is created by its first use or declared with
-  `PUT /v1/merchant/customers/{customer_id}`. Its balance, credit limit, trust
-  level, spend delegations, credit grants and ledger all live beneath that
-  path.
+- A **customer** is created by its first use or declared, up to 100 at a time,
+  with `POST /v1/merchant/customers/ensure`; `POST /v1/merchant/customers/lookup`
+  reads up to 500. Its balance, credit limit, trust level, spend delegations,
+  credit grants and ledger all live beneath `/v1/merchant/customers/{customer_id}`.
 - A **credit grant** (`POST …/credit-grants`) is idempotent on `source_id`: an
   identical retry answers the same grant with `replayed: true`; other terms are
   `409 idempotency_key_reused`. Revoking takes the unspent remainder
   (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
-- A **usage event** (`POST /v1/merchant/usage-events`) is idempotent on
-  `(source, source_id)`; `occurred_at` may be up to 35 days old.
+- **Usage events** (`POST /v1/merchant/usage-events`, up to 1,000 per call, one
+  result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
+  up to 35 days old.
 - **Provider operations** authorize and settle upstream compute cost:
   [provider obligations](../architecture/provider-obligation-contract.md).
 - **Arrears**: [delinquency](../arrears-delinquency.md) and
@@ -245,8 +246,8 @@ automatic refund is `400 refund_unsupported`; one that cannot take it now is
 
 `GET /v1/merchant/host-events` is the feed a host drains: `payment.settled`,
 `delinquency.grace`, `delinquency.entered`, `delinquency.cleared`, oldest
-first, filtered by `type`. Acknowledge each
-(`POST /v1/merchant/host-events/{id}/acknowledge`) after the host's own
+first, filtered by `type`. Acknowledge them, up to 100 at a time
+(`POST /v1/merchant/host-events/acknowledge`), after the host's own
 processing commits, then fetch again. Acknowledgment is idempotent and
 independent of notification read state. Acknowledged events are kept 30 days;
 pending ones are never deleted.

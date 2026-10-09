@@ -41,7 +41,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 
 	newCustomer := func() billing.CustomerID {
 		customer := billing.CustomerID(uuid.New())
-		_, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
+		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 		require.NoError(t, err)
 		return customer
 	}

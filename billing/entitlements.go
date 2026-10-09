@@ -191,7 +191,7 @@ type ProductAccessGrant struct {
 // MaxProductAccessChecks bounds one product-access check.
 const MaxProductAccessChecks = 100
 
-// CheckProductAccessParams asks about up to MaxProductAccessChecks products,
+// CheckProductAccessParams asks about 1 to MaxProductAccessChecks products,
 // named by exactly one of ProductIDs and ProductKeys.
 type CheckProductAccessParams struct {
 	ProductIDs  []ProductID `json:"product_ids"`
@@ -205,8 +205,22 @@ type ProductAccessCheck struct {
 }
 
 // CreateProductAccessParams grants a customer access to a product until
-// EndsAt (nil: indefinitely).
+// EndsAt (nil: indefinitely; it needs merchant:access:grant-permanent). One
+// admin's grant of a product to a customer is made once: a repeat answers the
+// existing grant.
 type CreateProductAccessParams struct {
-	ProductID ProductID  `json:"product_id"`
-	EndsAt    *time.Time `json:"ends_at"`
+	CustomerID CustomerID `json:"customer_id"`
+	ProductID  ProductID  `json:"product_id"`
+	EndsAt     *time.Time `json:"ends_at"`
+}
+
+// CreateProductAccessBatchParams grants 1 to MaxBatchItems product accesses,
+// across any customers, in one transaction.
+type CreateProductAccessBatchParams struct {
+	Items []CreateProductAccessParams `json:"items"`
+}
+
+// CreateProductAccessBatchResult is every grant, in request order.
+type CreateProductAccessBatchResult struct {
+	Items []ProductAccessGrant `json:"items"`
 }

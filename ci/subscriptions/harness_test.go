@@ -738,7 +738,7 @@ type customer struct {
 
 func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
-	_, err := w.client[embedded].EnsureCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.EnsureCustomerParams{})
+	_, err := w.client[embedded].EnsureCustomers(w.t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(id))}})
 	require.NoError(w.t, err)
 	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
 }
@@ -1008,4 +1008,13 @@ func typedProductID(t testing.TB, id string) billing.ProductID {
 	parsed, err := billing.ParseProductID(id)
 	require.NoError(t, err)
 	return parsed
+}
+
+// recordUsage records one usage event; the item's refusal is the error.
+func recordUsage(ctx context.Context, client *openrails.Client, params billing.RecordUsageParams) (*billing.UsageEvent, error) {
+	results, err := client.RecordUsage(ctx, []billing.RecordUsageParams{params})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Event, results[0].Err()
 }

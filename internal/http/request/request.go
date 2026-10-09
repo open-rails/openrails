@@ -42,6 +42,7 @@ type Transport interface {
 	AbortJSON(code int, body any)
 	Bind(data any) error
 	BindJSON(data any) error
+	PeekJSON(data any) error
 	BindQuery(data any) error
 	BindURI(data any) error
 	Param(key string) string
@@ -294,6 +295,10 @@ func (r *Request) BindOptionalJSON(data any) bool {
 	r.APIError(BindError(err))
 	return false
 }
+
+// PeekJSON decodes the JSON body into data and leaves the body for the
+// handler's BindJSON. Middleware uses it to size a request before it runs.
+func (r *Request) PeekJSON(data any) error { return r.t.PeekJSON(data) }
 
 // DecodeJSON is BindJSON for a handler that answers a refusal itself: the
 // error is the refusal BindJSON would have written.
@@ -659,6 +664,18 @@ func (h *httpTransport) WriteJSON(code int, body any) {
 func (h *httpTransport) AbortJSON(code int, body any) { h.WriteJSON(code, body) }
 
 func (h *httpTransport) Bind(data any) error { return h.BindJSON(data) }
+
+func (h *httpTransport) PeekJSON(data any) error {
+	if h.r.Body == nil {
+		return io.EOF
+	}
+	raw, err := io.ReadAll(h.r.Body)
+	if err != nil {
+		return err
+	}
+	h.r.Body = io.NopCloser(bytes.NewReader(raw))
+	return json.Unmarshal(raw, data)
+}
 
 func (h *httpTransport) BindJSON(data any) error {
 	raw, err := io.ReadAll(h.r.Body)

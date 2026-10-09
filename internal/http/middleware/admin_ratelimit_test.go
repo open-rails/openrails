@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,28 +52,28 @@ func TestAdminOperationLimits(t *testing.T) {
 			now := tc.start
 			l, _ := testAdminLimiter(&now)
 			for i := 1; i <= tc.limit; i++ {
-				require.True(t, l.evaluate(ctx, adminUser, tc.op).allowed, "request %d", i)
+				require.True(t, l.evaluate(ctx, adminUser, tc.op, 1).allowed, "request %d", i)
 				now = now.Add(tc.step)
 			}
-			d := l.evaluate(ctx, adminUser, tc.op)
+			d := l.evaluate(ctx, adminUser, tc.op, 1)
 			require.False(t, d.allowed)
 			require.False(t, d.wasLocked)
 			require.Equal(t, tc.breachCnt, d.counts[tc.window])
 			require.Equal(t, adminLockoutDuration, d.retryAfter)
 
 			now = now.Add(adminLockoutDuration - time.Second)
-			d = l.evaluate(ctx, adminUser, AdminOperationGrant)
+			d = l.evaluate(ctx, adminUser, AdminOperationGrant, 1)
 			require.False(t, d.allowed, "the lockout spans operations")
 			require.True(t, d.wasLocked)
-			require.True(t, l.evaluate(ctx, "22222222-2222-2222-2222-222222222222", tc.op).allowed, "other admins are unaffected")
+			require.True(t, l.evaluate(ctx, "22222222-2222-2222-2222-222222222222", tc.op, 1).allowed, "other admins are unaffected")
 		})
 	}
 
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	l, _ := testAdminLimiter(&now)
-	require.EqualValues(t, 1, l.evaluate(ctx, "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF", AdminOperationDestructive).counts["minute"])
-	require.EqualValues(t, 2, l.evaluate(ctx, " abcdefab-cdef-4abc-8def-abcdefabcdef ", AdminOperationDestructive).counts["minute"], "user ids are canonicalized")
-	require.True(t, l.evaluate(ctx, adminUser, AdminOperation("unknown")).allowed)
+	require.EqualValues(t, 1, l.evaluate(ctx, "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF", AdminOperationDestructive, 1).counts["minute"])
+	require.EqualValues(t, 2, l.evaluate(ctx, " abcdefab-cdef-4abc-8def-abcdefabcdef ", AdminOperationDestructive, 1).counts["minute"], "user ids are canonicalized")
+	require.True(t, l.evaluate(ctx, adminUser, AdminOperation("unknown"), 1).allowed)
 }
 
 func TestAdminRateLimitMW(t *testing.T) {
@@ -137,4 +139,32 @@ func TestAdminRateLimitMW(t *testing.T) {
 		require.Equal(t, want, serve("issuer-user-7").Code)
 	}
 	require.Equal(t, http.StatusUnauthorized, serve("").Code)
+}
+
+// A batch counts as its items: a signed-in admin grants no more by batching
+// than by granting one at a time, and the handler still reads the body.
+func TestAdminRateLimitCountsBatchItems(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	l, _ := testAdminLimiter(&now)
+	var bodies []string
+	serve := func(items int) *httptest.ResponseRecorder {
+		body := `{"items":[` + strings.TrimSuffix(strings.Repeat(`{"product_id":"prod_1"},`, items), ",") + `]}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/merchant/product-access", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		staff := billingauth.Staff{Identity: billingauth.Identity{Issuer: "test", Subject: adminUser, SubjectKind: billingauth.SubjectUser, Invoker: billingauth.Invoker{Issuer: "test", ID: adminUser}}, Merchant: billing.MerchantID(uuid.New())}
+		req = req.WithContext(billingauth.BindStaff(req.Context(), staff))
+		w := httptest.NewRecorder()
+		r := request.NewHTTP(w, req, nil)
+		l.AdminRateLimitMW(AdminOperationGrant)(func(r *request.Request) {
+			var got struct{ Items []map[string]string }
+			require.True(t, r.BindJSON(&got))
+			bodies = append(bodies, fmt.Sprint(len(got.Items)))
+		})(r)
+		return w
+	}
+	require.Equal(t, http.StatusOK, serve(7).Code)
+	require.Equal(t, http.StatusOK, serve(3).Code)
+	require.Equal(t, []string{"7", "3"}, bodies, "the handler binds the whole batch")
+	require.Equal(t, http.StatusTooManyRequests, serve(1).Code, "ten items spent the minute's grants")
+	require.Len(t, bodies, 2)
 }

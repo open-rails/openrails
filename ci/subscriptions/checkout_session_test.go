@@ -446,7 +446,7 @@ func TestHostedCheckoutAccountState(t *testing.T) {
 	minted := app.handOver(buyer, price.ID)
 	option, mintedOption := session.option("nmi"), minted.option("nmi")
 	block := func(blocked bool) {
-		_, err := app.client[remote].EnsureCustomer(t.Context(), buyer.cid(), billing.EnsureCustomerParams{Blocked: blocked})
+		_, err := app.client[remote].EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: buyer.cid(), Blocked: blocked}})
 		require.NoError(t, err)
 	}
 

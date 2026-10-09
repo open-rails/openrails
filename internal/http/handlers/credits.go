@@ -63,24 +63,33 @@ func billingService(r *httprequest.Request) (*billingservice.Service, bool) {
 // writeMoneyError answers a credit, admission or usage refusal with its
 // registered code.
 func writeMoneyError(r *httprequest.Request, err error, internalMessage string) {
+	if out := moneyRefusal(err); out != nil {
+		r.APIError(out)
+		return
+	}
+	r.InternalError(internalMessage, err)
+}
+
+// moneyRefusal is the answer to a money refusal, nil for an unclassified
+// error.
+func moneyRefusal(err error) *api.APIError {
 	switch {
 	case errors.Is(err, billingservice.ErrIdempotencyKeyReused):
-		r.APIError(api.Coded(billing.CodeIdempotencyKeyReused, err.Error()))
+		return api.Coded(billing.CodeIdempotencyKeyReused, err.Error())
 	case errors.Is(err, billing.ErrInsufficientCredits):
-		r.APIError(api.Coded(billing.CodeInsufficientCredits, err.Error()))
+		return api.Coded(billing.CodeInsufficientCredits, err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantNotFound):
-		r.APIError(api.Coded("credit_grant_not_found", err.Error()))
+		return api.Coded("credit_grant_not_found", err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantHeld):
-		r.APIError(api.Coded("credit_grant_held", err.Error()))
+		return api.Coded("credit_grant_held", err.Error())
 	case errors.Is(err, billingservice.ErrCreditGrantUnavailable):
-		r.APIError(api.Coded("credit_grant_unavailable", err.Error()))
+		return api.Coded("credit_grant_unavailable", err.Error())
 	case errors.Is(err, billingservice.ErrInvalidInvokerSpendLimit):
-		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()))
+		return api.Coded(billing.CodeInvalidParam, err.Error())
 	case errors.Is(err, billingservice.ErrUsageOutsideIngestWindow):
-		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at"))
-	default:
-		writeRefusal(r, err, internalMessage)
+		return api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("occurred_at")
 	}
+	return refusalOf(err)
 }
 
 // CreateCreditGrant grants a customer prepaid credit.

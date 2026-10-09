@@ -50,9 +50,13 @@ func ServiceListHostEvents(r *httprequest.Request) {
 	r.SuccessJSON(events)
 }
 
-// ServiceAcknowledgeHostEvent handles POST /v1/merchant/host-events/{id}/acknowledge.
-func ServiceAcknowledgeHostEvent(r *httprequest.Request) {
-	id, ok := pathID(r, billing.ParseHostEventID)
+// ServiceAcknowledgeHostEvents handles POST /v1/merchant/host-events/acknowledge.
+func ServiceAcknowledgeHostEvents(r *httprequest.Request) {
+	var req billing.AcknowledgeHostEventsParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	ids, ok := batchIDs(r, req.HostEventIDs, billing.MaxBatchItems, "host_event_ids")
 	if !ok {
 		return
 	}
@@ -61,10 +65,10 @@ func ServiceAcknowledgeHostEvent(r *httprequest.Request) {
 		writeHostEventError(r, err)
 		return
 	}
-	event, err := svc.AcknowledgeHostEvent(r.Request.Context(), id)
+	events, err := svc.AcknowledgeHostEvents(r.Request.Context(), ids)
 	if err != nil {
 		writeHostEventError(r, err)
 		return
 	}
-	r.SuccessJSON(event)
+	r.SuccessJSON(billing.HostEventLookup{HostEvents: events})
 }

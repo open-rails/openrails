@@ -227,7 +227,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	setup := a.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})["id"].(string)
 	_, err = w.client[remote].SetCreditLimit(ctx, a.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 100_000_000})
 	require.NoError(t, err)
-	_, err = w.client[remote].RecordUsage(ctx, billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

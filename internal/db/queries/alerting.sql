@@ -45,10 +45,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant'
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: MarkMerchantNotificationRead :one
+-- name: MarkMerchantNotificationsRead :many
 UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant' AND id = sqlc.arg(id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'merchant' AND id = ANY(sqlc.arg(ids)::uuid[])
 RETURNING *;
 
 -- name: CountUnreadMerchantNotifications :one

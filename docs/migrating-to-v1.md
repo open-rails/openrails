@@ -35,7 +35,7 @@ Before the code:
 | A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and the default River schema, to that existing role |
 | `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
-| `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `client.EnsureCustomer` with the customer's `Email`, `Username` and `Blocked`, called whenever they change |
+| `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `client.EnsureCustomers` with each customer's `Email`, `Username` and `Blocked`, called whenever they change |
 | `openrails.Identity` (`Kind`, `SubjectID`, `CustomerID`, `CredentialClass`, `Permissions`), `PrincipalKind`, `CredentialClass`, `Requirement`, `Authority`, `Target`, `Scope`, `DelegatedPrincipal`, `GateError`, `RequestAuthenticator`, `ErrForbidden` | `openrails.Identity`: `Subject` and `SubjectKind`, `Invoker`, `Credential`, from `Auth.Identity` |
 | `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
@@ -230,7 +230,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(`, `client.ArchivePSP(`, `client.PreviewPSPRouting(`, `client.RefreshPSPs(`, `client.ListRails(` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.ApplyMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
-| `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvent(` takes a `billing.HostEventID` and returns the event |
+| `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.SetAlertWebhookURL(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |

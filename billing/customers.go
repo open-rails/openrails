@@ -17,16 +17,42 @@ type Customer struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 }
 
-// EnsureCustomerParams declares a customer: the facts OpenRails keeps about
-// it instead of asking the host's auth. EnsureCustomer creates the customer
+// EnsureCustomerParams declares one customer: the facts OpenRails keeps about
+// it instead of asking the host's auth. EnsureCustomers creates the customer
 // or replaces these fields; a nil Email or Username clears it. Receipts and
 // notices go to Email, the CCBill username bridge matches Username, and
 // checkout sessions refuse a Blocked customer (one banned or deleted at the
 // host). Call it whenever they change.
 type EnsureCustomerParams struct {
-	Email    *string `json:"email"`
-	Username *string `json:"username"`
-	Blocked  bool    `json:"blocked"`
+	ID       CustomerID `json:"id"`
+	Email    *string    `json:"email"`
+	Username *string    `json:"username"`
+	Blocked  bool       `json:"blocked"`
+}
+
+// EnsureCustomerBatchParams declares 1 to MaxBatchItems distinct customers in
+// one transaction.
+type EnsureCustomerBatchParams struct {
+	Items []EnsureCustomerParams `json:"items"`
+}
+
+// EnsureCustomerBatchResult is every declared customer, in request order.
+type EnsureCustomerBatchResult struct {
+	Items []Customer `json:"items"`
+}
+
+// MaxCustomerLookup bounds one GetCustomers call.
+const MaxCustomerLookup = 500
+
+// CustomerLookupParams names up to MaxCustomerLookup customers.
+type CustomerLookupParams struct {
+	CustomerIDs []CustomerID `json:"customer_ids"`
+}
+
+// CustomerLookup answers every requested customer; one that does not exist
+// is null.
+type CustomerLookup struct {
+	Customers map[CustomerID]*Customer `json:"customers"`
 }
 
 // CustomerListParams lists customers, newest first. Query matches an id

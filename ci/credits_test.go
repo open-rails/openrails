@@ -23,14 +23,18 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 
 	customer := billing.CustomerID(uuid.New())
 	email := "buyer@example.test"
-	declared, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{Email: &email})
+	declared, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer, Email: &email}})
 	require.NoError(t, err)
-	require.Equal(t, &email, declared.Email)
+	require.Equal(t, &email, declared[0].Email)
 	other := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, other, billing.EnsureCustomerParams{})
+	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: other}})
 	require.NoError(t, err)
-	_, err = client.GetCustomer(ctx, billing.CustomerID(uuid.New()))
-	require.ErrorIs(t, err, billing.ErrNotFound)
+	missing := billing.CustomerID(uuid.New())
+	read, err := client.GetCustomers(ctx, []billing.CustomerID{customer, missing, customer})
+	require.NoError(t, err)
+	require.Len(t, read, 2, "every requested customer is answered once")
+	require.Equal(t, &email, read[customer].Email)
+	require.Nil(t, read[missing], "an undeclared customer is null")
 
 	found, err := client.ListCustomers(ctx, billing.CustomerListParams{Query: "buyer@"})
 	require.NoError(t, err)
@@ -100,13 +104,13 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	_, err = client.ReleaseAdmission(ctx, requestID)
 	require.ErrorIs(t, err, billing.ErrConflict)
 
-	event, err := client.RecordUsage(ctx, billing.RecordUsageParams{
+	event, err := recordUsage(ctx, client, billing.RecordUsageParams{
 		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
 		Amount: 50_000, Source: "worker", SourceID: "event-1",
 	})
 	require.NoError(t, err)
 	require.False(t, event.Replayed)
-	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{
 		CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference",
 		Amount: 1, Source: "worker", SourceID: strings.Repeat("k", 256),
 	})

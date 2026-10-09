@@ -72,6 +72,18 @@ type HostEvent struct {
 	Delinquency    *DelinquencyHostEvent `json:"delinquency"`
 }
 
+// AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to
+// acknowledge.
+type AcknowledgeHostEventsParams struct {
+	HostEventIDs []HostEventID `json:"host_event_ids"`
+}
+
+// HostEventLookup answers every requested host event; one that does not exist
+// is null.
+type HostEventLookup struct {
+	HostEvents map[HostEventID]*HostEvent `json:"host_events"`
+}
+
 // HostEventListParams pages the merchant's host events, oldest first:
 // unacknowledged ones unless IncludeAcknowledged. A consumer can select its
 // event type so unrelated pending events cannot starve its work. Acknowledge

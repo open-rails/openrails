@@ -132,12 +132,12 @@ func (s *store) listNotifications(ctx context.Context, unreadOnly bool, afterAt 
 	})
 }
 
-func (s *store) markNotificationRead(ctx context.Context, id uuid.UUID) (gen.BillingNotification, error) {
+func (s *store) markNotificationsRead(ctx context.Context, ids []uuid.UUID) ([]gen.BillingNotification, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return gen.BillingNotification{}, err
+		return nil, err
 	}
-	return s.db.Gen(ctx).MarkMerchantNotificationRead(ctx, gen.MarkMerchantNotificationReadParams{MerchantID: mid.UUID(), ID: id})
+	return s.db.Gen(ctx).MarkMerchantNotificationsRead(ctx, gen.MarkMerchantNotificationsReadParams{MerchantID: mid.UUID(), Ids: ids})
 }
 
 func (s *store) unreadCount(ctx context.Context) (int64, error) {

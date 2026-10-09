@@ -27,7 +27,7 @@ func observedInvoice(t *testing.T, w *world, c *customer, amount int64) billing.
 	t.Helper()
 	_, err := w.client[remote].SetCreditLimit(t.Context(), c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: amount * 2})
 	require.NoError(t, err)
-	_, err = w.client[remote].RecordUsage(t.Context(), billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "observed-invoice", Amount: amount, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "observed-invoice", Amount: amount, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	w.advance(time.Minute)
 	job, err := w.jobs.Insert(t.Context(), invoicePass{}, &river.InsertOpts{Queue: "billing"})

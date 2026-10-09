@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -63,4 +64,14 @@ func TestOperationalAlertsLandInTheMerchantInbox(t *testing.T) {
 	status, raw := w.staff(http.MethodGet, "/v1/merchant/notifications")
 	require.Equal(t, http.StatusOK, status, raw)
 	require.NotContains(t, raw, "cus_0000")
+
+	unknown := billing.NotificationID(uuid.New())
+	read, err := w.client[remote].MarkNotificationsRead(t.Context(), []billing.NotificationID{repairs[0].ID, stalls[0].ID, unknown})
+	require.NoError(t, err)
+	require.Nil(t, read[unknown])
+	require.NotNil(t, read[repairs[0].ID].ReadAt)
+	require.NotNil(t, read[stalls[0].ID].ReadAt)
+	unread, err := w.client[embedded].GetUnreadNotificationCount(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, unread.UnreadCount)
 }

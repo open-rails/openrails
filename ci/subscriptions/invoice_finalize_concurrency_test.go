@@ -26,7 +26,7 @@ func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 	client := f.any().client[remote]
 	_, err := client.SetCreditLimit(t.Context(), c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: nmiInvoiceAmount})
 	require.NoError(t, err)
-	_, err = client.RecordUsage(t.Context(), billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "concurrent-finalize", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "concurrent-finalize", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	f.advance(time.Minute)
 	var merchant uuid.UUID

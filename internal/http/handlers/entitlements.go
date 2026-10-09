@@ -233,6 +233,9 @@ func createEntitlement(r *httprequest.Request, gate StaffCan) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid customer_id").WithParam("customer_id"))
 		return
 	}
+	if !requireServiceCustomerScope(r, customerID) {
+		return
+	}
 	var req billing.CreateEntitlementParams
 	if !r.BindJSON(&req) {
 		return
@@ -348,6 +351,9 @@ func DeleteEntitlement(r *httprequest.Request) {
 	id, err := billing.ParseEntitlementID(r.Param("id"))
 	if customerID.IsZero() || err != nil || id.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid entitlement id").WithParam("id"))
+		return
+	}
+	if !requireServiceCustomerScope(r, customerID) {
 		return
 	}
 	svc := r.State.EntitlementService

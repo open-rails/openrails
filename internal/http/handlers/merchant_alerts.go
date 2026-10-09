@@ -160,22 +160,26 @@ func ListMerchantNotifications(r *httprequest.Request) {
 	r.SuccessJSON(notes)
 }
 
-// MarkMerchantNotificationRead handles POST /v1/merchant/notifications/{id}/read.
-func MarkMerchantNotificationRead(r *httprequest.Request) {
+// MarkMerchantNotificationsRead handles POST /v1/merchant/notifications/read.
+func MarkMerchantNotificationsRead(r *httprequest.Request) {
+	var req billing.MarkNotificationsReadParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	ids, ok := batchIDs(r, req.NotificationIDs, billing.MaxBatchItems, "notification_ids")
+	if !ok {
+		return
+	}
 	svc, ok := alertService(r)
 	if !ok {
 		return
 	}
-	id, ok := pathID(r, billing.ParseNotificationID)
-	if !ok {
-		return
-	}
-	note, err := svc.MarkNotificationRead(r.Request.Context(), id)
+	notes, err := svc.MarkNotificationsRead(r.Request.Context(), ids)
 	if err != nil {
 		handleAlertWriteError(r, err)
 		return
 	}
-	r.SuccessJSON(note)
+	r.SuccessJSON(billing.NotificationLookup{Notifications: notes})
 }
 
 // MerchantNotificationsUnreadCount handles GET /v1/merchant/notifications/unread-count.

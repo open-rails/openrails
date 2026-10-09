@@ -145,6 +145,45 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 	return i, err
 }
 
+const getCustomersByIDs = `-- name: GetCustomersByIDs :many
+SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+`
+
+type GetCustomersByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) GetCustomersByIDs(ctx context.Context, arg GetCustomersByIDsParams) ([]BillingCustomer, error) {
+	rows, err := q.db.Query(ctx, getCustomersByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomer
+	for rows.Next() {
+		var i BillingCustomer
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Issuer,
+			&i.Email,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.Username,
+			&i.Blocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCustomers = `-- name: ListCustomers :many
 SELECT id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked FROM billing.customers c
 WHERE c.merchant_id = $1
@@ -238,9 +277,11 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 	return items, nil
 }
 
-const putCustomer = `-- name: PutCustomer :one
+const putCustomers = `-- name: PutCustomers :many
 INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
-VALUES ($1, $2, $3, $4, $5)
+SELECT item.id, $1::uuid, NULLIF(item.email, ''), NULLIF(item.username, ''), item.blocked
+FROM unnest($2::uuid[], $3::text[], $4::text[], $5::boolean[])
+  AS item(id, email, username, blocked)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   email = EXCLUDED.email,
   username = EXCLUDED.username,
@@ -249,36 +290,49 @@ ON CONFLICT (merchant_id, id) DO UPDATE SET
 RETURNING id, merchant_id, issuer, email, created_at, last_seen_at, username, blocked
 `
 
-type PutCustomerParams struct {
-	ID         uuid.UUID
+type PutCustomersParams struct {
 	MerchantID uuid.UUID
-	Email      *string
-	Username   *string
-	Blocked    bool
+	Ids        []uuid.UUID
+	Emails     []string
+	Usernames  []string
+	Blocked    []bool
 }
 
-// The merchant's declaration of a customer: materialize it, or replace its
-// declared fields.
-func (q *Queries) PutCustomer(ctx context.Context, arg PutCustomerParams) (BillingCustomer, error) {
-	row := q.db.QueryRow(ctx, putCustomer,
-		arg.ID,
+// The merchant's declaration of distinct customers in one statement; an empty
+// email or username is absent.
+func (q *Queries) PutCustomers(ctx context.Context, arg PutCustomersParams) ([]BillingCustomer, error) {
+	rows, err := q.db.Query(ctx, putCustomers,
 		arg.MerchantID,
-		arg.Email,
-		arg.Username,
+		arg.Ids,
+		arg.Emails,
+		arg.Usernames,
 		arg.Blocked,
 	)
-	var i BillingCustomer
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Issuer,
-		&i.Email,
-		&i.CreatedAt,
-		&i.LastSeenAt,
-		&i.Username,
-		&i.Blocked,
-	)
-	return i, err
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCustomer
+	for rows.Next() {
+		var i BillingCustomer
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Issuer,
+			&i.Email,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.Username,
+			&i.Blocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setCustomerEmail = `-- name: SetCustomerEmail :exec

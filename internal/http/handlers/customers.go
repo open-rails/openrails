@@ -27,44 +27,60 @@ func ListCustomers(r *httprequest.Request) {
 	r.SuccessJSON(page)
 }
 
-// GetCustomer reads one customer.
-func GetCustomer(r *httprequest.Request) {
-	customer, ok := customerParam(r)
+// GetCustomers reads up to billing.MaxCustomerLookup customers; one that
+// does not exist is null. A credential scoped to some customers may name only
+// those.
+func GetCustomers(r *httprequest.Request) {
+	var req billing.CustomerLookupParams
+	if !r.BindJSON(&req) {
+		return
+	}
+	ids, ok := batchIDs(r, req.CustomerIDs, billing.MaxCustomerLookup, "customer_ids")
 	if !ok {
 		return
+	}
+	for _, id := range ids {
+		if !requireServiceCustomerScope(r, id) {
+			return
+		}
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.GetCustomer(r.Request.Context(), customer)
+	out, err := svc.GetCustomers(r.Request.Context(), ids)
 	if err != nil {
 		writeRefusal(r, err, "customer read failed")
 		return
 	}
-	r.SuccessJSON(out)
+	r.SuccessJSON(billing.CustomerLookup{Customers: out})
 }
 
-// EnsureCustomer creates a customer or replaces its declared fields.
-func EnsureCustomer(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
+// EnsureCustomers creates customers or replaces their declared fields, all
+// or none. A credential scoped to some customers may name only those.
+func EnsureCustomers(r *httprequest.Request) {
+	var req billing.EnsureCustomerBatchParams
+	if !r.BindJSON(&req) {
 		return
 	}
-	var params billing.EnsureCustomerParams
-	if !r.BindJSON(&params) {
+	if !batchItems(r, len(req.Items), billing.MaxBatchItems) {
 		return
+	}
+	for _, item := range req.Items {
+		if !item.ID.IsZero() && !requireServiceCustomerScope(r, item.ID) {
+			return
+		}
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
 	}
-	out, err := svc.EnsureCustomer(r.Request.Context(), customer, params)
+	out, err := svc.EnsureCustomers(r.Request.Context(), req.Items)
 	if err != nil {
 		writeRefusal(r, err, "customer update failed")
 		return
 	}
-	r.SuccessJSON(out)
+	r.SuccessJSON(billing.EnsureCustomerBatchResult{Items: out})
 }
 
 // GetCustomerBillingPolicy reads the policy assigned to a customer.

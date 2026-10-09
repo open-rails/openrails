@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
@@ -23,25 +24,41 @@ func customerFromRow(row gen.BillingCustomer) billing.Customer {
 	return billing.Customer{ID: billing.CustomerID(row.ID), Email: row.Email, Username: row.Username, Blocked: row.Blocked, CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}
 }
 
-// EnsureCustomer creates the merchant's customer or replaces its declared
-// fields.
-func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, params billing.EnsureCustomerParams) (*billing.Customer, error) {
-	if id.IsZero() {
-		return nil, apperr.Invalidf("customer id is required").WithParam("customer_id")
+// EnsureCustomers creates the merchant's customers or replaces their
+// declared fields, in one statement: every item or none. Items name distinct
+// customers.
+func (s *Service) EnsureCustomers(ctx context.Context, items []billing.EnsureCustomerParams) ([]billing.Customer, error) {
+	if len(items) == 0 || len(items) > billing.MaxBatchItems {
+		return nil, apperr.Invalidf("items must hold 1 to %d customers", billing.MaxBatchItems).WithParam("items")
 	}
-	if params.Email != nil {
-		email := strings.TrimSpace(*params.Email)
-		if email == "" || len(email) > 320 || !strings.Contains(email, "@") {
-			return nil, apperr.Invalidf("email must be an address of at most 320 bytes").WithParam("email")
+	ids := make([]uuid.UUID, len(items))
+	emails := make([]string, len(items))
+	usernames := make([]string, len(items))
+	blocked := make([]bool, len(items))
+	seen := make(map[billing.CustomerID]bool, len(items))
+	for i, item := range items {
+		if item.ID.IsZero() {
+			return nil, apperr.Invalidf("customer id is required").WithParam(apperr.ItemParam(i, "id"))
 		}
-		params.Email = &email
-	}
-	if params.Username != nil {
-		username := strings.TrimSpace(*params.Username)
-		if username == "" || len(username) > 256 {
-			return nil, apperr.Invalidf("username must be at most 256 bytes and not blank").WithParam("username")
+		if seen[item.ID] {
+			return nil, apperr.Invalidf("customer %s is declared twice", item.ID).WithParam(apperr.ItemParam(i, "id"))
 		}
-		params.Username = &username
+		seen[item.ID] = true
+		if item.Email != nil {
+			email := strings.TrimSpace(*item.Email)
+			if email == "" || len(email) > 320 || !strings.Contains(email, "@") {
+				return nil, apperr.Invalidf("email must be an address of at most 320 bytes").WithParam(apperr.ItemParam(i, "email"))
+			}
+			emails[i] = email
+		}
+		if item.Username != nil {
+			username := strings.TrimSpace(*item.Username)
+			if username == "" || len(username) > 256 {
+				return nil, apperr.Invalidf("username must be at most 256 bytes and not blank").WithParam(apperr.ItemParam(i, "username"))
+			}
+			usernames[i] = username
+		}
+		ids[i], blocked[i] = item.ID.UUID(), item.Blocked
 	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -52,12 +69,48 @@ func (s *Service) EnsureCustomer(ctx context.Context, id identity.CustomerID, pa
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.rt.DB.Gen(ctx).PutCustomer(ctx, gen.PutCustomerParams{ID: id.UUID(), MerchantID: mid.UUID(), Email: params.Email, Username: params.Username, Blocked: params.Blocked})
+	rows, err := s.rt.DB.Gen(ctx).PutCustomers(ctx, gen.PutCustomersParams{MerchantID: mid.UUID(), Ids: ids, Emails: emails, Usernames: usernames, Blocked: blocked})
 	if err != nil {
 		return nil, err
 	}
-	out := customerFromRow(row)
-	return &out, nil
+	byID := make(map[uuid.UUID]billing.Customer, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = customerFromRow(row)
+	}
+	out := make([]billing.Customer, len(ids))
+	for i, id := range ids {
+		out[i] = byID[id]
+	}
+	return out, nil
+}
+
+// GetCustomers reads the requested customers; one the merchant never
+// declared or billed maps to nil.
+func (s *Service) GetCustomers(ctx context.Context, ids []billing.CustomerID) (map[billing.CustomerID]*billing.Customer, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]uuid.UUID, len(ids))
+	out := make(map[billing.CustomerID]*billing.Customer, len(ids))
+	for i, id := range ids {
+		keys[i] = id.UUID()
+		out[id] = nil
+	}
+	rows, err := s.rt.DB.Gen(ctx).GetCustomersByIDs(ctx, gen.GetCustomersByIDsParams{MerchantID: mid.UUID(), Ids: keys})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		customer := customerFromRow(row)
+		out[customer.ID] = &customer
+	}
+	return out, nil
 }
 
 // GetCustomer reads one customer.

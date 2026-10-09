@@ -166,7 +166,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	_, err = client.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.EnsureCustomerParams{})
+	_, err = client.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(userID))}})
 	require.NoError(t, err)
 	session, err := client.CreateCheckoutAttempt(t.Context(), billing.CreateCheckoutAttemptParams{
 		Customer:       billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},

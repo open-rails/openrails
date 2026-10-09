@@ -57,7 +57,7 @@ func TestSecuritySupportCannotMintCredit(t *testing.T) {
 	for name, c := range callers {
 		owner := name == "owner member" || name == "owner API key"
 		customer := uuid.NewString()
-		w := call(t, handler, c.token, http.MethodPut, "/v1/merchant/customers/"+customer, c.selector, map[string]any{})
+		w := call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/ensure", c.selector, map[string]any{"items": []any{map[string]any{"id": customer}}})
 		require.Equal(t, http.StatusOK, w.Code, "%s edits customers: %s", name, w.Body.String())
 
 		w = call(t, handler, c.token, http.MethodPost, "/v1/merchant/customers/"+customer+"/credit-grants", c.selector, map[string]any{

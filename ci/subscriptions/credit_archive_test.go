@@ -63,7 +63,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{})
 	require.NoError(t, err)
 	for _, event := range events.Items {
-		_, err = c.AcknowledgeHostEvent(t.Context(), event.ID)
+		_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 		require.NoError(t, err)
 	}
 	merchantID := c.MerchantID()

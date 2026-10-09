@@ -107,6 +107,18 @@ type MerchantNotification struct {
 	ReadAt    *time.Time     `json:"read_at"`
 }
 
+// MarkNotificationsReadParams names 1 to MaxBatchItems notifications to mark
+// read.
+type MarkNotificationsReadParams struct {
+	NotificationIDs []NotificationID `json:"notification_ids"`
+}
+
+// NotificationLookup answers every requested notification; one that does not
+// exist is null.
+type NotificationLookup struct {
+	Notifications map[NotificationID]*MerchantNotification `json:"notifications"`
+}
+
 // MerchantNotificationListParams pages the merchant's inbox, newest first.
 type MerchantNotificationListParams struct {
 	PageRequest

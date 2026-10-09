@@ -32,7 +32,7 @@ func TestInvoiceRemittanceReplay(t *testing.T) {
 			_, err = client.SetCreditLimit(ctx, payer.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 2 * owed})
 			require.NoError(t, err)
 			invoice := func() *billing.Invoice {
-				_, err := client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})
+				_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: payer.cid(), Invoker: payer.id, Currency: "USD", EventType: "remittance-proof", Amount: owed, Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
 				job, err := w.jobs.Insert(ctx, invoicePass{}, &river.InsertOpts{Queue: openrails.QueueBilling})

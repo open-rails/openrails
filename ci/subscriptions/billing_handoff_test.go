@@ -66,7 +66,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				events, err := source.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
 				require.NoError(t, err)
 				for _, event := range events.Items {
-					_, err = source.client[embedded].AcknowledgeHostEvent(t.Context(), event.ID)
+					_, err = source.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 					require.NoError(t, err)
 				}
 				source.checkMoneyInvariants()

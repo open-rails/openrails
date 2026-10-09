@@ -62,7 +62,7 @@ const cases: Case[] = [
   ["revokes an entitlement", (c, g) => g(M.revokeCustomerEntitlement(c, "cus_1"), "ent_1"),
     "DELETE /merchant/customers/cus_1/entitlements/ent_1", customerTree],
   ["grants product access until an instant", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), { productId: "prod_1", endsAt: effectiveAt }),
-    "POST /merchant/customers/cus_1/product-access", customerTree, { product_id: "prod_1", ends_at: effectiveAt }],
+    "POST /merchant/product-access", customerTree, { items: [{ customer_id: "cus_1", product_id: "prod_1", ends_at: effectiveAt }] }],
   ["revokes product access", (c, g) => g(M.revokeCustomerProductAccess(c, "cus_1"), "acc_1"),
     "DELETE /merchant/customers/cus_1/product-access/acc_1", customerTree],
   ["records an off-channel payment", (c, g) => g(M.recordCustomerOffChannelPayment(c, "cus_1"), offChannel),
@@ -114,7 +114,12 @@ let routes: Record<string, Reply>
 beforeEach(async () => {
   routes = {
     "/merchant/catalog/products/by-key/pro/prices/by-key/monthly": { id: "price_1", product_id: "prod_1" },
-    "POST /merchant/notifications/note_2/read": () => new Response(null, { status: 503 }),
+    "POST /merchant/product-access": { items: [{ id: "acc_1" }] },
+    "POST /merchant/notifications/read": (request) => ({
+      notifications: Object.fromEntries(
+        (request.body as { notification_ids: string[] }).notification_ids.map((id) => [id, id === "note_2" ? null : { id }])
+      ),
+    }),
   }
   requests = await server(routes)
 })
@@ -181,7 +186,7 @@ describe("notification read state", () => {
 
   it("reconciles both caches from the ids the server accepted", async () => {
     const queryClient = started()
-    // note_2 is answered 503 by the harness: a partial bulk result.
+    // The harness answers note_2 as missing: only note_1 was read.
     const readIds = await exec(queryClient, M.markNotificationsRead(queryClient), ["note_1", "note_2"])
     expect(readIds).toEqual(["note_1"])
     expect(readFlags(queryClient)).toEqual([true, false])

@@ -110,7 +110,7 @@ explicit:
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6), and what OpenRails knows about a customer is what
-you tell it with `client.EnsureCustomer`: the email receipts and notices go to,
+you tell it with `client.EnsureCustomers`: the email receipts and notices go to,
 the username the CCBill username bridge matches, and whether the customer is
 blocked (banned or deleted), which checkout sessions refuse. Call it whenever
 they change.
@@ -398,14 +398,14 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `SetSpendDelegation`, `DeleteSpendDelegation`, `GetTrustLevel`, `SetTrustLevel`, `GetCreditLimit`, `SetCreditLimit` |
 | Credits | `CreateCreditGrant`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
-| Customers / entitlements | `EnsureCustomer`, `GetCustomer`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `CheckEntitlements`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
+| Customers / entitlements | `EnsureCustomers`, `GetCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `GetCustomerBillingPolicy`, `SetCustomerBillingPolicy`, `ListCustomerDelinquency`, `ListDelinquency`, `ListEntitlements`, `CheckEntitlements`, `ListEntitlementCustomers`, `CreateEntitlement`, `DeleteEntitlement`, `GetEffectiveTier`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
 | Checkout | `CreateCheckoutSession`, `CreateCheckoutAttempt`, `GetCheckoutAttempt`, `ConfirmCheckoutAttempt`, `GetCheckoutConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CreateRepriceBatch`, `PreviewRepriceBatch`, `ListRepriceBatches`, `GetRepriceBatch`, `CancelRepriceBatch`, `ListReprices`, `GetReprice`, `CancelReprice` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
 | Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetInvoiceProfile`, `SetInvoiceProfile` (`IfAbsent` to only create) |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
-| Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
+| Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 
 ```go
 verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
@@ -500,12 +500,18 @@ for _, kind := range []billing.HostEventType{
         Type: kind, PageRequest: billing.PageRequest{Limit: 100},
     })
     if err != nil { return err }
+    var done []billing.HostEventID
+    var failed error
     for _, event := range page.Items {
-        if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
-            return err // leave the event pending for replay
+        if failed = applyHostAction(ctx, event.Type, event.Delinquency); failed != nil {
+            break // leave this and later events pending for replay
         }
-        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        done = append(done, event.ID)
     }
+    if len(done) > 0 {
+        if _, err := client.AcknowledgeHostEvents(ctx, done); err != nil { return err }
+    }
+    if failed != nil { return failed }
 }
 ```
 

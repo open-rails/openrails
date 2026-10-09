@@ -60,7 +60,7 @@ For ordinary OpenRails accounts, the PSP UUID is derived from rail, environment
 and provider account ID. Applying the same merchant PSP configuration in the
 destination recreates that UUID; supply credentials separately and use the same
 sandbox/production environment. Verify those IDs against the snapshot before
-import. The public `Client.EnsureCustomer` accepts each original customer UUID.
+import. The public `Client.EnsureCustomers` accepts each original customer UUID.
 Older externally imported PSPs may have non-derived UUIDs: the normal creation
 API cannot select an arbitrary replacement ID. Those require explicit identity
 provisioning by a database operator; importing the whole billing archive instead

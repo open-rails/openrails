@@ -52,7 +52,7 @@ func TestCanceledReconciliationRunDoesNotStrandArchive(t *testing.T) {
 			break
 		}
 		for _, event := range events.Items {
-			_, err = w.client[embedded].AcknowledgeHostEvent(t.Context(), event.ID)
+			_, err = w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 			require.NoError(t, err)
 		}
 	}

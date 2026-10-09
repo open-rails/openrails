@@ -36,6 +36,9 @@ func Conflictf(format string, args ...any) *Error {
 	return &Error{Status: http.StatusConflict, Code: api.CodeResourceConflict, Message: fmt.Sprintf(format, args...)}
 }
 
+// ItemParam names field of the i-th item of a batch: items[i].field.
+func ItemParam(i int, field string) string { return fmt.Sprintf("items[%d].%s", i, field) }
+
 // WithParam returns a copy naming the offending request field.
 func (e *Error) WithParam(param string) *Error {
 	out := *e

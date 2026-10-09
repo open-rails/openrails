@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -52,12 +53,13 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	}
 
 	timed := map[string]any{"entitlement": "content:comp", "hours": 24}
+	access := map[string]any{"items": []any{map[string]any{"customer_id": member.id, "product_id": price.ProductID}}}
 	for _, op := range []struct {
 		method, path string
 		body         any
 	}{
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/entitlements", timed},
-		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/product-access", map[string]any{"product_id": price.ProductID}},
+		{http.MethodPost, "/v1/merchant/product-access", access},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
@@ -81,7 +83,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	require.True(t, member.entitled("content:comp"), "the fresh grants landed")
 
 	// A read needs no step-up, and neither does the host's in-process client.
-	status, body := call(stale, http.MethodGet, "/v1/merchant/customers/"+member.id, nil)
+	status, body := call(stale, http.MethodPost, "/v1/merchant/customers/lookup", map[string]any{"customer_ids": []string{member.id}})
 	require.Equal(t, http.StatusOK, status, "%v", body)
 	_, err := w.client[embedded].CreateEntitlement(t.Context(), member.customerID(), billing.CreateEntitlementParams{Entitlement: "content:host"})
 	require.NoError(t, err)
@@ -96,9 +98,20 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	status, body = call(support, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", permanent)
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
-	status, body = call(support, http.MethodPost, "/v1/merchant/customers/"+member.id+"/product-access", map[string]any{"product_id": price.ProductID})
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", access)
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	require.Equal(t, "permanent_grant_forbidden", body["error"].(map[string]any)["code"])
+	other := w.newCustomer()
+	until := w.clock.Now().Add(24 * time.Hour)
+	mixed := map[string]any{"items": []any{
+		map[string]any{"customer_id": other.id, "product_id": price.ProductID, "ends_at": until},
+		map[string]any{"customer_id": member.id, "product_id": price.ProductID},
+	}}
+	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", mixed)
+	require.Equal(t, http.StatusForbidden, status, "one indefinite item needs the permission for the batch: %v", body)
+	held, err := w.client[embedded].CheckProductAccess(t.Context(), other.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{price.ProductID}})
+	require.NoError(t, err)
+	require.False(t, held[price.ProductID.String()], "a refused batch grants nothing")
 	require.False(t, member.entitled("content:forever"))
 	status, body = call(fresh, http.MethodPost, "/v1/merchant/customers/"+member.id+"/entitlements", map[string]any{"entitlement": "content:comp", "hours": 2562048})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -146,7 +147,7 @@ func (l *AdminOperationLimiter) AdminRateLimitMW(operation AdminOperation) route
 				return
 			}
 			userID := adminActorKey(staff.Invoker.Issuer, staff.Invoker.ID)
-			decision := l.evaluate(r.Request.Context(), userID, operation)
+			decision := l.evaluate(r.Request.Context(), userID, operation, requestItems(r))
 			event := AdminRateLimitEvent{
 				UserID:     userID,
 				Operation:  operation,
@@ -214,7 +215,20 @@ func (l *AdminOperationLimiter) Unlock(ctx context.Context, userID, actorID stri
 	return nil
 }
 
-func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, operation AdminOperation) adminRateLimitDecision {
+// requestItems is how many operations a request carries: the length of its
+// JSON body's "items" batch, else one. Limits count operations, so a batch
+// never buys more than the same calls one at a time.
+func requestItems(r *request.Request) int64 {
+	var batch struct {
+		Items []json.RawMessage `json:"items"`
+	}
+	if r.PeekJSON(&batch) != nil || len(batch.Items) == 0 {
+		return 1
+	}
+	return int64(len(batch.Items))
+}
+
+func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, operation AdminOperation, weight int64) adminRateLimitDecision {
 	if canonicalUserID, err := canonicalAdminUserID(userID); err == nil {
 		userID = canonicalUserID
 	}
@@ -224,7 +238,7 @@ func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, ope
 	}
 	now := l.now().UTC()
 	if l.rdb != nil {
-		decision, err := l.evaluateRedis(ctx, userID, operation, windows, now)
+		decision, err := l.evaluateRedis(ctx, userID, operation, windows, now, weight)
 		if err == nil {
 			return decision
 		}
@@ -233,7 +247,7 @@ func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, ope
 			"operation":     operation,
 		}).Warn("admin rate limit redis error; falling back to in-memory limiter")
 	}
-	return l.evaluateMemory(userID, operation, windows, now)
+	return l.evaluateMemory(userID, operation, windows, now, weight)
 }
 
 func (l *AdminOperationLimiter) emit(ctx context.Context, event AdminRateLimitEvent) {
@@ -263,7 +277,7 @@ func logAdminRateLimitEvent(ctx context.Context, event AdminRateLimitEvent) {
 	}
 }
 
-func (l *AdminOperationLimiter) evaluateMemory(userID string, operation AdminOperation, windows []adminRateLimitWindow, now time.Time) adminRateLimitDecision {
+func (l *AdminOperationLimiter) evaluateMemory(userID string, operation AdminOperation, windows []adminRateLimitWindow, now time.Time, weight int64) adminRateLimitDecision {
 	l.memory.mu.Lock()
 	defer l.memory.mu.Unlock()
 	l.memory.prune(now)
@@ -281,10 +295,10 @@ func (l *AdminOperationLimiter) evaluateMemory(userID string, operation AdminOpe
 		if !counter.reset.After(now) {
 			counter = adminMemoryCounter{reset: nextAdminRateLimitWindow(now, window.duration)}
 		}
-		counter.count++
+		counter.count += weight
 		l.memory.counters[key] = counter
 		decision.counts[window.name] = counter.count
-		if counter.count == adminRateLimitAlertThreshold(window.limit) {
+		if crossed(counter.count, weight, adminRateLimitAlertThreshold(window.limit)) {
 			decision.thresholds = append(decision.thresholds, window.name)
 		}
 		if counter.count > window.limit {
@@ -339,6 +353,11 @@ func (l *AdminOperationLimiter) unlockMemory(userID string) {
 	}
 }
 
+// crossed reports whether adding weight brought count to threshold.
+func crossed(count, weight, threshold int64) bool {
+	return count >= threshold && count-weight < threshold
+}
+
 func adminRateLimitAlertThreshold(limit int64) int64 {
 	return int64(math.Ceil(float64(limit) * 0.8))
 }
@@ -384,10 +403,11 @@ end
 
 local counts = {}
 local breached = 0
+local weight = tonumber(ARGV[2])
 for i = 2, #KEYS do
-  local arg = ((i - 2) * 2) + 2
-  local count = redis.call("INCR", KEYS[i])
-  if count == 1 then redis.call("EXPIRE", KEYS[i], ARGV[arg]) end
+  local arg = ((i - 2) * 2) + 3
+  local count = redis.call("INCRBY", KEYS[i], weight)
+  if count == weight then redis.call("EXPIRE", KEYS[i], ARGV[arg]) end
   table.insert(counts, count)
   if count > tonumber(ARGV[arg + 1]) then breached = 1 end
 end
@@ -402,11 +422,11 @@ for _, count in ipairs(counts) do table.insert(result, count) end
 return result
 `)
 
-func (l *AdminOperationLimiter) evaluateRedis(ctx context.Context, userID string, operation AdminOperation, windows []adminRateLimitWindow, now time.Time) (adminRateLimitDecision, error) {
+func (l *AdminOperationLimiter) evaluateRedis(ctx context.Context, userID string, operation AdminOperation, windows []adminRateLimitWindow, now time.Time, weight int64) (adminRateLimitDecision, error) {
 	keys := make([]string, 1, len(windows)+1)
 	keys[0] = adminRateLimitLockKey(userID)
-	args := make([]any, 1, (len(windows)*2)+1)
-	args[0] = int64(adminLockoutDuration / time.Second)
+	args := make([]any, 2, (len(windows)*2)+2)
+	args[0], args[1] = int64(adminLockoutDuration/time.Second), weight
 	for _, window := range windows {
 		keys = append(keys, adminRateLimitCounterKey(userID, operation, window, now))
 		ttl := int64(math.Ceil(nextAdminRateLimitWindow(now, window.duration).Sub(now).Seconds()))
@@ -432,7 +452,7 @@ func (l *AdminOperationLimiter) evaluateRedis(ctx context.Context, userID string
 	for i, window := range windows {
 		count := values[i+3]
 		decision.counts[window.name] = count
-		if count == adminRateLimitAlertThreshold(window.limit) {
+		if crossed(count, weight, adminRateLimitAlertThreshold(window.limit)) {
 			decision.thresholds = append(decision.thresholds, window.name)
 		}
 	}

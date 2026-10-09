@@ -21,33 +21,38 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 	return &out, nil
 }
 
-// GetCustomer reads one customer; one the merchant never declared or billed
-// is billing.ErrNotFound.
-func (c *Client) GetCustomer(ctx context.Context, id billing.CustomerID, requestOptions ...RequestOption) (*billing.Customer, error) {
-	path, err := customerIDPath(id)
-	if err != nil {
+// GetCustomers reads up to billing.MaxCustomerLookup customers. Every
+// requested customer is in the answer; one the merchant never declared or
+// billed is nil.
+func (c *Client) GetCustomers(ctx context.Context, ids []billing.CustomerID, requestOptions ...RequestOption) (map[billing.CustomerID]*billing.Customer, error) {
+	if err := batchIDs("customer_ids", ids, billing.MaxCustomerLookup); err != nil {
 		return nil, err
 	}
-	var out billing.Customer
-	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
+	var out billing.CustomerLookup
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/lookup", billing.CustomerLookupParams{CustomerIDs: ids}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Customers, nil
 }
 
-// EnsureCustomer creates the customer under the bound merchant, or replaces
-// its declared fields. Commerce writes create customers on demand; call this
-// to declare one first, or to set its billing email.
-func (c *Client) EnsureCustomer(ctx context.Context, id billing.CustomerID, params billing.EnsureCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error) {
-	path, err := customerIDPath(id)
-	if err != nil {
+// EnsureCustomers creates 1 to billing.MaxBatchItems distinct customers under
+// the bound merchant, or replaces their declared fields, all or none; the
+// answer is in request order. Commerce writes create customers on demand;
+// call this to declare them first, or to set their billing emails.
+func (c *Client) EnsureCustomers(ctx context.Context, items []billing.EnsureCustomerParams, requestOptions ...RequestOption) ([]billing.Customer, error) {
+	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	var out billing.Customer
-	if err := c.do(ctx, http.MethodPut, path, params, &out, requestOptions...); err != nil {
+	for _, item := range items {
+		if item.ID.IsZero() {
+			return nil, invalidErr("customer id is required")
+		}
+	}
+	var out billing.EnsureCustomerBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/ensure", billing.EnsureCustomerBatchParams{Items: items}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Items, nil
 }
 
 // GetCustomerBillingProfile reads one customer's billing at a glance.

@@ -214,7 +214,7 @@ reference: [api/routes.md](api/routes.md).
 |---|---|---|
 | Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{customer_id}/billing-profile` | Customers → search |
 | Grant / revoke an entitlement manually | `POST /v1/merchant/customers/{customer_id}/entitlements`, `DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}` | Customers → profile |
-| Grant / revoke product access manually | `POST /v1/merchant/customers/{customer_id}/product-access`, `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}` | Customers → profile |
+| Grant / revoke product access manually | `POST /v1/merchant/product-access` (a batch), `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}` | Customers → profile |
 | Record an off-channel/manual purchase | `POST /v1/merchant/customers/{customer_id}/payments/off-channel` | Customers → profile |
 | List / inspect payments | `GET /v1/merchant/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/merchant/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |

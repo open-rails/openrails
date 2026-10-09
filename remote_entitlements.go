@@ -50,6 +50,9 @@ func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.Cust
 	if (params.ProductIDs == nil) == (params.ProductKeys == nil) {
 		return nil, invalidErr("exactly one of product_ids and product_keys is required")
 	}
+	if err := batchSize(len(params.ProductIDs)+len(params.ProductKeys), billing.MaxProductAccessChecks); err != nil {
+		return nil, err
+	}
 	for _, key := range params.ProductKeys {
 		if !validProductKey(key) {
 			return nil, invalidErr("product_key is invalid")
@@ -76,20 +79,26 @@ func (c *Client) ListProductAccess(ctx context.Context, customerID billing.Custo
 	return &out, nil
 }
 
-// CreateProductAccess grants the customer access to a product.
-func (c *Client) CreateProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CreateProductAccessParams, requestOptions ...RequestOption) (*billing.ProductAccessGrant, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
+// CreateProductAccess grants 1 to billing.MaxBatchItems product accesses,
+// across any customers, all or none; the answer is in request order. One
+// admin's grant of a product to a customer is made once.
+func (c *Client) CreateProductAccess(ctx context.Context, items []billing.CreateProductAccessParams, requestOptions ...RequestOption) ([]billing.ProductAccessGrant, error) {
+	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	if params.ProductID.IsZero() {
-		return nil, invalidErr("product_id is required")
+	for _, item := range items {
+		if item.CustomerID.IsZero() {
+			return nil, invalidErr("customer_id is required")
+		}
+		if item.ProductID.IsZero() {
+			return nil, invalidErr("product_id is required")
+		}
 	}
-	var out billing.ProductAccessGrant
-	if err := c.do(ctx, http.MethodPost, path+"/product-access", params, &out, requestOptions...); err != nil {
+	var out billing.CreateProductAccessBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/product-access", billing.CreateProductAccessBatchParams{Items: items}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return out.Items, nil
 }
 
 // DeleteProductAccess revokes one of the customer's product-access grants.

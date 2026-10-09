@@ -71,6 +71,37 @@ type UsageEvent struct {
 	Replayed            bool                 `json:"replayed"`
 }
 
+// MaxUsageBatchItems bounds one RecordUsage call.
+const MaxUsageBatchItems = 1000
+
+// RecordUsageBatchParams records 1 to MaxUsageBatchItems usage events.
+type RecordUsageBatchParams struct {
+	Items []RecordUsageParams `json:"items"`
+}
+
+// UsageEventResult is one item's outcome: Status is what recording it alone
+// answers (201 recorded, 200 replayed, or the refusal's status), with Event
+// or Error.
+type UsageEventResult struct {
+	Status int           `json:"status"`
+	Event  *UsageEvent   `json:"event"`
+	Error  *ErrorDetails `json:"error"`
+}
+
+// Err is the item's refusal as the error recording it alone would return,
+// nil when it was recorded or replayed.
+func (r UsageEventResult) Err() error {
+	if r.Error == nil {
+		return nil
+	}
+	return &StatusError{Status: r.Status, ErrorDetails: *r.Error}
+}
+
+// RecordUsageBatchResult is one result per item, in request order.
+type RecordUsageBatchResult struct {
+	Items []UsageEventResult `json:"items"`
+}
+
 // UsageGroupBy is what a usage report groups events by.
 type UsageGroupBy string
 

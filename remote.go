@@ -173,6 +173,27 @@ func invalidErr(msg string) error {
 	return &billing.StatusError{Status: http.StatusBadRequest, ErrorDetails: billing.ErrorDetails{Type: "invalid_request_error", Code: billing.CodeInvalidParam, Message: msg}}
 }
 
+// batchSize refuses an empty batch or one longer than limit before any I/O.
+func batchSize(n, limit int) error {
+	if n == 0 || n > limit {
+		return invalidErr(fmt.Sprintf("a batch holds 1 to %d items", limit))
+	}
+	return nil
+}
+
+// batchIDs refuses an empty, oversized or zero-holding id list before any I/O.
+func batchIDs[T interface{ IsZero() bool }](field string, ids []T, limit int) error {
+	if err := batchSize(len(ids), limit); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if id.IsZero() {
+			return invalidErr(field + " must be nonzero ids")
+		}
+	}
+	return nil
+}
+
 // requireID trims a caller-supplied identifier and refuses a blank one with
 // the server's invalid_param refusal before any I/O, so embedded and remote
 // callers observe the same error. Dot segments name nothing and would be

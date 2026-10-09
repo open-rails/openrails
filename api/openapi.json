@@ -4866,63 +4866,6 @@
           "tier:merchant",
           "request"
         ]
-      },
-      "post": {
-        "tags": [
-          "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProductAccessParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductAccessGrant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:customer-settings:update",
-        "x-openrails-operation-limit": "grant",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "permanent_grant_forbidden",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
       }
     },
     "/v1/merchant/customers/{customer_id}/entitlements": {
@@ -4974,7 +4917,8 @@
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "invalid_param",
-          "permanent_grant_forbidden"
+          "permanent_grant_forbidden",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5023,10 +4967,60 @@
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "resource_not_found",
+          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
+        ]
+      }
+    },
+    "/v1/merchant/product-access": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductAccessBatchParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateProductAccessBatchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:customer-settings:update",
+        "x-openrails-operation-limit": "grant",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param",
+          "permanent_grant_forbidden",
+          "service_credential_customer_scope_denied"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -5222,28 +5216,27 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}": {
-      "get": {
+    "/v1/merchant/customers/lookup": {
+      "post": {
         "tags": [
           "merchant"
         ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerLookupParams"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Customer"
+                  "$ref": "#/components/schemas/CustomerLookup"
                 }
               }
             }
@@ -5260,33 +5253,25 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:read",
         "x-openrails-errors": [
-          "customer_not_found",
-          "invalid_customer_id",
+          "invalid_param",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
-      },
-      "put": {
+      }
+    },
+    "/v1/merchant/customers/ensure": {
+      "post": {
         "tags": [
           "merchant"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/EnsureCustomerParams"
+                "$ref": "#/components/schemas/EnsureCustomerBatchParams"
               }
             }
           }
@@ -5297,7 +5282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Customer"
+                  "$ref": "#/components/schemas/EnsureCustomerBatchResult"
                 }
               }
             }
@@ -5314,7 +5299,6 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:customer-settings:update",
         "x-openrails-errors": [
-          "invalid_customer_id",
           "invalid_param",
           "service_credential_customer_scope_denied"
         ],
@@ -7009,28 +6993,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RecordUsageParams"
+                "$ref": "#/components/schemas/RecordUsageBatchParams"
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UsageEvent"
-                }
-              }
-            }
-          },
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UsageEvent"
+                  "$ref": "#/components/schemas/RecordUsageBatchResult"
                 }
               }
             }
@@ -7047,10 +7021,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:admissions:create",
         "x-openrails-errors": [
-          "currency_unsupported",
-          "idempotency_key_reused",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -11930,28 +11901,27 @@
         ]
       }
     },
-    "/v1/merchant/host-events/{id}/acknowledge": {
+    "/v1/merchant/host-events/acknowledge": {
       "post": {
         "tags": [
           "merchant"
         ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcknowledgeHostEventsParams"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HostEvent"
+                  "$ref": "#/components/schemas/HostEventLookup"
                 }
               }
             }
@@ -11968,11 +11938,11 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "merchant:host-events:acknowledge",
         "x-openrails-errors": [
-          "host_event_not_found",
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -12247,28 +12217,27 @@
         ]
       }
     },
-    "/v1/merchant/notifications/{id}/read": {
+    "/v1/merchant/notifications/read": {
       "post": {
         "tags": [
           "merchant"
         ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkNotificationsReadParams"
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantNotification"
+                  "$ref": "#/components/schemas/NotificationLookup"
                 }
               }
             }
@@ -12286,11 +12255,11 @@
         "x-openrails-permission": "merchant:operations:read",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -13261,6 +13230,17 @@
           "expires_at",
           "revoked_at"
         ]
+      },
+      "AcknowledgeHostEventsParams": {
+        "type": "object",
+        "properties": {
+          "host_event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "Admission": {
         "type": "object",
@@ -16199,9 +16179,37 @@
           "display_name"
         ]
       },
+      "CreateProductAccessBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateProductAccessParams"
+            }
+          }
+        }
+      },
+      "CreateProductAccessBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductAccessGrant"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "CreateProductAccessParams": {
         "type": "object",
         "properties": {
+          "customer_id": {
+            "type": "string"
+          },
           "product_id": {
             "type": "string"
           },
@@ -16793,6 +16801,45 @@
           }
         }
       },
+      "CustomerLookup": {
+        "type": "object",
+        "properties": {
+          "customers": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Customer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "customers"
+        ]
+      },
+      "CustomerLookupParams": {
+        "type": "object",
+        "properties": {
+          "customer_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Dashboard": {
         "type": "object",
         "properties": {
@@ -17264,9 +17311,37 @@
           "tier"
         ]
       },
+      "EnsureCustomerBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnsureCustomerParams"
+            }
+          }
+        }
+      },
+      "EnsureCustomerBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "EnsureCustomerParams": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "email": {
             "oneOf": [
               {
@@ -18010,6 +18085,34 @@
           "delinquency"
         ]
       },
+      "HostEventLookup": {
+        "type": "object",
+        "properties": {
+          "host_events": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HostEvent"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "host_events"
+        ]
+      },
       "InviteTeamMemberParams": {
         "type": "object",
         "properties": {
@@ -18580,6 +18683,17 @@
           "billing_contacts",
           "memo"
         ]
+      },
+      "MarkNotificationsReadParams": {
+        "type": "object",
+        "properties": {
+          "notification_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "Matrix": {
         "type": "object",
@@ -19638,6 +19752,34 @@
             "type": "string"
           }
         }
+      },
+      "NotificationLookup": {
+        "type": "object",
+        "properties": {
+          "notifications": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MerchantNotification"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "notifications"
+        ]
       },
       "Offer": {
         "type": "object",
@@ -22324,6 +22466,31 @@
           }
         }
       },
+      "RecordUsageBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecordUsageParams"
+            }
+          }
+        }
+      },
+      "RecordUsageBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageEventResult"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "RecordUsageParams": {
         "type": "object",
         "properties": {
@@ -24230,6 +24397,39 @@
           "occurred_at",
           "created_at",
           "replayed"
+        ]
+      },
+      "UsageEventResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "event": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UsageEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "event",
+          "error"
         ]
       },
       "UsageRow": {

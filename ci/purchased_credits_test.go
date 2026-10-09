@@ -84,7 +84,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 1_000_000})
 	require.NoError(t, err)
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
+	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
 	buy := func(key string) {
 		t.Helper()
@@ -170,7 +170,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 		deliver(raw)
 	}
 	providerEvent("evt_partial_credit_refund", "refund.created", map[string]any{"object": "refund", "id": "re_credit_second", "amount": 50, "currency": "usd", "status": "succeeded", "payment_intent": "pi_credit_2"})
-	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api", Amount: 1_500_000, Source: "api", SourceID: "consume-remaining-credit"})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "api", Amount: 1_500_000, Source: "api", SourceID: "consume-remaining-credit"})
 	require.NoError(t, err)
 	providerEvent("evt_credit_disputed", "charge.dispute.created", map[string]any{"object": "dispute", "id": "dp_credit_second", "amount": 50, "currency": "usd", "status": "needs_response", "payment_intent": "pi_credit_2"})
 	providerEvent("evt_credit_dispute_won", "charge.dispute.closed", map[string]any{"object": "dispute", "id": "dp_credit_second", "amount": 50, "currency": "usd", "status": "won", "payment_intent": "pi_credit_2"})

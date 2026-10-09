@@ -99,7 +99,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 			break
 		}
 		for _, event := range events.Items {
-			_, err := source.client[embedded].AcknowledgeHostEvent(t.Context(), event.ID)
+			_, err := source.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 			require.NoError(t, err)
 		}
 	}

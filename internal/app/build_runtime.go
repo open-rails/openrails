@@ -221,7 +221,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Endpoint:    config.SandboxSolanaRPCURL(cfg),
 	}
 
-	// Billing reads the customer facts hosts push (EnsureCustomer), never the
+	// Billing reads the customer facts hosts push (EnsureCustomers), never the
 	// host's auth.
 	customers := identity.Customers{DB: database}
 	// #1099: idempotency leases renew on their own connections, so a pool

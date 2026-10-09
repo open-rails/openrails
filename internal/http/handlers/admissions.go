@@ -300,35 +300,53 @@ func ReportWastedSpend(r *httprequest.Request) {
 	r.SuccessJSON(report)
 }
 
-// RecordUsageEvent records one metered usage event.
-func RecordUsageEvent(r *httprequest.Request) {
-	var params billing.RecordUsageParams
+// RecordUsage records a batch of usage events, one result per item in
+// order. The batch answers 200; each item is recorded or refused on its own,
+// exactly as recording it alone would be.
+func RecordUsage(r *httprequest.Request) {
+	var params billing.RecordUsageBatchParams
 	if !r.BindJSON(&params) {
 		return
 	}
-	if params.Amount < 0 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
+	if !batchItems(r, len(params.Items), billing.MaxUsageBatchItems) {
 		return
 	}
-	if params.CustomerID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
-		return
-	}
-	if len(params.SourceID) > maxSourceIDBytes {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "source_id must be at most 255 bytes").WithParam("source_id"))
-		return
-	}
-	if !requireServiceCustomerScope(r, params.CustomerID) {
-		return
-	}
-	key, err := money.NewIdempotencyKey(money.UsageOperation(params.EventType), params.Source, params.SourceID)
-	if err != nil {
-		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("source_id"))
+	if !requireMerchantRoutePrincipal(r) {
 		return
 	}
 	svc, ok := billingService(r)
 	if !ok {
 		return
+	}
+	out := make([]billing.UsageEventResult, len(params.Items))
+	for i, item := range params.Items {
+		out[i] = recordUsageItem(r, svc, item)
+		if out[i].Error != nil {
+			out[i].Error.RequestID = r.RequestID()
+		}
+	}
+	r.JSON(http.StatusOK, billing.RecordUsageBatchResult{Items: out})
+}
+
+func usageRefusal(err *api.APIError) billing.UsageEventResult {
+	details := err.ToResponse().Error
+	return billing.UsageEventResult{Status: err.HTTPStatus, Error: &details}
+}
+
+func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params billing.RecordUsageParams) billing.UsageEventResult {
+	switch {
+	case params.Amount < 0:
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
+	case params.CustomerID.IsZero():
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
+	case len(params.SourceID) > maxSourceIDBytes:
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, "source_id must be at most 255 bytes").WithParam("source_id"))
+	case !serviceCustomerScopeAllows(r, params.CustomerID):
+		return usageRefusal(api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, ""))
+	}
+	key, err := money.NewIdempotencyKey(money.UsageOperation(params.EventType), params.Source, params.SourceID)
+	if err != nil {
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("source_id"))
 	}
 	in := billingservice.RecordUsageInput{
 		CustomerID: params.CustomerID, Invoker: params.Invoker, Currency: params.Currency, EventType: params.EventType,
@@ -339,14 +357,20 @@ func RecordUsageEvent(r *httprequest.Request) {
 	}
 	event, err := svc.RecordUsage(r.Request.Context(), in)
 	if err != nil {
-		writeMoneyError(r, err, "usage record failed")
-		return
+		refusal := moneyRefusal(err)
+		if refusal == nil {
+			// The wire stays non-leaky; the cause reaches the operator log.
+			log.WithContext(r.Request.Context()).WithError(err).WithFields(log.Fields{"customer_id": params.CustomerID, "source_id": params.SourceID}).
+				Error("usage record failed")
+			refusal = api.Coded(billing.CodeInternalError, "usage record failed")
+		}
+		return usageRefusal(refusal)
 	}
 	status := http.StatusCreated
 	if event.Replayed {
 		status = http.StatusOK
 	}
-	r.JSON(status, event)
+	return billing.UsageEventResult{Status: status, Event: event}
 }
 
 // GetCustomerUsage reports a customer's usage.

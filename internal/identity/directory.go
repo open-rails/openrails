@@ -1,5 +1,5 @@
 // Package identity is the customer directory billing reads: the facts a host
-// pushes with EnsureCustomer (email, username), stored on billing.customers.
+// pushes with EnsureCustomers (email, username), stored on billing.customers.
 // OpenRails never asks the host's auth system about a user.
 package identity
 

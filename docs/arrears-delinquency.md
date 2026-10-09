@@ -131,12 +131,18 @@ for _, kind := range []billing.HostEventType{
         Type: kind, PageRequest: billing.PageRequest{Limit: 100},
     })
     if err != nil { return err }
+    var done []billing.HostEventID
+    var failed error
     for _, event := range page.Items {
-        if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
-            return err // leave the event pending for replay
+        if failed = applyHostAction(ctx, event.Type, event.Delinquency); failed != nil {
+            break // leave this and later events pending for replay
         }
-        if _, err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
+        done = append(done, event.ID)
     }
+    if len(done) > 0 {
+        if _, err := client.AcknowledgeHostEvents(ctx, done); err != nil { return err }
+    }
+    if failed != nil { return failed }
 }
 ```
 

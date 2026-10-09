@@ -140,20 +140,20 @@ export const revokeEntitlement = (customerId: string, entitlementId: string) =>
     method: "DELETE",
   })
 
-export const grantProductAccess = (
+export const grantProductAccess = async (
   customerId: string,
   productId: string,
   endsAt?: string
-) =>
-  api<RawProductAccessGrant>(
-    `/merchant/customers/${customerId}/product-access`,
-    {
-      method: "POST",
-      body: endsAt
-        ? { product_id: productId, ends_at: endsAt }
-        : { product_id: productId },
-    }
+) => {
+  const item = endsAt
+    ? { customer_id: customerId, product_id: productId, ends_at: endsAt }
+    : { customer_id: customerId, product_id: productId }
+  const { items } = await api<{ items: RawProductAccessGrant[] }>(
+    "/merchant/product-access",
+    { method: "POST", body: { items: [item] } }
   )
+  return items[0]
+}
 
 export const revokeProductAccess = (customerId: string, grantId: string) =>
   api<void>(`/merchant/customers/${customerId}/product-access/${grantId}`, {
@@ -815,10 +815,13 @@ export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
     signal,
   })
 
-export const markNotificationRead = (id: string) =>
-  api<MerchantNotification>(`/merchant/notifications/${id}/read`, {
-    method: "POST",
-  })
+// markNotificationsRead marks up to 100 notifications read; an id that does
+// not exist answers null.
+export const markNotificationsRead = (ids: string[]) =>
+  api<{ notifications: Record<string, MerchantNotification | null> }>(
+    "/merchant/notifications/read",
+    { method: "POST", body: { notification_ids: ids } }
+  )
 
 export const getUnreadCount = (signal?: AbortSignal) =>
   api<{ unread_count: number }>("/merchant/notifications/unread-count", {

@@ -34,7 +34,7 @@ import {
   listCustomers,
   listPayments,
   listSubscriptions,
-  markNotificationRead,
+  markNotificationsRead,
   applyMerchantSettings,
   putDefaultUsageRateCard,
   putCustomerUsageRateOverride,
@@ -85,6 +85,8 @@ import type {
 import { merchantQueryKeys } from "@/lib/queries"
 
 const EXPORT_PAGE = 200
+// MAX_BATCH_ITEMS is billing.MaxBatchItems: one batch write's bound.
+const MAX_BATCH_ITEMS = 100
 
 const collectAllCursorPages = async <T>(
   listPage: (
@@ -158,7 +160,7 @@ export const adminMutations = {
     const unreadKey = [...notificationsKey, "unread-count"] as const
     return mutationOptions({
       mutationKey: [...notificationsKey, "mark-read"],
-      mutationFn: (id: string) => markNotificationRead(id),
+      mutationFn: (id: string) => markNotificationsRead([id]),
       onSuccess: (_result, id) =>
         updateNotificationReadCache(queryClient, notificationsKey, unreadKey, [
           id,
@@ -172,11 +174,18 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...notificationsKey, "mark-all-read"],
       mutationFn: async (ids: string[]) => {
+        const batches = []
+        for (let i = 0; i < ids.length; i += MAX_BATCH_ITEMS)
+          batches.push(ids.slice(i, i + MAX_BATCH_ITEMS))
         const results = await Promise.allSettled(
-          ids.map((id) => markNotificationRead(id))
+          batches.map((batch) => markNotificationsRead(batch))
         )
-        return results.flatMap((result, index) =>
-          result.status === "fulfilled" ? [ids[index]] : []
+        return results.flatMap((result) =>
+          result.status === "fulfilled"
+            ? Object.entries(result.value.notifications).flatMap(
+                ([id, note]) => (note ? [id] : [])
+              )
+            : []
         )
       },
       onSuccess: (readIds) =>

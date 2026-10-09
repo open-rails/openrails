@@ -130,7 +130,7 @@ func TestPartitionsAreCreatedAheadAndDroppedByTheCalendar(t *testing.T) {
 
 	// One admitted request and one usage event land in this month's partitions.
 	customer := billing.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
+	_, err = client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
 	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
@@ -261,7 +261,7 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	ctx := t.Context()
 	customer, other := billing.CustomerID(uuid.New()), billing.CustomerID(uuid.New())
 	for _, c := range []billing.CustomerID{customer, other} {
-		_, err := client.EnsureCustomer(ctx, c, billing.EnsureCustomerParams{})
+		_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: c}})
 		require.NoError(t, err)
 		_, err = client.CreateCreditGrant(ctx, c, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 		require.NoError(t, err)
@@ -299,26 +299,26 @@ func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 
 	// A usage coordinate is recorded once, whatever time each attempt reports.
 	usage := billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"}
-	first, err := client.RecordUsage(ctx, usage)
+	first, err := recordUsage(ctx, client, usage)
 	require.NoError(t, err)
 	require.False(t, first.Replayed)
 	earlier := time.Now().Add(-48 * time.Hour)
 	usage.OccurredAt = &earlier
-	again, err := client.RecordUsage(ctx, usage)
+	again, err := recordUsage(ctx, client, usage)
 	require.NoError(t, err)
 	require.True(t, again.Replayed)
 	require.Equal(t, first.ID, again.ID)
 	usage.Amount = 6_000
-	_, err = client.RecordUsage(ctx, usage)
+	_, err = recordUsage(ctx, client, usage)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.usage_events WHERE merchant_id = $1 AND source_id = 'event-1'`, w.merchant))
 
 	// An event is accepted within the ingest window and no further back or ahead.
 	backdated := time.Now().Add(-retention.UsageIngestWindow + time.Hour)
-	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: "backdated", OccurredAt: &backdated})
 	require.NoError(t, err)
 	for name, at := range map[string]time.Time{"stale": time.Now().Add(-retention.UsageIngestWindow - time.Hour), "future": time.Now().Add(time.Hour)} {
-		_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: name, OccurredAt: &at})
+		_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 1, Source: "worker", SourceID: name, OccurredAt: &at})
 		require.ErrorIs(t, err, billing.ErrInvalid, name)
 	}
 }
@@ -332,7 +332,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
+	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "plan-" + uuid.NewString()[:8], DisplayName: "Plan"})
 	require.NoError(t, err)
@@ -422,7 +422,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	// Money that must survive everything below.
 	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
-	_, err = client.RecordUsage(ctx, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
+	_, err = recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: customer, Invoker: customer.String(), Currency: "USD", EventType: "inference", Amount: 5_000, Source: "worker", SourceID: "event-1"})
 	require.NoError(t, err)
 	permanent := func() map[string]int {
 		out := map[string]int{}
@@ -502,7 +502,7 @@ func TestProviderWriteAndCostObservationRetention(t *testing.T) {
 	day := 24 * time.Hour
 
 	customer := billing.CustomerID(uuid.New())
-	_, err := client.EnsureCustomer(ctx, customer, billing.EnsureCustomerParams{})
+	_, err := client.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: customer}})
 	require.NoError(t, err)
 	_, err = client.CreateCreditGrant(ctx, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)

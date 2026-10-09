@@ -81,14 +81,16 @@ func (c *Client) GetUnreadNotificationCount(ctx context.Context, options ...Requ
 	return &out, nil
 }
 
-// MarkNotificationRead marks one of the merchant's notifications read.
-func (c *Client) MarkNotificationRead(ctx context.Context, id billing.NotificationID, options ...RequestOption) (*billing.MerchantNotification, error) {
-	if id.IsZero() {
-		return nil, invalidErr("notification id is required")
-	}
-	var out billing.MerchantNotification
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/notifications/"+id.String()+"/read", nil, &out, options...); err != nil {
+// MarkNotificationsRead marks 1 to billing.MaxBatchItems of the merchant's
+// notifications read. Every requested notification is in the answer; one that
+// does not exist is nil.
+func (c *Client) MarkNotificationsRead(ctx context.Context, ids []billing.NotificationID, options ...RequestOption) (map[billing.NotificationID]*billing.MerchantNotification, error) {
+	if err := batchIDs("notification_ids", ids, billing.MaxBatchItems); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	var out billing.NotificationLookup
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/notifications/read", billing.MarkNotificationsReadParams{NotificationIDs: ids}, &out, options...); err != nil {
+		return nil, err
+	}
+	return out.Notifications, nil
 }

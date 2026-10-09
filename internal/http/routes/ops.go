@@ -10,8 +10,8 @@ import (
 var opsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/host-events", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantHostEventsRead,
 		Query: params(queryOf(handlers.HostEventsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
-	{Method: POST, Path: "/v1/merchant/host-events/{id}/acknowledge", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantHostEventsAcknowledge,
-		Responses: []Reply{{200, billing.HostEvent{}}}, Errors: codes("host_event_not_found", "invalid_param"), Handler: h(handlers.ServiceAcknowledgeHostEvent)},
+	{Method: POST, Path: "/v1/merchant/host-events/acknowledge", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantHostEventsAcknowledge,
+		Request: billing.AcknowledgeHostEventsParams{}, Responses: []Reply{{200, billing.HostEventLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceAcknowledgeHostEvents)},
 	{Method: POST, Path: "/v1/merchant/metrics/query", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead,
 		Request: billing.MetricsQuery{}, Responses: []Reply{{200, billing.MetricsResult{}}}, Errors: codes("metrics_query_invalid", "service_unavailable"), Handler: h(handlers.MerchantMetricsQuery)},
 	{Method: GET, Path: "/v1/merchant/metrics/schema", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantMetricsRead,
@@ -24,9 +24,9 @@ var opsRoutes = []Route{
 		Query: params(queryOf(handlers.ListMerchantNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.MerchantNotification]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMerchantNotifications)},
 	{Method: GET, Path: "/v1/merchant/notifications/unread-count", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantOperationsRead,
 		Responses: []Reply{{200, billing.UnreadCount{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.MerchantNotificationsUnreadCount)},
-	// Reading a notification needs only the permission that lists it.
-	{Method: POST, Path: "/v1/merchant/notifications/{id}/read", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantOperationsRead,
-		Responses: []Reply{{200, billing.MerchantNotification{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.MarkMerchantNotificationRead)},
+	// Reading notifications needs only the permission that lists them.
+	{Method: POST, Path: "/v1/merchant/notifications/read", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantOperationsRead,
+		Request: billing.MarkNotificationsReadParams{}, Responses: []Reply{{200, billing.NotificationLookup{}}}, Errors: codes("invalid_param", "service_unavailable"), Handler: h(handlers.MarkMerchantNotificationsRead)},
 	{Method: GET, Path: "/v1/merchant/worker-health", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantOperationsRead,
 		Responses: []Reply{{200, billing.ListPage[billing.WorkerHealth]{}}}, Handler: h(handlers.GetAdminWorkerHealth)},
 	{Method: GET, Path: "/v1/merchant/findings", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantOperationsRead,

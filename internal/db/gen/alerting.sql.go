@@ -242,37 +242,50 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID
 	return items, nil
 }
 
-const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :one
+const markMerchantNotificationsRead = `-- name: MarkMerchantNotificationsRead :many
 UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant' AND id = $2::uuid
+WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant' AND id = ANY($2::uuid[])
 RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
 `
 
-type MarkMerchantNotificationReadParams struct {
+type MarkMerchantNotificationsReadParams struct {
 	MerchantID uuid.UUID
-	ID         uuid.UUID
+	Ids        []uuid.UUID
 }
 
-func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, arg MarkMerchantNotificationReadParams) (BillingNotification, error) {
-	row := q.db.QueryRow(ctx, markMerchantNotificationRead, arg.MerchantID, arg.ID)
-	var i BillingNotification
-	err := row.Scan(
-		&i.ID,
-		&i.EventType,
-		&i.Data,
-		&i.RecipientKind,
-		&i.ReadAt,
-		&i.Severity,
-		&i.Title,
-		&i.Body,
-		&i.Link,
-		&i.CreatedAt,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.EmailedAt,
-	)
-	return i, err
+func (q *Queries) MarkMerchantNotificationsRead(ctx context.Context, arg MarkMerchantNotificationsReadParams) ([]BillingNotification, error) {
+	rows, err := q.db.Query(ctx, markMerchantNotificationsRead, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingNotification
+	for rows.Next() {
+		var i BillingNotification
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Data,
+			&i.RecipientKind,
+			&i.ReadAt,
+			&i.Severity,
+			&i.Title,
+			&i.Body,
+			&i.Link,
+			&i.CreatedAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const rotateMerchantWebhookURL = `-- name: RotateMerchantWebhookURL :one

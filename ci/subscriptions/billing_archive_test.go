@@ -47,7 +47,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	events, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{})
 	require.NoError(t, err)
 	for _, event := range events.Items {
-		_, err := client.AcknowledgeHostEvent(t.Context(), event.ID)
+		_, err := client.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
 		require.NoError(t, err)
 	}
 	w.stop() // The source has no writer while its billing book is moved.

@@ -18,18 +18,6 @@ INSERT INTO billing.customers (id, merchant_id)
 VALUES (sqlc.arg(id), sqlc.arg(merchant_id))
 ON CONFLICT (merchant_id, id) DO NOTHING;
 
--- name: PutCustomer :one
--- The merchant's declaration of a customer: materialize it, or replace its
--- declared fields.
-INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
-VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(email), sqlc.narg(username), sqlc.arg(blocked))
-ON CONFLICT (merchant_id, id) DO UPDATE SET
-  email = EXCLUDED.email,
-  username = EXCLUDED.username,
-  blocked = EXCLUDED.blocked,
-  last_seen_at = now()
-RETURNING *;
-
 -- name: CustomerIDsByUsername :many
 -- The CCBill username bridge: the merchant's customers that declared the
 -- username. Two answers are ambiguous and resolve nothing.
@@ -38,6 +26,20 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
   AND lower(c.username) = lower(sqlc.arg(username)::text)
 ORDER BY c.id
 LIMIT 2;
+
+-- name: PutCustomers :many
+-- The merchant's declaration of distinct customers in one statement; an empty
+-- email or username is absent.
+INSERT INTO billing.customers (id, merchant_id, email, username, blocked)
+SELECT item.id, sqlc.arg(merchant_id)::uuid, NULLIF(item.email, ''), NULLIF(item.username, ''), item.blocked
+FROM unnest(sqlc.arg(ids)::uuid[], sqlc.arg(emails)::text[], sqlc.arg(usernames)::text[], sqlc.arg(blocked)::boolean[])
+  AS item(id, email, username, blocked)
+ON CONFLICT (merchant_id, id) DO UPDATE SET
+  email = EXCLUDED.email,
+  username = EXCLUDED.username,
+  blocked = EXCLUDED.blocked,
+  last_seen_at = now()
+RETURNING *;
 
 -- name: SetCustomerEmail :exec
 UPDATE billing.customers SET email = sqlc.arg(email)
@@ -52,6 +54,10 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id) AND email IS NUL
 -- name: GetCustomer :one
 SELECT * FROM billing.customers
 WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
+
+-- name: GetCustomersByIDs :many
+SELECT * FROM billing.customers
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListCustomers :many
 -- Newest first. q matches an id prefix or an email substring.

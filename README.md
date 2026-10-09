@@ -687,7 +687,7 @@ What you will set next:
 |---|---|
 | Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`), or your own `Deps.Email`; without one OpenRails sends no email |
 | Publish the merchant API | `Routes.Merchant` with `Routes.Auth`; grant your staff the `openrails.Permissions()` they need |
-| Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomer` whenever it changes |
+| Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomers` whenever it changes |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |

@@ -29,6 +29,10 @@ export type APIKey = {
   revoked_at: string | null
 }
 
+export type AcknowledgeHostEventsParams = {
+  host_event_ids?: string[]
+}
+
 export type Admission = {
   request_id: string
   customer_id: string
@@ -677,7 +681,16 @@ export type CreatePriceProduct = {
   description?: string
 }
 
+export type CreateProductAccessBatchParams = {
+  items?: CreateProductAccessParams[]
+}
+
+export type CreateProductAccessBatchResult = {
+  items: ProductAccessGrant[]
+}
+
 export type CreateProductAccessParams = {
+  customer_id?: string
   product_id?: string
   ends_at?: string | null
 }
@@ -807,6 +820,14 @@ export type CustomerCancelSubscriptionParams = {
 export type CustomerChangeTierParams = {
   price_id?: string
   signature?: string
+}
+
+export type CustomerLookup = {
+  customers: Record<string, Customer | null> | null
+}
+
+export type CustomerLookupParams = {
+  customer_ids?: string[]
 }
 
 export type Dashboard = {
@@ -945,7 +966,16 @@ export type EffectiveTier = {
   tier: Tier | null
 }
 
+export type EnsureCustomerBatchParams = {
+  items?: EnsureCustomerParams[]
+}
+
+export type EnsureCustomerBatchResult = {
+  items: Customer[]
+}
+
 export type EnsureCustomerParams = {
+  id?: string
   email?: string | null
   username?: string | null
   blocked?: boolean
@@ -1106,6 +1136,10 @@ export type HostEvent = {
   delinquency: DelinquencyHostEvent | null
 }
 
+export type HostEventLookup = {
+  host_events: Record<string, HostEvent | null> | null
+}
+
 export type InviteTeamMemberParams = {
   email?: string
   role?: string
@@ -1198,6 +1232,10 @@ export type InvoiceProfile = {
   tax: Record<string, unknown> | null
   billing_contacts: InvoiceContact[]
   memo: string
+}
+
+export type MarkNotificationsReadParams = {
+  notification_ids?: string[]
 }
 
 export type Matrix = {
@@ -1466,6 +1504,10 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
+}
+
+export type NotificationLookup = {
+  notifications: Record<string, MerchantNotification | null> | null
 }
 
 export type Offer = {
@@ -2024,6 +2066,14 @@ export type RecordProviderBillingObservationParams = {
   refusal?: ProviderBillingObservationRefusal | null
 }
 
+export type RecordUsageBatchParams = {
+  items?: RecordUsageParams[]
+}
+
+export type RecordUsageBatchResult = {
+  items: UsageEventResult[]
+}
+
 export type RecordUsageParams = {
   customer_id?: string
   invoker?: string
@@ -2488,6 +2538,12 @@ export type UsageEvent = {
   occurred_at: string
   created_at: string
   replayed: boolean
+}
+
+export type UsageEventResult = {
+  status: number
+  event: UsageEvent | null
+  error: ErrorDetails | null
 }
 
 export type UsageRow = {

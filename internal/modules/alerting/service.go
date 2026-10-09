@@ -263,14 +263,24 @@ func (s *Service) ListNotifications(ctx context.Context, req billing.MerchantNot
 	return pagination.Map(page, notificationFromRow), nil
 }
 
-// MarkNotificationRead marks one notification read and returns it; an
-// unknown id is pgx.ErrNoRows.
-func (s *Service) MarkNotificationRead(ctx context.Context, id billing.NotificationID) (billing.MerchantNotification, error) {
-	row, err := s.store.markNotificationRead(ctx, id.UUID())
-	if err != nil {
-		return billing.MerchantNotification{}, err
+// MarkNotificationsRead marks the merchant's notifications read; one that
+// does not exist maps to nil.
+func (s *Service) MarkNotificationsRead(ctx context.Context, ids []billing.NotificationID) (map[billing.NotificationID]*billing.MerchantNotification, error) {
+	keys := make([]uuid.UUID, len(ids))
+	out := make(map[billing.NotificationID]*billing.MerchantNotification, len(ids))
+	for i, id := range ids {
+		keys[i] = id.UUID()
+		out[id] = nil
 	}
-	return notificationFromRow(row), nil
+	rows, err := s.store.markNotificationsRead(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		note := notificationFromRow(row)
+		out[note.ID] = &note
+	}
+	return out, nil
 }
 
 // UnreadCount is the bell badge count.

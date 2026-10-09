@@ -51,7 +51,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			if invoiceMode {
 				_, err := w.client[remote].SetCreditLimit(t.Context(), e.c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 50_000_000})
 				require.NoError(t, err)
-				_, err = w.client[remote].RecordUsage(t.Context(), billing.RecordUsageParams{CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
+				_, err = recordUsage(t.Context(), w.client[remote], billing.RecordUsageParams{CustomerID: e.c.cid(), Invoker: e.c.id, Currency: "USD", EventType: "pull-invoice", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
 				require.NoError(t, err)
 				w.advance(time.Minute)
 				job, err := w.jobs.Insert(t.Context(), monthlyInvoicePass{FinalizePreviousMonth: true}, &river.InsertOpts{Queue: openrails.QueueBilling})

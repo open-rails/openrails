@@ -55,7 +55,7 @@ func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
 	}
 	_, err = client.SetCreditLimit(f.t.Context(), c.cid(), billing.SetCreditLimitParams{Currency: "USD", Amount: 3 * nmiInvoiceAmount})
 	require.NoError(f.t, err)
-	_, err = client.RecordUsage(f.t.Context(), billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
+	_, err = recordUsage(f.t.Context(), client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: "invoice-safety", Amount: nmiInvoiceAmount, Source: "test", SourceID: uuid.NewString()})
 	require.NoError(f.t, err)
 	f.advance(time.Minute)
 	f.waitPassJobs(invoicePasses(f, false, on...))

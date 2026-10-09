@@ -105,16 +105,25 @@ func (c *Client) ReportWastedSpend(ctx context.Context, params billing.ReportWas
 	return &out, nil
 }
 
-// RecordUsage records one usage event. Its source and source id make a retry
-// record and charge it once (Replayed); a retry with a different amount is
-// billing.ErrIdempotencyKeyReused.
-func (c *Client) RecordUsage(ctx context.Context, params billing.RecordUsageParams, requestOptions ...RequestOption) (*billing.UsageEvent, error) {
-	params.Currency = normalizeCurrency(params.Currency)
-	var out billing.UsageEvent
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage-events", params, &out, requestOptions...); err != nil {
+// RecordUsage records 1 to billing.MaxUsageBatchItems usage events, one
+// result per item in order: each is recorded or refused on its own, exactly
+// as recording it alone would be. An event's source and source id make a
+// retry record and charge it once (Status 200, Replayed); a retry with a
+// different amount is refused with idempotency_key_reused.
+func (c *Client) RecordUsage(ctx context.Context, items []billing.RecordUsageParams, requestOptions ...RequestOption) ([]billing.UsageEventResult, error) {
+	if err := batchSize(len(items), billing.MaxUsageBatchItems); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	body := billing.RecordUsageBatchParams{Items: make([]billing.RecordUsageParams, len(items))}
+	for i, item := range items {
+		item.Currency = normalizeCurrency(item.Currency)
+		body.Items[i] = item
+	}
+	var out billing.RecordUsageBatchResult
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage-events", body, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
 }
 
 // GetUsage reports a customer's usage in one currency over [From, To),

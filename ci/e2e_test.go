@@ -150,9 +150,9 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 
 	customerA := uuid.NewString()
 	customerB := uuid.NewString()
-	_, err = alice.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.EnsureCustomerParams{})
+	_, err = alice.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(customerA))}})
 	require.NoError(t, err)
-	_, err = bob.EnsureCustomer(t.Context(), billing.CustomerID(uuid.MustParse(customerB)), billing.EnsureCustomerParams{})
+	_, err = bob.EnsureCustomers(t.Context(), []billing.EnsureCustomerParams{{ID: billing.CustomerID(uuid.MustParse(customerB))}})
 	require.NoError(t, err)
 	_, err = alice.CreateEntitlement(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), billing.CreateEntitlementParams{Entitlement: "content:" + productA.Key})
 	require.NoError(t, err)
@@ -290,4 +290,13 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	after, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
 	require.NoError(t, err)
 	require.True(t, after.Entitlements["content:premium"], "the public access check observes the entitlement granted for the product")
+}
+
+// recordUsage records one usage event; the item's refusal is the error.
+func recordUsage(ctx context.Context, client *openrails.Client, params billing.RecordUsageParams) (*billing.UsageEvent, error) {
+	results, err := client.RecordUsage(ctx, []billing.RecordUsageParams{params})
+	if err != nil {
+		return nil, err
+	}
+	return results[0].Event, results[0].Err()
 }

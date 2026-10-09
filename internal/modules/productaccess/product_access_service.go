@@ -78,63 +78,93 @@ type GrantParams struct {
 // same (user, product, source) returns the existing grant unchanged. Returns the
 // grant and whether it was newly created.
 func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*models.ProductAccessGrant, bool, error) {
-	if params.UserID == "" {
-		return nil, false, errors.New("user_id is required")
+	if err := validGrant(params); err != nil {
+		return nil, false, err
 	}
-	if (params.ProductID == uuid.UUID{}) {
-		return nil, false, errors.New("product_id is required")
-	}
-	if params.SourceType == "" {
-		return nil, false, errors.New("source_type is required")
-	}
-
-	now := s.now().UTC()
 	var out *models.ProductAccessGrant
 	created := false
-
 	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
-		existing, err := r.GetBySource(ctx, params.UserID, params.ProductID, params.SourceID)
-		if err != nil {
-			return fmt.Errorf("check existing grant: %w", err)
-		}
-		if existing != nil {
-			out = existing
-			return nil
-		}
-
-		var endsAt *time.Time
-		if params.EndsAt != nil {
-			e := params.EndsAt.UTC()
-			endsAt = &e
-		}
-		start := now
-		if params.StartsAt != nil {
-			start = params.StartsAt.UTC()
-		}
-		grant := &models.ProductAccessGrant{
-			CustomerID: identity.CustomerIDFromString(params.UserID).UUID(),
-			ProductID:  params.ProductID,
-			SourceType: params.SourceType,
-			SourceID:   params.SourceID,
-			PaymentID:  params.PaymentID,
-			Status:     models.ProductAccessStatusActive,
-			StartsAt:   start,
-			EndsAt:     endsAt,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		if err := r.Insert(ctx, grant); err != nil {
-			return fmt.Errorf("insert grant: %w", err)
-		}
-		out = grant
-		created = true
-
-		return nil
+		var err error
+		out, created, err = grantInTx(ctx, r, params, s.now().UTC())
+		return err
 	})
 	if err != nil {
 		return nil, false, err
 	}
 	return out, created, nil
+}
+
+// GrantProductAccessBatch makes every grant in one transaction, each as
+// GrantProductAccess would: all or none, in request order.
+func (s *Service) GrantProductAccessBatch(ctx context.Context, batch []GrantParams) ([]*models.ProductAccessGrant, error) {
+	for _, params := range batch {
+		if err := validGrant(params); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]*models.ProductAccessGrant, len(batch))
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
+		now := s.now().UTC()
+		for i, params := range batch {
+			grant, _, err := grantInTx(ctx, r, params, now)
+			if err != nil {
+				return err
+			}
+			out[i] = grant
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func validGrant(params GrantParams) error {
+	switch {
+	case params.UserID == "":
+		return errors.New("user_id is required")
+	case params.ProductID == uuid.Nil:
+		return errors.New("product_id is required")
+	case params.SourceType == "":
+		return errors.New("source_type is required")
+	}
+	return nil
+}
+
+func grantInTx(ctx context.Context, r *ProductAccessGrantRepo, params GrantParams, now time.Time) (*models.ProductAccessGrant, bool, error) {
+	existing, err := r.GetBySource(ctx, params.UserID, params.ProductID, params.SourceID)
+	if err != nil {
+		return nil, false, fmt.Errorf("check existing grant: %w", err)
+	}
+	if existing != nil {
+		return existing, false, nil
+	}
+	var endsAt *time.Time
+	if params.EndsAt != nil {
+		e := params.EndsAt.UTC()
+		endsAt = &e
+	}
+	start := now
+	if params.StartsAt != nil {
+		start = params.StartsAt.UTC()
+	}
+	grant := &models.ProductAccessGrant{
+		CustomerID: identity.CustomerIDFromString(params.UserID).UUID(),
+		ProductID:  params.ProductID,
+		SourceType: params.SourceType,
+		SourceID:   params.SourceID,
+		PaymentID:  params.PaymentID,
+		Status:     models.ProductAccessStatusActive,
+		StartsAt:   start,
+		EndsAt:     endsAt,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := r.Insert(ctx, grant); err != nil {
+		return nil, false, fmt.Errorf("insert grant: %w", err)
+	}
+	return grant, true, nil
 }
 
 // GetGrant returns a single grant by id (merchant-scoped), or nil if not found.

@@ -370,13 +370,49 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"create access product": func() error {
-			_, err := c.CreateProductAccess(ctx, customerID, billing.CreateProductAccessParams{})
+			_, err := c.CreateProductAccess(ctx, []billing.CreateProductAccessParams{{CustomerID: customerID}})
 			return err
 		},
 		"delete access id":   func() error { return c.DeleteProductAccess(ctx, customerID, billing.ProductAccessID{}) },
 		"delete entitlement": func() error { return c.DeleteEntitlement(ctx, customerID, billing.EntitlementID{}) },
 		"create entitlement customer": func() error {
 			_, err := c.CreateEntitlement(ctx, billing.CustomerID{}, billing.CreateEntitlementParams{Entitlement: "pro"})
+			return err
+		},
+		"create access empty": func() error {
+			_, err := c.CreateProductAccess(ctx, nil)
+			return err
+		},
+		"create access customer": func() error {
+			_, err := c.CreateProductAccess(ctx, []billing.CreateProductAccessParams{{ProductID: billing.ProductID(uuid.New())}})
+			return err
+		},
+		"record usage empty": func() error {
+			_, err := c.RecordUsage(ctx, nil)
+			return err
+		},
+		"record usage over bound": func() error {
+			_, err := c.RecordUsage(ctx, make([]billing.RecordUsageParams, billing.MaxUsageBatchItems+1))
+			return err
+		},
+		"customers empty": func() error {
+			_, err := c.GetCustomers(ctx, nil)
+			return err
+		},
+		"customers over bound": func() error {
+			_, err := c.GetCustomers(ctx, make([]billing.CustomerID, billing.MaxCustomerLookup+1))
+			return err
+		},
+		"ensure customers empty": func() error {
+			_, err := c.EnsureCustomers(ctx, nil)
+			return err
+		},
+		"notifications empty": func() error {
+			_, err := c.MarkNotificationsRead(ctx, nil)
+			return err
+		},
+		"host events empty": func() error {
+			_, err := c.AcknowledgeHostEvents(ctx, nil)
 			return err
 		},
 		"entitlement check customer": func() error {
@@ -448,8 +484,11 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.SetSpendDelegation(ctx, zero, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: "k"})
 			return err
 		},
-		"customer":        func() error { _, err := c.GetCustomer(ctx, zero); return err },
-		"ensure customer": func() error { _, err := c.EnsureCustomer(ctx, zero, billing.EnsureCustomerParams{}); return err },
+		"customer": func() error { _, err := c.GetCustomers(ctx, []billing.CustomerID{zero}); return err },
+		"ensure customer": func() error {
+			_, err := c.EnsureCustomers(ctx, []billing.EnsureCustomerParams{{ID: zero}})
+			return err
+		},
 		"billing profile": func() error { _, err := c.GetCustomerBillingProfile(ctx, zero); return err },
 		"delinquency":     func() error { _, err := c.ListCustomerDelinquency(ctx, zero); return err },
 		"credit grant": func() error {
@@ -462,11 +501,18 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 	}
 	uuidCalls := map[string]func() error{
-		"get reprice batch":      func() error { _, err := c.GetRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
-		"cancel reprice batch":   func() error { _, err := c.CancelRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
-		"get reprice":            func() error { _, err := c.GetReprice(ctx, billing.RepriceID{}); return err },
-		"cancel reprice":         func() error { _, err := c.CancelReprice(ctx, billing.RepriceID{}); return err },
-		"acknowledge host event": func() error { _, err := c.AcknowledgeHostEvent(ctx, billing.HostEventID{}); return err },
+		"get reprice batch":    func() error { _, err := c.GetRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
+		"cancel reprice batch": func() error { _, err := c.CancelRepriceBatch(ctx, billing.RepriceBatchID{}); return err },
+		"get reprice":          func() error { _, err := c.GetReprice(ctx, billing.RepriceID{}); return err },
+		"cancel reprice":       func() error { _, err := c.CancelReprice(ctx, billing.RepriceID{}); return err },
+		"acknowledge host event": func() error {
+			_, err := c.AcknowledgeHostEvents(ctx, []billing.HostEventID{{}})
+			return err
+		},
+		"mark notification read": func() error {
+			_, err := c.MarkNotificationsRead(ctx, []billing.NotificationID{{}})
+			return err
+		},
 	}
 
 	requireInvalidParam := func(t *testing.T, name string, err error) {
