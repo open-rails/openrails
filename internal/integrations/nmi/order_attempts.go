@@ -80,6 +80,15 @@ func (c *NMIClient) ReadRecurringOrderAttempts(ctx context.Context, accepted Sal
 	return c.readOrderAttempts(ctx, accepted.OrderID, &accepted)
 }
 
+// ReadCustodianOrderAttempts is ReadRecurringOrderAttempts for a card a
+// custodian proxies to NMI: its sale names no NMI vault.
+func (c *NMIClient) ReadCustodianOrderAttempts(ctx context.Context, accepted SaleParams) (OrderAttempts, error) {
+	if accepted.OrderDescription == "" || accepted.CustomerVaultID != "" || accepted.BillingID != "" || accepted.Amount <= 0 || accepted.Currency == "" {
+		return OrderAttempts{}, errors.New("custodian attempt requires exact description, amount and currency and no vault")
+	}
+	return c.readOrderAttempts(ctx, accepted.OrderID, &accepted)
+}
+
 func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string, accepted *SaleParams) (OrderAttempts, error) {
 	c = c.scoped()
 	if strings.TrimSpace(orderReference) == "" {
@@ -121,8 +130,10 @@ func (c *NMIClient) readOrderAttempts(ctx context.Context, orderReference string
 		if err != nil || amount != accepted.Amount {
 			return OrderAttempts{}, receiptMismatch("decline does not match accepted amount")
 		}
-		if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {
-			return OrderAttempts{}, err
+		if accepted.CustomerVaultID != "" {
+			if _, err := c.ReadSingleCardVaultBilling(ctx, accepted.CustomerVaultID, accepted.BillingID); err != nil {
+				return OrderAttempts{}, err
+			}
 		}
 	}
 	out.Declined, out.DeclineCode, out.DeclineTransactionID = true, code, strings.TrimSpace(txn.TransactionID)

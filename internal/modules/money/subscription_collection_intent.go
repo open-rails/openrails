@@ -114,7 +114,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Bill
 // know about a provider charge yet. Recover qualified payment/refusal facts and
 // hold visible unresolved work. Reads cannot serialize independent senders.
 func (h *SubscriptionCollectionHandler) obligationOutcome(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload) (intents.Outcome, bool) {
-	if in.Rail == "stripe" || p.Instrument.CustodianHeld() {
+	if in.Rail == "stripe" {
 		return intents.Outcome{}, false
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, "")

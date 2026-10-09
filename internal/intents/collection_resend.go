@@ -139,11 +139,15 @@ func ReadNMIOrderAttempts(ctx context.Context, in gen.BillingProviderIntent, res
 	if err != nil {
 		return nmi.OrderAttempts{}, err
 	}
-	return client.ReadRecurringOrderAttempts(ctx, nmi.SaleParams{
+	accepted := nmi.SaleParams{
 		OrderID: p.OrderReference, OrderDescription: subscriptions.SubscriptionCollectionDescription(in.ID),
-		CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
 		Amount: p.AmountMinor, Currency: p.Currency,
-	})
+	}
+	if p.Instrument.CustodianHeld() {
+		return client.ReadCustodianOrderAttempts(ctx, accepted)
+	}
+	accepted.CustomerVaultID, accepted.BillingID = p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef
+	return client.ReadRecurringOrderAttempts(ctx, accepted)
 }
 
 // ReadNMIVaultTransactions reads every transaction on the operation's frozen
