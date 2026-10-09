@@ -18,8 +18,8 @@ import (
 // here: it is supplied where routes are mounted (Routes.Auth); the engine
 // itself authenticates nobody.
 type Deps struct {
-	// Postgres is the host's pool; its role owns OpenRails' tables (Migrate).
-	// Nil opens one from Config.DB.
+	// Postgres is the host's pool; its role owns OpenRails' tables, which New
+	// creates or upgrades. Nil opens one from Config.DB.
 	Postgres *pgxpool.Pool
 	// Redis is optional shared storage for rate limits, FX rates and abuse statistics.
 	Redis *redis.Client

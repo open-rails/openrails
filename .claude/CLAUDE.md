@@ -100,8 +100,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   schema references only.
 - One baseline, `internal/migrate/postgres/0001_schema.up.sql`, immutable after v1.0.0;
   a schema change is a new numbered migration, and `api/schema.txt` shows it.
-- The role that runs `Migrate` owns every object unless `Config.SchemaOwner` names an
-  existing role to hand them to (two apps sharing one schema). No grants, no runtime role.
+- `New` applies the migrations; the pool it runs with owns every object (another owner is
+  the operator's `SET ROLE`). No grants, no runtime role.
 - There is NO row-level security: tenant isolation is the explicit `merchant_id` (or
   `psp_id`) predicate on every tenant query, plus composite foreign keys and
   `PRIMARY KEY (merchant_id, id)` on tenant tables.

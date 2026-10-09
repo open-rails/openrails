@@ -48,12 +48,11 @@ func newFixture(t *testing.T) *fixture {
 		f.pool.Close()
 	})
 
-	// The fixture owns no migration files. OpenRails applies its own public
-	// migrations, and the second call proves replay is safe before a client is
-	// constructed.
-	for range 2 {
-		require.NoError(t, openrails.Migrate(t.Context(), pool, f.config()))
-	}
+	// The fixture owns no migration files: New applies OpenRails' own, and
+	// every client a test builds replays them.
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: pool})
+	require.NoError(t, err)
+	require.NoError(t, client.Close(t.Context()))
 	return f
 }
 
@@ -62,8 +61,7 @@ func newFixture(t *testing.T) *fixture {
 // writes its own catalog as the process owner.
 func (f *fixture) config() openrails.Config {
 	return openrails.Config{
-		Schema:            f.schema,
-		RiverSchema:       f.schema,
+		Database:          openrails.DatabaseConfig{Schema: f.schema, RiverSchema: f.schema},
 		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		ReturnOrigins:     []string{"https://e2e.test"},

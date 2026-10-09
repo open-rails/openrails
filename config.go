@@ -75,6 +75,9 @@ type (
 	// merchant's account with a card custodian.
 	CustodianConfig = config.CustodianConfig
 
+	// DatabaseConfig is Config.Database: the Postgres schemas New creates or
+	// upgrades.
+	DatabaseConfig = config.DatabaseConfig
 	// DBConfig is Config.DB: the Postgres connection OpenRails opens when
 	// Deps.Postgres is nil.
 	DBConfig = config.DBConfig

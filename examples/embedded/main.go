@@ -76,20 +76,15 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 	}
 
 	cfg := openrails.Config{
-		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,            // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
-		ProviderWriteMode: openrails.ProviderWritesFull, // Set to ProviderWritesReadOnly to prevent any billing
+		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
+		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
+		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
 		Merchant:          merchant,
 		Catalog:           products,
 	}
 
-	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
-	if err := openrails.Migrate(ctx, db, cfg); err != nil {
-		return nil, err
-	}
-
-	// 2. Build the billing engine. It has no logins of its own: your auth guards its
-	// routes when you mount them.
+	// Build the billing engine; it creates or upgrades its own tables. It has no logins
+	// of its own: your auth guards its routes when you mount them.
 	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
 }
 

@@ -77,7 +77,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | Command | Purpose |
 |---|---|
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
-| `migrate up` / `migrate pg` | apply all migrations / Postgres-only (River + OpenRails) |
+| `migrate up` / `migrate pg` | apply ahead of a rollout the migrations the server applies at boot: all / Postgres-only (River + OpenRails) |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so `migrate up` applies exactly that list — see "Cutover to product access" |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
@@ -835,10 +835,7 @@ How it runs:
   per merchant per pass. A backlog drains over the following passes. Partitions
   are also ensured at migration and by the first write a process makes in a new
   month, so writes never wait for the job.
-- A partition belongs to its table's owner, whoever creates it. Under
-  `schema_owner` the logins OpenRails runs as hand each partition they create
-  to the shared owner, so any of them can drop it; that takes the right to
-  `SET ROLE` to the owner, which role membership gives by default.
+- A partition belongs to its table's owner, whoever creates it.
 - Creating a partition attaches a table built beside the parent, so reads and
   writes carry on. Dropping one locks the table briefly; it gives up after two
   seconds rather than queue writers behind a long reader (a logical backup, a

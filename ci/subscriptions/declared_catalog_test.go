@@ -63,7 +63,7 @@ func (w *world) catalogRevision() int64 {
 // harness, so New's own outcome stays observable.
 func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) (*openrails.Client, error) {
 	return openrails.New(ctx, openrails.Config{
-		Schema: w.schema, RiverSchema: w.schema, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps},
 		Catalog:  catalog,
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})

@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/standalonedb"
 	admin "github.com/open-rails/openrails/web/admin"
 )
 
@@ -64,10 +65,13 @@ func Graph(client any) *app.App {
 	return nil
 }
 
-// New builds the engine. ctx bounds the wait for the database; nothing else
-// does. Only Postgres and a refused Config.Catalog fail construction: Vault
-// login, PSP posture, Redis and a declared catalog's unconfirmed provider
-// references recover in the background (see Ready and Probes).
+// New builds the engine. It first creates or upgrades OpenRails' tables, this
+// month's partitions and River's tables (Migrate's work, with the control
+// plane's AuthKit schema before the control plane attaches). ctx bounds the
+// wait for the database; nothing else does. Only Postgres and a refused
+// Config.Catalog fail construction: Vault login, PSP posture, Redis and a
+// declared catalog's unconfirmed provider references recover in the
+// background (see Ready and Probes).
 func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -132,6 +136,9 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		}
 	}
 	if cfg.ControlPlane != nil {
+		if err := standalonedb.ApplyAuthKit(ctx, application.Runtime.DB.Pool()); err != nil {
+			return fail(err)
+		}
 		if err := attachControlPlane(ctx, application, *cfg.ControlPlane, deps); err != nil {
 			return fail(err)
 		}
@@ -179,7 +186,7 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	if !reflect.ValueOf(cfg.Merchant).IsZero() && strings.TrimSpace(cfg.Merchant.Slug) == "" {
 		return fmt.Errorf("openrails: Config.Merchant.Slug is required")
 	}
-	cfg.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.RiverSchema))
+	cfg.Database.RiverSchema = strings.ToLower(strings.TrimSpace(cfg.Database.RiverSchema))
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return err
 	}
@@ -229,7 +236,7 @@ func validIdentifier(s string) bool {
 // short enough for River's own derived names.
 func validRiverSchema(schema string) error {
 	if !validIdentifier(schema) || len(schema) > 63-len(".river_leadership") {
-		return fmt.Errorf("openrails: River schema %q is not a valid schema name (at most 46 characters); set Config.RiverSchema", schema)
+		return fmt.Errorf("openrails: River schema %q is not a valid schema name (at most 46 characters); set Config.Database.RiverSchema", schema)
 	}
 	return nil
 }

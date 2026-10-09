@@ -53,7 +53,7 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 	realClock := clockwork.NewRealClock()
 	clock := restartClock{Clock: realClock, offset: input.Now.Sub(realClock.Now())}
 	rt, err := openrails.New(t.Context(), openrails.Config{
-		Schema: input.Schema, RiverSchema: input.Schema,
+		Database: openrails.DatabaseConfig{Schema: input.Schema, RiverSchema: input.Schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: input.Mode,
 		DB:       &openrails.DBConfig{URL: input.DSN},
 		Merchant: openrails.MerchantDeclaration{Slug: input.Slug, DisplayName: input.Slug, PSPs: input.PSPs},

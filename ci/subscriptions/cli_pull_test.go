@@ -34,7 +34,7 @@ func (w *world) cliPull(provider string, overwrite bool) {
 	cfg := &config.Config{
 		TestMode:          config.CredentialPostureSandbox,
 		ProviderWriteMode: config.ProviderWriteModeFull,
-		DB:                &config.DBConfig{URL: w.dsn}, Schema: w.schema,
+		DB:                &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema},
 	}
 	manifest := &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{
 		w.slug: {DisplayName: w.slug, PSPs: w.psps},

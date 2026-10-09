@@ -44,26 +44,25 @@ Do not guess these; ask:
 Follow [embedded-integration.md](embedded-integration.md) section by section. The
 milestone order, each verifiable before the next:
 
-1. **Migrations.** Call `openrails.Migrate` with the pool the engine will use.
-   OpenRails owns and applies its billing schema and its River tables.
-   Verify: the `billing` schema (or the configured one) exists.
-2. **Boot.** `openrails.Config` (explicit `TestMode`,
-   `ProviderWriteMode`), `openrails.New` with the host's pgx pool in `Deps`. Verify: boot succeeds;
-   a missing posture field refuses to boot (that is correct behavior, not a bug).
-3. **Merchant + rails.** Set `Config.Merchant` with the user's sandbox PSP entries
+1. **Boot.** `openrails.Config` (explicit `TestMode`, `ProviderWriteMode`),
+   `openrails.New` with the host's pgx pool in `Deps`. `New` creates or
+   upgrades its billing schema and its River tables first. Verify: boot
+   succeeds and the `billing` schema (or the configured one) exists; a missing
+   posture field refuses to boot (that is correct behavior, not a bug).
+2. **Merchant + rails.** Set `Config.Merchant` with the user's sandbox PSP entries
    (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
    the sandbox probe passes.
-4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
+3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
-5. **Mount routes.** Implement `openrails.Auth` over the host's auth (the README's
+4. **Mount routes.** Implement `openrails.Auth` over the host's auth (the README's
    AuthKit adapter, or four plain middleware methods) and pass it as `Auth` in
    an `openrails.Routes` with the route groups you want; mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify with
    `openrailstest.CheckAuth` in a test, then that an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.
-6. **Backend calls.** Use the Client where the host needs admission/holds, usage,
+5. **Backend calls.** Use the Client where the host needs admission/holds, usage,
    or entitlement reads. Verify: `Admit` + `CaptureAdmission` round-trip in a test.
-7. **Checkout end-to-end.** Frontend work per
+6. **Checkout end-to-end.** Frontend work per
    [frontend-integration.md](frontend-integration.md). Verify: sandbox checkout →
    webhook (use [dev/local-webhooks.md](dev/local-webhooks.md) for a public URL) →
    entitlement active → host feature unlocks. Then verify cancel.
@@ -85,7 +84,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    [frontend-integration.md](frontend-integration.md) / [auth.md](auth.md).
    Never send the host's own session tokens to OpenRails.
 5. **Webhooks + end-to-end.** Rails point directly at OpenRails. Verify the same
-   checkout → webhook → entitlement loop as Plan A step 7.
+   checkout → webhook → entitlement loop as Plan A step 6.
 
 ## Doc map
 

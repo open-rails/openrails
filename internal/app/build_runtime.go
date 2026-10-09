@@ -1,12 +1,13 @@
 package app
 
 import (
-	"database/sql"
+	"io/fs"
 	"net"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/identity"
+	"github.com/open-rails/openrails/internal/migrate"
 
 	"context"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -29,7 +29,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
-	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -77,6 +76,7 @@ type runtimeOverrides struct {
 	Redis           *redis.Client
 	Clock           clockwork.Clock
 	EmailSender     config.EmailSender
+	Migrations      fs.FS
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -151,16 +151,23 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		redisClient *redis.Client
 		err         error
 	)
-	if overrides != nil && overrides.DB != nil {
-		if err = validateDatabase(cfg, overrides.DB); err != nil {
-			return nil, err
-		}
-		database = overrides.DB
-	} else {
-		database, err = createDatabase(ctx, cfg)
-		if err != nil {
+	var chain fs.FS
+	if overrides != nil {
+		database, chain = overrides.DB, overrides.Migrations
+	}
+	if database == nil {
+		if database, err = db.NewDB(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("failed to create db: %w", err)
 		}
+	}
+	// OpenRails' and River's tables, before anything else touches the database.
+	if err := migrate.Apply(ctx, database.Pool(), migrate.Options{
+		Schema: config.SchemaName(cfg), RiverSchema: config.RiverSchemaName(cfg), Chain: chain,
+	}); err != nil {
+		if overrides == nil || database != overrides.DB {
+			_ = database.Close()
+		}
+		return nil, err
 	}
 
 	redisOwned := false
@@ -487,52 +494,6 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 		return overrides.Clock
 	}
 	return clockwork.NewRealClock()
-}
-
-func createDatabase(ctx context.Context, cfg *config.Config) (*db.DB, error) {
-	database, err := db.NewDB(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := validateDatabase(cfg, database); err != nil {
-		return nil, err
-	}
-	return database, nil
-}
-
-func validateDatabase(cfg *config.Config, database *db.DB) error {
-	if database == nil {
-		return fmt.Errorf("database is nil")
-	}
-
-	// Validate that all migrations have been applied before starting.
-	// migratekit drives a database/sql handle; open a short-lived one over the
-	// pgx stdlib driver.
-	if cfg == nil || cfg.DB == nil {
-		return fmt.Errorf("database config is nil")
-	}
-	sqlDB, err := sql.Open("pgx", config.DBConnectionString(cfg.DB))
-	if err != nil {
-		return fmt.Errorf("open db for migration validation: %w", err)
-	}
-	defer func() { _ = sqlDB.Close() }()
-
-	// Schema must mirror the apply step's WithSchema (#731): migratekit v1.2.0
-	// filters the ledger by schema, so a schema-less source stops matching rows
-	// applied via WithSchema.
-	//
-	// Never Fatal here: this runs inside openrails.New, so os.Exit would take the
-	// HOST process down on a library precondition. Return the error and let the
-	// host refuse to boot with it.
-	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
-		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: config.SchemaName(cfg)},
-	); err != nil {
-		log.WithError(err).Error("Postgres migrations validation failed")
-		return err
-	}
-
-	return nil
 }
 
 func createRedisClient(cfg *config.Config) (*redis.Client, error) {

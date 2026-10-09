@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantarchive"
@@ -67,7 +68,7 @@ func TestLegacyArchiveConvertsToProductAccess(t *testing.T) {
 			})
 
 			schema := "legacy_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-			require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
+			require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
 			quoted := pgx.Identifier{schema}.Sanitize()
 			t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
 			_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+".merchants(id,slug,status) VALUES($1,'historical-entitlements','active')", mid.UUID())

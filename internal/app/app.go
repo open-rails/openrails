@@ -64,6 +64,9 @@ type BootstrapOptions struct {
 	Clock       clockwork.Clock
 	// EmailSender replaces the sender Config.SendGrid selects.
 	EmailSender config.EmailSender
+	// Migrations replaces this build's migration files (test seam: an older
+	// build's chain).
+	Migrations fs.FS
 
 	ConfiguredMerchant billing.MerchantID
 }
@@ -150,6 +153,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		EmailSender: func() config.EmailSender {
 			if opts != nil {
 				return opts.EmailSender
+			}
+			return nil
+		}(),
+		Migrations: func() fs.FS {
+			if opts != nil {
+				return opts.Migrations
 			}
 			return nil
 		}(),

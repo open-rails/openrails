@@ -77,18 +77,22 @@ subscription ownership. Explicit historical provider catalog links remain usable
 
 ## Database schema
 
-`schema` / `DB_SCHEMA` (default `billing`; `Config.Schema` embedded) names the Postgres schema that
-holds every OpenRails table, function and type. It must be a plain identifier
+`database.schema` / `DATABASE_SCHEMA` (default `billing`; `Config.Database.Schema`
+embedded) names the Postgres schema that holds every OpenRails table, function
+and type. It must be a plain identifier
 (letters, digits, underscore). All OpenRails SQL is authored in `billing` and
 runs there verbatim. Any other schema is reached by one token-aware rewrite,
 applied to migrations and to every statement at runtime: it moves schema
 qualifiers, the name after `SCHEMA`, `SET search_path` values and
 `'billing.<table>'::regclass` / `to_regclass('billing.<table>')` literals. Every other string
 literal and comment is data and is never rewritten. River and AuthKit keep their
-own schemas.
+own schemas: OpenRails' River is in `database.river_schema` /
+`DATABASE_RIVER_SCHEMA` (`Config.Database.RiverSchema`), default the schema plus
+`_river`.
 
-The role that runs the migrations owns every object and is the role OpenRails
-runs as; there are no grants and no row-level security. When two apps share one
-schema, `schema_owner` (`Config.SchemaOwner`) names an existing role both logins
-inherit: `Migrate` hands the schema, and the default River schema, to it, and a rerun changes nothing. The whole schema is listed in
+The server (`New`) creates or upgrades these schemas at boot, before anything
+else touches the database. Its role owns every object and is the role
+OpenRails runs as; there are no grants and no row-level security. When two
+apps share one schema, both connect as one role, or `SET ROLE` to a shared one
+on every connection. The whole schema is listed in
 [`api/schema.txt`](../api/schema.txt); see [compatibility](compatibility.md#database-schema).

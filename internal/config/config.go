@@ -60,20 +60,8 @@ type Config struct {
 	// encryption.
 	TestMode CredentialPosture
 
-	// Schema is the Postgres schema OpenRails' tables live in. Empty is
-	// "billing".
-	Schema string
-	// SchemaOwner is the role Migrate hands the schema and everything in it
-	// to, with the default River schema, when the logins OpenRails runs as
-	// inherit a shared owner rather than being the migrating role. The role
-	// must exist. Empty: the migrating role owns what it creates.
-	SchemaOwner string
-	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
-	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
-	// host's River. Migrate creates them; Start runs OpenRails' own River
-	// client there, and a host fleet passed to Start with WithRiverClient
-	// must use the same schema.
-	RiverSchema string
+	// Database names the Postgres schemas New creates or upgrades.
+	Database DatabaseConfig
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
 	Merchant MerchantDeclaration
@@ -489,6 +477,18 @@ func LLMModel(c *LLMConfig) string {
 	return LLMDefaultModelAnthropic
 }
 
+// DatabaseConfig names the Postgres schemas OpenRails keeps its tables in.
+// The role of the pool New runs with owns every object in them.
+type DatabaseConfig struct {
+	// Schema holds OpenRails' tables. Empty is "billing".
+	Schema string
+	// RiverSchema holds the River tables OpenRails' jobs run in; empty is
+	// Schema plus "_river" ("billing_river"), apart from AuthKit's and the
+	// host's River. Start runs OpenRails' own River client there, and a host
+	// fleet passed to Start with WithRiverClient must use the same schema.
+	RiverSchema string
+}
+
 // DBConfig is a Postgres connection. URL takes precedence; otherwise the
 // connection string is built from the parts.
 type DBConfig struct {
@@ -560,10 +560,10 @@ const DefaultSchema = "billing"
 const MigratekitApp = "openrails"
 
 // RiverSchemaName is the schema of the River client Client.Start runs:
-// RiverSchema, or Schema plus "_river".
+// Database.RiverSchema, or the schema plus "_river".
 func RiverSchemaName(c *Config) string {
 	if c != nil {
-		if s := strings.ToLower(strings.TrimSpace(c.RiverSchema)); s != "" {
+		if s := strings.ToLower(strings.TrimSpace(c.Database.RiverSchema)); s != "" {
 			return s
 		}
 	}
@@ -577,13 +577,13 @@ func RiverSchemaName(c *Config) string {
 var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // SchemaName returns the effective OpenRails Postgres schema (#165, #471):
-// Schema trimmed and lower-cased, default billing. Code that needs the schema
-// reads it here, never Schema directly.
+// Database.Schema trimmed and lower-cased, default billing. Code that needs
+// the schema reads it here, never Database.Schema directly.
 func SchemaName(c *Config) string {
 	if c == nil {
 		return DefaultSchema
 	}
-	return normalizeSchema(c.Schema)
+	return normalizeSchema(c.Database.Schema)
 }
 
 // normalizeSchema trims and lower-cases a schema identifier, falling back to the
@@ -1678,7 +1678,7 @@ func ValidateDatabase(cfg *Config) error {
 		return fmt.Errorf("database URL could not be determined")
 	}
 	// The schema is interpolated into SQL and must be a safe identifier (#165).
-	return validateSchema(cfg.Schema)
+	return validateSchema(cfg.Database.Schema)
 }
 
 // DefaultRateLimits are the built-in per-bucket limits, applied whenever

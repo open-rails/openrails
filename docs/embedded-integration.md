@@ -47,32 +47,31 @@ A host imports four kinds of package; everything else is `internal/`:
 
 | Package | Holds |
 |---|---|
-| `openrails` | `New`, `NewRemote`, `Migrate`, the `*Client`, `Config`, `Deps` |
+| `openrails` | `New`, `NewRemote`, the `*Client`, `Config`, `Deps` |
 | `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes, permission names (`billing.MerchantAll`) |
 | `catalog` | the catalog document (`catalog.Application`) and its charge models (rate cards, meters, prices) |
 | `adapters/http`, `adapters/gin`, `adapters/fiber` | mount the routes an `openrails.Routes` selects on your router |
 
-OpenRails owns its migrations and applies them through your pool; the pool's
-role owns the objects and is the role OpenRails runs as (no grants). Run it on
-every boot, before `New`:
+OpenRails owns its migrations: `New` applies them through your pool before
+anything else touches the database. The pool's role owns the objects and is
+the role OpenRails runs as (no grants); for another owner, have the pool's
+connections `SET ROLE` to it.
 
-```go
-if err := openrails.Migrate(ctx, pool, cfg); err != nil {
-    return fmt.Errorf("initialize OpenRails database: %w", err)
-}
-```
-
-`Migrate` creates OpenRails' tables in `cfg.Schema` and River's in
-`cfg.RiverSchema` (`billing_river` for the default schema), whichever fleet
-`Start` will run there, so `New` and `Start` run no DDL. With
+`New` creates or upgrades OpenRails' tables in `cfg.Database.Schema`, River's
+in `cfg.Database.RiverSchema` (`billing_river` for the default schema),
+whichever fleet `Start` will run there, and this month's partitions. With
 `cfg.ControlPlane` it also migrates the control plane's AuthKit schema. A
-host's own AuthKit migrates through AuthKit's API.
+host's own AuthKit migrates through AuthKit's API. Replicas booting together
+take turns on an advisory lock, and a migration that fails fails `New`, so new
+pods crash-loop while the old ones keep serving. An older build boots against
+a schema a newer one already migrated: migrations it does not know are left
+as they are.
 
 Billing, AuthKit, application tables and River may share `public` or another
 namespace. OpenRails archives contain only billing-owned tables and never include
-live River jobs, AuthKit identities or host records. The engine validates its
-migration ledger at boot and refuses to start if a migration is missing or
-orphaned.
+live River jobs, AuthKit identities or host records. `New` refuses to start
+when an applied migration's file changed and the live schema no longer
+matches a fresh build of it.
 
 Merchant isolation uses verified application scope, explicit SQL predicates and
 composite relationships, not PostgreSQL RLS. OpenRails creates no roles and
@@ -88,11 +87,10 @@ explicit:
 |---|---|---|
 | `TestMode` | yes | `openrails.Sandbox` or `openrails.Live`. The zero value is refused; it never silently means live. |
 | `ProviderWriteMode` | yes | `ProviderWritesFull`, `ProviderWritesLimited` (renewals and retries wait) or `ProviderWritesReadOnly` (never charges). |
-| `Schema` | default `billing` | The Postgres schema of OpenRails' tables. |
+| `Database` | default `billing` | `Schema`: the Postgres schema of OpenRails' tables. `RiverSchema` (default `Schema` + `_river`): where OpenRails' River jobs live; `Start` runs them there, on its own client or the host's fleet (section 4). `New` creates or upgrades both. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
 | `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
 | `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
-| `RiverSchema` | default `Schema` + `_river` | Where OpenRails' River jobs live: `Migrate` creates the tables, and `Start` runs them there, on its own client or the host's fleet (section 4). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `ControlPlane` | no | OpenRails' own AuthKit control plane, for hosted products (section 8). |
@@ -129,13 +127,13 @@ or set `RateLimitsDisabled` if your own gateway fronts billing. See
 ### 4. Boot, lifecycle and River
 
 ```go
-client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth})
+client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 if err != nil { return err }
 defer client.Close(ctx)
 ```
 
-Only Postgres (including River's tables, which `Migrate` creates) and a
-refused `Config.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
+Only Postgres (including the migrations `New` applies first) and a refused
+`Config.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
 (capped full-jitter backoff, forever); until then only their features answer
 503. `Ready` is the readiness check (Postgres, the merchant directory, the
 declared catalog, River). Register `Probes` with the host's
@@ -148,9 +146,9 @@ for _, p := range client.Probes() { // openrails_vault, openrails_psp_posture, o
 ```
 
 River is required: renewals, dunning, invoices, reconciliation and provider
-intents are River jobs. Jobs queue in `Config.RiverSchema` from `New` on and
-wait there; `Start` runs them, and `Ready` fails until it does. Without options
-`Start` builds and runs OpenRails' own River client there:
+intents are River jobs. Jobs queue in `Config.Database.RiverSchema` from `New`
+on and wait there; `Start` runs them, and `Ready` fails until it does. Without
+options `Start` builds and runs OpenRails' own River client there:
 
 ```go
 if err := client.Start(ctx); err != nil { return err }
@@ -158,11 +156,11 @@ if err := client.Start(ctx); err != nil { return err }
 
 A host that already runs a River fleet adds OpenRails' jobs to it, beside its
 own and AuthKit's, and passes the fleet to `Start`. The fleet must use
-`Config.RiverSchema`, where `Migrate` created River's tables:
+`Config.Database.RiverSchema`, where `New` created River's tables:
 
 ```go
 workers, err := riverhelpers.New(ctx, pool, &river.Config{
-    Schema: "billing_river", // Config.RiverSchema
+    Schema: "billing_river", // Config.Database.RiverSchema
     Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 10}},
 }, auth.RiverJobs(), client.RiverJobs())
 if err != nil { return err }

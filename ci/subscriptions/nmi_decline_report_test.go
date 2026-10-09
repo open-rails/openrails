@@ -22,7 +22,7 @@ func (w *world) declineReport(since time.Time, format string) string {
 	w.t.Helper()
 	var out strings.Builder
 	err := hosttools.NMIDeclineReport(w.t.Context(), hosttools.NMIDeclineReportOptions{
-		Config:           &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: w.dsn}, Schema: w.schema},
+		Config:           &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}},
 		PGXPool:          w.pool,
 		MerchantID:       w.client[embedded].MerchantID(),
 		MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},

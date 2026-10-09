@@ -68,12 +68,11 @@ type fileConfig struct {
 
 	ProviderWriteMode string `koanf:"provider_write_mode"`
 	TestMode          string `koanf:"test_mode"`
-	Schema            string `koanf:"schema"`
-	SchemaOwner       string `koanf:"schema_owner"`
 
 	PublicBillingBaseURL string `koanf:"public_billing_base_url"`
 	DashboardBaseURL     string `koanf:"dashboard_base_url"`
 
+	Database           billing.DatabaseConfig    `koanf:"database"`
 	DB                 *billing.DBConfig         `koanf:"db"`
 	Redis              *billing.RedisConfig      `koanf:"redis"`
 	Logger             *billing.LoggerConfig     `koanf:"logger"`
@@ -124,7 +123,7 @@ func defaults() *fileConfig {
 			// Application login used by the local Docker setup.
 			Username: "app", Password: "app_password", SSLMode: "disable",
 		},
-		Schema: billing.DefaultSchema,
+		Database: billing.DatabaseConfig{Schema: billing.DefaultSchema},
 		// Match docker-compose's host-published Garnet port.
 		Redis:      &billing.RedisConfig{Addr: "localhost:6380"},
 		Logger:     &billing.LoggerConfig{Level: "info"},
@@ -174,8 +173,7 @@ func (f *fileConfig) config() (*Config, error) {
 		Config: &billing.Config{
 			ProviderWriteMode:                 f.ProviderWriteMode,
 			TestMode:                          posture,
-			Schema:                            f.Schema,
-			SchemaOwner:                       f.SchemaOwner,
+			Database:                          f.Database,
 			PublicBillingBaseURL:              f.PublicBillingBaseURL,
 			DashboardBaseURL:                  f.DashboardBaseURL,
 			DB:                                f.DB,

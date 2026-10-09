@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 )
@@ -64,7 +65,7 @@ func TestDurationHistoricalArchiveRetainsBillingAndPaidGrants(t *testing.T) {
 	historical := bytes.NewBuffer(legacy)
 
 	schema := "duration_archive_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
+	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
 	quoted := pgx.Identifier{schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
 	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+".merchants(id,slug,status) VALUES($1,'historical-duration','active')", client.MerchantID().UUID())

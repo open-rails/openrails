@@ -2,12 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
 	riverhelpers "github.com/open-rails/helpers/river"
-	"github.com/open-rails/openrails/internal/db"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 )
@@ -59,10 +57,10 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 		}
 		claimed = true
 		r.riverCompositionMu.Unlock()
-		// Migrate prepared River's tables in RiverSchema only, and the
-		// producer New bound queues jobs there.
+		// New prepared River's tables in Database.RiverSchema only, and the
+		// producer it bound queues jobs there.
 		if want := r.riverSchemaOrDefault(); cfg.Schema != want {
-			return fmt.Errorf("openrails: River fleet schema %q differs from Config.RiverSchema %q", cfg.Schema, want)
+			return fmt.Errorf("openrails: River fleet schema %q differs from Config.Database.RiverSchema %q", cfg.Schema, want)
 		}
 		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers}
 		refreshQueue := riverjobs.QueueBilling
@@ -95,9 +93,6 @@ func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
 	}, func(ctx context.Context, binding riverhelpers.Binding) error {
 		client := binding.Client
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
-			if errors.Is(err, db.ErrRiverTablesMissing) {
-				return fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) first", err)
-			}
 			return err
 		}
 		r.riverCompositionMu.Lock()

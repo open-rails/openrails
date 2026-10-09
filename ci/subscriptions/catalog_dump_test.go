@@ -111,7 +111,7 @@ products:
 		t.Helper()
 		var out bytes.Buffer
 		require.NoError(t, hosttools.DumpMerchantCatalog(t.Context(), hosttools.CatalogDumpOptions{
-			Config: &config.Config{Schema: w.schema}, PGXPool: w.pool, Merchant: w.slug, Out: &out,
+			Config: &config.Config{Database: config.DatabaseConfig{Schema: w.schema}}, PGXPool: w.pool, Merchant: w.slug, Out: &out,
 		}))
 		doc, err := catalog.ParseApplicationYAML(out.Bytes())
 		require.NoError(t, err)

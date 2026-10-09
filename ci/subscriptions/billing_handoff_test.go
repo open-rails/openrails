@@ -80,7 +80,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 					path := filepath.Join(t.TempDir(), "database.yaml")
 					require.NoError(t, os.WriteFile(path, configuration, 0o600))
 					cmd := exec.CommandContext(t.Context(), binary, append([]string{"--config", path, "billing"}, args...)...)
-					cmd.Env = append(os.Environ(), "DB_URL="+w.dsn, "DB_SCHEMA="+w.schema)
+					cmd.Env = append(os.Environ(), "DB_URL="+w.dsn, "DATABASE_SCHEMA="+w.schema)
 					out, err := cmd.CombinedOutput()
 					return string(out), err
 				}
@@ -210,7 +210,7 @@ func handoffTarget(t *testing.T, source *world) *world {
 		require.NoError(t, err)
 	})
 	t.Cleanup(target.checkMoneyInvariants)
-	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: target.schema, RiverSchema: target.schema}))
+	require.NoError(t, engine.Migrate(t.Context(), pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema}}))
 	require.NoError(t, riverkit.ApplyMigrations(t.Context(), pool, target.schema))
 	return target
 }
@@ -225,7 +225,7 @@ func TestBillingRestoreTargetUsesDestinationAuthority(t *testing.T) {
 	target := handoffTarget(t, source)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), target.pool, target.schema))
 	client, err := openrails.New(t.Context(), openrails.Config{
-		Schema: target.schema, RiverSchema: target.schema,
+		Database: openrails.DatabaseConfig{Schema: target.schema, RiverSchema: target.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		DB: &openrails.DBConfig{URL: target.dsn},
 		ControlPlane: &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{

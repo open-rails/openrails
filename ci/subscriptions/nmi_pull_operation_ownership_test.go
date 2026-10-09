@@ -92,7 +92,7 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 			insertPull := func() {
 				var out strings.Builder
 				err := hosttools.PullProvider(t.Context(), hosttools.PullProviderOptions{
-					Config:  &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: w.dsn}, Schema: w.schema},
+					Config:  &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}},
 					PGXPool: w.pool, MerchantID: w.client[embedded].MerchantID(),
 					MerchantManifest: &merchantbootstrap.BillingConfig{Merchants: map[string]openrails.MerchantDeclaration{w.slug: {DisplayName: w.slug, PSPs: w.psps}}},
 					NMITransport:     w.nmi, Providers: []string{"nmi"}, Insert: true,

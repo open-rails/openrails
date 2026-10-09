@@ -63,33 +63,6 @@ services:
     networks:
       - local-openrails
 
-  openrails-migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    depends_on:
-      postgres:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      # ENV has no default in the binary and config.Load refuses an empty one,
-      # so the migrate service must declare it too — without this the stack
-      # never gets past migrations.
-
-      TEST_MODE: "${TEST_MODE:-sandbox}"
-      # Database connection over the compose network.
-      DB_HOST: "postgres"
-      DB_PORT: "5432"
-      DB_DATABASE: "openrails_db"
-      DB_USERNAME: "${DB_USERNAME:-app}"
-      DB_PASSWORD: "${DB_PASSWORD:-app_password}"
-      DB_SSLMODE: "disable"
-    command: ["migrate", "up"]
-    restart: "no"
-    networks:
-      - local-openrails
-
   # OpenRails service (HTTP server only)
   openrails:
     profiles: ["all", "openrails"]
@@ -101,8 +74,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      openrails-migrate:
-        condition: service_completed_successfully
       garnet:
         condition: service_healthy
     ports:

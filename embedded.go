@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
@@ -32,22 +31,16 @@ func init() {
 	}
 }
 
-// Migrate creates or upgrades OpenRails' tables in cfg.Schema through pool.
-// It is idempotent: run it on every boot, before New. The pool's role owns
-// what it creates and is the role OpenRails runs as; with cfg.SchemaOwner,
-// Migrate hands the schema and everything in it to that role instead, touching
-// only what it does not already own. It also migrates River in
-// cfg.RiverSchema, whichever fleet Start will run there, so New and Start run
-// no DDL.
-func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
-	return engine.Migrate(ctx, pool, cfg)
-}
-
 // New runs the OpenRails engine in this process and returns the same Client
-// NewRemote builds, over an in-process transport. It starts no workers: Start
-// does, and jobs queued before it wait in Config.RiverSchema. ctx bounds the
-// wait for the database; nothing else does. With Config.Catalog, New applies it before
-// returning and fails with the reason if it is refused; only provider
+// NewRemote builds, over an in-process transport. Before anything else touches
+// the database it creates or upgrades OpenRails' tables in
+// Config.Database.Schema, River's in Config.Database.RiverSchema and this
+// month's partitions; the pool's role owns them. That is idempotent, replicas
+// booting together take turns on an advisory lock, and a schema a newer build
+// already migrated is left as it is. It starts no workers: Start does, and
+// jobs queued before it wait in Config.Database.RiverSchema. ctx bounds the
+// wait for the database; nothing else does. With Config.Catalog, New applies
+// it before returning and fails with the reason if it is refused; only provider
 // references it cannot confirm within seconds finish in the background, and
 // Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
@@ -106,8 +99,8 @@ type startOptions struct {
 }
 
 // WithRiverClient runs OpenRails' jobs on the host's River fleet, which
-// riverhelpers.New built with RiverJobs in Config.RiverSchema (alongside the
-// host's and AuthKit's jobs). OpenRails enqueues through it and never starts
+// riverhelpers.New built with RiverJobs in Config.Database.RiverSchema
+// (alongside the host's and AuthKit's jobs). OpenRails enqueues through it and never starts
 // or stops it.
 func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption {
 	return func(o *startOptions) { o.fleet, o.fleetSet = fleet, true }
@@ -116,8 +109,8 @@ func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption {
 // Start starts OpenRails' background work: River (renewals, dunning,
 // invoices, provider intents), the Solana Pay poller and the job-progress
 // monitor. With no options it builds and runs OpenRails' own River client in
-// Config.RiverSchema; with WithRiverClient the jobs run on the host's fleet.
-// Jobs queued before Start wait for it. It runs no DDL, and ctx ending stops
+// Config.Database.RiverSchema; with WithRiverClient the jobs run on the host's
+// fleet. Jobs queued before Start wait for it. It runs no DDL, and ctx ending stops
 // nothing: Close stops what Start started. Call it once, before serving.
 func (c *Client) Start(ctx context.Context, opts ...StartOption) error {
 	e, err := c.embedded()
@@ -248,8 +241,8 @@ func (c *Client) CheckoutFrameAncestors() string {
 }
 
 // RiverJobs is OpenRails' contribution to the host's River fleet (workers,
-// periodic jobs and QueueBilling), for riverhelpers.New in Config.RiverSchema
-// alongside the host's and AuthKit's; then pass the fleet to Start with
+// periodic jobs and QueueBilling), for riverhelpers.New in
+// Config.Database.RiverSchema alongside the host's and AuthKit's; then pass the fleet to Start with
 // WithRiverClient. Requesting it rules out OpenRails' own River. It fails that
 // composition on a remote client.
 func (c *Client) RiverJobs() riverhelpers.Contribution {

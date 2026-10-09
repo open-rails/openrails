@@ -345,13 +345,13 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// applyStandaloneMigrations migrates like any host (openrails.Migrate): billing,
-// River and, with the control plane, AuthKit.
+// applyStandaloneMigrations does what New does first: billing, River and,
+// with the control plane, AuthKit.
 func applyStandaloneMigrations(ctx context.Context, cfg *config.Config) error {
 	pool, err := pgxpool.New(ctx, config.DBConnectionString(cfg.DB))
 	if err != nil {
 		return fmt.Errorf("standalone migration pool: %w", err)
 	}
 	defer pool.Close()
-	return openrails.Migrate(ctx, pool, *cfg)
+	return engine.Migrate(ctx, pool, *cfg)
 }

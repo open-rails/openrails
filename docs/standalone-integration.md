@@ -29,16 +29,16 @@ curl http://localhost:3053/health/ready       # readiness: dependencies, local w
 ```
 
 Host ports (all bound to 127.0.0.1): OpenRails `:3053`, Postgres `:5434`,
-Redis `:6380`. The `openrails-migrate` service applies migrations
-(`openrails migrate up`) before the server starts. Everything — public catalog,
+Redis `:6380`. The server applies its migrations at boot. Everything — public catalog,
 `/v1/me/*` self-service, `/v1/merchant/*`, and webhooks — shares the one port;
 there is no separate private/service listener.
 
 **Production needs:**
 
-- **Postgres 18+.** OpenRails owns one schema (`schema` / `DB_SCHEMA`, default `billing`); it can share your
-  app's database. Apply migrations with `openrails migrate up` before each new
-  version boots (the server validates and refuses to start on missing migrations).
+- **Postgres 18+.** OpenRails owns one schema (`database.schema` /
+  `DATABASE_SCHEMA`, default `billing`); it can share your app's database. The
+  server creates or upgrades its tables at boot; `openrails migrate up` does it
+  ahead of a rollout.
 - **A Redis-compatible service** (we recommend Garnet) — optional, backs
   rate limiting. If omitted or unreachable, limits are in-memory per-process
   and readiness remains green.
@@ -345,8 +345,9 @@ other surface (merchant API, webhooks, admin) emits no CORS headers at all.
 
 ### Upgrades and ops
 
-On every upgrade run `openrails migrate up` before the new version serves
-traffic — the server refuses to boot on a missing migration. For everything
+Each new version applies its migrations as it boots; replicas booting together
+take turns, and one whose migration fails crash-loops while the old version
+keeps serving. For everything
 operational — the `provider_write_mode` matrix, cutover onto production
 credentials (boot `limited`, inspect `openrails intents`, then raise to
 `full`), the durable provider-intent ledger, `pull-provider` reconciliation,

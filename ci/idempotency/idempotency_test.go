@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -71,7 +72,7 @@ func newEnv(t *testing.T) *env {
 		_, _ = admin.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{e.schema}.Sanitize()+" CASCADE")
 		admin.Close()
 	})
-	require.NoError(t, openrails.Migrate(t.Context(), admin, openrails.Config{Schema: e.schema, RiverSchema: e.schema}))
+	require.NoError(t, engine.Migrate(t.Context(), admin, openrails.Config{Database: openrails.DatabaseConfig{Schema: e.schema, RiverSchema: e.schema}}))
 	e.merchant = e.newMerchant()
 	require.NoError(t, admin.QueryRow(t.Context(), e.q(`INSERT INTO billing.psps (merchant_id, key, rail, account_id, environment) VALUES ($1, 'main', 'stripe', $2, 'live') RETURNING id`), e.merchant, "acct_"+uuid.NewString()[:8]).Scan(&e.psp))
 	for i := range e.replicas {

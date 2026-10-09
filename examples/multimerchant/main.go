@@ -38,10 +38,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	defer db.Close()
 	cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
-	if err := openrails.Migrate(ctx, db, cfg); err != nil {
-		return err
-	}
-	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db})
+	bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // creates or upgrades its tables
 	if err != nil {
 		return err
 	}

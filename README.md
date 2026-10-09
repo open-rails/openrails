@@ -153,20 +153,15 @@ func newBilling(ctx context.Context, db *pgxpool.Pool) (*openrails.Client, error
 	}
 
 	cfg := openrails.Config{
-		Schema:            "billing",                    // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,            // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
-		ProviderWriteMode: openrails.ProviderWritesFull, // Set to ProviderWritesReadOnly to prevent any billing
+		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
+		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
+		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
 		Merchant:          merchant,
 		Catalog:           products,
 	}
 
-	// 1. Create or upgrade OpenRails' tables. Safe to run on every boot.
-	if err := openrails.Migrate(ctx, db, cfg); err != nil {
-		return nil, err
-	}
-
-	// 2. Build the billing engine. It has no logins of its own: your auth guards its
-	// routes when you mount them.
+	// Build the billing engine; it creates or upgrades its own tables. It has no logins
+	// of its own: your auth guards its routes when you mount them.
 	return openrails.New(ctx, cfg, openrails.Deps{Postgres: db}) // the same pool your app uses
 }
 ```
@@ -441,10 +436,11 @@ The standalone server's switch is `admin_console.enabled` in `config.yaml`
 
 #### Share one River fleet
 
-`bill.Start(ctx)` runs OpenRails' own River workers in `Config.RiverSchema`
-(`billing_river` by default), whose tables `Migrate` creates. If you already
-run a River fleet, add OpenRails' jobs to it instead; the fleet is yours, so
-you start and stop it. It must use `Config.RiverSchema`:
+`bill.Start(ctx)` runs OpenRails' own River workers in
+`Config.Database.RiverSchema` (`billing_river` by default), whose tables `New`
+creates. If you already run a River fleet, add OpenRails' jobs to it instead;
+the fleet is yours, so you start and stop it. It must use
+`Config.Database.RiverSchema`:
 
 ```go
 fleet, err := riverhelpers.New(ctx, db, &river.Config{Schema: "billing_river"}, auth.RiverJobs(), bill.RiverJobs())
@@ -643,7 +639,7 @@ What you will set next:
 | Publish the merchant API | `Routes.Merchant` with `Routes.Auth`; grant your staff the `openrails.Permissions()` they need |
 | Tell OpenRails about a customer (email for receipts, username, banned) | `client.EnsureCustomers` whenever it changes |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
-| Share one billing schema between two apps | `Config.SchemaOwner`: `Migrate` hands the schema to that role |
+| Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
 | Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
 

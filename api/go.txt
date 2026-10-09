@@ -23,7 +23,6 @@ pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func ForMerchantID(billing.MerchantID) RequestOption
 pkg openrails, func MachinePermissions() []string
-pkg openrails, func Migrate(context.Context, *pgxpool.Pool, Config) error
 pkg openrails, func New(context.Context, Config, Deps, ...ClientOption) (*Client, error)
 pkg openrails, func NewRemote(string, ...ClientOption) (*Client, error)
 pkg openrails, func ParseMerchantDeclaration([]byte) (MerchantDeclaration, error)
@@ -288,6 +287,7 @@ pkg openrails, type Config struct, CredentialReadOnly bool
 pkg openrails, type Config struct, CredentialSnapshotID string
 pkg openrails, type Config struct, DB *config.DBConfig
 pkg openrails, type Config struct, DashboardBaseURL string
+pkg openrails, type Config struct, Database config.DatabaseConfig
 pkg openrails, type Config struct, Encryption *config.EncryptionConfig
 pkg openrails, type Config struct, EngineAdmissionHold bool
 pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
@@ -302,9 +302,6 @@ pkg openrails, type Config struct, RateLimits *config.RateLimitsConfig
 pkg openrails, type Config struct, RateLimitsDisabled bool
 pkg openrails, type Config struct, Redis *config.RedisConfig
 pkg openrails, type Config struct, ReturnOrigins []string
-pkg openrails, type Config struct, RiverSchema string
-pkg openrails, type Config struct, Schema string
-pkg openrails, type Config struct, SchemaOwner string
 pkg openrails, type Config struct, SecretBackend string
 pkg openrails, type Config struct, SendGrid *config.SendGridConfig
 pkg openrails, type Config struct, TestMode config.CredentialPosture
@@ -362,6 +359,10 @@ pkg openrails, type DBConfig struct, SQLTrace bool
 pkg openrails, type DBConfig struct, SSLMode string
 pkg openrails, type DBConfig struct, URL string
 pkg openrails, type DBConfig struct, Username string
+pkg openrails, type DatabaseConfig = config.DatabaseConfig
+pkg openrails, type DatabaseConfig struct
+pkg openrails, type DatabaseConfig struct, RiverSchema string
+pkg openrails, type DatabaseConfig struct, Schema string
 pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock

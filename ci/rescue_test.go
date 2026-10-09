@@ -79,30 +79,27 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	stop()
 }
 
-// Migrate creates River's tables in Config.RiverSchema; New refuses a schema
-// without them, naming the call. Neither New nor Start runs DDL.
-func TestNewNamesTheMissingRiverMigration(t *testing.T) {
+// New creates River's tables in Config.Database.RiverSchema, a schema of
+// their own here, before it binds the producer that queues jobs there.
+func TestNewCreatesTheRiverSchema(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
-	cfg.RiverSchema = f.schema + "_jobs"
+	cfg.Database.RiverSchema = f.schema + "_jobs"
 	t.Cleanup(func() {
-		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{cfg.RiverSchema}.Sanitize()+" CASCADE")
+		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{cfg.Database.RiverSchema}.Sanitize()+" CASCADE")
 	})
-	_, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-	require.ErrorContains(t, err, "call openrails.Migrate(ctx, pool, cfg) before openrails.New")
-	var schemas int
-	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM pg_namespace WHERE nspname = $1", cfg.RiverSchema).Scan(&schemas))
-	require.Zero(t, schemas, "New runs no DDL")
-
-	require.NoError(t, openrails.Migrate(t.Context(), f.pool, cfg))
 	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
+	var jobs *string
+	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT to_regclass($1)::text", cfg.Database.RiverSchema+".river_job").Scan(&jobs))
+	require.NotNil(t, jobs, "River's tables are in the River schema")
 }
 
-// Start without options runs OpenRails' own River in Config.RiverSchema. Jobs
-// queued before it wait there; Ready fails until it runs. Cancelling Start's
-// context stops nothing; Close stops what Start started.
+// Start without options runs OpenRails' own River in
+// Config.Database.RiverSchema. Jobs queued before it wait there; Ready fails
+// until it runs. Cancelling Start's context stops nothing; Close stops what
+// Start started.
 func TestStartRunsItsOwnRiver(t *testing.T) {
 	f := newFixture(t)
 	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
@@ -120,8 +117,8 @@ func TestStartRunsItsOwnRiver(t *testing.T) {
 }
 
 // WithRiverClient takes only the fleet built with this client's RiverJobs in
-// Config.RiverSchema; once RiverJobs went to a fleet, OpenRails' own River is
-// refused.
+// Config.Database.RiverSchema; once RiverJobs went to a fleet, OpenRails' own
+// River is refused.
 func TestStartWithTheHostFleet(t *testing.T) {
 	f := newFixture(t)
 	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
@@ -143,6 +140,6 @@ func TestStartWithTheHostFleet(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = elsewhere.Close(context.Background()) })
 	_, err = riverkit.New(t.Context(), f.pool, &river.Config{Schema: "public"}, elsewhere.RiverJobs())
-	require.ErrorContains(t, err, `River fleet schema "public" differs from Config.RiverSchema "`+f.schema+`"`)
+	require.ErrorContains(t, err, `River fleet schema "public" differs from Config.Database.RiverSchema "`+f.schema+`"`)
 	require.ErrorContains(t, elsewhere.Start(t.Context()), "composition failed")
 }

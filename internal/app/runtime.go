@@ -265,7 +265,7 @@ type Runtime struct {
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
-	riverSchema            string // Config.RiverSchema's, or the bound host client's
+	riverSchema            string // Config.Database.RiverSchema's, or the bound host client's
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -422,9 +422,10 @@ func (r *Runtime) AddRiverContribution(jobs riverhelpers.Contribution) error {
 }
 
 // InitRiver binds OpenRails' own River client, without starting it, in the
-// runtime's River schema, which Migrate prepared; it runs no DDL. The client
-// is composed from the same contributions a host fleet takes. A process that
-// only serves HTTP binds its producers this way; StartWorkers starts it.
+// runtime's River schema, which runtime construction migrated; it runs no
+// DDL. The client is composed from the same contributions a host fleet takes.
+// A process that only serves HTTP binds its producers this way; StartWorkers
+// starts it.
 func (r *Runtime) InitRiver(ctx context.Context) error {
 	r.riverCompositionMu.Lock()
 	switch {
@@ -568,7 +569,7 @@ func (r *Runtime) RiverBound() bool {
 
 // BindRiverProducer binds an insert-only River client in the runtime's River
 // schema, so jobs queued before Start wait there for whichever fleet runs
-// them. Migrate must have created River's tables.
+// them. Runtime construction created River's tables there.
 func (r *Runtime) BindRiverProducer(ctx context.Context) error {
 	schema := r.riverSchemaOrDefault()
 	producer, err := river.NewClient(riverpgxv5.New(r.DB.Pool()), &river.Config{Schema: schema, SkipUnknownJobCheck: true})
@@ -576,9 +577,6 @@ func (r *Runtime) BindRiverProducer(ctx context.Context) error {
 		return fmt.Errorf("River producer: %w", err)
 	}
 	if err := r.DB.ValidateRiverJobBinding(ctx, r.DB.Pool(), schema); err != nil {
-		if errors.Is(err, db.ErrRiverTablesMissing) {
-			return fmt.Errorf("%w: call openrails.Migrate(ctx, pool, cfg) before openrails.New", err)
-		}
 		return fmt.Errorf("River producer: %w", err)
 	}
 	r.riverCompositionMu.Lock()

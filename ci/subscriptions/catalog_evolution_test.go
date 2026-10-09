@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
 
@@ -417,7 +418,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			schema := "archive_catalog_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-			require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: schema, RiverSchema: schema}))
+			require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
 			name := pgx.Identifier{schema}.Sanitize()
 			t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+name+" CASCADE") })
 			_, err := w.pool.Exec(t.Context(), "INSERT INTO "+name+`.merchants (id, slug, status, permission_group_id, display_name) VALUES ($1, $2, 'active', $3, 'Restored')`, merchantID.UUID(), w.slug, uuid.New())
@@ -444,7 +445,7 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 			}
 			boot := func(app *catalog.Application) *openrails.Client {
 				t.Helper()
-				client, err := openrails.New(t.Context(), openrails.Config{Schema: schema, RiverSchema: schema, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
+				client, err := openrails.New(t.Context(), openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 					Merchant: openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: w.psps}, Catalog: app,
 				}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 				require.NoError(t, err)

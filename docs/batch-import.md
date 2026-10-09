@@ -126,8 +126,8 @@ derives the windows. `Client.ImportBilling` posts the same book over
 The ordered phases, from a production host that migrated many years of legacy
 billing data over this seam:
 
-1. **Apply migrations.** Call `openrails.Migrate` with the pool the engine will use;
-   OpenRails owns and applies its billing baseline and its River tables.
+1. **Apply migrations.** Build the engine with `openrails.New` on the pool it
+   will use; it creates its billing baseline and its River tables first.
    Apply your application schemas separately, then validate the target shape
    before writing anything.
 2. **Declare the merchant, PSPs, and catalog.** Upsert the merchant + its

@@ -52,7 +52,8 @@ type Runtime struct {
 	BaseURL string
 }
 
-// Open connects to dsn and applies AuthKit and OpenRails migrations.
+// Open connects to dsn and applies AuthKit's migrations; openrails.New
+// applies its own.
 func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if dsn == "" {
 		return nil, errors.New("harness: Postgres DSN is required")
@@ -64,10 +65,6 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if err := authkit.Migrate(ctx, pool, authConfig(""), authkit.MigrateOptions{}); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("authkit migrations: %w", err)
-	}
-	if err := openrails.Migrate(ctx, pool, openrails.Config{Schema: BillingSchema}); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("openrails migrations: %w", err)
 	}
 	return pool, nil
 }
@@ -96,7 +93,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		}
 	}()
 	cfg := openrails.Config{
-		Schema:               BillingSchema,
+		Database:             openrails.DatabaseConfig{Schema: BillingSchema},
 		TestMode:             openrails.Sandbox,
 		ProviderWriteMode:    openrails.ProviderWritesFull,
 		PublicBillingBaseURL: baseURL + "/billing",

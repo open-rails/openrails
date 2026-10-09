@@ -94,8 +94,8 @@ func TestPeriodicScheduleContract(t *testing.T) {
 func TestRuntimeWiringPolicies(t *testing.T) {
 	rt := &Runtime{}
 	require.Equal(t, "billing_river", rt.riverSchemaOrDefault(), "OpenRails' own River sits beside its schema")
-	require.Equal(t, "shop_river", (&Runtime{Config: &config.Config{Schema: "Shop"}}).riverSchemaOrDefault())
-	require.Equal(t, "jobs", (&Runtime{Config: &config.Config{RiverSchema: " Jobs "}}).riverSchemaOrDefault())
+	require.Equal(t, "shop_river", (&Runtime{Config: &config.Config{Database: config.DatabaseConfig{Schema: "Shop"}}}).riverSchemaOrDefault())
+	require.Equal(t, "jobs", (&Runtime{Config: &config.Config{Database: config.DatabaseConfig{RiverSchema: " Jobs "}}}).riverSchemaOrDefault())
 	rt.SetRiverSchema("  jobs ")
 	require.Equal(t, "jobs", rt.riverSchemaOrDefault(), "direct River reads follow the bound client's schema")
 

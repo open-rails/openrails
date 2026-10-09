@@ -33,8 +33,8 @@ available for explicitly scoped operator work. See
 
 ## Database role in local dev
 
-One role, `app` (the Compose Postgres user), runs `openrails migrate up`, the
-server, the workers and the CLI. It owns every object it creates; OpenRails
+One role, `app` (the Compose Postgres user), runs the server (which migrates at
+boot), the workers and the CLI. It owns every object it creates; OpenRails
 creates no roles and issues no grants.
 
 There is no row-level security, so the login does not isolate merchants:
@@ -88,14 +88,14 @@ change. A schema change is a new numbered migration (`0002_…`) that upgrades
 any v1 database in place, with its `api/schema.txt` diff in the same pull
 request.
 
-A database built before v1.0.0 is not upgraded: `migrate up` refuses it
+A database built before v1.0.0 is not upgraded: the boot refuses it
 (migratekit strict integrity: the applied `0001` differs and the schema is not
 a fresh build of it). Wipe it:
 
 | Database | How |
 |---|---|
-| Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
-| A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
+| Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, whose server migrates the empty database at boot. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
+| A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then restart the server (or run `openrails migrate up`). |
 | A hand-rolled test pool | Provision a new disposable database. The e2e suite creates a fresh schema per test. Never clear another library's shared ledger rows. |
 | An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then `DROP SCHEMA billing CASCADE; DELETE FROM public.migrations WHERE app = 'openrails' AND schema = 'billing';` (use the configured schema). Restart the host so it re-applies the chain. |
 

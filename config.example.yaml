@@ -32,14 +32,15 @@ db:
   host: localhost
   port: "5434"
   database: openrails_db
-  # One role for `openrails migrate up` and the server: it owns what it creates.
+  # One role: the server migrates as it at boot and owns what it creates.
   # Merchant isolation is per-query merchant predicates, not login flags.
   username: app
   password: app_password
   sslmode: disable
 
-schema: billing # every OpenRails table lives here; defaults to 'billing' (env DB_SCHEMA)
-# schema_owner: openrails_app # migrate hands the schema to this existing role
+database:
+  schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
+  # river_schema: billing_river # OpenRails' River jobs; defaults to the schema plus '_river'
 
 redis:
   addr: localhost:6380

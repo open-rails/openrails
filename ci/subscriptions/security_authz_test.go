@@ -147,7 +147,7 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 	profile := openrails.CustomerRoutes{Merchant: slug, Scope: scope}
 	deps := openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
 	rt, err := openrails.New(t.Context(), openrails.Config{
-		Schema: w.schema, RiverSchema: w.schema,
+		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
 		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},

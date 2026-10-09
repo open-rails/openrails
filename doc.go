@@ -6,7 +6,7 @@
 //     RiverJobs, Ready and Probes.
 //   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over HTTP.
 //
-// Migrate creates OpenRails' tables before New. Request, response and
+// New creates or upgrades OpenRails' tables first. Request, response and
 // identifier types, errors and codes live in package billing; Config and
 // Deps are defined in internal/config and named here.
 package openrails

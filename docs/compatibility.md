@@ -79,8 +79,10 @@ are left out, because their names follow the calendar; the partitioned tables
 are in.
 
 After v1.0.0 the baseline `0001_schema.up.sql` never changes: a schema change
-is a new numbered migration, and `openrails.Migrate` of any v1.x upgrades a
-database of any earlier v1 release in place.
+is a new numbered migration, and `openrails.New` of any v1.x upgrades a
+database of any earlier v1 release in place. An earlier v1.x also boots
+against a database a later one migrated: it leaves the migrations it does not
+know as they are.
 
 - **Additive:** a new table; a new column that is nullable or has a default;
   a new index, function or trigger; a CHECK that accepts more values.

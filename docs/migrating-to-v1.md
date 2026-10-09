@@ -8,7 +8,7 @@ what a host does. A row a host never used needs nothing.
 Before the code:
 
 - **Database.** v1 installs one new baseline and does not upgrade a v0 schema.
-  Start from an empty schema (`openrails.Migrate`) and bring billing facts in
+  Start from an empty schema (`openrails.New` creates it) and bring billing facts in
   with `ImportBilling` ([batch import](batch-import.md)). A merchant archive
   written by v0 is not restored.
 - **Versions.** Pin `github.com/open-rails/openrails` and
@@ -26,13 +26,15 @@ Before the code:
 |---|---|
 | `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Merchant` mounts the one merchant group; each route's permission gates it |
 | `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Prefix`, `Storefront`, `Customers`, `CustomerProfiles`, `Merchant`, `CatalogEdits`, `CookieOrigin`, `AdminConsole`. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
-| `Config.River` (`RiverManaged`, `RiverHostOwned`) | `Migrate` always creates River's tables in `Config.RiverSchema` (default: the schema plus `_river`). `client.Start(ctx)` runs OpenRails' own River there; `client.Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with `client.RiverJobs()` in that schema. `New` starts nothing |
+| `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
+| `Config.Schema`, `Config.RiverSchema` | `Config.Database` (`openrails.DatabaseConfig`) with `Schema` and `RiverSchema`; in `config.yaml`, `database.schema` and `database.river_schema` (env `DATABASE_SCHEMA`, `DATABASE_RIVER_SCHEMA`) |
+| `Config.River` (`RiverManaged`, `RiverHostOwned`) | `New` always creates River's tables in `Config.Database.RiverSchema` (default: the schema plus `_river`). `client.Start(ctx)` runs OpenRails' own River there; `client.Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with `client.RiverJobs()` in that schema. `New` starts nothing |
 | `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
 | `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind` |
 | `openrails.PSPFromEnv` | Removed: build each PSP from your own configuration with the rail's typed struct (`openrails.NMIPSP`, `StripePSP`, `CCBillPSP`, `SolanaPSP`) and its `PSPConfig()`, or keep the merchant in a file read by `openrails.ReadMerchantFile` |
 | `MerchantDeclaration` with `Profile`, `Invoice`, `BillingPolicies`, `CheckoutRouting` and their `*Config` types | `MerchantDeclaration.Settings` is the `billing.MerchantSettings` document the configuration API reads and applies |
 | `Deps.EmailSender` for control-plane mail beside `Config.SendGrid` for billing mail; `Deps.SMSSender` | One sender for both: `Deps.Email` (an `openrails.EmailSender`: `Send` an `openrails.Email`, `CheckHealth`) or `Config.SendGrid` with `APIKey` and `From`. Setting both is refused. Text messages: `Deps.SMS` |
-| A hand-written `ALTER … OWNER` pass after `Migrate` for a shared schema | `Config.SchemaOwner`: `Migrate` hands the schema, and the default River schema, to that existing role |
+| A hand-written `ALTER … OWNER` pass after migrating a shared schema | The role of the pool `New` runs with owns every object; for another owner, have that pool's connections `SET ROLE` to it |
 | `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
 | `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `client.EnsureCustomers` with each customer's `Email`, `Username` and `Blocked`, called whenever they change |

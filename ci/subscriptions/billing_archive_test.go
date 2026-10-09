@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 )
 
@@ -94,7 +95,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	require.Contains(t, archive.String(), `"version":2`)
 
 	destinationSchema := "archive_metadata_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	require.NoError(t, openrails.Migrate(t.Context(), w.pool, openrails.Config{Schema: destinationSchema, RiverSchema: destinationSchema}))
+	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: destinationSchema, RiverSchema: destinationSchema}}))
 	destinationName := pgx.Identifier{destinationSchema}.Sanitize()
 	t.Cleanup(func() {
 		_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+destinationName+" CASCADE")

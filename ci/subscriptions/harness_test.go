@@ -32,6 +32,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/sqlschema"
 )
@@ -312,7 +313,7 @@ func prepareWorldAtDSN(t *testing.T, maxConns int32, databaseURL string, configu
 		pool.Close()
 	})
 	t.Cleanup(w.checkMoneyInvariants)
-	require.NoError(t, openrails.Migrate(t.Context(), pool, openrails.Config{Schema: w.schema, RiverSchema: w.schema}))
+	require.NoError(t, engine.Migrate(t.Context(), pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}}))
 	return w
 }
 
@@ -331,8 +332,7 @@ func (w *world) start() {
 		w.replica.configureRiver(riverConfig)
 	}
 	cfg := &openrails.Config{
-		Schema:            w.schema,
-		RiverSchema:       w.schema,
+		Database:          openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesFull,
 		DB:                &openrails.DBConfig{URL: dbURL},

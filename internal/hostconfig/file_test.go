@@ -12,7 +12,7 @@ import (
 )
 
 // hostOnly are the engine settings a host builds in code; no file key sets them.
-var hostOnly = map[string]bool{"RiverSchema": true, "Merchant": true, "Catalog": true, "Checkout": true, "ControlPlane": true}
+var hostOnly = map[string]bool{"Merchant": true, "Catalog": true, "Checkout": true, "ControlPlane": true}
 
 // Every file key reaches the server's configuration, and every engine setting
 // is either a file key or deliberately host-only.
@@ -32,6 +32,10 @@ func TestFileReachesConfig(t *testing.T) {
 			field.Set(reflect.ValueOf([]string{"x"}))
 		case reflect.Pointer:
 			field.Set(reflect.New(field.Type().Elem()))
+		case reflect.Struct:
+			for j := range field.NumField() {
+				field.Field(j).SetString("sandbox")
+			}
 		default:
 			t.Fatalf("%s: unhandled kind %s", v.Type().Field(i).Name, field.Kind())
 		}

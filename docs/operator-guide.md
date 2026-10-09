@@ -33,14 +33,17 @@ Postgres specifics worth knowing:
   always require encryption. Local issuer/signing/sender exceptions are explicit
   Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
   retired and refuses loading rather than silently selecting a weaker posture.
-- Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
-  migrations. The server validates at boot and refuses to start behind.
+- Migrations: the server and worker apply AuthKit, River, and OpenRails
+  migrations at boot, before anything else touches the database; replicas
+  booting together take turns, and a failed migration fails the boot.
+  `openrails migrate up` applies them ahead of a rollout, and
   `openrails migrate status` reports the ledger against the embedded chain.
+  An older release boots against a database a newer one migrated.
   Every v1.x release upgrades a database of any earlier v1 release in place
   ([compatibility](compatibility.md#database-schema)); a pre-v1 database is not
   upgraded ([migrating to v1](migrating-to-v1.md)).
-- Two apps sharing one billing schema: set `schema_owner` to the role both
-  logins inherit, and `migrate` hands every object to it.
+- Two apps sharing one billing schema connect as one role, or `SET ROLE` to a
+  shared one on every connection: that role owns every object.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on
   `:3053`), `task docker-down` to tear down, `task docker-reset` to recreate the
   database from empty.

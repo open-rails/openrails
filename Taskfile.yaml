@@ -92,7 +92,7 @@ tasks:
       - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down
 
   docker-reset:
-    desc: "Recreate the local stack from EMPTY: down + delete volumes (Postgres data) + up + migrate"
+    desc: "Recreate the local stack from EMPTY: down + delete volumes (Postgres data) + up"
     prompt: This DELETES the local Postgres and Garnet volumes. Continue?
     cmds:
       # -v drops the named volumes (postgres_data, redis_data, spool, runtime keys);

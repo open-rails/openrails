@@ -43,14 +43,14 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	cfg, err := Load("")
 	require.NoError(t, err)
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
-	require.Equal(t, billing.DefaultSchema, cfg.Schema)
+	require.Equal(t, billing.DefaultSchema, cfg.Database.Schema)
 	require.NotEmpty(t, cfg.DB.URL, "the DSN is assembled from the atomic parts")
 	require.NotNil(t, cfg.Auth)
 	require.Empty(t, cfg.Auth.Issuer, "no URL setting supplies an issuer fallback")
 	require.False(t, cfg.CatalogEdits)
 
 	for key, value := range map[string]string{
-		"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DB_SCHEMA": "  Custom_Billing  ",
+		"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DATABASE_SCHEMA": "  Custom_Billing  ", "DATABASE_RIVER_SCHEMA": "jobs",
 		"VAULT_ENABLED": "true", "VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
 		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "SENDGRID_API_KEY": "SG.test-key", "SENDGRID_FROM_ADDRESS": "noreply@billing.example",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
@@ -64,7 +64,8 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, [3]string{"example.com", "user", "pass"}, [3]string{cfg.DB.Host, cfg.DB.Username, cfg.DB.Password})
 	require.True(t, cfg.DB.SQLTrace)
-	require.Equal(t, "custom_billing", cfg.Schema)
+	require.Equal(t, "custom_billing", cfg.Database.Schema)
+	require.Equal(t, "jobs", cfg.Database.RiverSchema)
 	require.Contains(t, cfg.DB.URL, "@example.com:")
 	require.True(t, cfg.Vault.Enabled)
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
@@ -93,7 +94,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "postgres://u:p@localhost:5432/db?sslmode=disable", cfg.DB.URL, "an explicit URL beats the parts")
 
-	for key, value := range map[string]string{"CATALOG_EDITS": "maybe", "TRUSTED_PROXIES": "0.0.0.0/0", "DB_SCHEMA": "bad schema"} {
+	for key, value := range map[string]string{"CATALOG_EDITS": "maybe", "TRUSTED_PROXIES": "0.0.0.0/0", "DATABASE_SCHEMA": "bad schema", "DB_SCHEMA": "billing"} {
 		t.Run("refuses "+key, func(t *testing.T) {
 			t.Setenv(key, value)
 			_, err := Load("")
@@ -166,13 +167,13 @@ func TestLoadSourcePrecedence(t *testing.T) {
 func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	bootEnv(t)
 	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"),
-		"schema: Archive_Test\ndb:\n  url: postgres://file.invalid/db\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n")
+		"database:\n  schema: Archive_Test\ndb:\n  url: postgres://file.invalid/db\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n")
 	t.Setenv("DB_URL", "postgres://env.invalid/db")
 	unsetenv(t, "TEST_MODE")
 	cfg, err := LoadDatabase(path)
 	require.NoError(t, err)
 	require.Equal(t, "postgres://env.invalid/db", cfg.DB.URL)
-	require.Equal(t, "archive_test", cfg.Schema)
+	require.Equal(t, "archive_test", cfg.Database.Schema)
 	require.Nil(t, cfg.Auth, "never a server configuration")
 	require.Nil(t, cfg.Redis)
 	cfg, err = LoadDatabase(path, WithOverride("db.url", "postgres://flag.invalid/db"))
