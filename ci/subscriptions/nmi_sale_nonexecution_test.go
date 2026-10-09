@@ -42,12 +42,9 @@ func TestNMISaleNonExecutionNeedsProviderEvidence(t *testing.T) {
 				w.nmi.HideSales(1)
 			}
 			w.nmi.DropSaleResponses(1)
-			_, err = createCheckoutAttempt(t.Context(), client, billing.CreateCheckoutAttemptParams{
-				OfferKind: billing.OfferPermanent, Customer: c.identity(), Entitlement: "content:post", PriceID: price.ID,
-				IdempotencyKey: "buy-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
-				SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return",
-			})
+			paid, err := c.checkout(embedded, order{price: price.ID, rail: "nmi", method: method, successURL: "https://e2e.test/return"})
 			require.NoError(t, err)
+			t.Logf("pay with the sale's answer lost: %+v", paid.CheckoutSessionPayResult)
 			require.NoError(t, w.jobs.Stop(t.Context()))
 			w.advance(2 * time.Hour)
 			var id uuid.UUID

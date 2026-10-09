@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -34,13 +33,26 @@ func nmiDeleteFails(w *world, failing *atomic.Bool) {
 	}, http.StatusServiceUnavailable, 1000)
 }
 
-// reenroll buys the legacy membership's own price again through checkout.
-func (l *legacy) reenroll(method string) (*billing.CheckoutAttempt, error) {
-	return createCheckoutAttempt(l.w.t.Context(), l.w.client[embedded], billing.CreateCheckoutAttemptParams{
-		OfferKind: billing.OfferRecurring, Customer: l.c.identity(), Entitlement: l.ent, PriceID: l.price.ID,
-		IdempotencyKey: "reenroll-" + uuid.NewString(), PaymentOptions: billing.CheckoutPaymentOptions{PSP: "nmi", PaymentMethodID: pmid(method)},
-		SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-	})
+// checkoutAgain buys the legacy membership's own price again through checkout.
+func (l *legacy) checkoutAgain(method string) (*sessionPaid, error) {
+	l.w.t.Helper()
+	return l.c.checkout(embedded, order{price: l.price.ID, rail: "nmi", method: method, successURL: "https://e2e.test/return"})
+}
+
+// reenroll is a checkoutAgain the page answers.
+func (l *legacy) reenroll(method string) *sessionPaid {
+	l.w.t.Helper()
+	paid, err := l.checkoutAgain(method)
+	require.NoError(l.w.t, err)
+	return paid
+}
+
+// requireSlotHeld is a purchase refused because the customer's slot is held:
+// nothing charged, and the page says why.
+func requireSlotHeld(t *testing.T, paid *sessionPaid) {
+	t.Helper()
+	require.Equal(t, "blocked", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+	require.NotNil(t, paid.FailureMessage)
 }
 
 // A canceled membership whose NMI schedule may still bill holds the
@@ -68,9 +80,9 @@ func TestPendingProviderStopHoldsSlot(t *testing.T) {
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, l.sub).Status)
 	require.True(t, w.nmi.ScheduleLive(l.railSub), "the provider stop has not succeeded")
 
-	_, err := l.reenroll(method)
-	requireCode(t, err, http.StatusConflict, billing.CodeResourceConflict)
-	require.ErrorContains(t, err, "resume")
+	refused := l.reenroll(method)
+	requireSlotHeld(t, refused)
+	require.Contains(t, *refused.FailureMessage, "resume")
 	require.Len(t, w.nmi.Ledger(""), before, "the refused enrollment charges nothing")
 
 	w.advance(end.Add(time.Second).Sub(w.clock.Now()))
@@ -93,9 +105,7 @@ func TestPendingProviderStopHoldsSlot(t *testing.T) {
 	failing.Store(false)
 	w.until(func() bool { return !w.nmi.ScheduleLive(l.railSub) }, "the delete succeeds once NMI answers")
 	w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the verified stop releases the slot")
-	attempt, err := l.reenroll(method)
-	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
+	require.Equal(t, "succeeded", l.reenroll(method).Status)
 	require.Len(t, w.nmi.Ledger(""), before+2, "one charge for the new membership")
 }
 
@@ -114,8 +124,7 @@ func TestCanceledInUndoWindowResumesInsteadOfBuyingAgain(t *testing.T) {
 	w.settle()
 	require.NotNil(t, w.subscription(remote, l.sub).DeletionScheduledAt)
 
-	_, err := l.reenroll(method)
-	requireCode(t, err, http.StatusConflict, billing.CodeResourceConflict)
+	requireSlotHeld(t, l.reenroll(method))
 	require.Len(t, w.nmi.Ledger(""), before)
 
 	status, body = l.c.call(http.MethodPost, "/subscriptions/"+l.sub.String()+"/resume", "", nil)
@@ -143,19 +152,16 @@ func TestDisarmedProviderStopHoldsSlot(t *testing.T) {
 	w.settle()
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(remote, l.sub).Status)
 
-	_, err = l.reenroll(method)
-	requireCode(t, err, http.StatusConflict, billing.CodeResourceConflict)
+	requireSlotHeld(t, l.reenroll(method))
 	require.Len(t, w.nmi.Ledger(""), before)
 
 	w.armDestructive()
 	w.until(func() bool { return !w.nmi.ScheduleLive(l.railSub) }, "the held delete runs once armed")
 	w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the verified stop releases the slot")
-	_, err = l.reenroll(method)
+	_, err = l.checkoutAgain(method)
 	requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionPaidThrough)
 	w.advanceHealthyTo(l.periodEnd().Add(time.Minute))
-	attempt, err := l.reenroll(method)
-	require.NoError(t, err)
-	require.Equal(t, billing.CheckoutAttemptSucceeded, attempt.Status)
+	require.Equal(t, "succeeded", l.reenroll(method).Status)
 	require.Len(t, w.nmi.Ledger(""), before+1, "one charge, after the paid period")
 }
 
