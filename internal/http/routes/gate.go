@@ -155,7 +155,7 @@ func fixedMerchant(fixed billingauth.Target) router.Middleware {
 }
 
 // selectedMerchant pins the merchant the request selected, by its
-// OpenRails-Merchant selector (resolved before the gate) or the merchant API
+// OpenRails-Merchant selector (resolved before the gate) or the admin API
 // host it called. Without a selection the request is refused.
 func selectedMerchant() router.Middleware {
 	return func(next router.Handler) router.Handler {
@@ -299,17 +299,17 @@ func (d discard) Header() http.Header       { return d.header }
 func (discard) Write(b []byte) (int, error) { return len(b), nil }
 func (discard) WriteHeader(int)             {}
 
-// staffGates gates a merchant route: the mount's merchant, then the host's
-// RequirePermission for the route's guard and, for an operation that moves
-// money or removes access by a user in person, Sensitive.
+// staffGates gates a merchant-tier route: the mount's merchant, then the
+// host's RequirePermission for the route's permission and, for an operation
+// that moves money or removes access by a user in person, Sensitive.
 func (e *Env) staffGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
-		panic(MountError{Route: route.Key(), Reason: "a merchant route needs Routes.Auth"})
+		panic(MountError{Route: route.Key(), Reason: "an admin route needs Routes.Auth"})
 	}
-	perm := e.guard(route)
+	perm := e.permissionFor(route)
 	if strings.TrimSpace(perm) == "" {
-		panic(MountError{Route: route.Key(), Reason: "no guard names a permission for it (Routes.Guards)"})
+		panic(MountError{Route: route.Key(), Reason: "no permission (Routes.Permissions)"})
 	}
 	var out []router.Middleware
 	if !e.AuthBindsMerchant {
@@ -322,16 +322,13 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 	return append(out, e.staffCheck(route, a))
 }
 
-// guard is the permission a merchant route checks: a control-plane route's
-// own, a staff route's guard.
-func (e *Env) guard(route Route) string {
+// permissionFor is the permission a merchant-tier route checks: a
+// control-plane route's own, a staff route's bundle's.
+func (e *Env) permissionFor(route Route) string {
 	if !route.Staff() {
 		return route.Perm
 	}
-	if e.Guard == nil {
-		return ""
-	}
-	return e.Guard(route)
+	return e.Permissions.For(route)
 }
 
 // inPerson stacks the host's Sensitive for a user acting in person. A key or
@@ -421,7 +418,8 @@ func (e *Env) staffCheck(route Route, a billingauth.Auth) router.Middleware {
 }
 
 // staffCan answers a handler that asks whether its caller would pass the
-// guard of another route, by key, on the merchant the route already resolved.
+// permission of another route, by key, on the merchant the route already
+// resolved.
 func (e *Env) staffCan(r *http.Request, routeKey string) error {
 	if IsNilAuth(e.Auth) {
 		return billingauth.ErrUnauthenticated
@@ -432,7 +430,7 @@ func (e *Env) staffCan(r *http.Request, routeKey string) error {
 	route, ok := routeByKey(routeKey)
 	perm := ""
 	if ok {
-		perm = e.guard(route)
+		perm = e.permissionFor(route)
 	}
 	if perm == "" {
 		return billingauth.ErrForbidden

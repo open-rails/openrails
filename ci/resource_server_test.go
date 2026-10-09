@@ -152,7 +152,7 @@ func provision(t *testing.T, cp *server.Server, slug string) {
 	require.NoError(t, err)
 }
 
-// A trusted issuer's at+jwt reaches the merchant API with the token's
+// A trusted issuer's at+jwt reaches the admin API with the token's
 // permissions within the issuer's ceiling, on the merchants the issuer is
 // trusted for only; DPoP-bound tokens need a fresh, nonce-carrying proof;
 // every other issuer, audience or lifetime is refused.
@@ -182,8 +182,8 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	provision(t, cp, rival)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	const findings, psps, catalog = "/v1/merchant/findings", "/v1/merchant/psps", "/v1/merchant/catalog/revision"
-	cancel := "/v1/merchant/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
+	const findings, psps, catalog = "/v1/admin/findings", "/v1/admin/psps", "/v1/admin/catalog/revision"
+	cancel := "/v1/admin/subscriptions/" + billing.SubscriptionID(uuid.New()).String() + "/cancel"
 	bearer := func(token string) string { return "Bearer " + token }
 
 	t.Run("accepted", func(t *testing.T) {
@@ -396,7 +396,7 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 	provision(t, cp, shop)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	const findings, psps = "/v1/merchant/findings", "/v1/merchant/psps"
+	const findings, psps = "/v1/admin/findings", "/v1/admin/psps"
 	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: resourceID, Scopes: []string{billing.ScopeMerchant}}
 	owner := authtest.NewUser(t, as.Client)
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(owner.ID), admin)
@@ -532,7 +532,7 @@ merchants:
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, plane, manifest, nil, ""))
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	const findings = "/v1/merchant/findings"
+	const findings = "/v1/admin/findings"
 	call := func(token string) *httptest.ResponseRecorder {
 		return serve(handler, rsRequest{path: findings, authorization: "Bearer " + token})
 	}
@@ -623,7 +623,7 @@ func TestResourceServerFederatedGrants(t *testing.T) {
 			}
 		})
 	}
-	const grants, findings = "/v1/merchant/federated-grants", "/v1/merchant/findings"
+	const grants, findings = "/v1/merchant/federated-grants", "/v1/admin/findings"
 
 	w := send(http.MethodPost, grants, owner, body{"email": " Staff@Example.test ", "role": "viewer"})
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())

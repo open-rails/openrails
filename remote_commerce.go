@@ -23,7 +23,7 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 		return nil, invalidErr("exactly one of price_id or price_key is required")
 	}
 	var out billing.CheckoutSessionLink
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/checkout-sessions", request, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/checkout-sessions", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -34,7 +34,7 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.Crea
 // the merchant's payment setup.
 func (c *Client) GetPublicConfig(ctx context.Context, requestOptions ...RequestOption) (*billing.PublicConfig, error) {
 	var out billing.PublicConfig
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/config", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/config", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -61,7 +61,7 @@ func (c *Client) ListCheckoutOptions(ctx context.Context, query billing.Checkout
 		values.Set("product_key", query.ProductKey)
 	}
 	var out billing.ListPage[billing.CheckoutOption]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+values.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/checkout-options?"+values.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

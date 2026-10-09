@@ -24,7 +24,7 @@ type Config struct {
 	// "/auth/v1" (the control plane mount). Embedded: the host's AuthKit JSON
 	// API, "/api/v1" by default, possibly on another origin.
 	AuthBaseURL string `json:"auth_base_url"`
-	// APIBaseURL is the merchant API base. Standalone default "/v1";
+	// APIBaseURL is the admin API base. Standalone default "/v1";
 	// embedded hosts typically "/billing/v1".
 	APIBaseURL string `json:"api_base_url"`
 	// NLWidgetsEnabled mirrors the #741 fail-closed LLM gate: false hides the

@@ -48,8 +48,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}
-	selection := config.Routes{Auth: authtest.Deny{}, Storefront: true, Merchant: true, MerchantConfig: true, Guards: authtest.Guards(),
-		CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}
+	selection := config.Routes{Auth: authtest.Deny{}, Permissions: authtest.Permissions()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -92,8 +91,8 @@ func TestInventoryMountsNatively(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/pay/v1/config", []int{http.StatusOK}},
 		{http.MethodHead, "/api/pay/v1/config", []int{http.StatusOK}},
-		{http.MethodPost, "/api/pay/v1/merchant/product-access", []int{http.StatusUnauthorized}},
-		{http.MethodPost, "/api/pay/v1/merchant/customers/entitlementsXYZ", []int{http.StatusNotFound, http.StatusMethodNotAllowed}},
+		{http.MethodPost, "/api/pay/v1/admin/product-access", []int{http.StatusUnauthorized}},
+		{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXYZ", []int{http.StatusNotFound, http.StatusMethodNotAllowed}},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", []int{http.StatusNoContent}},
 		{http.MethodGet, "/API/pay/v1/config", []int{http.StatusNotFound}},
 	} {
@@ -165,9 +164,9 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 	graph := &app.App{Config: cfg, Runtime: rt}
 	for _, prefix := range []string{"/portal/*audience", "/portal/+audience", "/api/v1/merchants/{slug}/billing/me"} {
 		fake := &authtest.Fake{}
-		profiles := []config.CustomerRoutes{{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Auth: fake}}
+		profiles := []config.CustomerRoutes{{Prefix: prefix, Auth: fake}}
 		hosted := strings.Contains(prefix, "{slug}")
-		if err := embedhttp.ValidateRoutes(config.Routes{CustomerProfiles: profiles}, profiles, graph.Runtime); err != nil {
+		if err := embedhttp.ValidateRoutes(config.Routes{Auth: fake, CustomerProfiles: profiles}); err != nil {
 			require.False(t, hosted, err)
 			continue
 		}

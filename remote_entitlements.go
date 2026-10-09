@@ -78,7 +78,7 @@ func (c *Client) CreateProductAccess(ctx context.Context, params billing.CreateP
 		headers = http.Header{"Idempotency-Key": {key}}
 	}
 	var out billing.CreateProductAccessBatchResult
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/product-access", params, &out, headers, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/product-access", params, &out, headers, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil

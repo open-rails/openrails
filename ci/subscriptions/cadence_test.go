@@ -222,7 +222,7 @@ func TestCadenceMetrics(t *testing.T) {
 		require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT billing.monthly_normalized_amount($1, $2)`), row.amount, row.hours).Scan(&norm))
 		expected += norm
 
-		status, res := w.staffJSON(http.MethodPost, "/v1/merchant/metrics/query", map[string]any{
+		status, res := w.staffJSON(http.MethodPost, "/v1/admin/metrics/query", map[string]any{
 			"measures": []string{"mrr", "subscriptions"}, "by": []string{"billing_cycle"},
 			"filters": map[string][]string{"status": {"active"}}, "range": map[string]string{"last": "1d"},
 		})

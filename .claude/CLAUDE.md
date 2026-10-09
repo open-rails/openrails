@@ -24,21 +24,22 @@ through `host-four`; these are placeholders, not customer or repository names.
   typed enums. Types live in `billing`; the catalog document in `catalog`. Everything
   else is `internal/`. `Config` is plain data; anything that reaches outside the process
   is in `Deps`.
-- The Go client is the merchant API: each merchant route has one `*Client` method.
-  Customer self-service (`/v1/me`) is for browsers through `sdk/billing-ui`.
+- The Go client is the admin API: each admin, catalog-edit and merchant-config route
+  has one `*Client` method. Customer self-service (`/v1/me`) is for browsers through
+  `sdk/billing-ui`.
 - Every route is declared once in the route catalog (`internal/http/routes`, one file
-  per resource) with its tier, guards (a staff route) or permission, request,
-  responses and error codes. The catalog mounts the route and generates
-  `api/openapi.json`, the TypeScript wire types of billing-ui and the console, the
-  `openrails.RouteSet` constants (`route_sets.go`), and `docs/api/routes.md` /
-  `error-codes.md`.
-- Route groups: checkout, customer (`/v1/me`), two staff groups under `/v1/merchant`
-  (`Routes.Merchant`: staff work on customers; `Routes.MerchantConfig`: the
-  merchant's own configuration), webhooks, and the standalone control plane and
-  platform.
-- OpenRails names no staff permissions: the host guards staff routes with its own
-  (`Routes.Guards`, by level group, resource group or one route, the most specific
-  winning), and `Mount` refuses a staff route no guard covers.
+  per resource) with its tier, level (an admin route: read or write) or permission,
+  request, responses and error codes. The catalog mounts the route and generates
+  `api/openapi.json`, the TypeScript wire types of billing-ui and the console, and
+  `docs/api/routes.md` / `error-codes.md`.
+- Bundles: public, customer (`/v1/me`) and webhooks are always mounted; under
+  `/v1/admin` the admin routes (`Permissions.AdminRead` for reads, `AdminWrite` for
+  writes), catalog edits (`CatalogWrite`) and the merchant's own configuration
+  (`MerchantConfig`) mount only with the host's permission; `AdminWrite` and
+  `CatalogWrite` need `AdminRead`. The standalone control plane (`/v1/merchant`,
+  `/v1/merchants`) and platform (`/v1/platform`) are the server's.
+- OpenRails names no staff permissions: the host passes its own in
+  `Routes.Permissions`; the in-process `Client` checks none.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
@@ -57,8 +58,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   `billing.Rail` enum). A **PSP** (payment service provider) is a merchant's concrete
   ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi): credentials + `account_id` + key
   (`psps.key`). A PSP is NOT the acquiring bank. Solana is the self-custody wallet slot.
-- PSP routes are `/v1/merchant/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, `ArchivePSP`);
-  rails are read at `/v1/merchant/rails`. Provider callbacks land on
+- PSP routes are `/v1/admin/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, `ArchivePSP`);
+  rails are read at `/v1/admin/rails`. Provider callbacks land on
   `/v1/webhooks/{rail}/{account_id}`.
 - A table that stores both `rail` and `psp_id` keeps them in agreement by a composite
   foreign key to `psps`.

@@ -22,7 +22,7 @@ func (c *Client) ListInvoices(ctx context.Context, params billing.InvoiceListPar
 		return nil, err
 	}
 	var out billing.ListPage[billing.Invoice]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/invoices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/invoices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -33,7 +33,7 @@ func invoicePath(id billing.InvoiceID) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/v1/merchant/invoices/" + invoice, nil
+	return "/v1/admin/invoices/" + invoice, nil
 }
 
 // invoiceCall posts or reads one invoice route answering T.

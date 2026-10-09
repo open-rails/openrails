@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 )
 
-// AskCatalog handles POST /v1/merchant/catalog/ask: a model answers a
+// AskCatalog handles POST /v1/admin/catalog/ask: a model answers a
 // question about the catalog from read-only lookups and, when drafting is
 // enabled, proposes price changes for a person to review. It changes nothing.
 func AskCatalog(r *httprequest.Request) {

@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/credential"
-	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/routesurface"
@@ -110,15 +109,13 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Contains(t, ready.Body.String(), `"service_unavailable"`)
 	require.NotContains(t, ready.Body.String(), "postgres")
 
-	// #623: the standalone server publishes every route group; a request
-	// that resolves no merchant has no payment setup.
+	// #623: the standalone server publishes every bundle; a request that
+	// resolves no merchant has no payment setup.
 	doc := get("/v1/config")
 	require.Equal(t, http.StatusOK, doc.Code)
 	var served billing.PublicConfig
 	require.NoError(t, json.Unmarshal(doc.Body.Bytes(), &served), doc.Body.String())
-	for _, rs := range embedhttp.AllRouteSets {
-		require.True(t, served.Capabilities.RouteGroups[string(rs)], rs)
-	}
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true}, served.Capabilities.RouteGroups)
 	require.Nil(t, served.Payment)
 	require.Contains(t, doc.Body.String(), `"payment":null`)
 	require.Equal(t, "public, max-age=300", doc.Header().Get("Cache-Control"))

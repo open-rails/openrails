@@ -19,7 +19,7 @@ export function detectDirection(
 export type MigrationMode = "grandfather" | "migrate"
 
 // DEFAULT_NOTICE_WINDOW_DAYS is only a fallback for the brief window before
-// the merchant's configured value (GET /v1/merchant/configuration,
+// the merchant's configured value (GET /v1/admin/configuration,
 // reprice_notice_window_days) has loaded — it mirrors the server's own
 // default (subscriptions.DefaultRepriceNoticeWindowDays) so the UI never
 // under-gates while loading. #781: the server now ALSO enforces this

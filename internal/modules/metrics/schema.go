@@ -2,7 +2,7 @@ package metrics
 
 import "github.com/open-rails/openrails/billing"
 
-// SchemaDoc is the GET /v1/merchant/metrics/schema payload: the registry as
+// SchemaDoc is the GET /v1/admin/metrics/schema payload: the registry as
 // the LLM-legible context document. One source of truth — the same registry
 // drives enforcement, so this cannot drift.
 type SchemaDoc = billing.MetricsSchema

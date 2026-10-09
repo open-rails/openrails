@@ -19,7 +19,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 		return nil, invalidErr(err.Error())
 	}
 	var out billing.CatalogApplicationReceipt
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/applications", document, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/applications", document, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -34,7 +34,7 @@ func (c *Client) ReplaceEntitlements(ctx context.Context, params billing.Replace
 		return nil, invalidErr("pairs is required")
 	}
 	var out billing.CatalogApplicationReceipt
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/entitlement-replacements", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/entitlement-replacements", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -44,7 +44,7 @@ func (c *Client) ReplaceEntitlements(ctx context.Context, params billing.Replace
 // advances, and whether catalog writes are accepted.
 func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error) {
 	var out billing.CatalogRevision
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/revision", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/revision", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -63,7 +63,7 @@ func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDri
 		return nil, err
 	}
 	var out billing.ListPage[billing.CatalogDrift]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/drift?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/drift?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -73,7 +73,7 @@ func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDri
 // drift it finds; it changes neither the PSPs nor the catalog.
 func (c *Client) RefreshCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftRefresh, error) {
 	var out billing.CatalogDriftRefresh
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/drift/refresh", struct{}{}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/drift/refresh", struct{}{}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -84,7 +84,7 @@ func (c *Client) RefreshCatalogDrift(ctx context.Context, requestOptions ...Requ
 // deployment must enable it.
 func (c *Client) AskCatalog(ctx context.Context, params billing.AskCatalogParams, requestOptions ...RequestOption) (*billing.CatalogAnswer, error) {
 	var out billing.CatalogAnswer
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/ask", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/ask", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

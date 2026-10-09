@@ -17,6 +17,7 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,7 +99,7 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	_, err = client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{CreditGrant: catalog.Value(catalog.CreditGrantSpec{Currency: "USD", Amount: &face, ExpiresAfterDays: &days})})
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
 	deliver := func(raw []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, "acct_e2e", "whsec_e2e", raw, time.Now())

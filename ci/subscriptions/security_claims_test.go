@@ -12,7 +12,7 @@ import (
 )
 
 // SEC-33: provider account ids are global and CCBill events route by account
-// id alone. A merchant cannot claim an account through the merchant API
+// id alone. A merchant cannot claim an account through the admin API
 // without credentials that prove control of it, so a squatter cannot register
 // another merchant's CCBill account first and receive its events. The
 // deployment operator's declaration remains the approved path.

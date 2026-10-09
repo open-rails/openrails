@@ -26,18 +26,18 @@ for its holders.
 
 ## Reading access
 
-Merchant API (staff reads, `openrails.StaffReads`; resource group `openrails.Access`):
+Admin API (`Permissions.AdminRead`):
 
-- `POST /v1/merchant/customers/{customer_id}/entitlements/check` —
+- `POST /v1/admin/customers/{customer_id}/entitlements/check` —
   `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
   `{"entitlements": {key: bool}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
   for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
-- `GET /v1/merchant/customers/{customer_id}/entitlements?prefix=&at=&cursor=&limit=` —
+- `GET /v1/admin/customers/{customer_id}/entitlements?prefix=&at=&cursor=&limit=` —
   one page of the customer's keys in byte order (`Client.ListCustomerEntitlements`).
-- `GET /v1/merchant/entitlements/{entitlement}/customers?at=&cursor=&limit=` — one page
+- `GET /v1/admin/entitlements/{entitlement}/customers?at=&cursor=&limit=` — one page
   of the customers holding a key (`Client.ListEntitlementCustomers`).
-- `POST /v1/merchant/customers/{customer_id}/product-access/check` and
-  `GET /v1/merchant/customers/{customer_id}/product-access?live=` — products held, bought,
+- `POST /v1/admin/customers/{customer_id}/product-access/check` and
+  `GET /v1/admin/customers/{customer_id}/product-access?live=` — products held, bought,
   subscribed or granted (`Client.CheckProductAccess`, `Client.ListProductAccess`).
 - `GET /v1/me/entitlements` and `GET /v1/me/product-access` — the signed-in customer's own.
 
@@ -50,18 +50,15 @@ list is `{data, next_cursor}` with keyset cursors.
   price's `access_duration_hours` (stacked after the customer's live window of the same
   product), a subscription period for its accepted duration, renewal grace while a
   renewal is retried. Accepted orders freeze price and terms, not keys.
-- **Free grants**: `POST /v1/merchant/product-access` (`Client.CreateProductAccess`)
+- **Free grants**: `POST /v1/admin/product-access` (`Client.CreateProductAccess`)
   grants up to 100 products across customers, all or none, each with `hours` (extends
   after the customer's latest live window of the product), `ends_at`, or neither
-  (indefinite), a `reason` and a `note`. A host that keeps indefinite grants from
-everyone who can grant access guards `openrails.CreateProductAccess` with a
-stricter permission. The
-  grant records who granted it. A retry with the same `Idempotency-Key` header answers
+  (indefinite), a `reason` and a `note`. The grant records who granted it. A retry with the same `Idempotency-Key` header answers
   the first grants.
-- **Revoke** one window with `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}`
+- **Revoke** one window with `DELETE /v1/admin/customers/{customer_id}/product-access/{id}`
   (`Client.DeleteProductAccess`). Refunds and chargebacks revoke their payment's window.
 - **Catalog edits**: `UpdateProduct` and catalog applications set a product's keys;
-  `POST /v1/merchant/catalog/entitlement-replacements` (`Client.ReplaceEntitlements`) moves a
+  `POST /v1/admin/catalog/entitlement-replacements` (`Client.ReplaceEntitlements`) moves a
   key to another across every product in one edit. Each edit reports, per product, the keys
   added and removed and how many customers held it, and queues a
   `product.entitlements_changed` host event.

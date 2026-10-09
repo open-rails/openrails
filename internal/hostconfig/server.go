@@ -45,7 +45,7 @@ type TrustedIssuerConfig struct {
 	// Permissions is the ceiling: a token grants only what it lies within.
 	Permissions []string
 	// AllowedOrigins are the browser origins (scheme://host[:port]) allowed
-	// to call the merchant API cross-origin with its tokens.
+	// to call the admin API cross-origin with its tokens.
 	AllowedOrigins []string
 	// GroupRoles maps a role the token's roles claim names to an OpenRails
 	// merchant role (owner, support, viewer), for issuers that cannot mint

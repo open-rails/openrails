@@ -239,11 +239,8 @@ func (m *model) operation(r routes.Route) *obj {
 		op.set("security", []any{newObj("bearer", []string{})})
 	}
 	op.set("x-openrails-auth", string(r.Auth))
-	if r.Perm != "" {
-		op.set("x-openrails-permission", r.Perm)
-	}
-	if guards := r.Guards(); len(guards) > 0 {
-		op.set("x-openrails-guards", guards)
+	if perm := routePermission(r); perm != "" {
+		op.set("x-openrails-permission", perm)
 	}
 	if r.Sensitive {
 		op.set("x-openrails-sensitive", true)
@@ -251,15 +248,8 @@ func (m *model) operation(r routes.Route) *obj {
 	if r.When != routes.Always {
 		op.set("x-openrails-mounted-when", string(r.When))
 	}
-	if r.CatalogWrite {
+	if r.Group == routes.CatalogWrite {
 		op.set("x-openrails-catalog-write", true)
-	}
-	if r.Group == routes.Customer {
-		scope := string(r.Scope)
-		if scope == "" {
-			scope = "self_service"
-		}
-		op.set("x-openrails-customer-scope", scope)
 	}
 	if r.Limit != "" {
 		op.set("x-openrails-operation-limit", string(r.Limit))
@@ -336,4 +326,13 @@ func (m *model) openAPI() ([]byte, error) {
 		"x-openrails-error-codes", codes,
 	)
 	return marshalIndent(doc)
+}
+
+// routePermission is what a route's caller must hold: a staff route's
+// Routes.Permissions field, another route's own permission.
+func routePermission(r routes.Route) string {
+	if needs := r.Needs(); needs != "" {
+		return needs
+	}
+	return r.Perm
 }

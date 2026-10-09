@@ -13,7 +13,7 @@ import (
 var configRoutes = []Route{
 	{Method: GET, Path: "/v1/config", Group: Meta, Auth: AuthPublic,
 		Responses: []Reply{{200, billing.PublicConfig{}}}, Bind: publicConfig},
-	{Method: GET, Path: "/v1/merchant/config", Group: Merchant, Auth: AuthMerchant, Name: "GetPublicConfig", Level: LevelRead, Resources: res(ResPublicConfig),
+	{Method: GET, Path: "/v1/admin/config", Group: Admin, Auth: AuthMerchant, Name: "GetPublicConfig", Level: LevelRead,
 		Responses: []Reply{{200, billing.PublicConfig{}}}, Errors: codes("service_unavailable"), Bind: merchantConfig},
 }
 

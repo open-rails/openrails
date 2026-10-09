@@ -29,7 +29,6 @@ import (
 func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	fake, merchantKey := withSolana(t, w)
 	w.start()
 	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)

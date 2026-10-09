@@ -25,23 +25,16 @@ type (
 	CredentialPosture = config.CredentialPosture
 	// CheckoutConfig is Config.Checkout: the shared payment page.
 	CheckoutConfig = config.CheckoutConfig
-	// Routes selects the HTTP surface Client.Routes returns and the adapters
-	// mount on the root router.
+	// Routes is the HTTP surface the adapters mount on the root router.
 	Routes = config.Routes
-	// Guards is Routes.Guards: the host's permission for each staff route set.
-	Guards = config.Guards
-	// RouteSet names staff routes a guard covers: a level group (StaffReads,
-	// StaffWrites, MerchantConfig), a resource group (Refunds) or one route
-	// (RefundPayment). The constants are generated from the route catalog.
-	RouteSet = config.RouteSet
-	// AdminConsole is Routes.AdminConsole: the merchant admin console.
+	// Permissions is Routes.Permissions: the host's permissions for the admin
+	// and merchant-config bundles.
+	Permissions = config.Permissions
+	// AdminConsole is Routes.AdminConsole: the staff dashboard.
 	AdminConsole = config.AdminConsole
 	// CustomerRoutes is one further customer surface of
 	// Routes.CustomerProfiles.
 	CustomerRoutes = config.CustomerRoutes
-	// CustomerHTTPScope is Routes.Customers and CustomerRoutes.Scope: which
-	// customer routes a surface mounts.
-	CustomerHTTPScope = config.CustomerHTTPScope
 
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.
@@ -136,19 +129,6 @@ const (
 	SecretBackendVault = config.SecretBackendVault
 	// SecretBackendDB stores credentials encrypted in the database.
 	SecretBackendDB = config.SecretBackendDB
-
-	// CustomersNone mounts no customer routes.
-	CustomersNone = config.CustomersNone
-	// CustomerSelfService is the full customer self-service API.
-	CustomerSelfService = config.CustomerSelfService
-	// CustomerSubscriptionManagement is cancellation, resumption,
-	// subscription payment-method changes and invoice collection-method
-	// selection only.
-	CustomerSubscriptionManagement = config.CustomerSubscriptionManagement
-	// CustomerBillingManagement adds billing history, purchased access, saved
-	// methods, payment recovery and paying a checkout session the merchant
-	// minted, without starting checkouts or changing plans.
-	CustomerBillingManagement = config.CustomerBillingManagement
 
 	// SubjectUser is a user: a customer, or staff.
 	SubjectUser = billingauth.SubjectUser

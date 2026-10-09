@@ -336,7 +336,7 @@ function MerchantProfileForm({
 // RepriceNoticeWindowForm (#781): the merchant-configurable minimum advance
 // notice (days) a subscription price INCREASE must give existing
 // subscribers. The catalog price-change wizard reads this same value
-// (GET /v1/merchant/configuration) for its own date-picker gate; the API
+// (GET /v1/admin/configuration) for its own date-picker gate; the API
 // enforces it regardless of what the console shows.
 function RepriceNoticeWindowForm({
   revision,

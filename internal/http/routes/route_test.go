@@ -26,8 +26,9 @@ var pathShape = regexp.MustCompile(`^/$|^(/([a-z0-9][a-z0-9.:-]*|\{[a-z_]+\}))+$
 
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
-	Merchant:       {"/v1/merchant/"},
-	MerchantConfig: {"/v1/merchant/"},
+	Admin:          {"/v1/admin/"},
+	CatalogWrite:   {"/v1/admin/catalog/", "/v1/admin/customers/"},
+	MerchantConfig: {"/v1/admin/"},
 	Customer:       {"/v1/me/"},
 	ControlPlane:   {"/v1/merchant/", "/v1/merchants"},
 	Platform:       {"/v1/platform/"},
@@ -63,7 +64,7 @@ func TestCatalogDeclarations(t *testing.T) {
 		}
 		switch {
 		case r.Staff():
-			require.Empty(t, r.Perm, "%s: a staff route checks its guard", key)
+			require.Empty(t, r.Perm, "%s: a staff route checks its bundle's permission", key)
 		case r.Auth == AuthMerchant:
 			require.True(t, strings.HasPrefix(r.Perm, "merchant:"), "%s: a control-plane route checks the server's merchant: permission, not %q", key, r.Perm)
 		case r.Auth == AuthOperator:
@@ -74,7 +75,7 @@ func TestCatalogDeclarations(t *testing.T) {
 		if r.Limit != "" {
 			require.Equal(t, AuthMerchant, r.Auth, "%s: the operation limiter keys the authorized principal", key)
 		}
-		if r.Scope != ScopeSelfService || r.InvokerScoped {
+		if r.InvokerScoped {
 			require.Equal(t, Customer, r.Group, key)
 		}
 		if r.Method == GET {
@@ -157,7 +158,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Guard: levelGuard(t), Capabilities: &billing.Capabilities{}, External: External{
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
 		Live: raw, Ready: raw, Metrics: raw, CaptchaStatus: raw, CaptchaScript: raw,
 		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
 		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
@@ -168,10 +169,10 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 
 	RegisterMetaRoutes(at(""), opts)
 	RegisterUserRoutes(at("/v1"), rt, opts)
-	RegisterMerchantRoutes(at("/v1"), rt, opts, Merchant, MerchantConfig)
+	RegisterStaffRoutes(at("/v1"), rt, opts)
 	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
-	RegisterSelfServiceRoutes(at("/v1/me"), rt, customers)
+	RegisterCustomerRoutes(at("/v1/me"), rt, customers)
 	RegisterPlatformRoutes(at("/v1/platform"), rt, PlatformOptions{})
 
 	var unmounted []string
@@ -188,30 +189,19 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	require.Empty(t, seen, "mounted outside the catalog")
 	// A bare runtime has no merchant directory and no LLM.
 	require.Equal(t, []string{
-		"catalog_copilot POST /v1/merchant/catalog/ask",
-		"dashboard_generation POST /v1/merchant/dashboard/widgets/generate",
-		"merchant_directory GET /v1/merchant/api-host",
-		"merchant_directory POST /v1/merchant/api-host/verify",
-		"merchant_directory PUT /v1/merchant/api-host",
-		"metrics_ask POST /v1/merchant/metrics/ask",
+		"catalog_copilot POST /v1/admin/catalog/ask",
+		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
+		"merchant_directory GET /v1/admin/api-host",
+		"merchant_directory POST /v1/admin/api-host/verify",
+		"merchant_directory PUT /v1/admin/api-host",
+		"metrics_ask POST /v1/admin/metrics/ask",
 	}, sorted(unmounted))
 
 	// The archive routes are also a surface of their own (the database-only
-	// CLI runtime), and a narrower customer exposure serves a subset.
+	// CLI runtime).
 	archive := map[string]int{}
-	RegisterMerchantRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/merchant/billing-archive")
-	require.Equal(t, map[string]int{"GET /v1/merchant/billing-archive": 1, "POST /v1/merchant/billing-archive": 1}, archive)
-	management, subscriptions := map[string]int{}, map[string]int{}
-	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, customers)
-	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, customers)
-	require.Len(t, subscriptions, 4)
-	require.Len(t, management, 31)
-	for key := range subscriptions {
-		require.Contains(t, management, key, "each scope includes the narrower ones")
-	}
-	require.NotContains(t, management, "POST /v1/me/checkout-sessions")
-	require.Contains(t, management, "POST /v1/me/checkout-sessions/{id}/pay", "a customer pays a session the merchant minted")
-	require.NotContains(t, subscriptions, "POST /v1/me/checkout-sessions/{id}/pay")
+	RegisterStaffRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/admin/billing-archive")
+	require.Equal(t, map[string]int{"GET /v1/admin/billing-archive": 1, "POST /v1/admin/billing-archive": 1}, archive)
 }
 
 func sorted(list []string) []string {
@@ -221,7 +211,7 @@ func sorted(list []string) []string {
 }
 
 // A route without its handler or its feature is not mounted, and a staff
-// route only with its group.
+// route only with its bundle's permission.
 func TestMountHonorsConfiguration(t *testing.T) {
 	seen := map[string]int{}
 	RegisterMetaRoutes(recorder{seen: seen}, Options{Capabilities: &billing.Capabilities{}})
@@ -234,21 +224,33 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.NotContains(t, seen, "GET /v1/captcha/status")
 	require.Contains(t, seen, "GET /v1/catalog/products")
 
-	staff, configuration := map[string]int{}, map[string]int{}
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: staff}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, Merchant)
-	RegisterMerchantRoutes(recorder{base: "/v1", seen: configuration}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, MerchantConfig)
-	require.NotContains(t, staff, "POST /v1/merchant/catalog/products")
-	require.Contains(t, staff, "GET /v1/merchant/catalog/products")
-	require.Contains(t, staff, "POST /v1/merchant/catalog/offers/lookup", "a lookup is a read")
-	require.Contains(t, configuration, "POST /v1/merchant/catalog/products")
-	require.NotContains(t, configuration, "GET /v1/merchant/catalog/products")
-	require.Contains(t, configuration, "GET /v1/merchant/psps", "a configuration read is MerchantConfig's")
+	reads, staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
+	mount := func(seen map[string]int, perms Permissions) {
+		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Permissions: perms})
+	}
+	mount(reads, Permissions{AdminRead: "r"})
+	mount(staff, Permissions{AdminRead: "r", AdminWrite: "w"})
+	mount(edits, Permissions{AdminRead: "r", CatalogWrite: "e"})
+	mount(configuration, Permissions{MerchantConfig: "c"})
+	require.Contains(t, reads, "GET /v1/admin/payments")
+	require.Contains(t, reads, "POST /v1/admin/subscriptions/{id}/change-tier/preview", "a preview is a read")
+	require.NotContains(t, reads, "POST /v1/admin/payments/{id}/refunds", "a write needs AdminWrite")
+	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds")
+	require.NotContains(t, staff, "POST /v1/admin/catalog/products")
+	require.Contains(t, staff, "GET /v1/admin/catalog/products")
+	require.Contains(t, staff, "POST /v1/admin/catalog/offers/lookup", "a lookup is a read")
+	require.Contains(t, edits, "POST /v1/admin/catalog/products")
+	require.Contains(t, edits, "GET /v1/admin/catalog/products", "catalog reads are AdminRead's")
+	require.NotContains(t, edits, "POST /v1/admin/payments/{id}/refunds")
+	require.NotContains(t, configuration, "POST /v1/admin/catalog/products")
+	require.NotContains(t, configuration, "GET /v1/admin/catalog/products")
+	require.Contains(t, configuration, "GET /v1/admin/psps", "a configuration read is MerchantConfig's")
 }
 
 // A declared integer query parameter that is not a non-negative integer is
 // refused before the handler reads it; an absent one is the handler's default.
 func TestDeclaredIntegerQueriesAreStrict(t *testing.T) {
-	route, ok := Lookup(GET, "/v1/merchant/payment-attempts")
+	route, ok := Lookup(GET, "/v1/admin/payment-attempts")
 	require.True(t, ok)
 	require.Equal(t, []string{"limit"}, checkedParams(route.Query))
 
@@ -296,7 +298,7 @@ func TestIDsFilterIsBoundedAndAlone(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		called := false
-		idsMW(func(r *httprequest.Request) { called = true; r.Status(http.StatusOK) })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/merchant/payments?"+query, nil), nil))
+		idsMW(func(r *httprequest.Request) { called = true; r.Status(http.StatusOK) })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/payments?"+query, nil), nil))
 		require.Equal(t, want, rec.Code, query)
 		require.Equal(t, want == http.StatusOK, called, query)
 		if want != http.StatusOK {

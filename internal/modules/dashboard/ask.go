@@ -54,7 +54,7 @@ func (e *AskNoAnswerError) Error() string {
 // the model's prose.
 type AskEvidence = billing.MetricsEvidence
 
-// AskResult is the POST /v1/merchant/metrics/ask response.
+// AskResult is the POST /v1/admin/metrics/ask response.
 type AskResult = billing.MetricsAnswer
 
 // Ask answers a natural-language metrics question by letting the model run
@@ -207,7 +207,7 @@ const askToolInputSchema = `{
 func askToolDef() ToolDef {
 	return ToolDef{
 		Name:        askToolName,
-		Description: "Run one OpenRails metrics query (the POST /v1/merchant/metrics/query body) against the merchant's own data. Measures, dimensions, grains and worked examples are defined in the metrics schema in the system prompt — use only names from it. Returns tabular {columns, rows}; time series are zero-filled over the whole range (a zero means genuinely zero). Validation errors come back all at once with corrective context.",
+		Description: "Run one OpenRails metrics query (the POST /v1/admin/metrics/query body) against the merchant's own data. Measures, dimensions, grains and worked examples are defined in the metrics schema in the system prompt — use only names from it. Returns tabular {columns, rows}; time series are zero-filled over the whole range (a zero means genuinely zero). Validation errors come back all at once with corrective context.",
 		InputSchema: json.RawMessage(askToolInputSchema),
 	}
 }

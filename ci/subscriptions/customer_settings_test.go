@@ -66,7 +66,7 @@ func TestCustomerSettingsDocument(t *testing.T) {
 
 	// ids names records alone, 1 to 100 of them, as one comma list.
 	for _, query := range []string{"ids=" + a.id + "&limit=1", "ids=" + a.id + "&ids=" + b.id, "ids=" + strings.Repeat(a.id+",", 100) + a.id, "ids="} {
-		status, body := w.staffJSON(http.MethodGet, "/v1/merchant/customers/settings?"+query, nil)
+		status, body := w.staffJSON(http.MethodGet, "/v1/admin/customers/settings?"+query, nil)
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", query, body)
 		require.Equal(t, "invalid_query", body["error"].(map[string]any)["code"], "%s: %v", query, body)
 	}
@@ -101,13 +101,13 @@ func TestCustomerSettingsBatchIsAllOrNone(t *testing.T) {
 		{map[string]any{"customer_id": uuid.NewString()}, http.StatusNotFound, "customer_not_found", "items[1].customer_id"},
 	} {
 		// The host's key: a person's writes are limited per item.
-		status, body := w.hostJSON(http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{valid, refused.item}})
+		status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{valid, refused.item}})
 		require.Equal(t, refused.status, status, "%v", body)
 		e := body["error"].(map[string]any)
 		require.Equal(t, refused.code, e["code"], "%v", body)
 		require.Equal(t, refused.param, e["param"], "%v", body)
 	}
-	status, body := w.hostJSON(http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{}})
+	status, body := w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 
 	read, err := w.client[remote].ListCustomerSettings(t.Context(), billing.CustomerSettingsListParams{IDs: []billing.CustomerID{a.cid()}})
@@ -134,15 +134,15 @@ func TestCustomerSettingsStepUp(t *testing.T) {
 	} {
 		item["customer_id"] = c.id
 		body := map[string]any{"items": []any{item}}
-		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/merchant/customers/settings", body)
+		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/settings", body)
 		require.Equal(t, http.StatusForbidden, status, "%v: %v", item, refused)
 		require.Equal(t, "step_up_required", refused["error"].(map[string]any)["code"], "%v: %v", item, refused)
-		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/merchant/customers/settings", body)
+		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/admin/customers/settings", body)
 		require.Equal(t, http.StatusOK, status, "%v: %v", item, answered)
 	}
-	status, body := w.merchantJSON(stale, http.MethodGet, "/v1/merchant/customers/settings?ids="+c.id, nil)
+	status, body := w.merchantJSON(stale, http.MethodGet, "/v1/admin/customers/settings?ids="+c.id, nil)
 	require.Equal(t, http.StatusOK, status, "a read needs no step-up: %v", body)
-	status, body = w.hostJSON(http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": c.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "2000000"}}}}})
+	status, body = w.hostJSON(http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": c.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "2000000"}}}}})
 	require.Equal(t, http.StatusOK, status, "the host's API key needs no sign-in: %v", body)
 }
 
@@ -158,7 +158,7 @@ func TestCustomerSettingsFieldRoutesRemoved(t *testing.T) {
 		{http.MethodGet, "billing-policy"}, {http.MethodPut, "billing-policy"},
 		{http.MethodGet, "invoice-profile"}, {http.MethodPut, "invoice-profile"},
 	} {
-		req, err := http.NewRequestWithContext(t.Context(), route.method, w.server.URL+mountPrefix+"/v1/merchant/customers/"+c.id+"/"+route.path, strings.NewReader(`{}`))
+		req, err := http.NewRequestWithContext(t.Context(), route.method, w.server.URL+mountPrefix+"/v1/admin/customers/"+c.id+"/"+route.path, strings.NewReader(`{}`))
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("OpenRails-Merchant", w.slug)

@@ -45,7 +45,7 @@ type Subscription struct {
 	GraceEndsAt         *time.Time       `json:"grace_ends_at"`
 	DeletionScheduledAt *time.Time       `json:"deletion_scheduled_at,omitempty"`
 	// Payments is the subscription's recovery history: the same Payment shape
-	// GET /v1/merchant/payments serves.
+	// GET /v1/admin/payments serves.
 	Payments   []Payment      `json:"payments,omitempty"`
 	ID         SubscriptionID `json:"id"`
 	CustomerID CustomerID     `json:"customer_id"`

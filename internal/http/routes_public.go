@@ -55,9 +55,9 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordBrowserRoute), httproutes.Options{Capabilities: s.capabilities()})
 }
 
-// capabilities is what the standalone server serves: every route group.
+// capabilities is what the standalone server serves: every bundle.
 func (s *Server) capabilities() *billing.Capabilities {
-	caps := embedhttp.CapabilitiesFor(s.runtime, embedhttp.AllRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
+	caps := embedhttp.CapabilitiesFor(s.runtime, staffPermissions, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
 		// Team invitations mint register-and-join links when the control
 		// plane's posture allows them.
 		map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()})

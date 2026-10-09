@@ -50,7 +50,7 @@ func hostedHosts(t *testing.T, deps func(*openrails.Deps)) (app, pay *world) {
 	process := func(name string, origins []string, checkout openrails.CheckoutConfig) *world {
 		b := f.base
 		w := &world{t: t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth, clock: b.clock,
-			selfService: true, deps: deps, replica: &replicaEnv{f: f, name: name, queue: "replica_" + name},
+			deps: deps, replica: &replicaEnv{f: f, name: name, queue: "replica_" + name},
 			cfg: func(c *config.Config) {
 				c.ReturnOrigins, c.PublicBillingBaseURL, c.Checkout = origins, origins[0]+"/billing", checkout
 			},
@@ -525,7 +525,6 @@ func TestHostedCheckoutClientMintAndSavedCard(t *testing.T) {
 func TestHostedCheckoutSingleSite(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.start()
 	buyer := w.newCustomer()
 	product, err := w.client[embedded].CreateProduct(t.Context(), billing.CreateProductParams{Key: "post-" + uuid.NewString()[:8], DisplayName: "Paid post", Entitlements: []string{"content:post"}})
@@ -562,7 +561,6 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		account := psps["nmi"]
 		account.Settings = map[string]any{"card_entry": "server"}

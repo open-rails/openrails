@@ -23,7 +23,7 @@ import (
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
 // (#1116).
 //
-//	GET /merchant/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&checkout_id&subscription_id&cycle_id&since&until&limit&offset
+//	GET /admin/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&checkout_id&subscription_id&cycle_id&since&until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
 func ListPaymentAttempts(r *httprequest.Request) {
@@ -73,7 +73,7 @@ func ListPaymentAttempts(r *httprequest.Request) {
 
 // GetPaymentAttempt reads one payment attempt.
 //
-//	GET /merchant/payment-attempts/{id}
+//	GET /admin/payment-attempts/{id}
 func GetPaymentAttempt(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {
@@ -99,7 +99,7 @@ func GetPaymentAttempt(r *httprequest.Request) {
 // ListRebillCycles lists the merchant's rebill cycles, latest due first
 // (#1116).
 //
-//	GET /merchant/rebill-cycles?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
+//	GET /admin/rebill-cycles?owner&first_outcome&miss_reason&outcome&psp_id&subscription_id&due_since&due_until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
 func ListRebillCycles(r *httprequest.Request) {
@@ -155,7 +155,7 @@ func ListRebillCycles(r *httprequest.Request) {
 
 // GetRebillCycle reads one rebill cycle with its attempts, oldest first.
 //
-//	GET /merchant/rebill-cycles/{id}
+//	GET /admin/rebill-cycles/{id}
 func GetRebillCycle(r *httprequest.Request) {
 	mid, ok := readScope(r)
 	if !ok {

@@ -144,7 +144,7 @@ func proofReplay(rdb *redis.Client, allowMemory bool) (func(context.Context, str
 	}, nil
 }
 
-// AllowedOrigin reports whether origin may call the merchant API across
+// AllowedOrigin reports whether origin may call the admin API across
 // origins with a trusted issuer's tokens.
 func (c *ControlPlane) AllowedOrigin(origin string) bool {
 	return c != nil && c.resource != nil && c.resource.origins[strings.TrimRight(strings.TrimSpace(origin), "/")]

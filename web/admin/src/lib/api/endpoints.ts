@@ -1,4 +1,4 @@
-// Per-endpoint client functions for /v1/merchant/*. Shapes are the generated
+// Per-endpoint client functions for /v1/admin/*. Shapes are the generated
 // wire types where the route has them, else src/lib/api/types.ts.
 import {
   api,
@@ -71,14 +71,14 @@ export const listCustomers = (
   cursor: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Customer>>("/merchant/customers", {
+  api<ListPage<Customer>>("/admin/customers", {
     query: { q, limit, cursor },
     signal,
   })
 
 export const getCustomerProfile = (customerId: string, signal?: AbortSignal) =>
   api<CustomerBillingProfile>(
-    `/merchant/customers/${customerId}/billing-profile`,
+    `/admin/customers/${customerId}/billing-profile`,
     { signal }
   )
 
@@ -88,7 +88,7 @@ export const listCustomerPaymentMethods = (
   signal?: AbortSignal
 ) =>
   api<ListPage<PaymentMethod>>(
-    `/merchant/customers/${customerId}/payment-methods`,
+    `/admin/customers/${customerId}/payment-methods`,
     { query: { ...page }, signal }
   )
 
@@ -103,7 +103,7 @@ export const listCustomerUsageRateOverrides = (
   signal?: AbortSignal
 ) =>
   api<ListPage<RateOverride>>(
-    `/merchant/customers/${customerId}/rate-overrides`,
+    `/admin/customers/${customerId}/rate-overrides`,
     { query: { limit: PAGE_MAX, cursor }, signal }
   )
 
@@ -113,7 +113,7 @@ export const putCustomerUsageRateOverride = (
   body: CustomerUsageRateOverrideRequest
 ) =>
   api<RateOverride>(
-    `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
+    `/admin/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
     { method: "PUT", body }
   )
 
@@ -122,7 +122,7 @@ export const deleteCustomerUsageRateOverride = (
   meterKey: string
 ) =>
   api<void>(
-    `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
+    `/admin/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
     { method: "DELETE" }
   )
 
@@ -137,7 +137,7 @@ export interface ProductGrant {
 // grantProductAccess grants one product free; the customer holds its keys
 // while the grant is live.
 export const grantProductAccess = (customerId: string, grant: ProductGrant) =>
-  api<{ items: RawProductAccessGrant[] }>(`/merchant/product-access`, {
+  api<{ items: RawProductAccessGrant[] }>(`/admin/product-access`, {
     method: "POST",
     body: {
       items: [
@@ -154,7 +154,7 @@ export const grantProductAccess = (customerId: string, grant: ProductGrant) =>
   })
 
 export const revokeProductAccess = (customerId: string, grantId: string) =>
-  api<void>(`/merchant/customers/${customerId}/product-access/${grantId}`, {
+  api<void>(`/admin/customers/${customerId}/product-access/${grantId}`, {
     method: "DELETE",
   })
 
@@ -166,7 +166,7 @@ export const createOffChannelPayment = async (
   body: CreateOffChannelPaymentParams
 ) => {
   const { status, body: payment } = await apiResponse<Payment>(
-    `/merchant/customers/${customerId}/payments/off-channel`,
+    `/admin/customers/${customerId}/payments/off-channel`,
     { method: "POST", body }
   )
   return { payment, recorded: status === 201 }
@@ -187,26 +187,26 @@ export const listSubscriptions = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<CursorEnvelope<AdminSubscription>>("/merchant/subscriptions", {
+  api<CursorEnvelope<AdminSubscription>>("/admin/subscriptions", {
     query: { ...filters, limit, ...(cursor ? { cursor } : {}) },
     signal,
   })
 
 export const getSubscription = (id: string, signal?: AbortSignal) =>
-  api<AdminSubscription>(`/merchant/subscriptions/${id}`, { signal })
+  api<AdminSubscription>(`/admin/subscriptions/${id}`, { signal })
 
 export const cancelSubscription = (
   id: string,
   reason: string,
   revokeAccess: boolean
 ) =>
-  api<AdminSubscription>(`/merchant/subscriptions/${id}/cancel`, {
+  api<AdminSubscription>(`/admin/subscriptions/${id}/cancel`, {
     method: "POST",
     body: { reason, revoke_access: revokeAccess },
   })
 
 export const resumeSubscription = (id: string) =>
-  api<AdminSubscription>(`/merchant/subscriptions/${id}/resume`, {
+  api<AdminSubscription>(`/admin/subscriptions/${id}/resume`, {
     method: "POST",
   })
 
@@ -214,13 +214,13 @@ export const changeSubscriptionPaymentMethod = (
   id: string,
   paymentMethodId: string
 ) =>
-  api<AdminSubscription>(`/merchant/subscriptions/${id}/payment-method`, {
+  api<AdminSubscription>(`/admin/subscriptions/${id}/payment-method`, {
     method: "PUT",
     body: { payment_method_id: paymentMethodId },
   })
 
 export const previewSubscriptionTierChange = (id: string, priceId: string) =>
-  api<TierChangePreview>(`/merchant/subscriptions/${id}/change-tier/preview`, {
+  api<TierChangePreview>(`/admin/subscriptions/${id}/change-tier/preview`, {
     method: "POST",
     body: { price_id: priceId },
   })
@@ -232,7 +232,7 @@ export const changeSubscriptionTier = (
   priceId: string,
   idempotencyKey: string
 ) =>
-  api<TierChangeResult>(`/merchant/subscriptions/${id}/change-tier`, {
+  api<TierChangeResult>(`/admin/subscriptions/${id}/change-tier`, {
     method: "POST",
     headers: { "Idempotency-Key": idempotencyKey },
     body: { price_id: priceId },
@@ -255,13 +255,13 @@ export const listPayments = (
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Payment>>("/merchant/payments", {
+  api<ListPage<Payment>>("/admin/payments", {
     query: { ...filters, ...page },
     signal,
   })
 
 export const getPayment = (id: string, signal?: AbortSignal) =>
-  api<Payment>(`/merchant/payments/${id}`, { signal })
+  api<Payment>(`/admin/payments/${id}`, { signal })
 
 // refundPayment answers the refund: succeeded, or pending (202) while the
 // rail settles it.
@@ -276,7 +276,7 @@ export const refundPayment = (
     reason: reason || undefined,
     revoke_access: revokeAccess,
   }
-  return api<Payment>(`/merchant/payments/${id}/refunds`, {
+  return api<Payment>(`/admin/payments/${id}/refunds`, {
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
     body,
@@ -342,26 +342,26 @@ export const listPaymentAttempts = (
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<PaymentAttempt>>("/merchant/payment-attempts", {
+  api<ListPage<PaymentAttempt>>("/admin/payment-attempts", {
     query: { ...filters, ...page },
     signal,
   })
 
 export const getPaymentAttempt = (id: string, signal?: AbortSignal) =>
-  api<PaymentAttempt>(`/merchant/payment-attempts/${id}`, { signal })
+  api<PaymentAttempt>(`/admin/payment-attempts/${id}`, { signal })
 
 export const listRebillCycles = (
   filters: CycleFilters,
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RebillCycle>>("/merchant/rebill-cycles", {
+  api<ListPage<RebillCycle>>("/admin/rebill-cycles", {
     query: { ...filters, ...page },
     signal,
   })
 
 export const getRebillCycle = (id: string, signal?: AbortSignal) =>
-  api<RebillCycle>(`/merchant/rebill-cycles/${id}`, { signal })
+  api<RebillCycle>(`/admin/rebill-cycles/${id}`, { signal })
 
 // Rails whose refunds route through a provider API today (admin_payments.go);
 // off-rail payments are refunded where they were taken.
@@ -380,13 +380,13 @@ export const listProducts = (
   archived?: boolean,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Product>>("/merchant/catalog/products", {
+  api<ListPage<Product>>("/admin/catalog/products", {
     query: { limit, cursor, archived },
     signal,
   })
 
 export const getProduct = (id: string, signal?: AbortSignal) =>
-  api<Product>(`/merchant/catalog/products/${id}`, { signal })
+  api<Product>(`/admin/catalog/products/${id}`, { signal })
 
 export interface ProductRequest {
   key: string
@@ -398,12 +398,12 @@ export interface ProductRequest {
 }
 
 export const createProduct = (body: ProductRequest) =>
-  api<Product>("/merchant/catalog/products", { method: "POST", body })
+  api<Product>("/admin/catalog/products", { method: "POST", body })
 
 // updateProduct is a merge patch: omitted fields stay, null clears
 // description and tier_group; entitlements: [] clears the granted keys.
 export const updateProduct = (id: string, body: UpdateProductParams) =>
-  api<Product>(`/merchant/catalog/products/${id}`, {
+  api<Product>(`/admin/catalog/products/${id}`, {
     method: "PATCH",
     body,
   })
@@ -428,13 +428,13 @@ export const listUsageMeters = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Meter>>("/merchant/catalog/meters", {
+  api<ListPage<Meter>>("/admin/catalog/meters", {
     query: { limit, cursor },
     signal,
   })
 
 export const getUsageMeter = (key: string, signal?: AbortSignal) =>
-  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}`, {
     signal,
   })
 
@@ -445,12 +445,12 @@ export const listUsageMeterOverrides = (
   signal?: AbortSignal
 ) =>
   api<ListPage<RateOverride>>(
-    `/merchant/catalog/meters/${encodeURIComponent(key)}/rate-overrides`,
+    `/admin/catalog/meters/${encodeURIComponent(key)}/rate-overrides`,
     { query: { limit, cursor }, signal }
   )
 
 export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
-  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}`, {
     method: "PUT",
     body,
   })
@@ -459,13 +459,13 @@ export const putDefaultUsageRateCard = (
   key: string,
   body: DefaultUsageRateCardRequest
 ) =>
-  api<Meter>(`/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
+  api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
     method: "PUT",
     body,
   })
 
 export const deleteDefaultUsageRateCard = (key: string) =>
-  api<void>(`/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
+  api<void>(`/admin/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
     method: "DELETE",
   })
 
@@ -475,7 +475,7 @@ export const listPrices = (
   productId?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Price>>("/merchant/catalog/prices", {
+  api<ListPage<Price>>("/admin/catalog/prices", {
     query: { limit, cursor, product_id: productId },
     signal,
   })
@@ -483,26 +483,26 @@ export const listPrices = (
 // A price that declares the key of a live price with other terms becomes
 // its new version and archives the old one.
 export const createPrice = (body: CreatePriceParams) =>
-  api<Price>("/merchant/catalog/prices", { method: "POST", body })
+  api<Price>("/admin/catalog/prices", { method: "POST", body })
 
 // getPrice returns the price with its state on each linked PSP. verify=true
 // also reads every PSP's copy and reports its drift: a read, never a write,
 // and slow enough that it stays opt-in.
 export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-  api<Price>(`/merchant/catalog/prices/${id}`, {
+  api<Price>(`/admin/catalog/prices/${id}`, {
     query: verify ? { verify: true } : undefined,
     signal,
   })
 
 export const getPriceByKey = (productKey: string, key: string) =>
   api<Price>(
-    `/merchant/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}`
+    `/admin/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}`
   )
 
 // updatePrice archives or restores a price, or changes its PSP links
 // (a PSP set to null is unlinked).
 export const updatePrice = (id: string, body: UpdatePriceParams) =>
-  api<Price>(`/merchant/catalog/prices/${id}`, { method: "PATCH", body })
+  api<Price>(`/admin/catalog/prices/${id}`, { method: "PATCH", body })
 
 // getPriceKeyHistory returns a price key's history, most recent first: when
 // the key moved to which price.
@@ -512,7 +512,7 @@ export const getPriceKeyHistory = (
   signal?: AbortSignal
 ) =>
   api<ListPage<PriceKeyMovement>>(
-    `/merchant/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}/history`,
+    `/admin/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}/history`,
     { query: { limit: PAGE_MAX }, signal }
   )
 
@@ -521,7 +521,7 @@ export const getPriceKeyHistory = (
 // previewRepriceBatch is the wizard's Step 2 affected-count dry run, called
 // BEFORE the price edit lands; it never writes.
 export const previewRepriceBatch = (productKey: string, priceKey: string) =>
-  api<RepriceBatchPreview>("/merchant/reprice-batches/preview", {
+  api<RepriceBatchPreview>("/admin/reprice-batches/preview", {
     method: "POST",
     body: { product_key: productKey, price_key: priceKey },
   })
@@ -533,7 +533,7 @@ export const createRepriceBatch = (
   priceKey: string,
   effectiveAt: string
 ) =>
-  api<RepriceBatchResult>("/merchant/reprice-batches", {
+  api<RepriceBatchResult>("/admin/reprice-batches", {
     method: "POST",
     body: { product_key: productKey, price_key: priceKey, effective_at: effectiveAt },
   })
@@ -545,13 +545,13 @@ export const listRepriceBatches = (
   limit = 20,
   signal?: AbortSignal
 ) =>
-  api<CursorEnvelope<RepriceBatch>>("/merchant/reprice-batches", {
+  api<CursorEnvelope<RepriceBatch>>("/admin/reprice-batches", {
     query: { product_key: productKey, price_key: priceKey, limit },
     signal,
   })
 
 export const cancelRepriceBatch = (id: string) =>
-  api<RepriceBatchCancel>(`/merchant/reprice-batches/${id}/cancel`, {
+  api<RepriceBatchCancel>(`/admin/reprice-batches/${id}/cancel`, {
     method: "POST",
   })
 
@@ -567,13 +567,13 @@ export const listReprices = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<CursorEnvelope<Reprice>>("/merchant/reprices", {
+  api<CursorEnvelope<Reprice>>("/admin/reprices", {
     query: { ...filters, limit, ...(cursor ? { cursor } : {}) },
     signal,
   })
 
 export const cancelReprice = (id: string) =>
-  api<Reprice>(`/merchant/reprices/${id}/cancel`, {
+  api<Reprice>(`/admin/reprices/${id}/cancel`, {
     method: "POST",
   })
 
@@ -581,14 +581,14 @@ export type { CatalogApplicationReceipt } from "./generated/wire"
 
 export const getCatalogRevision = () =>
   api<{ revision: number; writes_allowed: boolean }>(
-    "/merchant/catalog/revision"
+    "/admin/catalog/revision"
   )
 
 // JSON is valid YAML too. Keep the reviewed document byte-for-byte unchanged
 // instead of parsing/re-encoding money in the browser. The server deduplicates
 // batches by their canonical content.
 export const applyCatalog = (document: string) =>
-  api<CatalogApplicationReceipt>("/merchant/catalog/applications", {
+  api<CatalogApplicationReceipt>("/admin/catalog/applications", {
     method: "POST",
     rawBody: document,
     headers: { "Content-Type": "application/yaml" },
@@ -599,13 +599,13 @@ export const listCatalogDrift = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<CatalogDrift>>("/merchant/catalog/drift", {
+  api<ListPage<CatalogDrift>>("/admin/catalog/drift", {
     query: { limit, cursor },
     signal,
   })
 
 export const refreshCatalogDrift = () =>
-  api<CatalogDriftRefresh>("/merchant/catalog/drift/refresh", { method: "POST" })
+  api<CatalogDriftRefresh>("/admin/catalog/drift/refresh", { method: "POST" })
 
 // --- Ops ---
 
@@ -614,16 +614,16 @@ export const listFindings = (
   limit: number,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Finding>>("/merchant/findings", {
+  api<ListPage<Finding>>("/admin/findings", {
     query: { ...filters, limit },
     signal,
   })
 
 export const getFindingSummary = (signal?: AbortSignal) =>
-  api<FindingsGauges>("/merchant/findings/summary", { signal })
+  api<FindingsGauges>("/admin/findings/summary", { signal })
 
 export const getFinding = (id: string) =>
-  api<Finding>(`/merchant/findings/${id}`)
+  api<Finding>(`/admin/findings/${id}`)
 
 export const resolveFinding = (
   id: string,
@@ -631,22 +631,22 @@ export const resolveFinding = (
   notes: string
 ) =>
   api<{ finding: Finding; execution?: Record<string, unknown> }>(
-    `/merchant/findings/${id}/resolve`,
+    `/admin/findings/${id}/resolve`,
     { method: "POST", body: { outcome, notes } }
   )
 
 export const listWorkerHealth = (signal?: AbortSignal) =>
-  api<ListPage<WorkerHealth>>("/merchant/worker-health", { signal })
+  api<ListPage<WorkerHealth>>("/admin/worker-health", { signal })
 
 // --- Settings ---
 
 export const getMerchantConfiguration = (signal?: AbortSignal) =>
-  api<MerchantConfiguration>("/merchant/configuration", { signal })
+  api<MerchantConfiguration>("/admin/configuration", { signal })
 
 // Changes only the settings it names, against the revision the form read.
 export const applyMerchantSettings = (revision: string, settings: MerchantSettings) =>
   api<{ application_id: string; revision: string; replayed: boolean }>(
-    "/merchant/configuration/applications",
+    "/admin/configuration/applications",
     {
       method: "POST",
       body: { application_id: crypto.randomUUID(), expected_revision: revision, settings },
@@ -655,10 +655,10 @@ export const applyMerchantSettings = (revision: string, settings: MerchantSettin
 
 // A merchant has a handful of PSPs: one page holds them all.
 export const listPSPs = (signal?: AbortSignal) =>
-  api<ListPage<PSP>>("/merchant/psps?limit=500", { signal })
+  api<ListPage<PSP>>("/admin/psps?limit=500", { signal })
 
 export const listRails = (signal?: AbortSignal) =>
-  api<ListPage<RailDefinition>>("/merchant/rails", { signal })
+  api<ListPage<RailDefinition>>("/admin/rails", { signal })
 
 // Credentials are write-only and checked with the provider before anything
 // is stored. operation_id makes a retried submission return the first result.
@@ -672,7 +672,7 @@ export interface CreatePSPRequest {
 }
 
 export const createPSP = (body: CreatePSPRequest) =>
-  api<PSP>("/merchant/psps", { method: "POST", body })
+  api<PSP>("/admin/psps", { method: "POST", body })
 
 // expected_revision is the PSP revision the form read; a PSP changed since
 // is refused.
@@ -684,7 +684,7 @@ export interface UpdatePSPRequest {
 }
 
 export const updatePSP = (id: string, body: UpdatePSPRequest) =>
-  api<PSP>(`/merchant/psps/${encodeURIComponent(id)}`, {
+  api<PSP>(`/admin/psps/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body,
   })
@@ -696,7 +696,7 @@ export const previewPSPRouting = (
   body: { price_id: string; country?: string; psp?: string },
   signal?: AbortSignal
 ) =>
-  api<PSPRoutingPreview>("/merchant/psps/routing-preview", {
+  api<PSPRoutingPreview>("/admin/psps/routing-preview", {
     method: "POST",
     body,
     signal,
@@ -706,7 +706,7 @@ export const previewPSPRouting = (
 // provider. The rail's last active PSP is refused (409 psp_last_active)
 // unless allowLast.
 export const archivePSP = (id: string, allowLast = false) =>
-  api<PSP>(`/merchant/psps/${encodeURIComponent(id)}/archive`, {
+  api<PSP>(`/admin/psps/${encodeURIComponent(id)}/archive`, {
     method: "POST",
     body: allowLast ? { allow_last: true } : {},
   })
@@ -764,7 +764,7 @@ export const getCustomerSettings = async (
   signal?: AbortSignal
 ) => {
   const page = await api<ListPage<CustomerSettings>>(
-    "/merchant/customers/settings",
+    "/admin/customers/settings",
     { query: { ids: customerId }, signal }
   )
   return page.data[0] ?? null
@@ -773,7 +773,7 @@ export const getCustomerSettings = async (
 // updateCustomerSettings changes only the fields each item names, all or
 // none.
 export const updateCustomerSettings = (items: UpdateCustomerSettingsParams[]) =>
-  api<CustomerSettingsBatch>("/merchant/customers/settings", {
+  api<CustomerSettingsBatch>("/admin/customers/settings", {
     method: "PATCH",
     body: { items },
   })
@@ -788,24 +788,24 @@ export interface WebhookRequest {
 }
 
 export const listWebhooks = (signal?: AbortSignal) =>
-  api<ListPage<MerchantWebhook>>("/merchant/alert-webhooks", { signal })
+  api<ListPage<MerchantWebhook>>("/admin/alert-webhooks", { signal })
 
 export const createWebhook = (body: WebhookRequest) =>
-  api<MerchantWebhook>("/merchant/alert-webhooks", { method: "POST", body })
+  api<MerchantWebhook>("/admin/alert-webhooks", { method: "POST", body })
 
 export const rotateWebhookURL = (id: string, url: string) =>
-  api<MerchantWebhook>(`/merchant/alert-webhooks/${id}/url`, {
+  api<MerchantWebhook>(`/admin/alert-webhooks/${id}/url`, {
     method: "PUT",
     body: { url },
   })
 
 export const deleteWebhook = (id: string) =>
-  api<void>(`/merchant/alert-webhooks/${id}`, { method: "DELETE" })
+  api<void>(`/admin/alert-webhooks/${id}`, { method: "DELETE" })
 
 // --- Alerting: notifications (in_app store / header bell, #736) ---
 
 export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
-  api<ListPage<MerchantNotification>>("/merchant/notifications", {
+  api<ListPage<MerchantNotification>>("/admin/notifications", {
     query: unread !== undefined ? { unread } : undefined,
     signal,
   })
@@ -814,11 +814,11 @@ export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
 // not exist answers null.
 export const markNotificationsRead = (ids: string[]) =>
   api<{ notifications: Record<string, MerchantNotification | null> }>(
-    "/merchant/notifications/read",
+    "/admin/notifications/read",
     { method: "POST", body: { notification_ids: ids } }
   )
 
 export const getUnreadCount = (signal?: AbortSignal) =>
-  api<{ unread_count: number }>("/merchant/notifications/unread-count", {
+  api<{ unread_count: number }>("/admin/notifications/unread-count", {
     signal,
   })

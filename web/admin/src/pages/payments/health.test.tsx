@@ -214,7 +214,7 @@ describe("drill-down", () => {
       adminQueries.attempts(filtersFrom(params, ATTEMPT_FILTERS), 50)
     )
     const sent = new URLSearchParams(requests.at(-1)!.query)
-    expect(requests.at(-1)!.path).toBe("/merchant/payment-attempts")
+    expect(requests.at(-1)!.path).toBe("/admin/payment-attempts")
     expect(Object.fromEntries(sent)).toEqual({
       kind: "verify,initial",
       card_entry: "new",
@@ -234,7 +234,7 @@ describe("drill-down", () => {
     await client().fetchQuery(
       adminQueries.cycles(filtersFrom(params, CYCLE_FILTERS), 50, "cursor-2")
     )
-    expect(requests.at(-1)!.path).toBe("/merchant/rebill-cycles")
+    expect(requests.at(-1)!.path).toBe("/admin/rebill-cycles")
     expect(Object.fromEntries(new URLSearchParams(requests.at(-1)!.query)))
       .toMatchObject({
         first_outcome: "declined,error,missed",

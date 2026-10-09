@@ -17,8 +17,8 @@ type operatorKey struct{}
 var ErrUpdatesDisabled = apperr.New(http.StatusForbidden, "catalog_updates_disabled", "ordinary catalog updates are disabled")
 
 // Exposure is whether catalog writes reach callers other than the process
-// owner: HTTP and delegated credentials. Mounting the merchant API decides it
-// (Routes.MerchantConfig, unless Config.Catalog is the truth; on a standalone
+// owner: HTTP and delegated credentials. Mounting the admin API decides it
+// (Routes.Permissions.CatalogWrite, unless Config.Catalog is the truth; on a standalone
 // server, a writable secret backend); until then, and without that mount,
 // only the owner writes. The zero value is undecided and closed.
 type Exposure struct {
@@ -36,7 +36,7 @@ func (e *Exposure) Decide(enabled bool) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.decided && e.enabled != enabled {
-		return fmt.Errorf("openrails: the merchant API is already mounted with catalog edits %t; every mount must agree on Routes.MerchantConfig", e.enabled)
+		return fmt.Errorf("openrails: the admin API is already mounted with catalog edits %t; every mount must agree on Routes.Permissions.CatalogWrite", e.enabled)
 	}
 	e.decided, e.enabled = true, enabled
 	return nil

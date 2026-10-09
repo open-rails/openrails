@@ -67,7 +67,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Merchant: true, MerchantConfig: true, Guards: staffGuards})
+		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Permissions: staffPermissions})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {
@@ -81,15 +81,15 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		calls      *int
 		trusted    func() error
 	}{
-		{"/v1/merchant/metrics/ask", `{"question":"Summarize"}`, &dashboardLLM.asks, func() error {
+		{"/v1/admin/metrics/ask", `{"question":"Summarize"}`, &dashboardLLM.asks, func() error {
 			_, err := client.AskMetrics(t.Context(), billing.AskMetricsParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/merchant/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
+		{"/v1/admin/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
 			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/merchant/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
+		{"/v1/admin/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
 			_, err := client.GenerateDashboardWidget(t.Context(), billing.GenerateDashboardWidgetParams{Prompt: "Cancellations per day"})
 			return err
 		}},

@@ -233,7 +233,7 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 	page, err = c.ListProducts(t.Context(), billing.ProductListParams{ForSale: &forSale})
 	require.NoError(t, err)
 	require.Equal(t, []string{sold.Key}, productKeys(t, page))
-	status, body := w.staff(http.MethodGet, "/v1/merchant/catalog/products?for_sale=false")
+	status, body := w.staff(http.MethodGet, "/v1/admin/catalog/products?for_sale=false")
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, granted.Key)
 

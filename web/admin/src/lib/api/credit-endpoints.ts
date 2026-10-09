@@ -7,7 +7,7 @@ import type {
 } from "./credit-types"
 
 const customerPath = (id: string) =>
-  `/merchant/customers/${encodeURIComponent(id)}`
+  `/admin/customers/${encodeURIComponent(id)}`
 
 export const listCreditGrants = (
   customer: string,
@@ -26,7 +26,7 @@ export const createCreditGrant = async (
   customer: string,
   body: CreditGrantInput
 ) => {
-  const out = await api<{ items: CreditGrant[] }>("/merchant/credit-grants", {
+  const out = await api<{ items: CreditGrant[] }>("/admin/credit-grants", {
     method: "POST",
     body: { items: [{ customer_id: customer, ...body }] },
   })

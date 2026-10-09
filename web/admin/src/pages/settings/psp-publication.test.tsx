@@ -15,7 +15,7 @@ it("the mounted rotation form submits reviewed revision, reuses its operation af
   vi.stubGlobal("crypto", webcrypto)
   let succeed = false
   const requests = await server({
-    "PATCH /merchant/psps/psp_a": () =>
+    "PATCH /admin/psps/psp_a": () =>
       succeed
         ? {}
         : Response.json(

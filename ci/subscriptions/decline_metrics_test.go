@@ -30,7 +30,7 @@ func (w *world) metricRows(since time.Time, measures, by []string, filters map[s
 	if filters != nil {
 		body["filters"] = filters
 	}
-	status, res := w.staffJSON(http.MethodPost, "/v1/merchant/metrics/query", body)
+	status, res := w.staffJSON(http.MethodPost, "/v1/admin/metrics/query", body)
 	require.Equal(w.t, http.StatusOK, status, "%v %v: %v", measures, by, res)
 	var names []string
 	for _, col := range res["columns"].([]any) {

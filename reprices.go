@@ -18,7 +18,7 @@ func (c *Client) CreateRepriceBatch(ctx context.Context, params billing.CreateRe
 		return nil, invalidErr("effective_at is required")
 	}
 	var out billing.RepriceBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/reprice-batches", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/reprice-batches", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -31,7 +31,7 @@ func (c *Client) PreviewRepriceBatch(ctx context.Context, params billing.Preview
 		return nil, invalidErr("product_key and price_key are required")
 	}
 	var out billing.RepriceBatchPreview
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/reprice-batches/preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/reprice-batches/preview", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -48,7 +48,7 @@ func (c *Client) ListRepriceBatches(ctx context.Context, params billing.RepriceB
 		return nil, err
 	}
 	var out billing.ListPage[billing.RepriceBatch]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprice-batches?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/reprice-batches?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -61,7 +61,7 @@ func (c *Client) GetRepriceBatch(ctx context.Context, id billing.RepriceBatchID,
 		return nil, err
 	}
 	var out billing.RepriceBatch
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprice-batches/"+batch, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/reprice-batches/"+batch, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -74,7 +74,7 @@ func (c *Client) CancelRepriceBatch(ctx context.Context, id billing.RepriceBatch
 		return nil, err
 	}
 	var out billing.RepriceBatchCancel
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/reprice-batches/"+batch+"/cancel", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/reprice-batches/"+batch+"/cancel", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -86,7 +86,7 @@ func (c *Client) PreviewPlanMigration(ctx context.Context, request billing.Creat
 		return nil, err
 	}
 	var out billing.PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/plan-migrations/preview", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -98,7 +98,7 @@ func (c *Client) CreatePlanMigration(ctx context.Context, request billing.Create
 		return nil, err
 	}
 	var out billing.PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/plan-migrations", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -129,7 +129,7 @@ func (c *Client) ListReprices(ctx context.Context, params billing.RepriceListPar
 		return nil, err
 	}
 	var out billing.ListPage[billing.Reprice]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/reprices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -142,7 +142,7 @@ func (c *Client) GetReprice(ctx context.Context, id billing.RepriceID, requestOp
 		return nil, err
 	}
 	var out billing.Reprice
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/reprices/"+reprice, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/reprices/"+reprice, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -155,7 +155,7 @@ func (c *Client) CancelReprice(ctx context.Context, id billing.RepriceID, reques
 		return nil, err
 	}
 	var out billing.Reprice
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/reprices/"+reprice+"/cancel", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/reprices/"+reprice+"/cancel", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -28,7 +28,7 @@ func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, req
 	if err := setIDs(query, params.IDs); err != nil {
 		return nil, err
 	}
-	path := "/v1/merchant/psps"
+	path := "/v1/admin/psps"
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
@@ -57,7 +57,7 @@ func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ..
 // params to read the first result.
 func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
 	var out billing.PSP
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/psps", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -96,7 +96,7 @@ func (c *Client) ArchivePSP(ctx context.Context, id billing.PSPID, params billin
 // why each other PSP was passed over. Nothing is created.
 func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
 	var out billing.PSPRoutingPreview
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/routing-preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/psps/routing-preview", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -107,7 +107,7 @@ func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPS
 // schedule.
 func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOption) (*billing.PSPRefresh, error) {
 	var out billing.PSPRefresh
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/refresh", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/psps/refresh", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -117,7 +117,7 @@ func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOptio
 // and setting keys a PSP on each takes.
 func (c *Client) ListRails(ctx context.Context, requestOptions ...RequestOption) (*billing.ListPage[billing.RailDefinition], error) {
 	var out billing.ListPage[billing.RailDefinition]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/rails", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/rails", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -127,5 +127,5 @@ func pspPath(id billing.PSPID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr("PSP id is required")
 	}
-	return "/v1/merchant/psps/" + url.PathEscape(id.String()), nil
+	return "/v1/admin/psps/" + url.PathEscape(id.String()), nil
 }

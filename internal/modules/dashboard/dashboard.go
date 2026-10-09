@@ -35,7 +35,7 @@ type Dashboard = billing.Dashboard
 // MaxWidgets caps a layout; a dashboard is a page, not a database.
 const MaxWidgets = 60
 
-// DecodePut strictly decodes the PUT /v1/merchant/dashboard body
+// DecodePut strictly decodes the PUT /v1/admin/dashboard body
 // {"widgets":[...]}: unknown keys anywhere (incl. inside widget queries) fail
 // loudly with corrective errors, like the metrics endpoint itself.
 func DecodePut(r io.Reader) ([]Widget, *metrics.ValidationError) {

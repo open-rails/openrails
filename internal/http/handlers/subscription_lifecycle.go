@@ -356,7 +356,7 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 }
 
 // writeMerchantSubscription answers the subscription as GET
-// /v1/merchant/subscriptions/{id} serves it.
+// /v1/admin/subscriptions/{id} serves it.
 func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {

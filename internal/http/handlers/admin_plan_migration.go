@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// Plan migrations: POST /v1/merchant/plan-migrations commits one and
+// Plan migrations: POST /v1/admin/plan-migrations commits one and
 // .../preview is the operator's commit gate. The migration is a reprice
 // batch of kind plan_change, read and canceled at /reprice-batches/{id}.
 

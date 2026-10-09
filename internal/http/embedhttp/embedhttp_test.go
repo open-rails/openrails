@@ -12,15 +12,13 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 func TestCapabilities(t *testing.T) {
-	caps := CapabilitiesFor(nil, []RouteSet{RouteSetCheckout, RouteSetCustomer, RouteSetWebhooks}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"team_invites": true})
-	require.Len(t, caps.RouteGroups, len(AllRouteSets), "every known group is reported")
-	for _, rs := range AllRouteSets {
-		require.Equal(t, rs == RouteSetCheckout || rs == RouteSetCustomer || rs == RouteSetWebhooks, caps.RouteGroups[string(rs)], rs)
-	}
+	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"team_invites": true})
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false}, caps.RouteGroups)
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "provider_credential_writes": false,
@@ -28,74 +26,57 @@ func TestCapabilities(t *testing.T) {
 		"team_invites": true,
 	}, caps.Features)
 
-	// Customer features follow the mounted customer scope, not provider support.
-	for _, tc := range []struct {
-		scope          config.CustomerHTTPScope
-		portal, solana bool
-	}{
-		{config.CustomerSelfService, true, true},
-		{config.CustomerBillingManagement, false, true},
-		{config.CustomerSubscriptionManagement, false, true},
-	} {
-		caps := configuredCapabilities(nil, routeSets(config.Routes{}), []config.CustomerRoutes{{Scope: tc.scope}}, routesurface.AllProviderRoutes())
-		require.True(t, caps.RouteGroups[string(RouteSetCustomer)])
-		require.Equal(t, tc.portal, caps.Features["stripe_billing_portal"], tc.scope)
-		require.Equal(t, tc.solana, caps.Features["solana_subscription_management"], tc.scope)
-		require.False(t, caps.Features["provider_credential_writes"], "credential writes need the merchant group")
-	}
-
-	require.Equal(t, AllRouteSets, ResolveRouteSets(nil))
-	require.Equal(t, []RouteSet{RouteSetCheckout, RouteSetWebhooks}, ResolveRouteSets([]RouteSet{RouteSetCheckout, "", RouteSetCheckout, RouteSetWebhooks}))
+	// Credential writes need the merchant-config bundle.
+	writable := routesurface.ProviderRoutes{SecretWrite: true}
+	require.False(t, CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r", AdminWrite: "w"}, writable, nil).Features["provider_credential_writes"])
+	config := CapabilitiesFor(nil, httproutes.Permissions{MerchantConfig: "c"}, writable, nil)
+	require.True(t, config.Features["provider_credential_writes"])
+	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true}, config.RouteGroups)
 }
 
 // Route selection is refused unless each surface has the Auth it needs:
 // nothing mounts open.
 func TestRoutesValidation(t *testing.T) {
 	auth := &authtest.Fake{}
+	read, write, admin := authtest.Perm("r"), authtest.Perm("w"), authtest.Perm("a")
 	customer := func(c config.CustomerRoutes) config.Routes {
-		return config.Routes{CustomerProfiles: []config.CustomerRoutes{c}}
+		return config.Routes{Auth: auth, CustomerProfiles: []config.CustomerRoutes{c}}
 	}
 	for _, tc := range []struct {
 		name string
 		sel  config.Routes
 		ok   bool
 	}{
-		{"nothing selected", config.Routes{}, true},
-		{"storefront needs no Auth: a session id is its credential", config.Routes{Storefront: true}, true},
-		{"storefront", config.Routes{Storefront: true, Auth: auth}, true},
-		{"merchant without Auth", config.Routes{Merchant: true}, false},
-		{"merchant with a typed nil Auth", config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil)}, false},
-		{"merchant", config.Routes{Merchant: true, Auth: auth}, true},
-		{"merchant configuration without Auth", config.Routes{MerchantConfig: true}, false},
-		{"merchant configuration alone", config.Routes{MerchantConfig: true, Auth: auth}, true},
-		{"customer without Auth", customer(config.CustomerRoutes{Merchant: "store", Scope: config.CustomerSelfService}), false},
-		{"customer with the mount's Auth", config.Routes{Auth: auth, CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}, true},
-		{"customer with its own Auth", customer(config.CustomerRoutes{Scope: config.CustomerSelfService, Auth: auth}), true},
-		{"customers shorthand without Auth", config.Routes{Customers: config.CustomerBillingManagement}, false},
-		{"customers shorthand", config.Routes{Customers: config.CustomerBillingManagement, Auth: auth}, true},
-		{"no scope", customer(config.CustomerRoutes{Auth: auth}), false},
-		{"unknown scope", customer(config.CustomerRoutes{Scope: 9, Auth: auth}), false},
-		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me", Scope: config.CustomerSelfService, Auth: auth}), true},
+		{"no Auth: the customer routes need it", config.Routes{}, false},
+		{"a typed nil Auth", config.Routes{Auth: (*authtest.Fake)(nil)}, false},
+		{"public, customer and webhooks", config.Routes{Auth: auth}, true},
+		{"admin reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read}}, true},
+		{"admin reads and writes", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read, AdminWrite: write}}, true},
+		{"admin writes without reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminWrite: write}}, false},
+		{"a typed nil permission is none", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil), AdminWrite: write}}, false},
+		{"merchant configuration alone", config.Routes{Auth: auth, Permissions: config.Permissions{MerchantConfig: admin}}, true},
+		{"catalog edits with reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read, CatalogWrite: admin}}, true},
+		{"catalog edits without reads", config.Routes{Auth: auth, Permissions: config.Permissions{CatalogWrite: admin}}, false},
+		{"customer with the mount's Auth", customer(config.CustomerRoutes{Prefix: "/v1/shop/me"}), true},
+		{"customer with its own Auth", customer(config.CustomerRoutes{Prefix: "/v1/shop/me", Auth: auth}), true},
+		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me"}), true},
 	} {
-		require.Equal(t, tc.ok, ValidateRoutes(tc.sel, CustomerProfiles(tc.sel), &app.Runtime{}) == nil, tc.name)
+		require.Equal(t, tc.ok, ValidateRoutes(tc.sel) == nil, tc.name)
 	}
 	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		sel := customer(config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSelfService, Auth: auth})
-		require.Error(t, ValidateRoutes(sel, CustomerProfiles(sel), &app.Runtime{}), prefix)
+		require.Error(t, ValidateRoutes(customer(config.CustomerRoutes{Prefix: prefix})), prefix)
 	}
 }
 
-// The combined handler refuses to mount the merchant API without its Auth,
+// The combined handler refuses to mount the admin API without its Auth,
 // and only the configuration and checkout routes join the permissive-CORS
 // browser tier.
 func TestNewRoutes(t *testing.T) {
-	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{RouteSets: []RouteSet{RouteSetMerchant}}) })
+	require.Panics(t, func() { (&Assembler{}).NewRoutes(Options{Permissions: httproutes.Permissions{AdminRead: "r"}}) })
 
 	asm := &Assembler{Runtime: &app.Runtime{Config: &config.Config{}}, Auth: &authtest.Fake{}}
 	noWebhooks := routesurface.ProviderRoutes{}
-	guard, err := StaffGuard(asm.Runtime, config.Routes{Merchant: true, Guards: authtest.StaffGuards()})
-	require.NoError(t, err)
-	table := asm.NewRoutes(Options{RouteSets: []RouteSet{RouteSetCheckout, RouteSetMerchant, RouteSetWebhooks}, ProviderRoutes: &noWebhooks, Guard: guard})
+	table := asm.NewRoutes(Options{Permissions: httproutes.Permissions{AdminRead: "r"}, ProviderRoutes: &noWebhooks})
 	var keys []string
 	for _, e := range table.Entries {
 		key := e.Method + " " + e.Path
@@ -105,10 +86,12 @@ func TestNewRoutes(t *testing.T) {
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/config")
-	require.Contains(t, keys, "GET /billing/v1/merchant/config")
+	require.Contains(t, keys, "GET /billing/v1/admin/config")
 	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
-	require.Contains(t, keys, "GET /billing/v1/merchant/payments")
-	require.NotContains(t, keys, "OPTIONS /billing/v1/merchant/payments")
+	require.Contains(t, keys, "GET /billing/v1/admin/payments")
+	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
+	require.NotContains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "writes need AdminWrite")
+	require.NotContains(t, keys, "GET /billing/v1/admin/psps", "configuration needs MerchantConfig")
 }
 
 // Provider credential writes need a DB secret backend that can write; an

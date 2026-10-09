@@ -3,12 +3,23 @@ import { useQuery } from "@tanstack/react-query"
 import { adminQueries } from "@/lib/queries"
 
 // useMerchantConfig reports whether the host mounts the merchant's own
-// configuration (Routes.MerchantConfig): PSPs, settings, catalog edits,
-// billing import and export, the dashboard layout. The console shows those
-// pages only then.
+// configuration (Permissions.MerchantConfig): PSPs, settings, billing import
+// and export, the dashboard layout. The console shows those pages only then.
 export function useMerchantConfig(): boolean {
   const { data } = useQuery(adminQueries.config())
   return data?.capabilities.route_groups?.merchant_config ?? false
+}
+
+// useCatalogWrites reports whether staff may edit the catalog here: the host
+// mounts catalog edits (Permissions.CatalogWrite) and the catalog accepts
+// them (no catalog file is the truth).
+export function useCatalogWrites(): boolean {
+  const { data: config } = useQuery(adminQueries.config())
+  const { data: revision } = useQuery(adminQueries.catalogRevision())
+  return (
+    (config?.capabilities.route_groups?.catalog_write ?? false) &&
+    revision?.writes_allowed === true
+  )
 }
 
 // configTabs are the settings tabs that are the merchant's configuration.

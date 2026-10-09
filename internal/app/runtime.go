@@ -131,7 +131,7 @@ type Runtime struct {
 	ProviderRefreshQueue string
 	RiverClient          *river.Client[pgx.Tx]
 	// CatalogEdits is whether catalog writes reach callers other than the
-	// process owner; the merchant API's mount decides it (Routes.MerchantConfig,
+	// process owner; the admin API's mount decides it (Routes.Permissions.CatalogWrite,
 	// or a standalone server's secret backend).
 	CatalogEdits *catalogpolicy.Exposure
 

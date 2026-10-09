@@ -77,7 +77,7 @@ table from the `currencies` of the public `GET /v1/config`. The admin UI's
 `go run ./scripts/currency-units` and pinned by a Go test. It formats exact decimal strings with BigInt/Intl, including
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input.
-Catalog application documents (`POST /v1/merchant/catalog/applications` JSON; YAML files keep exact
+Catalog application documents (`POST /v1/admin/catalog/applications` JSON; YAML files keep exact
 integers), the admin customer billing profile balances and metrics money cells
 (unit `money`, exact int64 sums; a money-unit ratio such as
 `realized_revenue_per_customer` is the exact rational quotient rounded half

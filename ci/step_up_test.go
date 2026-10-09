@@ -36,12 +36,12 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPost, "/v1/merchant/customers/ensure", map[string]any{"items": []any{map[string]any{"id": customer}}}},
-		{http.MethodPost, "/v1/merchant/product-access", map[string]any{"items": []any{map[string]any{"customer_id": customer, "product_id": "prod_" + uuid.NewString(), "hours": 24}}}},
-		{http.MethodPost, "/v1/merchant/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/credit-grants", map[string]any{}},
+		{http.MethodPost, "/v1/admin/customers/ensure", map[string]any{"items": []any{map[string]any{"id": customer}}}},
+		{http.MethodPost, "/v1/admin/product-access", map[string]any{"items": []any{map[string]any{"customer_id": customer, "product_id": "prod_" + uuid.NewString(), "hours": 24}}}},
+		{http.MethodPost, "/v1/admin/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
+		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
 		{http.MethodPost, "/v1/merchant/api-keys", map[string]string{"name": "ci", "role": "viewer"}},
-		{http.MethodPost, "/v1/merchant/billing-import", map[string]any{}},
+		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
 	} {
 		w := call(t, handler, stale, op.method, op.path, shop, op.body)
 		require.Equal(t, http.StatusForbidden, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
@@ -60,6 +60,6 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	var minted struct{ Secret string }
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&minted))
 	key := minted.Secret
-	w = call(t, handler, key, http.MethodPost, "/v1/merchant/customers/ensure", "", map[string]any{"items": []any{map[string]any{"id": uuid.NewString()}}})
+	w = call(t, handler, key, http.MethodPost, "/v1/admin/customers/ensure", "", map[string]any{"items": []any{map[string]any{"id": uuid.NewString()}}})
 	require.Equal(t, http.StatusOK, w.Code, "an API key carries no sign-in to step up: %s", w.Body.String())
 }

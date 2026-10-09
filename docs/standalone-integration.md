@@ -13,7 +13,7 @@ flowchart LR
     B[Browser] -- session credential --> H[Your identity provider]
     H -. access token, scope openrails:self .-> B
     B -- DPoP access token, /v1/me/* --> OR[OpenRails :3053]
-    H -- API key, /v1/merchant/* --> OR
+    H -- API key, /v1/admin/* --> OR
     OR --> PG[(Postgres 18+)]
     OR --> RD[(Garnet/Redis)]
     R[Stripe / NMI / CCBill / Solana] -- webhooks --> OR
@@ -30,7 +30,7 @@ curl http://localhost:3053/health/ready       # readiness: dependencies, local w
 
 Host ports (all bound to 127.0.0.1): OpenRails `:3053`, Postgres `:5434`,
 Redis `:6380`. The server applies its migrations at boot. Everything — public catalog,
-`/v1/me/*` self-service, `/v1/merchant/*`, and webhooks — shares the one port;
+`/v1/me/*` self-service, `/v1/admin/*`, and webhooks — shares the one port;
 there is no separate private/service listener.
 
 **Production needs:**
@@ -86,7 +86,7 @@ openrails run-server --config /etc/openrails/config.yaml \
 ### Credential custody and configuration publication
 
 Merchant metadata lives in PostgreSQL. `secret_backend` selects snapshot, Vault
-or encrypted DB credential custody. The server mounts the merchant API and the
+or encrypted DB credential custody. The server mounts the admin API and the
 merchant's configuration, guarded by its merchant persona's permissions:
 `server.MerchantRead` for reads, `server.MerchantWrite` for actions on
 customers, `server.MerchantAdmin` for the configuration (PSPs, settings,
@@ -223,25 +223,25 @@ your hot path.
 
 ```bash
 # Pre-authorize + hold atomically before doing expensive work
-curl -X POST https://openrails.example/v1/merchant/admissions \
+curl -X POST https://openrails.example/v1/admin/admissions \
   -H "Authorization: Bearer openrails_st_..." \
   -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
        "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
 
 # Settle at real cost…
-curl -X POST https://openrails.example/v1/merchant/admissions/req-789/capture \
+curl -X POST https://openrails.example/v1/admin/admissions/req-789/capture \
   -H "Authorization: Bearer openrails_st_..." \
   -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
 
 # …or release the hold when the work failed
-curl -X POST https://openrails.example/v1/merchant/admissions/release \
+curl -X POST https://openrails.example/v1/admin/admissions/release \
   -H "Authorization: Bearer openrails_st_..." \
   -d '{"request_ids":["req-789"]}'
 ```
 
-The `/v1/merchant/*` surface (admissions, credits, entitlements, usage,
-settings, customers, payments, subscriptions) is gated per route by its guard —
-see [api/routes.md](api/routes.md) for every route with its guards and
+The `/v1/admin/*` surface (admissions, credits, entitlements, usage,
+settings, customers, payments, subscriptions) is gated per route by its
+permission — see [api/routes.md](api/routes.md) for every route with its permission and
 [api/endpoints.md](api/endpoints.md) for the conventions. Keys are bound to their merchant and can never act on
 another merchant's data.
 
@@ -276,7 +276,7 @@ resource_server:
       allowed_origins: [https://admin.example.com]
 ```
 
-- `scope` selects the surface: `openrails:merchant` for the merchant API and
+- `scope` selects the surface: `openrails:merchant` for the admin API and
   `GET /v1/merchants` (the merchants the token reaches, with its role and
   permissions there), `openrails:self` for a customer's own billing
   (`/v1/me/*`, DPoP-bound, `sub` a UUID: the customer's id). Another scope is
@@ -306,7 +306,7 @@ resource_server:
   `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
   first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
   header to retry with.
-- Browsers on `allowed_origins` may call the merchant API across origins.
+- Browsers on `allowed_origins` may call the admin API across origins.
   Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
   headers, never cookies.
 - Refusals: `access_token_issuer_unknown` (untrusted `iss`),
@@ -336,9 +336,9 @@ subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
 **Per-merchant API hosts.** A multi-merchant deployment can give each
-merchant a canonical hostname (the owner claims it with `PUT /v1/merchant/api-host`
+merchant a canonical hostname (the owner claims it with `PUT /v1/admin/api-host`
 and proves control of the domain with a TXT record, then
-`POST /v1/merchant/api-host/verify`; operators bind directly with the
+`POST /v1/admin/api-host/verify`; operators bind directly with the
 server's `SetMerchantAPIHost`). It resolves live on the next request, no restart.
 The public routes then resolve the merchant from the Host header, and every
 merchant-scoped route enforces Host-merchant == issuer-merchant: a token minted
@@ -348,7 +348,7 @@ for merchant A is rejected on merchant B's host even though it verifies.
 registration: browser-facing tiers (checkout, `/v1/me/*`)
 answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every
-other surface (merchant API, webhooks, admin) emits no CORS headers at all.
+other surface (admin API, webhooks, admin) emits no CORS headers at all.
 
 ### Building on the server package
 
@@ -384,7 +384,7 @@ each acts for.
 | `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
 | `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
 | `MerchantCreation` | Lets signed-in users create merchants: reserved names, a pattern and a free allowance. |
-| `ResourceServer` | The trusted issuers whose access tokens the merchant API accepts (above). |
+| `ResourceServer` | The trusted issuers whose access tokens the admin API accepts (above). |
 | `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
 | `Addr` | Where `Run` listens; default `:3053`. |
 

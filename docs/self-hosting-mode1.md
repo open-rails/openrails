@@ -11,8 +11,8 @@ undeclared providers. Use explicit metadata applications for deliberate updates:
 [merchant configuration applications](merchant-configuration-applications.md).
 
 Credential custody, authorization and external HTTP publication are independent.
-The standalone server publishes the configuration routes with the merchant API;
-embedded hosts mount `Routes.Merchant`. Each route is gated by its permission, and
+The standalone server publishes the configuration routes with the admin API;
+embedded hosts give `Permissions.MerchantConfig`. Each route is gated by its permission, and
 authorized local Client metadata operations need no HTTP. Credential
 writes require a writable managed backend.
 

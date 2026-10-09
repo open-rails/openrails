@@ -351,7 +351,7 @@ func (c *Client) ListEntitlementCustomers(ctx context.Context, entitlement strin
 		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.ListPage[billing.CustomerID]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/entitlements/"+url.PathEscape(entitlement)+"/customers?"+query.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements/"+url.PathEscape(entitlement)+"/customers?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -368,7 +368,7 @@ func (c *Client) GetEffectiveTiers(ctx context.Context, params billing.GetEffect
 		return nil, err
 	}
 	var out billing.EffectiveTierLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/tiers/lookup", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/tiers/lookup", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Tiers, nil

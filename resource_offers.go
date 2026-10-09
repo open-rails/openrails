@@ -29,7 +29,7 @@ func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams,
 		return nil, invalidErr("limit must be between 1 and 100")
 	}
 	var out billing.OfferPages
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/offers/lookup", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/offers/lookup", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out, nil

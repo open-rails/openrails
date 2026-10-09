@@ -99,7 +99,7 @@ func runStaff(t *testing.T, a billingauth.Auth, perm string, header map[string]s
 		out.merchant, _ = merchant.FromContext(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})))
-	r := httptest.NewRequest(http.MethodGet, "/v1/merchant/configuration", nil)
+	r := httptest.NewRequest(http.MethodGet, "/v1/admin/configuration", nil)
 	for k, v := range header {
 		r.Header.Set(k, v)
 	}

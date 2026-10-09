@@ -37,11 +37,17 @@ const (
 	Checkout Group = "checkout"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
-	// Merchant is staff work on customers: staff, machines and the Go client
-	// alike, each route behind the host's guard for it (Routes.Guards).
-	Merchant Group = "merchant"
+	// Admin is staff work on customers: staff, machines and the Go client
+	// alike, each route behind the host's AdminRead or AdminWrite by its
+	// Level.
+	Admin Group = "admin"
+	// CatalogWrite is every catalog edit, behind the host's CatalogWrite;
+	// each refuses while the deployment's catalog is not edited over HTTP
+	// (catalogpolicy).
+	CatalogWrite Group = "catalog_write"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
-	// catalog edits, billing import and export, the dashboard layout.
+	// billing import and export, the dashboard layout, behind the host's
+	// MerchantConfig.
 	MerchantConfig Group = "merchant_config"
 	// ControlPlane is the standalone server's merchant accounts, team and
 	// API keys.
@@ -67,9 +73,9 @@ const (
 	AuthUser Tier = "user"
 	// AuthCustomer: the mount's Auth.Required, then the customer gate.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: the mount's Auth.RequirePermission for the route's guard
-	// (a control-plane route's Perm), on the request's merchant; Auth.Sensitive
-	// too for a user in person on a Sensitive route.
+	// AuthMerchant: the mount's Auth.RequirePermission for the route's bundle
+	// permission (a control-plane route's Perm), on the request's merchant;
+	// Auth.Sensitive too for a user in person on a Sensitive route.
 	AuthMerchant Tier = "merchant"
 	// AuthOperator: a human session holding Perm, a root: grant.
 	AuthOperator Tier = "operator"
@@ -100,67 +106,14 @@ const (
 	FeatureMerchantCreation Feature = "merchant_creation"
 )
 
-// CustomerScope is how much of the customer surface an exposure serves; each
-// scope includes the ones after it.
-type CustomerScope string
-
-const (
-	// ScopeSelfService: every customer route, purchases included.
-	ScopeSelfService CustomerScope = ""
-	// ScopeBillingManagement: history, access, payment methods and the
-	// agreements the customer already has.
-	ScopeBillingManagement CustomerScope = "billing_management"
-	// ScopeSubscriptionManagement: cancel, resume and pick the paying card.
-	ScopeSubscriptionManagement CustomerScope = "subscription_management"
-)
-
-// Level is a staff route's level group: StaffReads and StaffWrites cover
-// Merchant's reads and writes, MerchantConfig every MerchantConfig route.
+// Level is an admin route's: a read mounts with AdminRead, a write with
+// AdminWrite. Lookups, previews, checks and queries sent as POST are reads.
 type Level string
 
 const (
 	LevelRead  Level = "read"
 	LevelWrite Level = "write"
-	LevelAdmin Level = "admin"
 )
-
-// Resource is a resource group of staff routes: a guard on it overrides the
-// routes' level group.
-type Resource string
-
-const (
-	ResAccess           Resource = "access"
-	ResBillingData      Resource = "billing_data"
-	ResCatalog          Resource = "catalog"
-	ResCheckoutSessions Resource = "checkout_sessions"
-	ResCredits          Resource = "credits"
-	ResCustomers        Resource = "customers"
-	ResCustomerSettings Resource = "customer_settings"
-	ResDashboard        Resource = "dashboard"
-	ResFindings         Resource = "findings"
-	ResHostEvents       Resource = "host_events"
-	ResInvoices         Resource = "invoices"
-	ResMetrics          Resource = "metrics"
-	ResOperations       Resource = "operations"
-	ResPayments         Resource = "payments"
-	ResPSPs             Resource = "psps"
-	ResPublicConfig     Resource = "public_config"
-	ResRefunds          Resource = "refunds"
-	ResSettings         Resource = "settings"
-	ResSubscriptions    Resource = "subscriptions"
-	ResUsage            Resource = "usage"
-)
-
-// Resources is every resource group, with its Go name (openrails.<Name>).
-var Resources = map[Resource]string{
-	ResAccess: "Access", ResBillingData: "BillingData", ResCatalog: "Catalog", ResCheckoutSessions: "CheckoutSessions",
-	ResCredits: "Credits", ResCustomers: "Customers", ResCustomerSettings: "CustomerSettings", ResDashboard: "Dashboard", ResFindings: "Findings",
-	ResHostEvents: "HostEvents", ResInvoices: "Invoices", ResMetrics: "Metrics", ResOperations: "Operations",
-	ResPayments: "Payments", ResPSPs: "PSPs", ResPublicConfig: "PublicConfig", ResRefunds: "Refunds", ResSettings: "Settings",
-	ResSubscriptions: "Subscriptions", ResUsage: "Usage",
-}
-
-func res(list ...Resource) []Resource { return list }
 
 // Throttle is a route's own limiter, beside the deployment's rate limits.
 type Throttle string
@@ -280,18 +233,16 @@ func codes(list ...string) []string {
 type Route struct {
 	Method string
 	// Path is the route from the API root, with ServeMux wildcards:
-	// "/v1/merchant/payments/{id}". A deployment's mount prefix is not part
-	// of it.
+	// "/v1/admin/payments/{id}". A deployment's mount prefix is not part of
+	// it.
 	Path  string
 	Group Group
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
-	// Name is a staff route's Go client method, and its route guard's name
-	// (openrails.<Name>).
+	// Name is a staff route's Go client method.
 	Name string
-	// Level and Resources are the guard groups a staff route belongs to.
-	Level     Level
-	Resources []Resource
+	// Level is an admin route's: read or write.
+	Level Level
 	// Sensitive: the route moves money or removes access; the host's
 	// Sensitive stacks on it for a user in person.
 	Sensitive bool
@@ -304,14 +255,9 @@ type Route struct {
 	Throttle Throttle
 	// When is the configuration the route needs to be mounted.
 	When Feature
-	// Scope is the narrowest customer exposure that serves a Customer route.
-	Scope CustomerScope
 	// InvokerScoped: an invoker-scoped credential, which spends a customer's
 	// balance without being the customer, may call this Customer route.
 	InvokerScoped bool
-	// CatalogWrite: the route changes the catalog; it refuses unless the
-	// deployment's catalog is edited over HTTP (catalogpolicy).
-	CatalogWrite bool
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool
 	// IdempotencyKey: the route reads the Idempotency-Key header.
@@ -332,11 +278,14 @@ type Route struct {
 	Bind    func(*Env) router.Handler
 }
 
-// Key is the route's identity: "GET /v1/merchant/payments/{id}".
+// Key is the route's identity: "GET /v1/admin/payments/{id}".
 func (r Route) Key() string { return r.Method + " " + r.Path }
 
-// Staff reports a route behind a guard: Merchant's and MerchantConfig's.
-func (r Route) Staff() bool { return r.Group == Merchant || r.Group == MerchantConfig }
+// Staff reports a route behind a bundle permission: Admin's, CatalogWrite's
+// and MerchantConfig's.
+func (r Route) Staff() bool {
+	return r.Group == Admin || r.Group == CatalogWrite || r.Group == MerchantConfig
+}
 
 // h adapts a handler func to the neutral router.Handler type.
 func h(fn func(r *httprequest.Request)) router.Handler { return router.Handler(fn) }
@@ -367,6 +316,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		}
 		if (r.Handler == nil) == (r.Bind == nil) {
 			panic("routes: " + r.Key() + " needs exactly one of Handler and Bind")
+		}
+		if (r.Group == Admin) != (r.Level == LevelRead || r.Level == LevelWrite) || (r.Group != Admin && r.Level != "") {
+			panic("routes: " + r.Key() + ": an admin route, and only one, reads or writes")
 		}
 		byKey[r.Key()] = r
 	}
@@ -429,7 +381,7 @@ func (r Route) ErrorSets() []string {
 	if r.Request != nil || len(r.Query) > 0 {
 		sets = append(sets, "request")
 	}
-	if r.CatalogWrite {
+	if r.Group == CatalogWrite {
 		sets = append(sets, "catalog_write")
 	}
 	return sets

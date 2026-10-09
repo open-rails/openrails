@@ -37,9 +37,9 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
-| `metrics-ask` | `metrics-ask` | 10 | `POST /v1/merchant/metrics/ask` |
-| `catalog-ask` | `catalog-ask` | 10 | `POST /v1/merchant/catalog/ask` (including drafting) |
-| `dashboard-generate` | `dashboard-generate` | 10 | `POST /v1/merchant/dashboard/widgets/generate` |
+| `metrics-ask` | `metrics-ask` | 10 | `POST /v1/admin/metrics/ask` |
+| `catalog-ask` | `catalog-ask` | 10 | `POST /v1/admin/catalog/ask` (including drafting) |
+| `dashboard-generate` | `dashboard-generate` | 10 | `POST /v1/admin/dashboard/widgets/generate` |
 | `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
 
 Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front

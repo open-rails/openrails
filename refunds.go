@@ -25,7 +25,7 @@ func (c *Client) RefundPayment(ctx context.Context, id billing.PaymentID, params
 		return nil, invalidErr("exactly one of a positive amount or full is required")
 	}
 	var out billing.Payment
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/payments/"+payment+"/refunds", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/payments/"+payment+"/refunds", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -40,7 +40,7 @@ func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProdu
 		return nil, invalidErr("Idempotency-Key required")
 	}
 	var out billing.ProductArchive
-	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/catalog/product-archives", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/admin/catalog/product-archives", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -54,7 +54,7 @@ func (c *Client) GetProductArchive(ctx context.Context, id billing.ProductArchiv
 		return nil, err
 	}
 	var out billing.ProductArchive
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/product-archives/"+path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/product-archives/"+path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

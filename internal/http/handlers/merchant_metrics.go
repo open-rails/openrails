@@ -12,14 +12,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// MerchantMetricsSchema handles GET /v1/merchant/metrics/schema: the registry
+// MerchantMetricsSchema handles GET /v1/admin/metrics/schema: the registry
 // dump (measures + formulas + dims + caveats + examples) —
 // the client/LLM context document.
 func MerchantMetricsSchema(r *httprequest.Request) {
 	r.JSON(http.StatusOK, metrics.Schema())
 }
 
-// MerchantMetricsQuery handles POST /v1/merchant/metrics/query: the composable
+// MerchantMetricsQuery handles POST /v1/admin/metrics/query: the composable
 // analytics endpoint (#733). Validation errors come back ALL AT ONCE with
 // corrective context (did-you-mean + valid lists).
 func MerchantMetricsQuery(r *httprequest.Request) {
@@ -46,7 +46,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 
-// MerchantMetricsAsk handles POST /v1/merchant/metrics/ask (#756): a free-form
+// MerchantMetricsAsk handles POST /v1/admin/metrics/ask (#756): a free-form
 // question answered by an LLM that runs compiler-validated metrics queries as
 // tools on the caller's merchant-scoped context. UNLIKE widget generation
 // (#741, schema-only), the model sees aggregate query RESULTS — so this is

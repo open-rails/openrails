@@ -118,16 +118,13 @@ func run(ctx context.Context) error {
 	if err := authkitgin.Mount(r, ak); err != nil { // sign-up and sign-in under /api/v1
 		return err
 	}
-	// Billing. Processor webhooks are always mounted; pick the rest.
+	// Billing. Public, customer (/me) and webhook routes are always mounted.
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:       ak,                            // AuthKit guards each route: OpenRails asks it, by route
-		Prefix:     "/billing",                    // the API is served at /billing/v1/*
-		Storefront: true,                          // anyone can browse products and prices, and pay a checkout
-		Customers:  openrails.CustomerSelfService, // signed-in users manage their own purchases, subscriptions and cards at /me
-		Merchant:   true,                          // your staff's API at /merchant: refunds, subscriptions, customers' billing
-		Guards: openrails.Guards{
-			openrails.StaffReads:  customersRead,   // every staff read
-			openrails.StaffWrites: customersUpdate, // every staff write
+		Auth:   ak,         // AuthKit guards each route: OpenRails asks it, by route
+		Prefix: "/billing", // the API is served at /billing/v1/*
+		Permissions: openrails.Permissions{
+			AdminRead:  customersRead, // your staff's admin routes: customers' billing, refunds, subscriptions
+			AdminWrite: customersUpdate,
 		},
 	})
 	if err != nil {

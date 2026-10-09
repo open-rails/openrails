@@ -18,7 +18,7 @@ same contract, and the in-process Go client its own host authority.
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | checkout session | the session id; `Required` only to show saved cards | the session's own customer sees and pays with its saved cards |
 | customer (`/v1/me`) | `Required` | a user subject, the customer; an invoker acting for someone else, or an application, only on its own spend limits |
-| merchant (`/v1/merchant`) | `RequirePermission(permission)` with the host's permission for the route's guard (`Routes.Guards`), then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that permission on the mounted merchant |
+| merchant (`/v1/admin`) | `RequirePermission(permission)` with the host's permission for the route's bundle (`Routes.Permissions`), then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that permission on the mounted merchant |
 
 OpenRails binds the merchant a customer route serves before `Required` runs;
 the middleware reads it with `openrails.RequestMerchant` rather than resolving

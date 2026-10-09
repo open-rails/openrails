@@ -1,7 +1,7 @@
 // Package contract renders the route catalog and the error-code registry as
 // the files other tools read: the OpenAPI document, the TypeScript wire types
-// of the browser SDK and the console, openrails' RouteSet constants, and the
-// route and error-code tables of the API reference. They are committed; Verify fails when one is stale.
+// of the browser SDK and the console, and the route and error-code tables of
+// the API reference. They are committed; Verify fails when one is stale.
 package contract
 
 import (
@@ -51,13 +51,8 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	sets, err := routeSetsGo()
-	if err != nil {
-		return nil, err
-	}
 	return map[string][]byte{
 		OpenAPIFile:                     openapi,
-		RouteSetsFile:                   sets,
 		RoutesDoc:                       all.routesMD(),
 		CodesDoc:                        errorCodesMD(),
 		billingUIDir + "wire.ts":        sdk.wireTS(),

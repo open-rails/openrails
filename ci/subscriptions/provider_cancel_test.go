@@ -83,7 +83,7 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	w.settleCollectionScans()
 	w.stripe.subscriptionWritesDown(true)
 	cancel := map[string]any{"reason": "merchant ended the membership"}
-	status, body := w.staffJSON(http.MethodPost, "/v1/merchant/subscriptions/"+l.sub.String()+"/cancel", cancel)
+	status, body := w.staffJSON(http.MethodPost, "/v1/admin/subscriptions/"+l.sub.String()+"/cancel", cancel)
 	require.Equal(t, http.StatusOK, status, "%v", body)
 	require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "the cancel never waits on Stripe")
 	require.True(t, l.c.entitled(l.ent), "the paid period is kept")
@@ -93,7 +93,7 @@ func TestStripeMerchantCancelIsDurable(t *testing.T) {
 	w.until(func() bool { return w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"] == true }, "the queued cancel reaches Stripe")
 	require.Len(t, l.stripeSubWrites(), 1)
 
-	status, _ = w.staffJSON(http.MethodPost, "/v1/merchant/subscriptions/"+l.sub.String()+"/cancel", cancel)
+	status, _ = w.staffJSON(http.MethodPost, "/v1/admin/subscriptions/"+l.sub.String()+"/cancel", cancel)
 	require.NotEqual(t, http.StatusOK, status, "a canceled membership is not canceled again")
 	w.wake()
 	require.Len(t, l.stripeSubWrites(), 1)

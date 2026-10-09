@@ -13,7 +13,7 @@ func (c *Client) ImportBilling(ctx context.Context, book billing.DeclaredBilling
 		return nil, invalidErr("as_of is required")
 	}
 	var out billing.BillingImportResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/billing-import", book, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/billing-import", book, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -12,13 +12,13 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// PSPListQuery filters GET /v1/merchant/psps.
+// PSPListQuery filters GET /v1/admin/psps.
 type PSPListQuery struct {
 	Rail     billing.Rail `form:"rail"`
 	Archived *bool        `form:"archived"`
 }
 
-// ListPSPs handles GET /v1/merchant/psps.
+// ListPSPs handles GET /v1/admin/psps.
 func ListPSPs(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
@@ -44,7 +44,7 @@ func ListPSPs(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPSP handles GET /v1/merchant/psps/{id}.
+// GetPSP handles GET /v1/admin/psps/{id}.
 func GetPSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -58,7 +58,7 @@ func GetPSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// CreatePSP handles POST /v1/merchant/psps.
+// CreatePSP handles POST /v1/admin/psps.
 func CreatePSP(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
@@ -76,7 +76,7 @@ func CreatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-// UpdatePSP handles PATCH /v1/merchant/psps/{id}.
+// UpdatePSP handles PATCH /v1/admin/psps/{id}.
 func UpdatePSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -94,7 +94,7 @@ func UpdatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ArchivePSP handles POST /v1/merchant/psps/{id}/archive. The body is
+// ArchivePSP handles POST /v1/admin/psps/{id}/archive. The body is
 // optional; no provider call is made, so a dark account archives too.
 func ArchivePSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
@@ -113,12 +113,12 @@ func ArchivePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ListRails handles GET /v1/merchant/rails.
+// ListRails handles GET /v1/admin/rails.
 func ListRails(r *httprequest.Request) {
 	r.JSON(http.StatusOK, billing.ListPage[billing.RailDefinition]{Items: merchants.RailDefinitions()})
 }
 
-// RefreshPSPs handles POST /v1/merchant/psps/refresh: the merchant's PSP
+// RefreshPSPs handles POST /v1/admin/psps/refresh: the merchant's PSP
 // pull runs now.
 func RefreshPSPs(r *httprequest.Request) {
 	ctx := r.Request.Context()

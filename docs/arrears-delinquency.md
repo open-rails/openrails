@@ -64,7 +64,7 @@ year-old invoice must not turn into a shutoff instruction.
 ## Policy (two knobs, both defaulted)
 
 Merchant settings, declared under the merchant's `settings:` (mode 1) or
-applied through `POST /v1/merchant/configuration/applications` (mode 2); the
+applied through `POST /v1/admin/configuration/applications` (mode 2); the
 same names in both:
 
 ```yaml
@@ -83,7 +83,7 @@ Amounts are integers in the currency's native units (micros for USD).
 
 ## What OpenRails enforces: admission
 
-A delinquent customer is refused at `/v1/merchant/admissions` with its **own** deny
+A delinquent customer is refused at `/v1/admin/admissions` with its **own** deny
 code:
 
 ```json
@@ -155,12 +155,12 @@ dedupe key, so a re-run never instructs you to shut the same customer off twice.
 
 ## Reading the state
 
-- `GET /v1/merchant/delinquency` (`Client.ListDelinquency`): the overdue roster
+- `GET /v1/admin/delinquency` (`Client.ListDelinquency`): the overdue roster
   (grace + delinquent, oldest debt first), a cursor page. `?state=delinquent`
   filters. Customers in good standing are never returned: it is an exception list,
   not a customer directory. The policy it is judged against is in the merchant's
   settings (`arrears_grace_days`, `arrears_delinquency_floor`).
-- `GET /v1/merchant/customers/{customer_id}/delinquency`
+- `GET /v1/admin/customers/{customer_id}/delinquency`
   (`Client.ListCustomerDelinquency`): one customer, per currency. An empty list
   means the customer has never been overdue.
 

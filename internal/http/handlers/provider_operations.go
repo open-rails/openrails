@@ -112,7 +112,7 @@ func ServiceCloseOperationAuthorization(r *httprequest.Request) {
 
 // ServiceListOperationAuthorizations lists holds newest first.
 //
-//	GET /merchant/provider-operations?state&refused&limit&cursor
+//	GET /admin/provider-operations?state&refused&limit&cursor
 func ServiceListOperationAuthorizations(r *httprequest.Request) {
 	svc, ok := providerOperationService(r, nil)
 	if !ok {
@@ -145,7 +145,7 @@ func ServiceListOperationAuthorizations(r *httprequest.Request) {
 
 // ServiceListProviderBillingQualifications lists qualifications newest first.
 //
-//	GET /merchant/provider-qualifications?state&authorization_state&limit&cursor
+//	GET /admin/provider-qualifications?state&authorization_state&limit&cursor
 func ServiceListProviderBillingQualifications(r *httprequest.Request) {
 	svc, ok := providerOperationService(r, nil)
 	if !ok {

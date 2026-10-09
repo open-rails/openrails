@@ -24,9 +24,10 @@ Before the code:
 
 | Before | After |
 |---|---|
-| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Merchant` mounts staff work on customers, `Routes.MerchantConfig` the merchant's own configuration (catalog writes included); `Routes.Guards` names your permission for each |
-| `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Guard its staff routes with your own in `Routes.Guards` (`openrails.StaffReads`, `openrails.StaffWrites`, `openrails.MerchantConfig`, a resource group or one route); AuthKit checks a `root:` permission on root with no configuration |
-| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Prefix`, `Storefront`, `Customers`, `CustomerProfiles`, `Merchant`, `MerchantConfig`, `Guards`, `CookieOrigin`, `AdminConsole`. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `HTTPConfig.MerchantAdmin`, `MerchantAPI`, `MerchantConfig`, `Catalog`; `Config.MerchantConfigHTTP` | `Routes.Permissions`: `AdminRead` and `AdminWrite` mount staff work on customers, `CatalogWrite` catalog edits, `MerchantConfig` the merchant's own configuration |
+| `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Give your own in `Routes.Permissions` (`AdminRead`, `AdminWrite`, `CatalogWrite`, `MerchantConfig`); AuthKit checks a `root:` permission on root with no configuration |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, `CustomerRoutes`, `Merchant`, `CookieOrigin`); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `Permissions`, `CustomerProfiles`, `CookieOrigin`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `Routes.Guards`, the `openrails.RouteSet` constants (level, resource and route groups); `Routes.Storefront`, `Routes.Customers` and the customer scopes (`CustomerSelfService`, …); `Routes.Merchant`, `Routes.MerchantConfig` | `Routes.Permissions{AdminRead, AdminWrite, CatalogWrite, MerchantConfig}`: a bundle mounts only with its permission, and OpenRails decides each admin route's level |
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
 | `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
 | `catalog_edits` (env `CATALOG_EDITS`) on the standalone server | Removed: catalog edits over HTTP follow `secret_backend` (`vault` or `db`: on; `snapshot`: read-only), and `catalog_edits` refuses boot |
@@ -60,7 +61,7 @@ Before the code:
 | `rate_limits.default`: 300 a minute per address on every other route | Removed. `rate_limits` takes `checkout`, `payment`, `subscribe` and `webhook`; any other key refuses boot. A per-address ceiling belongs to the proxy |
 | `GET /`, `/healthz`, `/readyz`, `/health/ready?verbose=1`, 503 `not_ready` | `/health/live` and `/health/ready`; a failed readiness check is 503 `service_unavailable` and the failing dependency is logged, not answered |
 | Capability `hosted_checkout`; route groups `merchant_admin`, `merchant_api`, `merchant_config`, `catalog` | Capability `checkout_sessions`; `/v1/config`'s `capabilities` list the groups `checkout`, `customer`, `merchant`, `merchant_config`, `webhooks` |
-| Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are `Routes.MerchantConfig`'s, behind your guard (`openrails.PSPs` or `openrails.MerchantConfig`) |
+| Permissions `merchant:payment-providers:read`, `merchant:payment-providers:update` | Removed: the PSP routes are behind your `Permissions.MerchantConfig` |
 | CLI flag `--provider-account` | `--psp` |
 
 ## 2. YAML manifests
@@ -246,7 +247,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical entries of `client.ListMerchantNotifications(` |
 | `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
-| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox, findings and worker health are staff reads (`openrails.Operations`, `openrails.Findings`) |
+| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox, findings and worker health are admin reads (`Permissions.AdminRead`) |
 | Permissions `merchant:catalog:read-own`, `merchant:catalog:update-own`; the control plane's `creator` role | Removed with creator-owned catalogs; a teammate or API key holds `viewer`, `support` or `owner` |
 
 ## 4. HTTP routes and shapes
@@ -286,27 +287,28 @@ fields (`400 unknown_field`), and every error code is in
 
 | Before | After |
 |---|---|
-| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`), `/v1/merchant/psps/{id}/archive`, `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; `/v1/merchant/rails` |
-| `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/merchant/checkout-sessions`, `POST /v1/me/checkout-sessions` |
+| `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…`; the standalone control plane keeps `/v1/merchant/name`, `/api-keys`, `/team` and `/federated-grants` |
+| `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; `/v1/admin/rails` |
+| `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
-| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/merchant/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
-| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/merchant/customers/settings` |
-| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/balance/transactions` |
-| `PUT …/spend-delegations:upsert` | `PUT /v1/merchant/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
-| `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}`, `POST /v1/merchant/admissions/release`, `POST /v1/merchant/admissions/extend` |
-| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/merchant/usage-events`, `GET /v1/merchant/customers/{customer_id}/usage` |
-| `/v1/merchant/users/{user_id}/…` | `/v1/merchant/customers/{customer_id}/product-access` and the checks beneath it |
-| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/merchant/customers/{customer_id}/entitlements/check`, `POST /v1/merchant/tiers/lookup` |
-| `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`; the profile is `/v1/merchant/customers/{customer_id}/billing-profile` |
-| `GET /v1/merchant/customers/{id}/payments` | `GET /v1/merchant/payments` with `customer_id` |
+| `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` |
+| `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/admin/customers/settings` |
+| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
+| `PUT …/spend-delegations:upsert` | `PUT /v1/admin/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
+| `/v1/merchant/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
+| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `GET /v1/admin/customers/{customer_id}/usage` |
+| `/v1/merchant/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
+| `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
+| `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`; the profile is `/v1/admin/customers/{customer_id}/billing-profile` |
+| `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
-| `/v1/merchant/webhooks…` | `/v1/merchant/alert-webhooks` |
-| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}` | `/v1/merchant/reprice-batches`, `/v1/merchant/reprice-batches/{id}` |
-| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/merchant/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
-| A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/merchant/catalog/*` |
-| `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
-| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/merchant/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
+| `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
+| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}` | `/v1/admin/reprice-batches`, `/v1/admin/reprice-batches/{id}` |
+| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/admin/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
+| A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
+| `POST /v1/import/billing` | `POST /v1/admin/billing-import` |
+| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/admin/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 | `GET /v1/platform/merchants` with `limit` and `offset` | A cursor page (`limit`, `cursor`) |
 

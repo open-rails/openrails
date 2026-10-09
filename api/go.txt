@@ -1,193 +1,19 @@
-pkg openrails, const Access RouteSet = "resource:access"
-pkg openrails, const AcknowledgeHostEvents RouteSet = "route:AcknowledgeHostEvents"
-pkg openrails, const Admit RouteSet = "route:Admit"
-pkg openrails, const ApplyCatalog RouteSet = "route:ApplyCatalog"
-pkg openrails, const ApplyMerchantConfiguration RouteSet = "route:ApplyMerchantConfiguration"
-pkg openrails, const ArchivePSP RouteSet = "route:ArchivePSP"
-pkg openrails, const ArchiveProduct RouteSet = "route:ArchiveProduct"
-pkg openrails, const AskCatalog RouteSet = "route:AskCatalog"
-pkg openrails, const AskMetrics RouteSet = "route:AskMetrics"
-pkg openrails, const BillingData RouteSet = "resource:billing_data"
-pkg openrails, const CancelReprice RouteSet = "route:CancelReprice"
-pkg openrails, const CancelRepriceBatch RouteSet = "route:CancelRepriceBatch"
-pkg openrails, const CancelSubscription RouteSet = "route:CancelSubscription"
-pkg openrails, const CaptureAdmission RouteSet = "route:CaptureAdmission"
-pkg openrails, const Catalog RouteSet = "resource:catalog"
-pkg openrails, const ChangeTier RouteSet = "route:ChangeTier"
-pkg openrails, const CheckEntitlements RouteSet = "route:CheckEntitlements"
-pkg openrails, const CheckProductAccess RouteSet = "route:CheckProductAccess"
-pkg openrails, const CheckoutSessions RouteSet = "resource:checkout_sessions"
-pkg openrails, const CloseOperationAuthorization RouteSet = "route:CloseOperationAuthorization"
-pkg openrails, const CreateAlertWebhook RouteSet = "route:CreateAlertWebhook"
-pkg openrails, const CreateCheckoutSession RouteSet = "route:CreateCheckoutSession"
-pkg openrails, const CreateCreditGrants RouteSet = "route:CreateCreditGrants"
-pkg openrails, const CreateInvoicePayment RouteSet = "route:CreateInvoicePayment"
-pkg openrails, const CreateOffChannelPayment RouteSet = "route:CreateOffChannelPayment"
-pkg openrails, const CreatePSP RouteSet = "route:CreatePSP"
-pkg openrails, const CreatePlanMigration RouteSet = "route:CreatePlanMigration"
-pkg openrails, const CreatePrice RouteSet = "route:CreatePrice"
-pkg openrails, const CreateProduct RouteSet = "route:CreateProduct"
-pkg openrails, const CreateProductAccess RouteSet = "route:CreateProductAccess"
-pkg openrails, const CreateRepriceBatch RouteSet = "route:CreateRepriceBatch"
 pkg openrails, const CredentialAPIKey auth.CredentialKind = "api_key"
 pkg openrails, const CredentialAccessToken auth.CredentialKind = "access_token"
 pkg openrails, const CredentialDeviceKey auth.CredentialKind = "device_key"
 pkg openrails, const CredentialSession auth.CredentialKind = "session"
 pkg openrails, const CredentialSignedToken auth.CredentialKind = "signed_token"
-pkg openrails, const Credits RouteSet = "resource:credits"
-pkg openrails, const CustomerBillingManagement config.CustomerHTTPScope = 3
-pkg openrails, const CustomerSelfService config.CustomerHTTPScope = 1
-pkg openrails, const CustomerSettings RouteSet = "resource:customer_settings"
-pkg openrails, const CustomerSubscriptionManagement config.CustomerHTTPScope = 2
-pkg openrails, const Customers RouteSet = "resource:customers"
-pkg openrails, const CustomersNone config.CustomerHTTPScope = 0
-pkg openrails, const Dashboard RouteSet = "resource:dashboard"
-pkg openrails, const DeleteAlertWebhook RouteSet = "route:DeleteAlertWebhook"
-pkg openrails, const DeleteMeterRateCard RouteSet = "route:DeleteMeterRateCard"
-pkg openrails, const DeletePaymentMethod RouteSet = "route:DeletePaymentMethod"
-pkg openrails, const DeleteProductAccess RouteSet = "route:DeleteProductAccess"
-pkg openrails, const DeleteRateOverride RouteSet = "route:DeleteRateOverride"
-pkg openrails, const DeleteSpendDelegation RouteSet = "route:DeleteSpendDelegation"
-pkg openrails, const EnsureCustomers RouteSet = "route:EnsureCustomers"
-pkg openrails, const EnsureProduct RouteSet = "route:EnsureProduct"
-pkg openrails, const ExportBillingArchive RouteSet = "route:ExportBillingArchive"
-pkg openrails, const ExtendAdmissions RouteSet = "route:ExtendAdmissions"
-pkg openrails, const ExtendOperationAuthorization RouteSet = "route:ExtendOperationAuthorization"
-pkg openrails, const Findings RouteSet = "resource:findings"
-pkg openrails, const GenerateDashboardWidget RouteSet = "route:GenerateDashboardWidget"
-pkg openrails, const GetAPIHost RouteSet = "route:GetAPIHost"
-pkg openrails, const GetAdmission RouteSet = "route:GetAdmission"
-pkg openrails, const GetBalance RouteSet = "route:GetBalance"
-pkg openrails, const GetCatalogRevision RouteSet = "route:GetCatalogRevision"
-pkg openrails, const GetCreditGrant RouteSet = "route:GetCreditGrant"
-pkg openrails, const GetCustomerBillingProfile RouteSet = "route:GetCustomerBillingProfile"
-pkg openrails, const GetDashboard RouteSet = "route:GetDashboard"
-pkg openrails, const GetEffectiveTiers RouteSet = "route:GetEffectiveTiers"
-pkg openrails, const GetFinding RouteSet = "route:GetFinding"
-pkg openrails, const GetFindingSummary RouteSet = "route:GetFindingSummary"
-pkg openrails, const GetInvoice RouteSet = "route:GetInvoice"
-pkg openrails, const GetMerchantConfiguration RouteSet = "route:GetMerchantConfiguration"
-pkg openrails, const GetMeter RouteSet = "route:GetMeter"
-pkg openrails, const GetMetricsSchema RouteSet = "route:GetMetricsSchema"
-pkg openrails, const GetOperationAuthorization RouteSet = "route:GetOperationAuthorization"
-pkg openrails, const GetPSP RouteSet = "route:GetPSP"
-pkg openrails, const GetPayment RouteSet = "route:GetPayment"
-pkg openrails, const GetPaymentAttempt RouteSet = "route:GetPaymentAttempt"
-pkg openrails, const GetPaymentSettlementStatus RouteSet = "route:GetPaymentSettlementStatus"
-pkg openrails, const GetPrice RouteSet = "route:GetPrice"
-pkg openrails, const GetPriceByKey RouteSet = "route:GetPriceByKey"
-pkg openrails, const GetProduct RouteSet = "route:GetProduct"
-pkg openrails, const GetProductArchive RouteSet = "route:GetProductArchive"
-pkg openrails, const GetProductByKey RouteSet = "route:GetProductByKey"
-pkg openrails, const GetProviderBillingQualification RouteSet = "route:GetProviderBillingQualification"
-pkg openrails, const GetPublicConfig RouteSet = "route:GetPublicConfig"
-pkg openrails, const GetRebillCycle RouteSet = "route:GetRebillCycle"
-pkg openrails, const GetReprice RouteSet = "route:GetReprice"
-pkg openrails, const GetRepriceBatch RouteSet = "route:GetRepriceBatch"
-pkg openrails, const GetSubscription RouteSet = "route:GetSubscription"
-pkg openrails, const GetUnreadNotificationCount RouteSet = "route:GetUnreadNotificationCount"
-pkg openrails, const GetUsage RouteSet = "route:GetUsage"
-pkg openrails, const HostEvents RouteSet = "resource:host_events"
-pkg openrails, const ImportBilling RouteSet = "route:ImportBilling"
-pkg openrails, const ImportBillingArchive RouteSet = "route:ImportBillingArchive"
-pkg openrails, const Invoices RouteSet = "resource:invoices"
-pkg openrails, const ListAlertWebhooks RouteSet = "route:ListAlertWebhooks"
-pkg openrails, const ListBalanceTransactions RouteSet = "route:ListBalanceTransactions"
-pkg openrails, const ListCatalogDrift RouteSet = "route:ListCatalogDrift"
-pkg openrails, const ListCheckoutOptions RouteSet = "route:ListCheckoutOptions"
-pkg openrails, const ListCreditGrants RouteSet = "route:ListCreditGrants"
-pkg openrails, const ListCustomerDelinquency RouteSet = "route:ListCustomerDelinquency"
-pkg openrails, const ListCustomerEntitlements RouteSet = "route:ListCustomerEntitlements"
-pkg openrails, const ListCustomerSettings RouteSet = "route:ListCustomerSettings"
-pkg openrails, const ListCustomers RouteSet = "route:ListCustomers"
-pkg openrails, const ListDelinquency RouteSet = "route:ListDelinquency"
-pkg openrails, const ListEntitlementCustomers RouteSet = "route:ListEntitlementCustomers"
-pkg openrails, const ListFindings RouteSet = "route:ListFindings"
-pkg openrails, const ListHostEvents RouteSet = "route:ListHostEvents"
-pkg openrails, const ListInvoicePayments RouteSet = "route:ListInvoicePayments"
-pkg openrails, const ListInvoices RouteSet = "route:ListInvoices"
-pkg openrails, const ListMerchantNotifications RouteSet = "route:ListMerchantNotifications"
-pkg openrails, const ListMeterRateOverrides RouteSet = "route:ListMeterRateOverrides"
-pkg openrails, const ListMeters RouteSet = "route:ListMeters"
-pkg openrails, const ListOffers RouteSet = "route:ListOffers"
-pkg openrails, const ListOperationAuthorizations RouteSet = "route:ListOperationAuthorizations"
-pkg openrails, const ListPSPs RouteSet = "route:ListPSPs"
-pkg openrails, const ListPaymentAttempts RouteSet = "route:ListPaymentAttempts"
-pkg openrails, const ListPaymentMethods RouteSet = "route:ListPaymentMethods"
-pkg openrails, const ListPayments RouteSet = "route:ListPayments"
-pkg openrails, const ListPriceKeyHistory RouteSet = "route:ListPriceKeyHistory"
-pkg openrails, const ListPrices RouteSet = "route:ListPrices"
-pkg openrails, const ListProductAccess RouteSet = "route:ListProductAccess"
-pkg openrails, const ListProducts RouteSet = "route:ListProducts"
-pkg openrails, const ListProviderBillingQualifications RouteSet = "route:ListProviderBillingQualifications"
-pkg openrails, const ListRails RouteSet = "route:ListRails"
-pkg openrails, const ListRateOverrides RouteSet = "route:ListRateOverrides"
-pkg openrails, const ListRebillCycles RouteSet = "route:ListRebillCycles"
-pkg openrails, const ListRepriceBatches RouteSet = "route:ListRepriceBatches"
-pkg openrails, const ListReprices RouteSet = "route:ListReprices"
-pkg openrails, const ListSpendDelegations RouteSet = "route:ListSpendDelegations"
-pkg openrails, const ListSubscriptions RouteSet = "route:ListSubscriptions"
-pkg openrails, const ListWorkerHealth RouteSet = "route:ListWorkerHealth"
 pkg openrails, const Live config.CredentialPosture = "live"
-pkg openrails, const MarkInvoiceUncollectible RouteSet = "route:MarkInvoiceUncollectible"
-pkg openrails, const MarkNotificationsRead RouteSet = "route:MarkNotificationsRead"
-pkg openrails, const MerchantConfig RouteSet = "merchant_config"
-pkg openrails, const Metrics RouteSet = "resource:metrics"
-pkg openrails, const OpenOperationAuthorization RouteSet = "route:OpenOperationAuthorization"
-pkg openrails, const Operations RouteSet = "resource:operations"
-pkg openrails, const PSPs RouteSet = "resource:psps"
-pkg openrails, const Payments RouteSet = "resource:payments"
-pkg openrails, const PreviewPSPRouting RouteSet = "route:PreviewPSPRouting"
-pkg openrails, const PreviewPlanMigration RouteSet = "route:PreviewPlanMigration"
-pkg openrails, const PreviewRepriceBatch RouteSet = "route:PreviewRepriceBatch"
-pkg openrails, const PreviewTierChange RouteSet = "route:PreviewTierChange"
 pkg openrails, const ProviderWritesFull untyped string = "full"
 pkg openrails, const ProviderWritesLimited untyped string = "limited"
 pkg openrails, const ProviderWritesReadOnly untyped string = "readonly"
-pkg openrails, const PublicConfig RouteSet = "resource:public_config"
-pkg openrails, const QueryMetrics RouteSet = "route:QueryMetrics"
 pkg openrails, const QueueBilling untyped string = "billing"
-pkg openrails, const RecordProviderBillingObservation RouteSet = "route:RecordProviderBillingObservation"
-pkg openrails, const RecordUsage RouteSet = "route:RecordUsage"
-pkg openrails, const RefreshCatalogDrift RouteSet = "route:RefreshCatalogDrift"
-pkg openrails, const RefreshPSPs RouteSet = "route:RefreshPSPs"
-pkg openrails, const RefundPayment RouteSet = "route:RefundPayment"
-pkg openrails, const Refunds RouteSet = "resource:refunds"
-pkg openrails, const RefuseProviderBillingQualification RouteSet = "route:RefuseProviderBillingQualification"
-pkg openrails, const ReleaseAdmissions RouteSet = "route:ReleaseAdmissions"
-pkg openrails, const ReleaseOperationAuthorization RouteSet = "route:ReleaseOperationAuthorization"
-pkg openrails, const ReplaceEntitlements RouteSet = "route:ReplaceEntitlements"
-pkg openrails, const ReportWastedSpend RouteSet = "route:ReportWastedSpend"
-pkg openrails, const ResolveFinding RouteSet = "route:ResolveFinding"
-pkg openrails, const ResolveProviderBillingQualification RouteSet = "route:ResolveProviderBillingQualification"
-pkg openrails, const ResumeSubscription RouteSet = "route:ResumeSubscription"
-pkg openrails, const RetryInvoiceCollection RouteSet = "route:RetryInvoiceCollection"
-pkg openrails, const RevokeCreditGrant RouteSet = "route:RevokeCreditGrant"
 pkg openrails, const Sandbox config.CredentialPosture = "sandbox"
 pkg openrails, const SecretBackendDB untyped string = "db"
 pkg openrails, const SecretBackendSnapshot untyped string = "snapshot"
 pkg openrails, const SecretBackendVault untyped string = "vault"
-pkg openrails, const SetAPIHost RouteSet = "route:SetAPIHost"
-pkg openrails, const SetAlertWebhookURL RouteSet = "route:SetAlertWebhookURL"
-pkg openrails, const SetDashboard RouteSet = "route:SetDashboard"
-pkg openrails, const SetMeter RouteSet = "route:SetMeter"
-pkg openrails, const SetMeterRateCard RouteSet = "route:SetMeterRateCard"
-pkg openrails, const SetRateOverride RouteSet = "route:SetRateOverride"
-pkg openrails, const SetSpendDelegations RouteSet = "route:SetSpendDelegations"
-pkg openrails, const SetSubscriptionPaymentMethod RouteSet = "route:SetSubscriptionPaymentMethod"
-pkg openrails, const Settings RouteSet = "resource:settings"
-pkg openrails, const StaffReads RouteSet = "staff_reads"
-pkg openrails, const StaffWrites RouteSet = "staff_writes"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
-pkg openrails, const Subscriptions RouteSet = "resource:subscriptions"
-pkg openrails, const UpdateCustomerSettings RouteSet = "route:UpdateCustomerSettings"
-pkg openrails, const UpdatePSP RouteSet = "route:UpdatePSP"
-pkg openrails, const UpdatePrice RouteSet = "route:UpdatePrice"
-pkg openrails, const UpdateProduct RouteSet = "route:UpdateProduct"
-pkg openrails, const Usage RouteSet = "resource:usage"
-pkg openrails, const VerifyAPIHost RouteSet = "route:VerifyAPIHost"
-pkg openrails, const VoidInvoice RouteSet = "route:VoidInvoice"
 pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
 pkg openrails, func ForMerchantID(billing.MerchantID) RequestOption
 pkg openrails, func New(context.Context, Config, Deps, ...ClientOption) (*Client, error)
@@ -447,14 +273,11 @@ pkg openrails, type CustodianConfig struct, Archived bool `yaml:"archived,omitem
 pkg openrails, type CustodianConfig struct, Kind string `yaml:"kind"`
 pkg openrails, type CustodianConfig struct, Secrets map[string]string `yaml:"secrets,omitempty"`
 pkg openrails, type CustodianConfig struct, Settings map[string]any `yaml:"settings,omitempty"`
-pkg openrails, type CustomerHTTPScope = config.CustomerHTTPScope
-pkg openrails, type CustomerHTTPScope uint8
 pkg openrails, type CustomerRoutes = config.CustomerRoutes
 pkg openrails, type CustomerRoutes struct
 pkg openrails, type CustomerRoutes struct, Auth billingauth.Auth
 pkg openrails, type CustomerRoutes struct, Merchant string
 pkg openrails, type CustomerRoutes struct, Prefix string
-pkg openrails, type CustomerRoutes struct, Scope config.CustomerHTTPScope
 pkg openrails, type DBConfig = config.DBConfig
 pkg openrails, type DBConfig struct
 pkg openrails, type DBConfig struct, Database string
@@ -498,8 +321,6 @@ pkg openrails, type EmailSender interface, Send(context.Context, config.Email) e
 pkg openrails, type EncryptionConfig = config.EncryptionConfig
 pkg openrails, type EncryptionConfig struct
 pkg openrails, type EncryptionConfig struct, MasterKey string
-pkg openrails, type Guards = config.Guards
-pkg openrails, type Guards map[config.RouteSet]fmt.Stringer
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string
@@ -557,6 +378,12 @@ pkg openrails, type PSPSignerConfig = config.PSPSignerConfig
 pkg openrails, type PSPSignerConfig struct
 pkg openrails, type PSPSignerConfig struct, Key string `yaml:"key,omitempty"`
 pkg openrails, type PSPSignerConfig struct, Mode string `yaml:"mode,omitempty"`
+pkg openrails, type Permissions = config.Permissions
+pkg openrails, type Permissions struct
+pkg openrails, type Permissions struct, AdminRead fmt.Stringer
+pkg openrails, type Permissions struct, AdminWrite fmt.Stringer
+pkg openrails, type Permissions struct, CatalogWrite fmt.Stringer
+pkg openrails, type Permissions struct, MerchantConfig fmt.Stringer
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
@@ -581,20 +408,14 @@ pkg openrails, type Route struct
 pkg openrails, type Route struct, Handler http.Handler
 pkg openrails, type Route struct, Method string
 pkg openrails, type Route struct, Path string
-pkg openrails, type RouteSet = config.RouteSet
-pkg openrails, type RouteSet string
 pkg openrails, type Routes = config.Routes
 pkg openrails, type Routes struct
 pkg openrails, type Routes struct, AdminConsole *config.AdminConsole
 pkg openrails, type Routes struct, Auth billingauth.Auth
 pkg openrails, type Routes struct, CookieOrigin string
 pkg openrails, type Routes struct, CustomerProfiles []config.CustomerRoutes
-pkg openrails, type Routes struct, Customers config.CustomerHTTPScope
-pkg openrails, type Routes struct, Guards config.Guards
-pkg openrails, type Routes struct, Merchant bool
-pkg openrails, type Routes struct, MerchantConfig bool
+pkg openrails, type Routes struct, Permissions config.Permissions
 pkg openrails, type Routes struct, Prefix string
-pkg openrails, type Routes struct, Storefront bool
 pkg openrails, type SendGridConfig = config.SendGridConfig
 pkg openrails, type SendGridConfig struct
 pkg openrails, type SendGridConfig struct, APIKey string
@@ -3541,10 +3362,10 @@ pkg openrails/catalog, type TieredPrice struct, Tiers []RateTier `json:"tiers,om
 pkg openrails/openrailstest, func CheckAuth(testing.TB, openrails.Auth, AuthCases)
 pkg openrails/openrailstest, type AuthCases struct
 pkg openrails/openrailstest, type AuthCases struct, Customer func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, Guards openrails.Guards
-pkg openrails/openrailstest, type AuthCases struct, Holders map[openrails.RouteSet]func() *http.Request
+pkg openrails/openrailstest, type AuthCases struct, Holders map[string]func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Machine func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, OtherMerchantStaff func() *http.Request
+pkg openrails/openrailstest, type AuthCases struct, Permissions openrails.Permissions
 pkg openrails/openrailstest, type AuthCases struct, Refused map[string]func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Staff func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, StaleStaff func() *http.Request

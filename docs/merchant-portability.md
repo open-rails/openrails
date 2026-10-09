@@ -23,10 +23,9 @@ providers, workers, FX refresh, a secret store, or AuthKit. Hosted
 live group ownership. Remote export/import require only `--url` and
 `--token-file`.
 
-The archive routes are `GET /v1/merchant/billing-archive` (export) and `POST` on
-the same path (import), part of `Routes.MerchantConfig` and guarded by
-`openrails.MerchantConfig` (or `openrails.BillingData`, or
-`openrails.ExportBillingArchive` and `openrails.ImportBillingArchive`). Archive transfer streams with a 1 GiB bound; ordinary
+The archive routes are `GET /v1/admin/billing-archive` (export) and `POST` on
+the same path (import), mounted and checked with `Permissions.MerchantConfig`.
+Archive transfer streams with a 1 GiB bound; ordinary
 API requests retain their 1 MiB cap. The client verifies the archive footer and
 returns an error for incomplete downloads. The CLI publishes its private output
 file only after that verification succeeds.

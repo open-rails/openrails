@@ -88,7 +88,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	_, err = w.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Edited in code")})
 	require.NoError(t, err)
 	var refused map[string]any
-	status := w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &refused)
+	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &refused)
 	require.Equal(t, http.StatusForbidden, status, "Config.Catalog is the truth: HTTP writes are refused while reads remain available")
 	code, _ := errorOf(refused)
 	require.Equal(t, "catalog_updates_disabled", code)

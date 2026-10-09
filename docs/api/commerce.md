@@ -10,13 +10,13 @@ each pay on a session creates one.
 
 ## Merchant client
 
-These operations run through the same merchant routes in the embedded and
-remote clients, each behind the host's guard for it (`Routes.Guards`):
+These operations run through the same admin routes in the embedded and
+remote clients, each behind the host's permission for it (`Routes.Permissions`):
 
-| Client method | HTTP operation | Guards |
+| Client method | HTTP operation | Permission |
 | --- | --- | --- |
-| CreateCheckoutSession | POST /v1/merchant/checkout-sessions | `openrails.CreateCheckoutSession`, `CheckoutSessions`, `StaffWrites` |
-| ListCheckoutOptions | GET /v1/merchant/checkout-options?price_id=…\|product_key=…&price_key=… | `openrails.ListCheckoutOptions`, `CheckoutSessions`, `StaffReads` |
+| CreateCheckoutSession | POST /v1/admin/checkout-sessions | `AdminWrite` |
+| ListCheckoutOptions | GET /v1/admin/checkout-options?price_id=…\|product_key=…&price_key=… | `AdminRead` |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
 host assertions made with the merchant's credential.
@@ -65,7 +65,7 @@ database share it, so one of them can serve the payment page for all.
 | GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
 | GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link (`flow: transaction_request`) |
-| POST | `/v1/merchant/checkout-sessions` | the merchant's credential, its guard | Mint for a customer (`Client.CreateCheckoutSession`) |
+| POST | `/v1/admin/checkout-sessions` | the merchant's credential, `AdminWrite` | Mint for a customer (`Client.CreateCheckoutSession`) |
 
 - A host whose customer surface defines who the customer is (its own
   `CustomerRoutes` with an `Auth` that maps the signed-in user) has the
@@ -77,7 +77,7 @@ database share it, so one of them can serve the payment page for all.
   Hand it only to that customer's browser; put it in a URL fragment, not a
   query. It is payable for 30 minutes and readable for 24 hours more, so a
   late provider return still learns its outcome.
-- Config: `Routes.Storefront` publishes the routes. `Config.Checkout.PageURL` is the shared payment
+- Config: the routes are always mounted. `Config.Checkout.PageURL` is the shared payment
   page (the mint answers `url = PageURL#id`); `EmbedOrigins` are the sites
   allowed to frame the page this host serves. Both empty is the single-site
   case: the app renders `<Checkout source={client.checkoutSource(id)}>` itself.

@@ -76,18 +76,18 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 		{"nil options ignored", "/v1", "alpha", "", "Bearer slug:alpha", []RequestOption{nil}},
 	}
 	calls := map[string]func(opts []RequestOption) (string, error){
-		"GET /merchant/configuration": func(o []RequestOption) (string, error) {
+		"GET /admin/configuration": func(o []RequestOption) (string, error) {
 			return http.MethodGet, readConfiguration(client, t.Context(), o...)
 		},
-		"POST /merchant/catalog/applications": func(o []RequestOption) (string, error) {
+		"POST /admin/catalog/applications": func(o []RequestOption) (string, error) {
 			_, err := client.ApplyCatalog(t.Context(), catalogApplication(), o...)
 			return http.MethodPost, err
 		},
-		"GET /merchant/catalog/revision": func(o []RequestOption) (string, error) {
+		"GET /admin/catalog/revision": func(o []RequestOption) (string, error) {
 			_, err := client.GetCatalogRevision(t.Context(), o...)
 			return http.MethodGet, err
 		},
-		"GET /merchant/payments/" + billing.PaymentID(id).String(): func(o []RequestOption) (string, error) {
+		"GET /admin/payments/" + billing.PaymentID(id).String(): func(o []RequestOption) (string, error) {
 			_, err := client.GetPayment(t.Context(), billing.PaymentID(id), o...)
 			return http.MethodGet, err
 		},
@@ -108,9 +108,9 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 	}, WithMerchantID(id), WithCredentialProvider(targetCredential))
 	require.Equal(t, id, byID.MerchantID())
 	require.NoError(t, readConfiguration(byID, t.Context()))
-	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/configuration", "", id.String(), "Bearer id:" + id.String()}, <-seen)
+	require.Equal(t, observedRequest{http.MethodGet, "/v1/admin/configuration", "", id.String(), "Bearer id:" + id.String()}, <-seen)
 	require.NoError(t, readConfiguration(byID, t.Context(), WithMerchant("bravo")))
-	require.Equal(t, observedRequest{http.MethodGet, "/v1/merchant/configuration", "bravo", "", "Bearer slug:bravo"}, <-seen)
+	require.Equal(t, observedRequest{http.MethodGet, "/v1/admin/configuration", "bravo", "", "Bearer slug:bravo"}, <-seen)
 }
 
 func TestInvalidMerchantSelectionFailsBeforeCredentialMint(t *testing.T) {
@@ -198,7 +198,7 @@ func TestExtraHeadersCannotDuplicateSelectionOrAuthority(t *testing.T) {
 		if byID {
 			option = ForMerchantID(id)
 		}
-		require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/configuration", nil, nil, extra, option))
+		require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/admin/configuration", nil, nil, extra, option))
 		require.True(t, reflect.DeepEqual(extra, original), "request mutated the caller's header map")
 	}
 }

@@ -37,7 +37,7 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction
 	return billing.PendingAction{
 		PSP:    "stripe",
 		Action: "configure_stripe",
-		Hint:   "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /merchant/catalog/prices/{id} with psp_links.stripe.price_id",
+		Hint:   "Stripe is not configured; set stripe.secret_key in config and retry, or PATCH /admin/catalog/prices/{id} with psp_links.stripe.price_id",
 	}
 }
 

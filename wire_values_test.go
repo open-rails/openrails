@@ -197,7 +197,7 @@ func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
 func TestProviderOperationPathIsOneSegment(t *testing.T) {
 	path, err := providerOperationPath("rental/1?#%/create")
 	require.NoError(t, err)
-	require.Equal(t, "/v1/merchant/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
+	require.Equal(t, "/v1/admin/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
 	for _, id := range []string{"", " ", ".", "..", " x"} {
 		_, err := providerOperationPath(id)
 		require.ErrorIs(t, err, billing.ErrInvalid, "%q", id)

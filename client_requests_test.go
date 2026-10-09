@@ -46,12 +46,12 @@ func TestClientRequestShapes(t *testing.T) {
 	customer := customerID.String()
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
-		"/v1/merchant/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
-		"/v1/merchant/customers/settings":                              `{"data":[{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}],"next_cursor":null}`,
-		"/v1/merchant/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
-		"/v1/merchant/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
-		"/v1/merchant/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
-		"/v1/merchant/customers/" + customer + "/entitlements/check":   `{"entitlements":{"pro":true,"team":false}}`,
+		"/v1/admin/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
+		"/v1/admin/customers/settings":                              `{"data":[{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}],"next_cursor":null}`,
+		"/v1/admin/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
+		"/v1/admin/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
+		"/v1/admin/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
+		"/v1/admin/customers/" + customer + "/entitlements/check":   `{"entitlements":{"pro":true,"team":false}}`,
 	})
 	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
 	expires := time.Now().Add(time.Hour)
@@ -68,18 +68,18 @@ func TestClientRequestShapes(t *testing.T) {
 		{"checkout session", func() error {
 			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodPost, "/v1/merchant/checkout-sessions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/checkout-sessions", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, "pro-monthly", b["price_key"])
 			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
 		}},
 		{"checkout options for a price", func() error {
 			_, err := client.ListCheckoutOptions(t.Context(), billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "pro-monthly"})
 			return err
-		}, http.MethodGet, "/v1/merchant/checkout-options", "price_key=pro-monthly&product_key=pro", nil},
+		}, http.MethodGet, "/v1/admin/checkout-options", "price_key=pro-monthly&product_key=pro", nil},
 		{"public config", func() error {
 			_, err := client.GetPublicConfig(t.Context())
 			return err
-		}, http.MethodGet, "/v1/merchant/config", "", nil},
+		}, http.MethodGet, "/v1/admin/config", "", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			revision := "r1"
 			_, err := client.ApplyMerchantConfiguration(t.Context(), billing.ApplyMerchantConfigurationParams{ApplicationID: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
@@ -87,7 +87,7 @@ func TestClientRequestShapes(t *testing.T) {
 				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "api_line", Tier: "gold"}},
 			}})
 			return err
-		}, http.MethodPost, "/v1/merchant/configuration/applications", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/configuration/applications", "", func(t *testing.T, b map[string]any) {
 			settings := b["settings"].(map[string]any)
 			require.Equal(t, "api_line", settings["billing_policies"].([]any)[0].(map[string]any)["name"])
 			binding := settings["billing_policy_bindings"].([]any)[0].(map[string]any)
@@ -100,7 +100,7 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("verdict not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v1/merchant/admissions", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/admissions", "", func(t *testing.T, b map[string]any) {
 			item := b["items"].([]any)[0].(map[string]any)
 			require.Equal(t, "gold", item["trust_level"])
 			require.Equal(t, "42", item["accrual_rate_delta_per_hour"])
@@ -111,11 +111,11 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("settings not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/customers/settings", "ids=" + customer + "%2C" + customer, nil},
+		}, http.MethodGet, "/v1/admin/customers/settings", "ids=" + customer + "%2C" + customer, nil},
 		{"settings write sends only the named fields", func() error {
 			_, err := client.UpdateCustomerSettings(t.Context(), []billing.UpdateCustomerSettingsParams{{CustomerID: typedCustomer, BillingPolicy: catalog.Null[string]()}})
 			return err
-		}, http.MethodPatch, "/v1/merchant/customers/settings", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPatch, "/v1/admin/customers/settings", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, map[string]any{"items": []any{map[string]any{"customer_id": customer, "billing_policy": nil}}}, b)
 		}},
 		{"credit grant source ids are opaque query values", func() error {
@@ -124,21 +124,21 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("grant amount not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/credit-grants", "source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
+		}, http.MethodGet, "/v1/admin/customers/" + customer + "/credit-grants", "source_id=..%2Fsource%2Freceipt%3Fpart%3D1%26currency%3DJPY", nil},
 		{"delegation replace", func() error {
 			_, err := client.SetSpendDelegations(t.Context(), typedCustomer, []billing.SpendDelegation{{Scope: billing.SpendDelegationInvoker, ScopeKey: "invoker-1", Windows: window}})
 			return err
-		}, http.MethodPut, "/v1/merchant/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPut, "/v1/admin/customers/" + customer + "/spend-delegations", "", func(t *testing.T, b map[string]any) {
 			require.Len(t, b["delegations"], 1)
 		}},
 		{"list ids are one comma list beside nothing else", func() error {
 			_, err := client.ListPayments(t.Context(), billing.PaymentListParams{IDs: []billing.PaymentID{billing.PaymentID(uuid.MustParse(customer)), billing.PaymentID(uuid.MustParse(customer))}})
 			return err
-		}, http.MethodGet, "/v1/merchant/payments", "ids=pay_" + customer + "%2Cpay_" + customer, nil},
+		}, http.MethodGet, "/v1/admin/payments", "ids=pay_" + customer + "%2Cpay_" + customer, nil},
 		{"credit grants batch across customers", func() error {
 			_, err := client.CreateCreditGrants(t.Context(), []billing.CreateCreditGrantParams{{CustomerID: typedCustomer, Currency: " usd ", Amount: 1, Source: "s", SourceID: "1"}})
 			return err
-		}, http.MethodPost, "/v1/merchant/credit-grants", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/credit-grants", "", func(t *testing.T, b map[string]any) {
 			item := b["items"].([]any)[0].(map[string]any)
 			require.Equal(t, customer, item["customer_id"])
 			require.Equal(t, "USD", item["currency"])
@@ -146,12 +146,12 @@ func TestClientRequestShapes(t *testing.T) {
 		{"admission releases name request ids", func() error {
 			_, err := client.ReleaseAdmissions(t.Context(), []string{"../a", "b"})
 			return err
-		}, http.MethodPost, "/v1/merchant/admissions/release", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/admissions/release", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{"../a", "b"}, b["request_ids"])
 		}},
 		{"delegation delete escapes one segment per key", func() error {
 			return client.DeleteSpendDelegation(t.Context(), typedCustomer, " invoker ", "a/b:c")
-		}, http.MethodDelete, "/v1/merchant/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
+		}, http.MethodDelete, "/v1/admin/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
 		{"access check keeps duplicates", func() error {
 			id, _ := billing.ParseProductID(product)
 			got, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{id, id}})
@@ -159,13 +159,13 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("access not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{product, product}, b["product_ids"])
 		}},
 		{"access check by key", func() error {
 			_, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductKeys: []string{"pro plan&x"}})
 			return err
-		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, []any{"pro plan&x"}, b["product_keys"])
 		}},
 		{"entitlement check", func() error {
@@ -174,13 +174,13 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("check not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, map[string]any{"entitlements": []any{"pro", "team"}}, b, "zero At, prefixes and limit are omitted")
 		}},
 		{"entitlement check prefixes only", func() error {
 			_, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Prefixes: []string{"content:t:"}, PrefixLimit: 5})
 			return err
-		}, http.MethodPost, "/v1/merchant/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPost, "/v1/admin/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
 			require.Equal(t, map[string]any{"entitlements": []any{}, "prefixes": []any{"content:t:"}, "prefix_limit": float64(5)}, b, "no keys send a list, not null")
 		}},
 		{"access list pages", func() error {
@@ -189,7 +189,7 @@ func TestClientRequestShapes(t *testing.T) {
 				err = errors.New("page not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/merchant/customers/" + customer + "/product-access", "cursor=cursor&limit=7&live=true", nil},
+		}, http.MethodGet, "/v1/admin/customers/" + customer + "/product-access", "cursor=cursor&limit=7&live=true", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

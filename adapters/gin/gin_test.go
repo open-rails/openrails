@@ -47,8 +47,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}
-	selection := config.Routes{Auth: authtest.Deny{}, Storefront: true, Merchant: true, MerchantConfig: true, Guards: authtest.Guards(),
-		CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}
+	selection := config.Routes{Auth: authtest.Deny{}, Permissions: authtest.Permissions()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -89,8 +88,8 @@ func TestInventoryMountsNatively(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/pay/v1/config", http.StatusOK},
 		{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
-		{http.MethodPost, "/api/pay/v1/merchant/product-access", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/merchant/customers/entitlementsXYZ/billing-profile", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/api/pay/v1/admin/product-access", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXYZ/billing-profile", http.StatusMethodNotAllowed},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 		{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},
 	} {
@@ -165,9 +164,9 @@ func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
 		fake := &authtest.Fake{}
 		var profiles []config.CustomerRoutes
 		for _, prefix := range tc.prefixes {
-			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Scope: config.CustomerSubscriptionManagement, Auth: fake})
+			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Auth: fake})
 		}
-		err := embedhttp.ValidateRoutes(config.Routes{CustomerProfiles: profiles}, profiles, graph.Runtime)
+		err := embedhttp.ValidateRoutes(config.Routes{Auth: fake, CustomerProfiles: profiles})
 		if err == nil {
 			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
 			require.NoError(t, buildErr)

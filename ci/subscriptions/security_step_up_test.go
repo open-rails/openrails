@@ -18,7 +18,7 @@ import (
 // SEC (secaudit round 2, D1): an operation that moves money or grants access
 // needs a recent sign-in on every route that serves it. A staff token whose
 // sign-in is stale, as a stolen one's is, reaches none of them (merchant
-// chosen by header): the import door, the catalog or the merchant API. The
+// chosen by header): the import door, the catalog or the admin API. The
 // same staff signed in recently passes the gate. Reads and the host's
 // in-process client need no step-up, and a grant with no end is a staff write
 // like any other.
@@ -65,17 +65,17 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPost, "/v1/merchant/product-access", timed},
-		{http.MethodPost, "/v1/merchant/credit-grants", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/customers/" + member.id + "/payments/off-channel", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/payments/" + none + "/refunds", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/subscriptions/" + none + "/cancel", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/billing-import", map[string]any{}},
-		{http.MethodPost, "/v1/merchant/catalog/prices", map[string]any{}},
-		{http.MethodPatch, "/v1/merchant/catalog/prices/" + price.ID.String(), map[string]any{}},
-		{http.MethodPost, "/v1/merchant/catalog/products", map[string]any{}},
-		{http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1"}}}}}},
-		{http.MethodPatch, "/v1/merchant/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
+		{http.MethodPost, "/v1/admin/product-access", timed},
+		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
+		{http.MethodPost, "/v1/admin/customers/" + member.id + "/payments/off-channel", map[string]any{}},
+		{http.MethodPost, "/v1/admin/payments/" + none + "/refunds", map[string]any{}},
+		{http.MethodPost, "/v1/admin/subscriptions/" + none + "/cancel", map[string]any{}},
+		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
+		{http.MethodPost, "/v1/admin/catalog/prices", map[string]any{}},
+		{http.MethodPatch, "/v1/admin/catalog/prices/" + price.ID.String(), map[string]any{}},
+		{http.MethodPost, "/v1/admin/catalog/products", map[string]any{}},
+		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "credit_limits": []any{map[string]any{"currency": "USD", "amount": "1"}}}}}},
+		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
 	} {
 		status, body := call(stale, op.method, op.path, op.body)
 		require.Equal(t, http.StatusForbidden, status, "%s %s: %v", op.method, op.path, body)
@@ -89,7 +89,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	require.True(t, member.entitled("content:comp"), "the fresh grants landed")
 
 	// A read needs no step-up, and neither does the host's in-process client.
-	status, body := call(stale, http.MethodGet, "/v1/merchant/customers?ids="+member.id, nil)
+	status, body := call(stale, http.MethodGet, "/v1/admin/customers?ids="+member.id, nil)
 	require.Equal(t, http.StatusOK, status, "%v", body)
 	member.grant(host, nil, nil)
 	require.True(t, member.entitled("content:host"))
@@ -98,11 +98,11 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	// holds it. Hours past time.Duration are refused.
 	permanent := grant(forever, nil)
 	support := w.auth.token(t, "support")
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", timed)
+	status, body = call(support, http.MethodPost, "/v1/admin/product-access", timed)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
-	status, body = call(fresh, http.MethodPost, "/v1/merchant/product-access", grant(comp, 2562048))
+	status, body = call(fresh, http.MethodPost, "/v1/admin/product-access", grant(comp, 2562048))
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	status, body = call(support, http.MethodPost, "/v1/merchant/product-access", permanent)
+	status, body = call(support, http.MethodPost, "/v1/admin/product-access", permanent)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
 	require.True(t, member.entitled("content:forever"))
 }

@@ -1,7 +1,7 @@
 # Hosted customer audiences
 
 Configure the engine once, then mount the routes an `openrails.Routes` selects
-with a framework adapter. A standalone server's `Routes` is the standalone
+with a framework adapter. The customer routes are always mounted at `/v1/me`. A standalone server's `Routes` is the standalone
 surface: identity, merchant, platform, customer, callback and enabled console
 registrations, plus the customer profiles it is given. Process health
 endpoints remain host-owned. Provider callbacks
@@ -16,24 +16,14 @@ if err != nil { return err }
 err = openrailsgin.Mount(router, client, openrails.Routes{ // on the host router
     Auth: portalAuth,
     CustomerProfiles: []openrails.CustomerRoutes{
-        {Prefix: "/billing/v1/me", Scope: openrails.CustomerSelfService},
-        {
-            Prefix: "/api/v1/merchants/{slug}/billing/me",
-            Scope:  openrails.CustomerSubscriptionManagement,
-            Auth:   platformAuth,
-        },
+        {Prefix: "/api/v1/merchants/{slug}/billing/me", Auth: platformAuth},
     },
 })
 ```
 
-`CustomerSelfService` is the full library self-service surface. The
-billing-management scope adds billing history, purchased access, saved
-methods, payment recovery and paying a checkout session the merchant minted,
-but starts no checkout and changes no plan. The
-subscription-management scope exposes exactly cancellation, resumption,
-subscription payment-method changes and invoice collection-method selection.
-Both profiles reuse the same route registration and customer ownership checks.
-Neither exposes merchant administration, credentials or callbacks.
+Every profile serves the whole customer surface, with the same route
+registration and customer ownership checks as `/v1/me`. None exposes
+administration, credentials or callbacks.
 
 Each audience serves `Config.Merchant`, or the merchant its `Merchant` slug
 names. On a standalone server (`Server.Routes`), an audience without a

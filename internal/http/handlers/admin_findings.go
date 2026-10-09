@@ -34,7 +34,7 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 	return store, true
 }
 
-// findingView is a finding as the merchant API answers it, with its parsed
+// findingView is a finding as the admin API answers it, with its parsed
 // recommendation.
 func findingView(rec reconcile.FindingRecord) billing.Finding {
 	v := billing.Finding{
@@ -75,7 +75,7 @@ type FindingsQuery struct {
 	Type     string `form:"finding_type"`
 }
 
-// AdminListFindings handles GET /v1/merchant/findings: the operator work
+// AdminListFindings handles GET /v1/admin/findings: the operator work
 // list, open findings by default, most severe first, then oldest.
 func AdminListFindings(r *httprequest.Request) {
 	store, ok := findingsStore(r)
@@ -104,7 +104,7 @@ func AdminListFindings(r *httprequest.Request) {
 	r.SuccessJSON(pagination.Map(items, findingView))
 }
 
-// GetFindingSummary handles GET /v1/merchant/findings/summary: the queue at
+// GetFindingSummary handles GET /v1/admin/findings/summary: the queue at
 // a glance (#690). OrphanedMembers, Freeloaders and DuplicateCoverage are
 // error metrics, nonzero for a full sweep (15 min) means the billing state
 // machine is failing; VerificationPressure may be nonzero, but its age
@@ -122,7 +122,7 @@ func GetFindingSummary(r *httprequest.Request) {
 	r.SuccessJSON(summary)
 }
 
-// AdminGetFinding handles GET /v1/merchant/findings/{id}.
+// AdminGetFinding handles GET /v1/admin/findings/{id}.
 func AdminGetFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {
@@ -164,7 +164,7 @@ func resolveActorIdentity(r *httprequest.Request) string {
 // with the error in its notes; the next sweep re-measures, so a fix that did
 // not take reopens by re-detection.
 //
-//	POST /v1/merchant/findings/{id}/resolve
+//	POST /v1/admin/findings/{id}/resolve
 func AdminResolveFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {

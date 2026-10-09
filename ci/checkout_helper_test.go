@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
@@ -44,7 +45,7 @@ func sell(t *testing.T, client *openrails.Client, mint billing.CreateCheckoutSes
 func (s *checkoutSession) on(client *openrails.Client) *checkoutSession {
 	s.t.Helper()
 	mux := http.NewServeMux()
-	require.NoError(s.t, openrailshttp.Mount(mux, client, openrails.Routes{Storefront: true}))
+	require.NoError(s.t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
 	return &checkoutSession{t: s.t, page: mux, id: s.id}
 }
 

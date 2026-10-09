@@ -124,7 +124,7 @@ SET notified_at = sqlc.arg(notified_at)::timestamptz,
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
 -- SEC-18: the merchant predicate is this query's only merchant scope. This is a
--- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
+-- merchant-admin by-id surface (GET /v1/admin/findings/:id, and the resolve
 -- below EXECUTES cancel/refund/revoke/grant against whatever the finding
 -- names); before this it was `WHERE id = $1`, which let merchant A's owner
 -- address merchant B's finding on any connection the since-removed RLS did

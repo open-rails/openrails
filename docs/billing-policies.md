@@ -85,7 +85,7 @@ settings:
 ```
 
 The same settings through the API, as the `settings` of
-`POST /v1/merchant/configuration/applications`:
+`POST /v1/admin/configuration/applications`:
 
 ```json
 {
@@ -130,14 +130,13 @@ settings, err = client.UpdateCustomerSettings(ctx, []billing.UpdateCustomerSetti
 })
 ```
 
-Over HTTP, `PATCH /v1/merchant/customers/settings` with
+Over HTTP, `PATCH /v1/admin/customers/settings` with
 `{"items":[{"customer_id":"…","billing_policy":"cloud_monthly"}]}` assigns
 it, and `"billing_policy": null` clears it. `GET
-/v1/merchant/customers/settings?ids=…` reads it. This is the explicit
+/v1/admin/customers/settings?ids=…` reads it. This is the explicit
 assignment, not the effective tier or default policy.
 
-The read is a staff read (`openrails.StaffReads`) and the write a staff write
-(`openrails.StaffWrites`); both are in `openrails.CustomerSettings`. Customer
+The read needs `Permissions.AdminRead` and the write `AdminWrite`. Customer
 self-service cannot change this resource. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer

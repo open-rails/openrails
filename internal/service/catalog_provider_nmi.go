@@ -54,7 +54,7 @@ func (a *nmiAdapter) PendingActionTemplate(priceID uuid.UUID) billing.PendingAct
 	return billing.PendingAction{
 		PSP:    string(models.RailNMI),
 		Action: "create_recurring_plan",
-		Hint:   "Create plan in NMI control center, then PATCH /merchant/catalog/prices/" + priceID.String() + " with psp_links.nmi.plan_id",
+		Hint:   "Create plan in NMI control center, then PATCH /admin/catalog/prices/" + priceID.String() + " with psp_links.nmi.plan_id",
 		PatchRequired: map[string]map[string]map[string]string{
 			"psp_links": {
 				string(models.RailNMI): {

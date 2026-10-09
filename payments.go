@@ -15,7 +15,7 @@ func (c *Client) GetPayment(ctx context.Context, id billing.PaymentID, requestOp
 		return nil, err
 	}
 	var out billing.Payment
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments/"+payment, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/payments/"+payment, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -30,7 +30,7 @@ func (c *Client) ListPayments(ctx context.Context, params billing.PaymentListPar
 		return nil, err
 	}
 	var out billing.ListPage[billing.Payment]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/payments?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

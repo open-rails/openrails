@@ -1,4 +1,4 @@
-// Thin fetch wrapper for the OpenRails merchant API. Base URLs come from the
+// Thin fetch wrapper for the OpenRails admin API. Base URLs come from the
 // mount's config.json (served by the Go binary): standalone defaults are
 // auth=/auth/v1, api=/v1; embedded hosts point at their own bases. The
 // session is auth-ui's: it holds the bearer, refreshes it, and steps up.
@@ -219,8 +219,8 @@ async function send<T>(
   return { status: res.status, body: body as T }
 }
 
-// api calls the merchant API (api_base_url-relative path, e.g.
-// "/merchant/payments"). A write OpenRails refuses for a stale sign-in opens
+// api calls the admin API (api_base_url-relative path, e.g.
+// "/admin/payments"). A write OpenRails refuses for a stale sign-in opens
 // auth-ui's step-up dialog and runs again once the user has confirmed.
 export const api = async <T>(path: string, opts: RequestOptions = {}) =>
   (await apiResponse<T>(path, opts)).body

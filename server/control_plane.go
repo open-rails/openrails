@@ -85,8 +85,9 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 }
 
 // The permissions the server's merchant persona declares: its staff routes'
-// guards (openrails.StaffReads, StaffWrites, MerchantConfig). Owners hold all
-// three, support MerchantRead and MerchantWrite, viewers MerchantRead.
+// AdminRead, AdminWrite, and CatalogWrite and MerchantConfig (MerchantAdmin).
+// Owners hold all three, support MerchantRead and MerchantWrite, viewers
+// MerchantRead.
 const (
 	MerchantRead  = staffperm.Read
 	MerchantWrite = staffperm.Write

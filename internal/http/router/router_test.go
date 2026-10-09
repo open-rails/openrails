@@ -111,7 +111,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	patterns := []string{
-		"GET /billing/v1/merchant/payments", "POST /billing/v1/merchant/billing-import",
+		"GET /billing/v1/admin/payments", "POST /billing/v1/admin/billing-import",
 		"GET /billing/v1/me/invoices/{id}", "GET /billing/account/invoices",
 		"OPTIONS /billing/v1/me/invoices/{id}",
 		"GET /billing/v1/merchants", "GET /billing/v1/catalog/products", "GET /billing/v1/config",
@@ -146,7 +146,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 	}
 	slug := http.Header{merchant.SelectorHeader: {"store"}}
 
-	for _, path := range []string{"/billing/v1/merchant/payments", "/billing/v1/me/invoices/inv_1", "/billing/account/invoices"} {
+	for _, path := range []string{"/billing/v1/admin/payments", "/billing/v1/me/invoices/inv_1", "/billing/account/invoices"} {
 		rec := call(http.MethodGet, path, nil)
 		require.Equal(t, http.StatusOK, rec.Code, path)
 		require.False(t, last.resolved, "%s: no selector, nothing pinned", path)
@@ -177,7 +177,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		"malformed id": {merchant.SelectorHeader: {"id:nope"}},
 		"illegal slug": {merchant.SelectorHeader: {"Not A Slug"}},
 	} {
-		rec := call(http.MethodGet, "/billing/v1/merchant/payments", header)
+		rec := call(http.MethodGet, "/billing/v1/admin/payments", header)
 		require.Equal(t, http.StatusBadRequest, rec.Code, name)
 		require.Contains(t, rec.Body.String(), `"code":"merchant_selector_invalid"`, name)
 		require.Nil(t, last, name)
@@ -202,7 +202,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/billing/v1/merchant/payments", nil)
+	r := httptest.NewRequest(http.MethodGet, "/billing/v1/admin/payments", nil)
 	r.Header.Set(merchant.SelectorHeader, "store")
 	build(nil).Handler().ServeHTTP(rec, r)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "no resolver fails closed")

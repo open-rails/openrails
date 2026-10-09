@@ -32,7 +32,7 @@ beforeEach(async () => {
   grants = []
   stepUps = []
   await server({
-    "POST /merchant/product-access": (request) => {
+    "POST /admin/product-access": (request) => {
       grants.push(request)
       return request.headers.get("Authorization") === `Bearer ${fresh}`
         ? Response.json({ items: [{ id: "pa_1" }] }, { status: 201 })
@@ -69,7 +69,7 @@ beforeEach(async () => {
 afterEach(unmount)
 
 const grant = () =>
-  api("/merchant/product-access", {
+  api("/admin/product-access", {
     method: "POST",
     body: { items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 24 }] },
   })
@@ -130,6 +130,6 @@ it("leaves OpenRails' refusal when the user cancels", async () => {
 })
 
 it("never asks a read to step up", async () => {
-  await expect(api("/merchant/customers/cus_1")).resolves.toEqual({})
+  await expect(api("/admin/customers/cus_1")).resolves.toEqual({})
   expect(document.querySelector('input[type="password"]')).toBeNull()
 })

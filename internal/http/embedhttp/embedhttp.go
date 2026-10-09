@@ -39,21 +39,13 @@ const EmbeddedV1Prefix = embeddedMount + "/v1"
 // embeddedMount is where an embedded host mounts the API root.
 const embeddedMount = "/billing"
 
-// Options controls which billing HTTP route groups are included in the returned
-// handler. A zero RouteSets slice uses AllRouteSets.
+// Options is what the handler mounts beside the public and webhook routes:
+// the staff bundles Permissions gives a permission.
 type Options struct {
-	RouteSets []RouteSet
-	// AdvertiseRouteSets is the full selection GET /v1/config reports,
-	// independent of which subset THIS handler actually mounts. The embedded
-	// combined mount strips `customer` from RouteSets (it is served by the
-	// separate self handler) but still advertises it here so discovery is honest.
-	// Empty → falls back to RouteSets.
-	AdvertiseRouteSets []RouteSet
-	ProviderRoutes     *routesurface.ProviderRoutes
-	// Capabilities includes separately mounted customer exposure profiles.
+	Permissions    httproutes.Permissions
+	ProviderRoutes *routesurface.ProviderRoutes
+	// Capabilities is what GET /v1/config reports; nil derives it.
 	Capabilities *Capabilities
-	// Guard is each staff route's permission (httproutes.ResolveGuards).
-	Guard func(httproutes.Route) string
 }
 
 // Assembler builds the embedded billing surface from the application graph.
@@ -103,28 +95,15 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 
 // NewRoutes records actual registrations, retaining each route's security chain.
 func (s *Assembler) NewRoutes(opts Options) *router.Table {
-	routeSets := routeSetMap(opts.RouteSets)
-	if err := s.validateAuthBoundary(routeSets); err != nil {
+	if err := s.validateAuthBoundary(opts.Permissions); err != nil {
 		panic(err)
 	}
 	providerRoutes := s.providerRoutes(opts.ProviderRoutes)
-	if !providerRoutes.Webhooks {
-		delete(routeSets, RouteSetWebhooks)
-	}
 	mux := &router.Table{}
 
-	// The public configuration (GET /v1/config) is always on, independent of
-	// selection, so even a minimal deployment is discoverable. Its
-	// capabilities report the full advertised set (incl. `customer`, which the
-	// combined mount serves via the self handler).
-	advertise := opts.AdvertiseRouteSets
-	if len(advertise) == 0 {
-		advertise = ResolveRouteSets(opts.RouteSets)
-	}
-	if !providerRoutes.Webhooks {
-		advertise = withoutRouteSet(advertise, RouteSetWebhooks)
-	}
-	capabilities := buildCapabilities(s.Runtime, advertise, providerRoutes)
+	// The public configuration (GET /v1/config) is always on, so even a
+	// minimal deployment is discoverable.
+	capabilities := CapabilitiesFor(s.Runtime, opts.Permissions, providerRoutes, nil)
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
@@ -135,25 +114,23 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, embeddedMount, s.Runtime, recordBrowser), httproutes.Options{Capabilities: &capabilities})
 
-	if routeSets[RouteSetCheckout] {
-		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
-			Auth:           s.Auth,
-			ProviderRoutes: &providerRoutes,
-			External: httproutes.External{
-				CaptchaStatus: http.HandlerFunc(s.captchaStatusHandler),
-				CaptchaScript: http.HandlerFunc(s.captchaClientScriptHandler),
-			},
-		})
-	}
-	if groups := staffGroups(routeSets); len(groups) > 0 {
-		httproutes.RegisterMerchantRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
+		Auth:           s.Auth,
+		ProviderRoutes: &providerRoutes,
+		External: httproutes.External{
+			CaptchaStatus: http.HandlerFunc(s.captchaStatusHandler),
+			CaptchaScript: http.HandlerFunc(s.captchaClientScriptHandler),
+		},
+	})
+	if opts.Permissions != (httproutes.Permissions{}) {
+		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			AdminLimiter: s.AdminLimiter,
-			Guard:        opts.Guard,
+			Permissions:  opts.Permissions,
 			Capabilities: &capabilities,
-		}, groups...)
+		})
 	}
-	if routeSets[RouteSetWebhooks] {
+	if providerRoutes.Webhooks {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 	}
 
@@ -201,36 +178,11 @@ func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routes
 	return ProviderRoutesForRuntime(s.Runtime, override)
 }
 
-func withoutRouteSet(routeSets []RouteSet, remove RouteSet) []RouteSet {
-	if len(routeSets) == 0 {
-		return routeSets
-	}
-	out := make([]RouteSet, 0, len(routeSets))
-	for _, routeSet := range routeSets {
-		if routeSet != remove {
-			out = append(out, routeSet)
-		}
-	}
-	return out
-}
-
-func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
-	if len(staffGroups(routeSets)) > 0 && (s == nil || httproutes.IsNilAuth(s.Auth)) {
-		return httproutes.MountError{Route: "merchant API", Reason: "needs Routes.Auth"}
+func (s *Assembler) validateAuthBoundary(perms httproutes.Permissions) error {
+	if perms != (httproutes.Permissions{}) && (s == nil || httproutes.IsNilAuth(s.Auth)) {
+		return httproutes.MountError{Route: "admin API", Reason: "needs Routes.Auth"}
 	}
 	return nil
-}
-
-// staffGroups are the catalog groups of the staff route sets selected.
-func staffGroups(routeSets map[RouteSet]bool) []httproutes.Group {
-	var out []httproutes.Group
-	if routeSets[RouteSetMerchant] {
-		out = append(out, httproutes.Merchant)
-	}
-	if routeSets[RouteSetMerchantConfig] {
-		out = append(out, httproutes.MerchantConfig)
-	}
-	return out
 }
 
 // captchaStatusHandler is the gin-free captcha status endpoint (issue #282).

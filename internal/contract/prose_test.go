@@ -185,7 +185,7 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 		}
 		require.Contains(t, strings.Join(strings.Fields(program), " "), strings.Join(strings.Fields(line), " "), "the README's AuthKit configuration")
 	}
-	_, mount, ok := strings.Cut(readme, "\t// Billing. Processor webhooks are always mounted; pick the rest.\n")
+	_, mount, ok := strings.Cut(readme, "\t// Billing. Public, customer (/me) and webhook routes are always mounted.\n")
 	require.True(t, ok)
 	mount, _, _ = strings.Cut(mount, "\n\t})\n")
 	require.Contains(t, program, mount, "the README's mount")

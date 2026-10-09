@@ -131,7 +131,7 @@ take their PSPs from it.
   `retry_after` says how many seconds to wait before asking again.
 - Which of these can sell a given price is answered by the checkout session's
   `options`, or for the merchant by `ListCheckoutOptions`
-  (`GET /v1/merchant/checkout-options?price_id=`), see below.
+  (`GET /v1/admin/checkout-options?price_id=`), see below.
 - `custodian` is **who holds the card**, which is not the same question as `rail` (who charges
   it). `psp` means the gateway itself; anything else is a third party whose SDK your page
   tokenizes against — same rail, different script and different public key. Read `flow` and
@@ -206,7 +206,7 @@ is refused (`unknown_field`).
 The chosen PSP and the reason for it are recorded on the checkout attempt
 (`checkout_attempts.routing_reason`), so support can answer "why did this customer
 get this PSP" without guessing. Merchants can preview a decision without creating
-anything: `POST /v1/merchant/psps/routing-preview` (`Client.PreviewPSPRouting`) with
+anything: `POST /v1/admin/psps/routing-preview` (`Client.PreviewPSPRouting`) with
 `{"price_id": "...", "country": "US"}` returns the winner, the ranked fallbacks, and
 every skipped candidate with its reason.
 
@@ -249,7 +249,7 @@ sequenceDiagram
 `/billing/v1/me/checkout-sessions` with its normal session credential.)
 
 With the merchant's credential instead, `CreateCheckoutSession`
-(`POST /v1/merchant/checkout-sessions`) mints a session for a customer and hands
+(`POST /v1/admin/checkout-sessions`) mints a session for a customer and hands
 it to their browser; the customer pays it the same way, and a saved card needs
 their own credential on the pay (see [the checkout API](api/commerce.md)).
 

@@ -18,7 +18,7 @@ products:
   vi.stubGlobal("fetch", fetcher)
   await applyCatalog(raw)
   expect(fetcher).toHaveBeenCalledWith(
-    "/v1/merchant/catalog/applications",
+    "/v1/admin/catalog/applications",
     expect.objectContaining({ method: "POST", body: raw })
   )
   const headers = new Headers((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].headers)

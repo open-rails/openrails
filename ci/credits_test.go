@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A customer's prepaid money end to end through the merchant API: declare
+// A customer's prepaid money end to end through the admin API: declare
 // the customer, grant credit, admit and capture metered work, read the
 // ledger, usage and profile, then revoke what remains.
 func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {

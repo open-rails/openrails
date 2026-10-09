@@ -7,7 +7,7 @@ import (
 	"github.com/open-rails/openrails/internal/service"
 )
 
-// GetPaymentSettlementStatus (GET /merchant/customers/{customer_id}/payment-settlement-status?price_id=)
+// GetPaymentSettlementStatus (GET /admin/customers/{customer_id}/payment-settlement-status?price_id=)
 // reports whether the customer ever paid for the price through a rail.
 func GetPaymentSettlementStatus(r *httprequest.Request) {
 	customerID, err := billing.ParseCustomerID(r.Param("customer_id"))

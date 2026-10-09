@@ -18,7 +18,7 @@ type HostEventsQuery struct {
 	PaymentID           string `form:"payment_id"`
 }
 
-// ServiceListHostEvents handles GET /v1/merchant/host-events.
+// ServiceListHostEvents handles GET /v1/admin/host-events.
 func ServiceListHostEvents(r *httprequest.Request) {
 	var q HostEventsQuery
 	if !r.BindQuery(&q) {
@@ -53,7 +53,7 @@ func ServiceListHostEvents(r *httprequest.Request) {
 	r.SuccessJSON(events)
 }
 
-// ServiceAcknowledgeHostEvents handles POST /v1/merchant/host-events/acknowledge.
+// ServiceAcknowledgeHostEvents handles POST /v1/admin/host-events/acknowledge.
 func ServiceAcknowledgeHostEvents(r *httprequest.Request) {
 	var req billing.AcknowledgeHostEventsParams
 	if !r.BindJSON(&req) {

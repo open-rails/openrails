@@ -7,9 +7,9 @@ token-lean tables. No SDK.
 
 ## Auth
 
-- Bearer merchant **API key** (`Authorization: Bearer <key>`) that the host's guard
-  for the metrics routes admits (a staff read: `openrails.StaffReads` or
-  `openrails.Metrics`; on the standalone server a `viewer` key); mint one from the
+- Bearer merchant **API key** (`Authorization: Bearer <key>`) that the host's
+  `Permissions.AdminRead` admits (on the standalone server a `viewer` key);
+  mint one from the
   console (Settings) or the API.
 - Every query is scoped to the key's merchant (an explicit merchant predicate); the API serves
   **aggregates only**, never entity rows.
@@ -19,9 +19,9 @@ token-lean tables. No SDK.
 
 | Method + path | Purpose |
 |---|---|
-| `GET /v1/merchant/metrics/schema` | The registry dump — the LLM context document |
-| `POST /v1/merchant/metrics/query` | Run one composable query |
-| `POST /v1/merchant/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
+| `GET /v1/admin/metrics/schema` | The registry dump — the LLM context document |
+| `POST /v1/admin/metrics/query` | Run one composable query |
+| `POST /v1/admin/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
 
 **Schema first.** The `/schema` JSON is designed to ride in a system prompt: every measure
 carries description + formula + allowed dims; dimensions carry enum values; `query_shape`
@@ -32,7 +32,7 @@ states what the data is NOT; `limits` states the caps. Use only names from it.
 ## Query shape
 
 ```json
-POST /v1/merchant/metrics/query
+POST /v1/admin/metrics/query
 {"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}}
 ```
 

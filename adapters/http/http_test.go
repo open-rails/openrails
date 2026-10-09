@@ -47,8 +47,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}
-	selection := config.Routes{Auth: authtest.Deny{}, Storefront: true, Merchant: true, MerchantConfig: true, Guards: authtest.Guards(),
-		CustomerProfiles: []config.CustomerRoutes{{Scope: config.CustomerSelfService}}}
+	selection := config.Routes{Auth: authtest.Deny{}, Permissions: authtest.Permissions()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -86,8 +85,8 @@ func TestInventoryMountsNativelyUnderAPrefix(t *testing.T) {
 		}{
 			{http.MethodGet, "/api/pay/v1/config", http.StatusOK},
 			{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
-			{http.MethodPost, "/api/pay/v1/merchant/product-access", http.StatusUnauthorized},
-			{http.MethodPost, "/api/pay/v1/merchant/customers/entitlementsXbatch", http.StatusTeapot},
+			{http.MethodPost, "/api/pay/v1/admin/product-access", http.StatusUnauthorized},
+			{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXbatch", http.StatusTeapot},
 			{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 			{http.MethodGet, "/api/pay/v1/unrelated", http.StatusTeapot},
 			{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},

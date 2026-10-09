@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
 // SEC-25: a refunded purchase stays refunded. After the provider reports a
@@ -58,7 +59,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
 	deliver := func(payload []byte) {
 		t.Helper()
 		status, body := postSignedStripeWebhook(t, mux, account, secret, payload, time.Now())

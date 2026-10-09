@@ -63,7 +63,7 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}, WithAPIKey(" sk-test "))
 	require.NoError(t, readConfiguration(client, t.Context()))
-	require.Equal(t, "GET /v1/merchant/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
+	require.Equal(t, "GET /v1/admin/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
 }
 
 func TestClientDecodesTheErrorEnvelope(t *testing.T) {

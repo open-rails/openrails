@@ -61,6 +61,7 @@ import {
   priceIntervalLabel,
 } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
+import { useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
 function catalogCopilotEnabled(): boolean {
@@ -91,8 +92,7 @@ function CatalogSection({
   title: string
   children: React.ReactNode
 }) {
-  const { data: capability } = useQuery(adminQueries.catalogRevision())
-  const writesAllowed = capability?.writes_allowed === true
+  const writesAllowed = useCatalogWrites()
   return (
     <CatalogWritesContext.Provider value={writesAllowed}>
       <div className="flex flex-col gap-4">

@@ -1,6 +1,6 @@
 # Durable request admission
 
-How admissions and their holds behave. The routes are `/v1/merchant/admissions`
+How admissions and their holds behave. The routes are `/v1/admin/admissions`
 ([routes](api/routes.md)); the Go methods are `Admit`, `GetAdmission`,
 `CaptureAdmission`, `ReleaseAdmissions` and `ExtendAdmissions`. Admit,
 release and extend take up to 1,000 items and answer one result per item, each

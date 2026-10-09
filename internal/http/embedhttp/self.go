@@ -125,18 +125,14 @@ func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid billing.Merch
 	}
 }
 
-// ConfiguredProviderRoutes selects buyer routes independently of credential
-// custody. Each request checks its selected account and current credential
-// readiness; mounting a route never arms an account or grants secret access.
-func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime, buyer bool) (routesurface.ProviderRoutes, error) {
+// ConfiguredProviderRoutes is the provider routes a mount serves, whatever
+// custody its credentials are in. Each request checks its selected account
+// and current credential readiness; mounting a route never arms an account or
+// grants secret access.
+func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime) (routesurface.ProviderRoutes, error) {
 	if rt == nil || rt.Config == nil {
 		return routesurface.ProviderRoutes{}, fmt.Errorf("openrails HTTP: runtime configuration is missing")
 	}
 	selected := routesurface.AllProviderRoutes()
-	if !buyer {
-		selected.StripePortal = false
-		selected.Solana = false
-		selected.SolanaSigning = false
-	}
 	return ProviderRoutesForRuntime(rt, &selected), nil
 }

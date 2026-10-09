@@ -117,7 +117,7 @@ type rival struct {
 
 func (w *world) rival() *rival {
 	// Its own identity provider: merchant A's credentials mean nothing there.
-	return w.peer("rival-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]openrails.PSPConfig{
+	return w.peer("rival-"+uuid.NewString()[:8], &verifier{secret: []byte("rival-" + uuid.NewString())}, map[string]openrails.PSPConfig{
 		"stripe": {Rail: "stripe", AccountID: "acct_rival", Secrets: map[string]string{"secret_key": "sk_test_rival", "webhook_signing_secret": "whsec_rival"}},
 		"nmi":    {Rail: "nmi", AccountID: "rival-nmi", Secrets: map[string]string{"security_key": "rival-nmi-key", "webhook_signing_secret": "nmi_webhook_rival"}, Settings: map[string]any{"tokenization_key": "rival-tokenization"}},
 	})
@@ -126,12 +126,7 @@ func (w *world) rival() *rival {
 // sibling is another process of the same merchant on the same database, as
 // hosts run several replicas behind one load balancer.
 func (w *world) sibling() *rival {
-	return w.siblingWith(openrails.CustomerBillingManagement)
-}
-
-// siblingWith is a sibling publishing the given customer route scope.
-func (w *world) siblingWith(scope openrails.CustomerHTTPScope) *rival {
-	return w.peer(w.slug, scope, w.auth, w.declaredPSPs())
+	return w.peer(w.slug, w.auth, w.declaredPSPs())
 }
 
 func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
@@ -143,9 +138,8 @@ func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 }
 
 // peer is another process on this database, guarded by v.
-func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier, psps map[string]openrails.PSPConfig) *rival {
+func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConfig) *rival {
 	t := w.t
-	profile := openrails.CustomerRoutes{Merchant: slug, Scope: scope}
 	deps := openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
@@ -155,7 +149,7 @@ func (w *world) peer(slug string, scope openrails.CustomerHTTPScope, v *verifier
 	}, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, Storefront: true, Merchant: true, MerchantConfig: true, Guards: guards, CustomerProfiles: []openrails.CustomerRoutes{profile}}
+	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, Permissions: permissions}
 	if slug != w.slug {
 		return w.serve(slug, rt, routes)
 	}
@@ -235,7 +229,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	// Staff authorized for merchant A cannot select merchant B on either
 	// merchant's mount; the same request for A is allowed.
 	merchantGet := func(server, token, slug string) int {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/merchant/findings", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/admin/findings", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("OpenRails-Merchant", slug)
@@ -251,10 +245,10 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	// never the 503 of an authorization outage.
 	sid := uuid.NewString()
 	session := w.auth.sessionToken(t, "staff", sid)
-	status, body := w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
+	status, body := w.merchantCall(session, http.MethodGet, "/v1/admin/findings")
 	require.Equal(t, http.StatusOK, status, body)
 	w.auth.revoked.Store(sid, struct{}{})
-	status, body = w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
+	status, body = w.merchantCall(session, http.MethodGet, "/v1/admin/findings")
 	require.Equal(t, http.StatusUnauthorized, status, body)
 	require.Contains(t, body, `"credential_revoked"`)
 	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug), "another session is unaffected")

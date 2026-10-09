@@ -371,7 +371,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 // refundPaymentForFinding executes the refund through the EXISTING admin
 // refund producer: reservation + durable rail intent
 // (effectively-once), recorded on the payments ledger by the handler's
-// finalize — identical to POST /merchant/payments/{id}/refunds. The
+// finalize — identical to POST /admin/payments/{id}/refunds. The
 // idempotency key is derived from the finding, so a re-approve retries the
 // SAME refund instead of minting a second one.
 func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRecord, paymentID uuid.UUID, params map[string]any, reason string, result map[string]any) error {

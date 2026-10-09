@@ -20,7 +20,7 @@ import (
 
 // A self-hosted OpenRails without local sign-in: its console is the trusted
 // issuer's OAuth 2.0 public client, the token that flow mints is all the
-// merchant API needs, and the control plane serves no sign-in of its own.
+// admin API needs, and the control plane serves no sign-in of its own.
 func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	f := newFixture(t)
 	roles := authkit.NewRoles()
@@ -107,7 +107,7 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code, "a fresh sign-in may grant access: %s", w.Body.String())
 
 	renewed := as.Refresh(t, console, "", tokens)
-	require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: "/v1/merchant/findings"}).Code, "the console's refreshed token")
+	require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: "/v1/admin/findings"}).Code, "the console's refreshed token")
 
 	stranger := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
 	w = dpopServe(t, handler, stranger, rsRequest{path: "/v1/merchants"})

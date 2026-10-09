@@ -18,7 +18,7 @@ func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListP
 		return nil, err
 	}
 	var out billing.ListPage[billing.Customer]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/customers", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/customers", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -38,7 +38,7 @@ func (c *Client) EnsureCustomers(ctx context.Context, items []billing.EnsureCust
 		}
 	}
 	var out billing.EnsureCustomerBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/ensure", billing.EnsureCustomerBatchParams{Items: items}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/customers/ensure", billing.EnsureCustomerBatchParams{Items: items}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -53,7 +53,7 @@ func (c *Client) ListCustomerSettings(ctx context.Context, params billing.Custom
 		return nil, err
 	}
 	var out billing.ListPage[billing.CustomerSettings]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/customers/settings", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/customers/settings", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -73,7 +73,7 @@ func (c *Client) UpdateCustomerSettings(ctx context.Context, items []billing.Upd
 		}
 	}
 	var out billing.CustomerSettingsBatch
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/customers/settings", billing.UpdateCustomerSettingsBatchParams{Items: items}, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/admin/customers/settings", billing.UpdateCustomerSettingsBatchParams{Items: items}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -113,7 +113,7 @@ func (c *Client) ListDelinquency(ctx context.Context, params billing.Delinquency
 		q.Set("state", string(params.State))
 	}
 	var out billing.ListPage[billing.Delinquency]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/delinquency", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/delinquency", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

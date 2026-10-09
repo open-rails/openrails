@@ -10,7 +10,7 @@
 //
 // Merchant-local authority is evaluated in the caller's merchant permission
 // group using the server's own `merchant:` permissions (staffperm), which
-// guard the merchant API's routes. Cross-merchant directory authority belongs
+// guard the admin API's routes. Cross-merchant directory authority belongs
 // to root/platform control, not merchant groups.
 package controlplane
 

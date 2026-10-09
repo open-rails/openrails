@@ -126,7 +126,7 @@ products:
 		{"schema_version": 1, "expected_revision": 0},
 		{"schema_version": 1, "catalog_version": 1},
 	} {
-		status, reply := w.staffJSON(http.MethodPost, "/v1/merchant/catalog/applications", body)
+		status, reply := w.staffJSON(http.MethodPost, "/v1/admin/catalog/applications", body)
 		require.Equal(t, http.StatusBadRequest, status, "%v", reply)
 	}
 	require.Equal(t, unseen.AppliedRevision, revision(), "refused request fields cannot mutate the catalog")

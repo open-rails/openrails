@@ -81,7 +81,7 @@ func ServiceGetPublicConfig(capabilities billing.Capabilities) func(*httprequest
 	}
 }
 
-// ListCheckoutOptions serves GET /v1/merchant/checkout-options: the ways
+// ListCheckoutOptions serves GET /v1/admin/checkout-options: the ways
 // checkout can sell one price, each with the browser driver that renders it.
 func ListCheckoutOptions(r *httprequest.Request) {
 	rawID, key := strings.TrimSpace(r.Query("price_id")), r.Query("price_key")

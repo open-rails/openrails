@@ -34,11 +34,12 @@ func httpRuntime() *Engine {
 	return &Engine{App: &app.App{Config: c, Runtime: rt}}
 }
 
-// profiles mounts customer surfaces at prefixes, each admitted by a.
-func profiles(a billingauth.Auth, scope config.CustomerHTTPScope, prefixes ...string) config.Routes {
-	sel := config.Routes{}
+// profiles mounts customer surfaces at prefixes beside /v1/me, each admitted
+// by a.
+func profiles(a billingauth.Auth, prefixes ...string) config.Routes {
+	sel := config.Routes{Auth: a}
 	for _, prefix := range prefixes {
-		sel.CustomerProfiles = append(sel.CustomerProfiles, config.CustomerRoutes{Prefix: prefix, Scope: scope, Auth: a})
+		sel.CustomerProfiles = append(sel.CustomerProfiles, config.CustomerRoutes{Prefix: prefix, Auth: a})
 	}
 	return sel
 }
@@ -96,43 +97,43 @@ func serve(h http.Handler, method, target, body string, headers ...string) *http
 func TestRoutesCopyTheSelection(t *testing.T) {
 	rt := httpRuntime()
 	fake := &authtest.Fake{}
-	sel := profiles(fake, config.CustomerSelfService, "/portal")
+	sel := profiles(fake, "/portal")
 	routes, err := rt.Routes(sel)
 	require.NoError(t, err)
 	sel.CustomerProfiles[0].Prefix = "/mutated"
 	var portal bool
 	for _, route := range routes {
-		require.NotContains(t, route.Path, "/merchant/")
+		require.NotContains(t, route.Path, "/admin/")
 		require.NotContains(t, route.Path, "/mutated")
 		portal = portal || strings.HasPrefix(route.Path, "/portal/")
 	}
 	require.True(t, portal)
 	original := routes[0].Path
 	routes[0].Path = "/caller-mutated"
-	again, err := rt.Routes(profiles(fake, config.CustomerSelfService, "/portal"))
+	again, err := rt.Routes(profiles(fake, "/portal"))
 	require.NoError(t, err)
 	require.Equal(t, original, again[0].Path)
 
 	var wg sync.WaitGroup
 	for range 12 {
-		wg.Go(func() { _, err := rt.Routes(config.Routes{}); require.NoError(t, err) })
+		wg.Go(func() { _, err := rt.Routes(config.Routes{Auth: fake}); require.NoError(t, err) })
 	}
 	wg.Wait()
 }
 
 func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
-	routes, err := httpRuntime().Routes(config.Routes{})
-	require.NoError(t, err)
-	require.NotEmpty(t, routes, "webhooks and capabilities are always mounted")
-	for _, r := range routes {
-		for _, hidden := range []string{"/catalog", "/me/", "/merchant/", "/products", "/checkout-sessions"} {
-			require.NotContains(t, r.Path, hidden, "an empty selection exposes no storefront, customer or merchant surface")
-		}
-	}
-
 	fake := &authtest.Fake{}
-	full := profiles(fake, config.CustomerSelfService, "/v1/me")
-	full.Storefront, full.Merchant, full.MerchantConfig, full.Auth, full.Guards = true, true, true, fake, authtest.Guards()
+	routes, err := httpRuntime().Routes(config.Routes{Auth: fake})
+	require.NoError(t, err)
+	var public, customer bool
+	for _, r := range routes {
+		require.NotContains(t, r.Path, "/admin/", "without Permissions no admin or merchant-config route is mounted")
+		public = public || r.Path == "/v1/catalog/products"
+		customer = customer || strings.HasPrefix(r.Path, "/v1/me/")
+	}
+	require.True(t, public && customer, "the public and customer routes are always mounted")
+
+	full := config.Routes{Auth: fake, Permissions: authtest.Permissions()}
 	rt := httpRuntime()
 	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
 	mux := mountAt(t, rt, full, "/api/pay")
@@ -142,7 +143,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/pay/v1/me/balance", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/me/checkout-sessions", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/merchant/psps", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/admin/psps", http.StatusUnauthorized},
 		{http.MethodOptions, "/api/pay/v1/me/balance", http.StatusNoContent},
 		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
 	} {
@@ -162,13 +163,13 @@ func TestCapabilitiesReportTheMount(t *testing.T) {
 		require.NotEmpty(t, doc.Currencies)
 		return doc.Capabilities.RouteGroups
 	}
-	require.Equal(t, map[string]bool{"checkout": true, "customer": false, "merchant": false, "merchant_config": false, "webhooks": true}, read(config.Routes{Storefront: true}))
-	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": true, "merchant_config": false, "webhooks": true}, read(config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}))
-	require.Equal(t, map[string]bool{"checkout": false, "customer": false, "merchant": false, "merchant_config": true, "webhooks": true}, read(config.Routes{MerchantConfig: true, Auth: fake, Guards: config.Guards{"merchant_config": authtest.Perm(authtest.StaffAdmin)}}))
-	require.Equal(t, map[string]bool{"checkout": false, "customer": true, "merchant": false, "merchant_config": false, "webhooks": true}, read(profiles(fake, config.CustomerBillingManagement, "/v1/me")))
+	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": false}, read(config.Routes{Auth: fake}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false}, read(config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true}, read(config.Routes{Auth: fake, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog_write": true, "merchant_config": true}, read(config.Routes{Auth: fake, Permissions: authtest.Permissions()}))
 }
 
-func TestCatalogEditsFollowTheMerchantConfigMount(t *testing.T) {
+func TestCatalogEditsFollowTheCatalogWriteMount(t *testing.T) {
 	writes := func(rt *Engine, sel config.Routes) (reads, writes int) {
 		routes, err := rt.Routes(sel)
 		require.NoError(t, err)
@@ -187,56 +188,50 @@ func TestCatalogEditsFollowTheMerchantConfigMount(t *testing.T) {
 	}
 	fake := &authtest.Fake{}
 	closed := httpRuntime()
-	reads, n := writes(closed, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()})
+	reads, n := writes(closed, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()})
 	require.Positive(t, reads)
-	require.Zero(t, n, "catalog writes are MerchantConfig's")
+	require.Zero(t, n, "catalog writes are CatalogWrite's")
 	require.False(t, closed.App.Runtime.CatalogEdits.Enabled())
-	mux := mountAt(t, closed, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}, "/api/pay")
-	for _, path := range []string{"/api/pay/v1/merchant/catalog/products", "/api/pay/v1/merchant/catalog/prices"} {
+	mux := mountAt(t, closed, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()}, "/api/pay")
+	for _, path := range []string{"/api/pay/v1/admin/catalog/products", "/api/pay/v1/admin/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
-	_, err := closed.Routes(config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.Guards()})
+	_, err := closed.Routes(config.Routes{Auth: fake, Permissions: authtest.Permissions()})
 	require.ErrorContains(t, err, "every mount must agree")
-	_, err = closed.Routes(config.Routes{Storefront: true})
-	require.NoError(t, err, "a mount without the merchant API decides nothing")
+	_, err = closed.Routes(config.Routes{Auth: fake})
+	require.NoError(t, err, "a mount without the admin API decides nothing")
 
 	open := httpRuntime()
-	_, n = writes(open, config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.Guards()})
+	_, n = writes(open, config.Routes{Auth: fake, Permissions: authtest.Permissions()})
 	require.Positive(t, n)
 	require.True(t, open.App.Runtime.CatalogEdits.Enabled(), "the service guard follows the mount")
 
 	// A host whose catalog document is the truth serves the writes refused.
 	declared := httpRuntime()
 	declared.App.Config.Catalog = &pkgcatalog.Application{}
-	_, n = writes(declared, config.Routes{MerchantConfig: true, Auth: fake, Guards: config.Guards{"merchant_config": authtest.Perm(authtest.StaffAdmin)}})
+	_, n = writes(declared, config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead), CatalogWrite: authtest.Perm(authtest.StaffCatalog)}})
 	require.Positive(t, n)
 	require.False(t, declared.App.Runtime.CatalogEdits.Enabled(), "Config.Catalog is the truth")
 
-	_, err = httpRuntime().Routes(config.Routes{Merchant: true, Guards: authtest.StaffGuards()})
-	require.ErrorContains(t, err, "need Routes.Auth", "the merchant API never mounts open")
-	_, err = httpRuntime().Routes(config.Routes{Merchant: true, Auth: (*authtest.Fake)(nil), Guards: authtest.StaffGuards()})
-	require.ErrorContains(t, err, "need Routes.Auth", "a typed nil is no Auth")
+	_, err = httpRuntime().Routes(config.Routes{Permissions: authtest.AdminPermissions()})
+	require.ErrorContains(t, err, "Routes.Auth is required", "the admin API never mounts open")
+	_, err = httpRuntime().Routes(config.Routes{Auth: (*authtest.Fake)(nil), Permissions: authtest.AdminPermissions()})
+	require.ErrorContains(t, err, "Routes.Auth is required", "a typed nil is no Auth")
 }
 
-// Mounting fails when a mounted staff route has no guard, a guard names
-// routes not mounted, or two guards of one tier cover a route.
-func TestGuardsFailClosed(t *testing.T) {
+// AdminWrite and CatalogWrite need AdminRead; a typed nil permission is none.
+func TestPermissionsFailClosed(t *testing.T) {
 	fake := &authtest.Fake{}
-	for name, tc := range map[string]struct {
-		sel config.Routes
-		err string
-	}{
-		"no guards":                     {config.Routes{Merchant: true, Auth: fake}, "guards none of"},
-		"writes uncovered":              {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r")}}, "openrails.StaffWrites"},
-		"configuration uncovered":       {config.Routes{Merchant: true, MerchantConfig: true, Auth: fake, Guards: authtest.StaffGuards()}, "openrails.MerchantConfig"},
-		"a guard for a group unmounted": {config.Routes{Merchant: true, Auth: fake, Guards: authtest.Guards()}, "openrails.MerchantConfig covers no mounted route"},
-		"guards without staff routes":   {config.Routes{Storefront: true, Auth: fake, Guards: authtest.StaffGuards()}, "set Routes.Merchant or Routes.MerchantConfig"},
-		"a nil guard":                   {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r"), "staff_writes": nil}}, "openrails.StaffWrites guards with an empty permission"},
-		"a typed nil guard":             {config.Routes{Merchant: true, Auth: fake, Guards: config.Guards{"staff_reads": authtest.Perm("r"), "staff_writes": (*nilPerm)(nil)}}, "openrails.StaffWrites guards with an empty permission"},
+	for name, sel := range map[string]config.Routes{
+		"writes without reads":      {Auth: fake, Permissions: config.Permissions{AdminWrite: authtest.Perm("w")}},
+		"a typed nil read":          {Auth: fake, Permissions: config.Permissions{AdminRead: (*nilPerm)(nil), AdminWrite: authtest.Perm("w")}},
+		"merchant config and write": {Auth: fake, Permissions: config.Permissions{AdminWrite: authtest.Perm("w"), MerchantConfig: authtest.Perm("c")}},
 	} {
-		_, err := httpRuntime().Routes(tc.sel)
-		require.ErrorContains(t, err, tc.err, name)
+		_, err := httpRuntime().Routes(sel)
+		require.ErrorContains(t, err, "AdminWrite needs AdminRead", name)
 	}
+	_, err := httpRuntime().Routes(config.Routes{Auth: fake, Permissions: config.Permissions{CatalogWrite: authtest.Perm("e")}})
+	require.ErrorContains(t, err, "CatalogWrite needs AdminRead")
 }
 
 type nilPerm struct{}
@@ -258,7 +253,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 		require.Equal(t, body, string(raw))
 		return false
 	}}
-	mux := mountAt(t, httpRuntime(), profiles(verifier, config.CustomerSelfService, "/v1/tenants/{tenant}/me"), "/api/pay")
+	mux := mountAt(t, httpRuntime(), profiles(verifier, "/v1/tenants/{tenant}/me"), "/api/pay")
 	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, target, body, "Authorization", "Bearer signed").Code)
 	require.Equal(t, 1, calls)
 
@@ -277,7 +272,7 @@ func TestHTTPVerifierSeesOriginalSignedRequest(t *testing.T) {
 func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 	rt := httpRuntime()
 	rt.App.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
-	sel := profiles(&authtest.Fake{}, config.CustomerSelfService, "/v1/me")
+	sel := config.Routes{Auth: &authtest.Fake{}}
 	first, second := mountAt(t, rt, sel, "/first"), mountAt(t, rt, sel, "/second")
 	for i, tc := range []struct {
 		mux  http.Handler
@@ -304,9 +299,9 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 	const customer = "22222222-2222-4222-8222-222222222222"
 	tokens := map[string]string{"portal": portalAuth.Person(customer), "platform": platformAuth.Person(customer)}
 	rt := httpRuntime()
-	sel := config.Routes{CustomerProfiles: []config.CustomerRoutes{
-		{Prefix: "/billing/v1/me", Scope: config.CustomerSelfService, Auth: portalAuth},
-		{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: config.CustomerSubscriptionManagement, Auth: platformAuth},
+	sel := config.Routes{Auth: &authtest.Fake{}, CustomerProfiles: []config.CustomerRoutes{
+		{Prefix: "/billing/v1/me", Auth: portalAuth},
+		{Prefix: "/api/v1/merchants/{slug}/billing/me", Auth: platformAuth},
 	}}
 	mux := mountAt(t, rt, sel, "/api/pay")
 	const portal, platform = "/billing/v1/me", "/api/v1/merchants/host-selected/billing/me"
@@ -326,18 +321,22 @@ func TestCustomerExposuresKeepTheirOwnAuthority(t *testing.T) {
 		require.Equal(t, 1, a.Admitted("Required"))
 		require.Equal(t, 1, a.Refused("Required"))
 	}
-	for _, path := range []string{portal + "/merchant/customers", "/billing/v1/merchant/psps", platform + "/checkout-sessions", platform + "/payment-methods"} {
+	for _, path := range []string{portal + "/admin/customers", "/billing/v1/admin/psps"} {
 		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay"+path, "").Code, path)
 	}
 	routes, err := rt.Routes(sel)
 	require.NoError(t, err)
-	actions := 0
+	me, platformRoutes := 0, 0
 	for _, route := range routes {
-		if strings.HasPrefix(route.Path, "/api/v1/merchants/") && route.Method != http.MethodOptions {
-			actions++
+		switch {
+		case strings.HasPrefix(route.Path, "/v1/me/"):
+			me++
+		case strings.HasPrefix(route.Path, "/api/v1/merchants/"):
+			platformRoutes++
 		}
 	}
-	require.Equal(t, 4, actions, "subscription management exposes exactly its four actions")
+	require.Positive(t, me)
+	require.Equal(t, me, platformRoutes, "every customer surface serves the whole customer API")
 }
 
 func TestCustomerExposureValidation(t *testing.T) {
@@ -347,35 +346,25 @@ func TestCustomerExposureValidation(t *testing.T) {
 	}
 	fake := &authtest.Fake{}
 	for _, prefix := range []string{"/", "/customer/", "/customer/../other", "/customer/{tail...}", "/customer/{slug}/%2f"} {
-		require.Error(t, validate(profiles(fake, config.CustomerSelfService, prefix)), prefix)
+		require.Error(t, validate(profiles(fake, prefix)), prefix)
 	}
-	require.ErrorContains(t, validate(config.Routes{Customers: config.CustomerSelfService}), "need Routes.Auth",
-		"customer routes never mount open")
-	require.ErrorContains(t, validate(profiles(nil, config.CustomerSelfService, "/portal")), "need Routes.Auth")
-	require.ErrorContains(t, validate(profiles(fake, config.CustomersNone, "/portal")), "need a Scope")
-	require.ErrorContains(t, validate(profiles(fake, config.CustomerSelfService, "/v1/me", "/v1/me")), "conflicting")
-	require.ErrorContains(t, validate(config.Routes{CookieOrigin: "http://portal.example"}), "CookieOrigin", "plain HTTP only on loopback")
+	require.ErrorContains(t, validate(config.Routes{}), "Routes.Auth is required", "customer routes never mount open")
+	require.ErrorContains(t, validate(profiles(nil, "/portal")), "Routes.Auth is required")
+	require.ErrorContains(t, validate(profiles(fake, "/v1/me")), "conflicting", "/v1/me is always mounted")
+	require.ErrorContains(t, validate(config.Routes{Auth: fake, CookieOrigin: "http://portal.example"}), "CookieOrigin", "plain HTTP only on loopback")
 }
 
-func TestCustomerBillingManagementScope(t *testing.T) {
-	mux := mountAt(t, httpRuntime(), profiles(&authtest.Fake{}, config.CustomerBillingManagement, "/v1/me"), "/api/pay")
+// The customer routes are always mounted, the admin ones only with
+// Permissions.
+func TestCustomerRoutesAlwaysMounted(t *testing.T) {
+	mux := mountAt(t, httpRuntime(), config.Routes{Auth: &authtest.Fake{}}, "/api/pay")
 	for _, path := range []string{"/payments", "/invoices", "/subscriptions", "/payment-methods"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
 	}
-	for _, path := range []string{"/checkout-sessions", "/subscriptions/x/change-tier", "/billing-portal"} {
-		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodPost, "/api/pay/v1/me"+path, "").Code, path)
-	}
+	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodPost, "/api/pay/v1/me/checkout-sessions", "").Code)
+	require.Equal(t, http.StatusNotFound, serve(mux, http.MethodGet, "/api/pay/v1/admin/payments", "").Code)
 	rec := serve(mux, http.MethodGet, "/api/pay/v1/config", "")
 	require.Equal(t, http.StatusOK, rec.Code)
-	var doc billing.PublicConfig
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &doc))
-	capabilities := doc.Capabilities
-	require.True(t, capabilities.RouteGroups["customer"])
-	require.False(t, capabilities.RouteGroups["checkout"])
-	for _, feature := range []string{"stripe_billing_portal", "solana_one_time_payments", "provider_credential_writes"} {
-		require.False(t, capabilities.Features[feature], feature)
-	}
-	require.NotContains(t, capabilities.Features, "webhooks")
 	require.NotContains(t, rec.Body.String(), `"routes"`)
 }
 
@@ -388,7 +377,7 @@ func TestCustomerCookieAdmission(t *testing.T) {
 		_, err := r.Cookie("session")
 		return err == nil
 	}}
-	sel := profiles(authn, config.CustomerSubscriptionManagement, "/portal")
+	sel := profiles(authn, "/portal")
 	mux := mountAt(t, httpRuntime(), sel, "/api/pay")
 	sel.CookieOrigin = "https://portal.example"
 	admitting := mountAt(t, httpRuntime(), sel, "/api/pay")
@@ -425,15 +414,15 @@ func TestCustomerCookieAdmission(t *testing.T) {
 	}
 }
 
-// The admin console mounts with the merchant API it drives, at its own path,
+// The admin console mounts with the admin API it drives, at its own path,
 // pointed at the API's prefix and the host's AuthKit; otherwise Mount fails.
-func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
+func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 	rt := httpRuntime()
 	fake := &authtest.Fake{}
 	console := &config.AdminConsole{Path: "/billing-admin"}
 	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: console, Auth: fake})
-	require.ErrorContains(t, err, "set Routes.Merchant")
-	sel := config.Routes{Prefix: "/billing", Merchant: true, AdminConsole: console, Auth: fake, Guards: authtest.StaffGuards()}
+	require.ErrorContains(t, err, "set Routes.Permissions.AdminRead")
+	sel := config.Routes{Prefix: "/billing", Permissions: authtest.AdminPermissions(), AdminConsole: console, Auth: fake}
 	_, err = rt.Routes(sel)
 	require.ErrorContains(t, err, "needs a console build")
 	rt.App.ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
@@ -441,9 +430,9 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	require.ErrorContains(t, err, "AuthBaseURL")
 	console.AuthBaseURL = "/api/v1"
 	for _, bad := range []config.Routes{
-		{Prefix: "billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards()},
-		{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{Path: "/admin/", AuthBaseURL: "/api/v1"}},
-		{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{Path: "/billing/v1/admin", AuthBaseURL: "/api/v1"}},
+		{Prefix: "billing", Auth: fake, Permissions: authtest.AdminPermissions()},
+		{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{Path: "/admin/", AuthBaseURL: "/api/v1"}},
+		{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{Path: "/billing/v1/admin", AuthBaseURL: "/api/v1"}},
 	} {
 		_, err = rt.Routes(bad)
 		require.Error(t, err, "%+v", bad)
@@ -460,12 +449,12 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	// config.json, verbatim and keyed by extension id.
 	hosted := httpRuntime()
 	hosted.App.ConsoleAssets = rt.App.ConsoleAssets
-	_, err = hosted.Routes(config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"Hosted": true}}})
+	_, err = hosted.Routes(config.Routes{Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"Hosted": true}}})
 	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
-	hostedMux := mountAt(t, hosted, config.Routes{Merchant: true, Auth: fake, Guards: authtest.StaffGuards(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
+	hostedMux := mountAt(t, hosted, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions(), AdminConsole: &config.AdminConsole{AuthBaseURL: "/api/v1", Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}}}, "")
 	require.Contains(t, serve(hostedMux, http.MethodGet, "/admin/config.json", "").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/config", "").Code)
 
-	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Merchant: true, Auth: fake, Guards: authtest.StaffGuards()}, "")
+	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: fake, Permissions: authtest.AdminPermissions()}, "")
 	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/admin/", "").Code, "no console unless selected")
 }

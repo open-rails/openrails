@@ -24,11 +24,11 @@ beforeEach(async () => {
   writesAllowed = true
   response = () => receipt()
   requests = await server({
-    "GET /merchant/catalog/revision": () => ({
+    "GET /admin/catalog/revision": () => ({
       revision,
       writes_allowed: writesAllowed,
     }),
-    "POST /merchant/catalog/applications": () => response(),
+    "POST /admin/catalog/applications": () => response(),
   })
   selectMerchant("merchant-one")
   await mount(

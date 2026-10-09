@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// StandaloneAuth is the standalone server's Auth for the merchant API:
+// StandaloneAuth is the standalone server's Auth for the admin API:
 // merchant API keys, trusted issuers' access tokens (#1140) and the control
 // plane's own user sessions, through the same route gate an embedded host's
 // middleware goes through. Its RequirePermission resolves the merchant the

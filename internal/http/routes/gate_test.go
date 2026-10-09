@@ -51,86 +51,85 @@ var openRoutes = []string{
 // sensitiveRoutes are the routes that also ask Auth.Sensitive of a user in
 // person: those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
-	"DELETE /v1/merchant/alert-webhooks/{id}",
+	"DELETE /v1/admin/alert-webhooks/{id}",
+	"DELETE /v1/admin/catalog/meters/{key}/rate-card",
+	"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}",
+	"DELETE /v1/admin/customers/{customer_id}/product-access/{id}",
+	"DELETE /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
+	"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
 	"DELETE /v1/merchant/api-keys/{id}",
-	"DELETE /v1/merchant/catalog/meters/{key}/rate-card",
-	"DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}",
-	"DELETE /v1/merchant/customers/{customer_id}/product-access/{id}",
-	"DELETE /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}",
-	"DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
 	"DELETE /v1/merchant/federated-grants/{id}",
 	"DELETE /v1/merchant/team/invites/{id}",
 	"DELETE /v1/merchant/team/{user_id}",
+	"GET /v1/admin/billing-archive",
 	"GET /v1/merchant/api-keys",
-	"GET /v1/merchant/billing-archive",
-	"PATCH /v1/merchant/catalog/prices/{id}",
-	"PATCH /v1/merchant/catalog/products/{id}",
-	"PATCH /v1/merchant/customers/settings",
-	"PATCH /v1/merchant/psps/{id}",
+	"PATCH /v1/admin/catalog/prices/{id}",
+	"PATCH /v1/admin/catalog/products/{id}",
+	"PATCH /v1/admin/customers/settings",
+	"PATCH /v1/admin/psps/{id}",
 	"PATCH /v1/merchant/team/{user_id}",
-	"POST /v1/merchant/admissions",
-	"POST /v1/merchant/admissions/extend",
-	"POST /v1/merchant/admissions/release",
-	"POST /v1/merchant/admissions/{request_id}/capture",
-	"POST /v1/merchant/alert-webhooks",
-	"POST /v1/merchant/api-host/verify",
+	"POST /v1/admin/admissions",
+	"POST /v1/admin/admissions/extend",
+	"POST /v1/admin/admissions/release",
+	"POST /v1/admin/admissions/{request_id}/capture",
+	"POST /v1/admin/alert-webhooks",
+	"POST /v1/admin/api-host/verify",
+	"POST /v1/admin/billing-archive",
+	"POST /v1/admin/billing-import",
+	"POST /v1/admin/catalog/applications",
+	"POST /v1/admin/catalog/drift/refresh",
+	"POST /v1/admin/catalog/entitlement-replacements",
+	"POST /v1/admin/catalog/prices",
+	"POST /v1/admin/catalog/product-archives",
+	"POST /v1/admin/catalog/products",
+	"POST /v1/admin/checkout-sessions",
+	"POST /v1/admin/configuration/applications",
+	"POST /v1/admin/credit-grants",
+	"POST /v1/admin/customers/ensure",
+	"POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke",
+	"POST /v1/admin/customers/{customer_id}/payments/off-channel",
+	"POST /v1/admin/findings/{id}/resolve",
+	"POST /v1/admin/invoices/{id}/payments",
+	"POST /v1/admin/invoices/{id}/retry-collection",
+	"POST /v1/admin/invoices/{id}/uncollectible",
+	"POST /v1/admin/invoices/{id}/void",
+	"POST /v1/admin/payments/{id}/refunds",
+	"POST /v1/admin/plan-migrations",
+	"POST /v1/admin/product-access",
+	"POST /v1/admin/provider-operations",
+	"POST /v1/admin/provider-operations/{operation_id}/close",
+	"POST /v1/admin/provider-operations/{operation_id}/extend",
+	"POST /v1/admin/provider-operations/{operation_id}/observations",
+	"POST /v1/admin/provider-operations/{operation_id}/refusal",
+	"POST /v1/admin/provider-operations/{operation_id}/release",
+	"POST /v1/admin/provider-operations/{operation_id}/resolution",
+	"POST /v1/admin/psps",
+	"POST /v1/admin/psps/refresh",
+	"POST /v1/admin/psps/{id}/archive",
+	"POST /v1/admin/reprice-batches",
+	"POST /v1/admin/reprice-batches/{id}/cancel",
+	"POST /v1/admin/reprices/{id}/cancel",
+	"POST /v1/admin/subscriptions/{id}/cancel",
+	"POST /v1/admin/subscriptions/{id}/change-tier",
+	"POST /v1/admin/subscriptions/{id}/resume",
+	"POST /v1/admin/usage-events",
+	"POST /v1/admin/wasted-spend",
 	"POST /v1/merchant/api-keys",
-	"POST /v1/merchant/billing-archive",
-	"POST /v1/merchant/billing-import",
-	"POST /v1/merchant/catalog/applications",
-	"POST /v1/merchant/catalog/drift/refresh",
-	"POST /v1/merchant/catalog/entitlement-replacements",
-	"POST /v1/merchant/catalog/prices",
-	"POST /v1/merchant/catalog/product-archives",
-	"POST /v1/merchant/catalog/products",
-	"POST /v1/merchant/checkout-sessions",
-	"POST /v1/merchant/configuration/applications",
-	"POST /v1/merchant/credit-grants",
-	"POST /v1/merchant/customers/ensure",
-	"POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke",
-	"POST /v1/merchant/customers/{customer_id}/payments/off-channel",
 	"POST /v1/merchant/federated-grants",
-	"POST /v1/merchant/findings/{id}/resolve",
-	"POST /v1/merchant/invoices/{id}/payments",
-	"POST /v1/merchant/invoices/{id}/retry-collection",
-	"POST /v1/merchant/invoices/{id}/uncollectible",
-	"POST /v1/merchant/invoices/{id}/void",
-	"POST /v1/merchant/payments/{id}/refunds",
-	"POST /v1/merchant/plan-migrations",
-	"POST /v1/merchant/product-access",
-	"POST /v1/merchant/provider-operations",
-	"POST /v1/merchant/provider-operations/{operation_id}/close",
-	"POST /v1/merchant/provider-operations/{operation_id}/extend",
-	"POST /v1/merchant/provider-operations/{operation_id}/observations",
-	"POST /v1/merchant/provider-operations/{operation_id}/refusal",
-	"POST /v1/merchant/provider-operations/{operation_id}/release",
-	"POST /v1/merchant/provider-operations/{operation_id}/resolution",
-	"POST /v1/merchant/psps",
-	"POST /v1/merchant/psps/refresh",
-	"POST /v1/merchant/psps/{id}/archive",
-	"POST /v1/merchant/reprice-batches",
-	"POST /v1/merchant/reprice-batches/{id}/cancel",
-	"POST /v1/merchant/reprices/{id}/cancel",
-	"POST /v1/merchant/subscriptions/{id}/cancel",
-	"POST /v1/merchant/subscriptions/{id}/change-tier",
-	"POST /v1/merchant/subscriptions/{id}/change-tier/preview",
-	"POST /v1/merchant/subscriptions/{id}/resume",
 	"POST /v1/merchant/team/invites",
-	"POST /v1/merchant/usage-events",
-	"POST /v1/merchant/wasted-spend",
-	"PUT /v1/merchant/alert-webhooks/{id}/url",
-	"PUT /v1/merchant/api-host",
-	"PUT /v1/merchant/catalog/meters/{key}",
-	"PUT /v1/merchant/catalog/meters/{key}/rate-card",
-	"PUT /v1/merchant/catalog/products/by-key/{product_key}",
-	"PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}",
-	"PUT /v1/merchant/customers/{customer_id}/spend-delegations",
+	"PUT /v1/admin/alert-webhooks/{id}/url",
+	"PUT /v1/admin/api-host",
+	"PUT /v1/admin/catalog/meters/{key}",
+	"PUT /v1/admin/catalog/meters/{key}/rate-card",
+	"PUT /v1/admin/catalog/products/by-key/{product_key}",
+	"PUT /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
+	"PUT /v1/admin/customers/{customer_id}/spend-delegations",
+	"PUT /v1/admin/subscriptions/{id}/payment-method",
 	"PUT /v1/merchant/name",
-	"PUT /v1/merchant/subscriptions/{id}/payment-method",
 }
 
 // Every catalog route declares exactly one tier of the closed set, and what
-// that tier checks: a staff route its guard groups, a control-plane route one
+// that tier checks: a staff route its bundle's permission, a control-plane route one
 // exact permission, a customer route none, and no customer path names a
 // customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
@@ -149,23 +148,18 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		require.False(t, r.Sensitive && r.Auth != AuthMerchant, "%s: only a merchant route steps up", key)
 		if r.Staff() {
 			require.Equal(t, AuthMerchant, r.Auth, key)
-			require.Empty(t, r.Perm, "%s: a staff route's permission is the host's guard", key)
+			require.Empty(t, r.Perm, "%s: a staff route's permission is the host's", key)
 			require.NotEmpty(t, r.Name, key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
 			names[r.Name] = key
-			require.NotEmpty(t, r.Resources, key)
-			for _, res := range r.Resources {
-				require.Contains(t, Resources, res, key)
-			}
-			if r.Group == MerchantConfig {
-				require.Equal(t, LevelAdmin, r.Level, "%s: every configuration route is MerchantConfig's", key)
+			if r.Group != Admin {
+				require.Empty(t, r.Level, "%s: a catalog-edit or configuration route has its bundle's one permission", key)
 			} else {
 				require.Contains(t, []Level{LevelRead, LevelWrite}, r.Level, key)
 			}
 		} else {
 			require.Empty(t, r.Name, key)
 			require.Empty(t, r.Level, key)
-			require.Empty(t, r.Resources, key)
 		}
 		switch r.Auth {
 		case AuthMerchant:
@@ -188,27 +182,10 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 	require.Equal(t, want, open, "the routes no Auth gates")
 	sort.Strings(sensitive)
 	require.Equal(t, sensitiveRoutes, sensitive, "the routes that step up")
-	for _, g := range GuardNames() {
-		require.NotEmpty(t, g.Routes, "%s covers no route", g.Name)
-	}
 }
 
-// staffGuards guards each staff route with a permission naming its level.
-var staffGuards = map[GuardKey]string{StaffReadsKey: "staff:read", StaffWritesKey: "staff:write", MerchantConfigKey: "staff:admin"}
-
-// levelGuard is staffGuards resolved over every staff route.
-func levelGuard(t *testing.T) func(Route) string {
-	t.Helper()
-	var all []Route
-	for _, r := range Catalog() {
-		if r.Staff() {
-			all = append(all, r)
-		}
-	}
-	guard, err := ResolveGuards(all, staffGuards)
-	require.NoError(t, err)
-	return guard
-}
+// staffPermissions gives each bundle a permission naming it.
+var staffPermissions = Permissions{AdminRead: "staff:read", AdminWrite: "staff:write", CatalogWrite: "staff:catalog", MerchantConfig: "staff:admin"}
 
 // recordingAuth records which middleware ran, in order, and admits who.
 type recordingAuth struct {
@@ -262,8 +239,8 @@ func everyGatedSurface(t *testing.T, a billingauth.Auth) (*router.Table, *app.Ru
 	providers := routesurface.AllProviderRoutes()
 	table := &router.Table{}
 	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
-	RegisterMerchantRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Guard: levelGuard(t)}, Merchant, MerchantConfig)
-	RegisterSelfServiceRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
+	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Permissions: staffPermissions})
+	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
 	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
 	return table, rt
 }
@@ -297,7 +274,6 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			mounted[key] = true
 		}
 		checked, sensitive := 0, 0
-		guard := levelGuard(t)
 		for _, r := range Catalog() {
 			if !mounted[r.Key()] || r.Group == ControlPlane || r.Group == Platform {
 				continue
@@ -307,7 +283,7 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			case AuthCustomer:
 				want = []string{"Required"}
 			case AuthMerchant:
-				want = []string{"RequirePermission:" + guard(r)}
+				want = []string{"RequirePermission:" + staffPermissions.For(r)}
 				if Sensitive(r) && billingauth.Interactive(who) {
 					want = append(want, "Sensitive")
 					sensitive++
@@ -340,7 +316,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 		req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
 		req.Header.Set("Authorization", "Bearer forged")
 		code := serveSafely(h, req)
-		if r.CatalogWrite || code == http.StatusNotFound {
+		if r.Group == CatalogWrite || code == http.StatusNotFound {
 			// Unmounted for this configuration (a feature it lacks).
 			if code == http.StatusNotFound {
 				continue
@@ -356,7 +332,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 // it, by any path, it answers 401 and does not run.
 func TestHandlersRecheckTheirVerdict(t *testing.T) {
 	rt := gatedRuntime(t)
-	env := newEnv(rt, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)})
+	env := newEnv(rt, Options{Auth: authtest.Deny{}, Permissions: staffPermissions})
 	env.Customers = authtest.Deny{}
 	for _, r := range Catalog() {
 		if r.Auth != AuthCustomer && r.Auth != AuthMerchant {
@@ -371,7 +347,7 @@ func TestHandlersRecheckTheirVerdict(t *testing.T) {
 			merchant.WithID(context.Background(), merchantA),
 			// The other tier's verdict is not this one's.
 			billingauth.BindStaff(customerscope.Bind(merchant.WithID(context.Background(), merchantA), merchantA, billing.CustomerID(uuid.MustParse(userA)), userA, true),
-				billingauth.Staff{Identity: authtest.User(userA), Route: "GET /v1/merchant/other", Merchant: merchantA}),
+				billingauth.Staff{Identity: authtest.User(userA), Route: "GET /v1/admin/other", Merchant: merchantA}),
 		} {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}")).WithContext(ctx)
@@ -452,7 +428,7 @@ func TestStaffGate(t *testing.T) {
 		method, path, _ := strings.Cut(key, " ")
 		route, ok := Lookup(method, path)
 		require.True(t, ok, key)
-		env := newEnv(rt, Options{Auth: a, Guard: levelGuard(t)})
+		env := newEnv(rt, Options{Auth: a, Permissions: staffPermissions})
 		table := &router.Table{}
 		var seen billingauth.Staff
 		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
@@ -470,16 +446,16 @@ func TestStaffGate(t *testing.T) {
 	personalKey := person
 	personalKey.Credential = billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "pk_1"}
 
-	code, staff := run(&recordingAuth{who: person}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	code, staff := run(&recordingAuth{who: person}, "POST /v1/admin/payments/{id}/refunds", nil)
 	require.Equal(t, http.StatusNoContent, code)
-	require.Equal(t, billingauth.Staff{Identity: person, Route: "POST /v1/merchant/payments/{id}/refunds", Merchant: merchantA}, staff)
+	require.Equal(t, billingauth.Staff{Identity: person, Route: "POST /v1/admin/payments/{id}/refunds", Merchant: merchantA}, staff)
 
 	// A checkout session is an ordinary staff write: whoever creates it, its
 	// customer pays it, and a saved card needs that customer's own proof.
 	for _, who := range []billingauth.Identity{person, service, personalKey} {
-		code, staff = run(&recordingAuth{who: who}, "POST /v1/merchant/checkout-sessions", nil)
+		code, staff = run(&recordingAuth{who: who}, "POST /v1/admin/checkout-sessions", nil)
 		require.Equal(t, http.StatusNoContent, code, who.Credential.Kind)
-		require.Equal(t, "POST /v1/merchant/checkout-sessions", staff.Route)
+		require.Equal(t, "POST /v1/admin/checkout-sessions", staff.Route)
 	}
 
 	for name, tc := range map[string]struct {
@@ -495,20 +471,20 @@ func TestStaffGate(t *testing.T) {
 		"a panicking Identity":           {panickingIdentity{}, nil, http.StatusUnauthorized},
 		"a refusing Sensitive (step-up)": {&staleAuth{recordingAuth{who: person}}, nil, http.StatusForbidden},
 	} {
-		code, _ := run(tc.auth, "POST /v1/merchant/payments/{id}/refunds", tc.header)
+		code, _ := run(tc.auth, "POST /v1/admin/payments/{id}/refunds", tc.header)
 		require.Equal(t, tc.status, code, name)
 	}
-	code, _ = run(&staleAuth{recordingAuth{who: service}}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	code, _ = run(&staleAuth{recordingAuth{who: service}}, "POST /v1/admin/payments/{id}/refunds", nil)
 	require.Equal(t, http.StatusNoContent, code, "automation has no sign-in to renew")
-	code, _ = run(&staleAuth{recordingAuth{who: personalKey}}, "POST /v1/merchant/payments/{id}/refunds", nil)
+	code, _ = run(&staleAuth{recordingAuth{who: personalKey}}, "POST /v1/admin/payments/{id}/refunds", nil)
 	require.Equal(t, http.StatusNoContent, code, "a user's API key automates the account")
 	unbound := gatedRuntime(t)
 	unbound.SetConfiguredMerchant(billing.MerchantID{})
-	env := newEnv(unbound, Options{Auth: &recordingAuth{who: person}, Guard: levelGuard(t)})
-	route, _ := Lookup(GET, "/v1/merchant/payments")
+	env := newEnv(unbound, Options{Auth: &recordingAuth{who: person}, Permissions: staffPermissions})
+	route, _ := Lookup(GET, "/v1/admin/payments")
 	table := &router.Table{}
 	router.NewMux(table, "", unbound).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
-	require.Equal(t, http.StatusForbidden, serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/merchant/payments", nil)), "no configured merchant, no merchant API")
+	require.Equal(t, http.StatusForbidden, serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/admin/payments", nil)), "no configured merchant, no admin API")
 }
 
 type refusingPermission struct{ recordingAuth }
@@ -542,27 +518,28 @@ func (panickingIdentity) Identity(context.Context) (billingauth.Identity, bool) 
 func TestMountFailsClosed(t *testing.T) {
 	rt := gatedRuntime(t)
 	for name, mount := range map[string]func(){
-		"merchant without Auth": func() {
-			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Guard: levelGuard(t)}, Merchant)
+		"admin without Auth": func() {
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Permissions: staffPermissions})
 		},
-		"merchant with a typed nil Auth": func() {
-			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: (*authtest.Fake)(nil), Guard: levelGuard(t)}, Merchant)
+		"admin with a typed nil Auth": func() {
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: (*authtest.Fake)(nil), Permissions: staffPermissions})
 		},
-		"a staff route without a guard": func() {
-			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}}, Merchant)
-		},
-		"a guard naming no permission": func() {
-			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Guard: func(Route) string { return " " }}, MerchantConfig)
+		"a blank permission": func() {
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{MerchantConfig: " "}})
 		},
 		"customers without Auth": func() {
-			RegisterSelfServiceRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
+			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
 		},
 		"a nil RequirePermission": func() {
-			RegisterMerchantRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: nilPermission{}, Guard: levelGuard(t)}, Merchant)
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: nilPermission{}, Permissions: staffPermissions})
 		},
 	} {
 		require.PanicsWithError(t, mountErrorFor(t, mount), mount, name)
 	}
+	// Without a permission, no staff route is mounted at all.
+	none := &router.Table{}
+	RegisterStaffRoutes(router.NewMux(none, "/v1", rt), rt, Options{Auth: authtest.Deny{}})
+	require.Empty(t, none.Entries)
 }
 
 type nilPermission struct{ authtest.Deny }

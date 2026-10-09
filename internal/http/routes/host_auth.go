@@ -97,7 +97,8 @@ func hostTarget(r *http.Request, hp *requestauth.HostPrincipal) (billingauth.Tar
 	return target, nil
 }
 
-// HostOptions mounts the staff routes for the in-process transport.
+// HostOptions mounts every staff route for the in-process transport, whose
+// HostAuth admits the host whatever the permission.
 func HostOptions() Options {
-	return Options{Auth: HostAuth{}, AuthBindsMerchant: true, Guard: func(Route) string { return "host" }}
+	return Options{Auth: HostAuth{}, AuthBindsMerchant: true, Permissions: Permissions{AdminRead: "host", AdminWrite: "host", CatalogWrite: "host", MerchantConfig: "host"}}
 }

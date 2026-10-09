@@ -143,7 +143,7 @@ export interface PSPRoutingCandidate {
   skip: PSPRoutingSkip | null
 }
 
-// PSPRoutingPreview is POST /merchant/psps/routing-preview (or#288): which
+// PSPRoutingPreview is POST /admin/psps/routing-preview (or#288): which
 // PSP a checkout for this price would use, and why every other PSP was passed
 // over. Read-only — it creates nothing.
 export interface PSPRoutingPreview {
@@ -253,7 +253,7 @@ export interface Finding {
   recommendation?: Recommendation
 }
 
-// GET /merchant/findings/summary: the queue at a glance.
+// GET /admin/findings/summary: the queue at a glance.
 export interface FindingsGauges {
   orphaned_members: number
   freeloaders: number
@@ -276,7 +276,7 @@ export interface WorkerHealth {
 
 // --- Settings / providers ---
 
-// GET /merchant/configuration: the merchant's non-secret configuration and
+// GET /admin/configuration: the merchant's non-secret configuration and
 // the revision an application must name.
 export interface MerchantConfiguration {
   revision: string
@@ -305,7 +305,7 @@ export interface MerchantSettings {
   reprice_notice_window_days?: number
 }
 
-// PSP is one merchant account on a rail (GET /merchant/psps). Credential
+// PSP is one merchant account on a rail (GET /admin/psps). Credential
 // values are never returned.
 export interface PSP {
   id: string // psp_...
@@ -333,7 +333,7 @@ export interface PSP {
   updated_at: string
 }
 
-// RailDefinition is a rail a PSP can be armed on (GET /merchant/rails).
+// RailDefinition is a rail a PSP can be armed on (GET /admin/rails).
 export interface RailDefinition {
   rail: Rail
   display_name: string

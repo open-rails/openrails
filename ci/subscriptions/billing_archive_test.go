@@ -164,7 +164,7 @@ func TestBillingArchiveClassifiesLifecycleColumns(t *testing.T) {
 	e := enroll(t, w, "stripe", embedded)
 	e.toPeriodEnd()
 	w.runRenewals()
-	status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
+	status, body := w.staff(http.MethodGet, "/v1/admin/billing-archive")
 	if status == http.StatusOK {
 		return
 	}
@@ -188,7 +188,7 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	archiveRefusal := func() (string, int) {
-		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
+		status, body := w.staff(http.MethodGet, "/v1/admin/billing-archive")
 		if status == http.StatusOK {
 			return "", 0
 		}
@@ -229,7 +229,7 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	declinedPay(t, paid, err)
 	w.settle()
 	refusedTable := func() string {
-		status, body := w.staff(http.MethodGet, "/v1/merchant/billing-archive")
+		status, body := w.staff(http.MethodGet, "/v1/admin/billing-archive")
 		if status == http.StatusOK {
 			return ""
 		}

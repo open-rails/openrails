@@ -4,7 +4,7 @@ import "time"
 
 // MetricsQuery asks the merchant's metrics: measures, grouped By dimensions
 // (and "time" at Grain), over Range, filtered and ordered. GET
-// /v1/merchant/metrics/schema lists every measure, dimension and grain.
+// /v1/admin/metrics/schema lists every measure, dimension and grain.
 type MetricsQuery struct {
 	Measures []string            `json:"measures"`
 	By       []string            `json:"by"`

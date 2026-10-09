@@ -7,12 +7,8 @@ import (
 	"github.com/open-rails/openrails/internal/standalonehandlers"
 )
 
-// staffGuards are the server's own permissions on its merchant persona.
-var staffGuards = map[httproutes.GuardKey]string{
-	httproutes.StaffReadsKey:     staffperm.Read,
-	httproutes.StaffWritesKey:    staffperm.Write,
-	httproutes.MerchantConfigKey: staffperm.Admin,
-}
+// staffPermissions are the server's own permissions on its merchant persona.
+var staffPermissions = httproutes.Permissions{AdminRead: staffperm.Read, AdminWrite: staffperm.Write, CatalogWrite: staffperm.Admin, MerchantConfig: staffperm.Admin}
 
 func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
 	opts := httproutes.Options{
@@ -20,12 +16,8 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 		AuthBindsMerchant: true,
 		AdminLimiter:      s.adminLimiter,
 		Capabilities:      s.capabilities(),
+		Permissions:       staffPermissions,
 	}
-	guard, err := httproutes.ResolveGuards(httproutes.PlanStaffRoutes(s.runtime, opts, httproutes.Merchant, httproutes.MerchantConfig), staffGuards)
-	if err != nil {
-		panic(err)
-	}
-	opts.Guard = guard
 	// The control plane's own merchant routes: API keys (#757), the team (#760)
 	// and the merchant's name (#1106). Their handlers touch only the control
 	// plane, never the runtime DB.
@@ -50,7 +42,7 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 		httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, control)
 	}
 
-	httproutes.RegisterMerchantRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts, httproutes.Merchant, httproutes.MerchantConfig)
+	httproutes.RegisterStaffRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts)
 }
 
 func (s *Server) registerMerchantActionRoutes(mux router.Registrar) {

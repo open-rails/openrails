@@ -70,7 +70,7 @@ const memoryStorage = (): Storage => {
 }
 
 // server stubs fetch and session storage and returns the recorded requests.
-// Routes are keyed "METHOD /merchant/..." (or just the path); anything
+// Routes are keyed "METHOD /admin/..." (or just the path); anything
 // unrouted answers {}, so a test spells out only what it asserts.
 export async function server(routes: Record<string, Reply> = {}) {
   const requests: Recorded[] = []

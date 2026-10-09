@@ -719,11 +719,11 @@ func ClassifyBucket(path, method string) string {
 	switch {
 	case path == "/v1/captcha/status" || path == "/v1/captcha/client.js":
 		return "captcha"
-	case method == http.MethodPost && path == "/v1/merchant/metrics/ask":
+	case method == http.MethodPost && path == "/v1/admin/metrics/ask":
 		return "metrics-ask"
-	case method == http.MethodPost && path == "/v1/merchant/catalog/ask":
+	case method == http.MethodPost && path == "/v1/admin/catalog/ask":
 		return "catalog-ask"
-	case method == http.MethodPost && path == "/v1/merchant/dashboard/widgets/generate":
+	case method == http.MethodPost && path == "/v1/admin/dashboard/widgets/generate":
 		return "dashboard-generate"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"

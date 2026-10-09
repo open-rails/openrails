@@ -28,7 +28,7 @@ func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebh
 		return nil, err
 	}
 	var out billing.ListPage[billing.AlertWebhook]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/alert-webhooks", q), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/alert-webhooks", q), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -37,7 +37,7 @@ func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebh
 // CreateAlertWebhook adds a destination for the merchant's operational alerts.
 func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error) {
 	var out billing.AlertWebhook
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/alert-webhooks", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/alert-webhooks", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -49,7 +49,7 @@ func (c *Client) SetAlertWebhookURL(ctx context.Context, id billing.AlertWebhook
 		return nil, invalidErr("alert webhook id is required")
 	}
 	var out billing.AlertWebhook
-	if err := c.do(ctx, http.MethodPut, "/v1/merchant/alert-webhooks/"+id.String()+"/url", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/v1/admin/alert-webhooks/"+id.String()+"/url", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -60,7 +60,7 @@ func (c *Client) DeleteAlertWebhook(ctx context.Context, id billing.AlertWebhook
 	if id.IsZero() {
 		return invalidErr("alert webhook id is required")
 	}
-	return c.do(ctx, http.MethodDelete, "/v1/merchant/alert-webhooks/"+id.String(), nil, nil, options...)
+	return c.do(ctx, http.MethodDelete, "/v1/admin/alert-webhooks/"+id.String(), nil, nil, options...)
 }
 
 // ListMerchantNotifications pages the merchant's inbox, newest first.
@@ -73,7 +73,7 @@ func (c *Client) ListMerchantNotifications(ctx context.Context, req billing.Merc
 		return nil, err
 	}
 	var out billing.ListPage[billing.MerchantNotification]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/notifications?"+q.Encode(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/notifications?"+q.Encode(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -82,7 +82,7 @@ func (c *Client) ListMerchantNotifications(ctx context.Context, req billing.Merc
 // GetUnreadNotificationCount counts the merchant's unread notifications.
 func (c *Client) GetUnreadNotificationCount(ctx context.Context, options ...RequestOption) (*billing.UnreadCount, error) {
 	var out billing.UnreadCount
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/notifications/unread-count", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/notifications/unread-count", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -96,7 +96,7 @@ func (c *Client) MarkNotificationsRead(ctx context.Context, ids []billing.Notifi
 		return nil, err
 	}
 	var out billing.NotificationLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/notifications/read", billing.MarkNotificationsReadParams{NotificationIDs: ids}, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/notifications/read", billing.MarkNotificationsReadParams{NotificationIDs: ids}, &out, options...); err != nil {
 		return nil, err
 	}
 	return out.Notifications, nil

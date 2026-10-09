@@ -12,13 +12,13 @@ func meterPath(key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/v1/merchant/catalog/meters/" + key, nil
+	return "/v1/admin/catalog/meters/" + key, nil
 }
 
 // ListMeters returns one page of the merchant's meters, by key.
 func (c *Client) ListMeters(ctx context.Context, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.Meter], error) {
 	var out billing.ListPage[billing.Meter]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/meters?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/meters?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -95,7 +95,7 @@ func rateOverridesPath(customerID billing.CustomerID) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/v1/merchant/customers/" + customer + "/rate-overrides", nil
+	return "/v1/admin/customers/" + customer + "/rate-overrides", nil
 }
 
 // ListRateOverrides returns one page of a customer's negotiated prices, by

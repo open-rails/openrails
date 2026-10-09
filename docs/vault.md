@@ -28,8 +28,8 @@ Credential custody is independent of merchant metadata and HTTP publication:
 
 `credential_read_only: true` narrows a managed backend to reads. Vault policy
 can narrow it further. The merchant configuration routes are the merchant's
-configuration (embedded `Routes.MerchantConfig`; always on the standalone
-server), each behind its guard. Authorized local Client operations do not require
+configuration (embedded `Permissions.MerchantConfig`; always on the standalone
+server). Authorized local Client operations do not require
 those HTTP routes. Remote Clients connect to the remote server and need no local Vault
 or database configuration.
 
@@ -47,7 +47,7 @@ that merchant's UUID subtree). Operational consequences:
 - The Vault policy scopes what the **process** may do, not what any merchant may do. Protect the
   app credential accordingly: it can read every merchant's secrets the policy grants.
 - Merchants never receive Vault credentials. Their surface is the delegated admin API
-  (`/v1/merchant/psps`): secret fields are accepted on write, validated, and
+  (`/v1/admin/psps`): secret fields are accepted on write, validated, and
   **redacted on read** — plaintext is never returned.
 - All secret paths derive from one builder in code (test-guarded); ad-hoc path construction
   cannot escape a merchant's namespace.

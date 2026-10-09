@@ -27,13 +27,14 @@ it("shows qualified price revisions while history links keep the immutable price
     archived: true,
   })
   await server({
-    "/merchant/catalog/revision": { revision: 2, writes_allowed: true },
-    "/merchant/catalog/prices/price_current": current,
-    "/merchant/catalog/products/prod_premium": aProduct("prod_premium", 0, {
+    "/admin/catalog/revision": { revision: 2, writes_allowed: true },
+    "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
+    "/admin/catalog/prices/price_current": current,
+    "/admin/catalog/products/prod_premium": aProduct("prod_premium", 0, {
       key: "premium",
       display_name: "Premium",
     }),
-    "/merchant/catalog/products/by-key/premium/prices/by-key/monthly/history": {
+    "/admin/catalog/products/by-key/premium/prices/by-key/monthly/history": {
       data: [current, previous].map((price) => ({
         price,
         effective_at: price.created_at,
@@ -41,8 +42,8 @@ it("shows qualified price revisions while history links keep the immutable price
       })),
       next_cursor: null,
     },
-    "/merchant/reprice-batches": { data: [], next_cursor: null },
-    "/merchant/psps/routing-preview": { candidates: [] },
+    "/admin/reprice-batches": { data: [], next_cursor: null },
+    "/admin/psps/routing-preview": { candidates: [] },
   })
   selectMerchant("merchant-a")
   const queries = client()

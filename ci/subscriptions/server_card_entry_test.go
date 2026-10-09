@@ -45,7 +45,6 @@ func entryCard(number string) map[string]any {
 func serverEntryWorld(t *testing.T) *world {
 	t.Helper()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		account := psps["nmi"]
 		account.Settings = map[string]any{"card_entry": "server"}
@@ -146,7 +145,6 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.start()
 	c := w.newCustomer()
 	method := c.saveCard("nmi", visa)
@@ -206,8 +204,8 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 	status, out := w.relayPay(c, price.ID, map[string]any{"card": entryCard(entryVisa), "payment_token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 
-	// The merchant API takes no card at all: cards are entered on a session.
-	status, out = w.hostJSON(http.MethodPost, "/v1/merchant/checkout-sessions", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
+	// The admin API takes no card at all: cards are entered on a session.
+	status, out = w.hostJSON(http.MethodPost, "/v1/admin/checkout-sessions", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
 		"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	code, _ := errorOf(out)

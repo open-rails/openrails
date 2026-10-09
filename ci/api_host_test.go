@@ -163,10 +163,10 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 		return state
 	}
 	claim := func(s shop, host string) *httptest.ResponseRecorder {
-		return on(shared, s.session, http.MethodPut, "/v1/merchant/api-host", s.slug, map[string]string{"api_host": host})
+		return on(shared, s.session, http.MethodPut, "/v1/admin/api-host", s.slug, map[string]string{"api_host": host})
 	}
 	verify := func(s shop) *httptest.ResponseRecorder {
-		return on(shared, s.session, http.MethodPost, "/v1/merchant/api-host/verify", s.slug, nil)
+		return on(shared, s.session, http.MethodPost, "/v1/admin/api-host/verify", s.slug, nil)
 	}
 	refused := func(w *httptest.ResponseRecorder, status int, code string) {
 		t.Helper()
@@ -192,7 +192,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
 	victimToken := decode(w).Claim.DNSRecord.Value
 	require.NotEqual(t, squatterClaim.DNSRecord.Value, victimToken)
-	w = on(shared, victim.session, http.MethodGet, "/v1/merchant/api-host", victim.slug, nil)
+	w = on(shared, victim.session, http.MethodGet, "/v1/admin/api-host", victim.slug, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	pending := decode(w)
 	require.Nil(t, pending.APIHost, "a claim is not the api_host")
@@ -206,7 +206,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	require.Equal(t, domain, *bound.APIHost)
 	require.Nil(t, bound.Claim)
 	require.Equal(t, http.StatusOK, works(domain, victim))
-	require.Equal(t, http.StatusOK, on(domain, victimKey, http.MethodGet, "/v1/merchant/findings", "", nil).Code)
+	require.Equal(t, http.StatusOK, on(domain, victimKey, http.MethodGet, "/v1/admin/findings", "", nil).Code)
 	require.Equal(t, http.StatusForbidden, works(domain, squatter), "the proven host routes to its merchant only")
 
 	// Even with its token in the record, a squatter cannot take a held host.
@@ -221,11 +221,11 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	refused(claim(squatter, "203.0.113.7"), http.StatusBadRequest, "invalid_api_host")
 
 	// The configuration document binds no host: only a proven claim does.
-	w = on(shared, squatter.session, http.MethodGet, "/v1/merchant/configuration", squatter.slug, nil)
+	w = on(shared, squatter.session, http.MethodGet, "/v1/admin/configuration", squatter.slug, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	state := map[string]any{}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&state))
-	refused(on(shared, squatter.session, http.MethodPost, "/v1/merchant/configuration/applications", squatter.slug,
+	refused(on(shared, squatter.session, http.MethodPost, "/v1/admin/configuration/applications", squatter.slug,
 		map[string]any{"application_id": uuid.NewString(), "expected_revision": state["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
 
 	// Control: the squatter proves a domain it does control.

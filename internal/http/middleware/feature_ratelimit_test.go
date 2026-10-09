@@ -51,9 +51,9 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 			}))
 			for _, path := range []string{
-				"/v1/merchant/metrics/ask",
-				"/v1/merchant/catalog/ask",
-				"/v1/merchant/dashboard/widgets/generate",
+				"/v1/admin/metrics/ask",
+				"/v1/admin/catalog/ask",
+				"/v1/admin/dashboard/widgets/generate",
 			} {
 				before := calls
 				for i, prefix := range []string{"", "/billing"} {
@@ -76,7 +76,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			call{path: "/v1/me/checkout-sessions", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			call{path: "/v1/me/checkout-sessions", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			for range 3 {
-				call{path: "/v1/merchant/metrics/query", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
+				call{path: "/v1/admin/metrics/query", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			}
 			if unavailable {
 				require.Positive(t, dials.Load(), "exercise Redis errors, not only the nil-Redis path")
@@ -102,7 +102,7 @@ func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 		{ip: "203.0.113.12", user: userB, merchant: merchantA, want: http.StatusOK},
 		{ip: "203.0.113.12", user: userC, merchant: merchantB, want: http.StatusTooManyRequests},
 	} {
-		c.path = "/v1/merchant/metrics/ask"
+		c.path = "/v1/admin/metrics/ask"
 		c.do(t, h)
 	}
 }

@@ -343,7 +343,7 @@ func TestEngineDeclinePolicy(t *testing.T) {
 				sub := w.subscription(e.tp, e.sub)
 				require.Equal(t, tc.final, string(sub.Status))
 				if !tc.armed && tc.name != "fix_payment_method" {
-					status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
+					status, body := w.staff(http.MethodGet, "/v1/admin/findings")
 					require.Equal(t, http.StatusOK, status)
 					require.Contains(t, body, "life.terminal_outcome.held", "a held terminal outcome is visible to the operator")
 				}
@@ -1006,7 +1006,7 @@ func TestEngineDuePassIsolatesRefusals(t *testing.T) {
 	w.runRenewals() // waits for the pass to COMPLETE, not retry
 	require.True(t, w.subscription(embedded, healthy.sub).CurrentPeriodEndsAt.After(end), "the healthy member renews")
 	require.Len(t, broken.providerLedger(), 1, "the refused member is not charged")
-	status, body := w.staff(http.MethodGet, "/v1/merchant/findings")
+	status, body := w.staff(http.MethodGet, "/v1/admin/findings")
 	require.Equal(t, http.StatusOK, status)
 	require.Contains(t, body, "life.due_pass.refused")
 	require.Contains(t, body, strings.TrimPrefix(broken.sub.String(), "sub_"))

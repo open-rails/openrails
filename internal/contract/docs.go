@@ -19,8 +19,9 @@ var groupTitles = []struct {
 	{routes.Meta, "Process", "Health, metrics and capability discovery. Only the standalone server serves the root paths."},
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
-	{routes.Merchant, "Merchant", "Staff work on customers (`Routes.Merchant`): staff, machines and the Go client alike, each route behind the host's permission for its most specific guard."},
-	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration (`Routes.MerchantConfig`), each route behind the host's permission for its most specific guard."},
+	{routes.Admin, "Admin", "Staff work on customers: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, a write its `Permissions.AdminWrite`."},
+	{routes.CatalogWrite, "Catalog edits", "Every catalog edit, behind the host's `Permissions.CatalogWrite`; each refuses while the deployment's catalog is not edited over HTTP (`catalog_updates_disabled`)."},
+	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, every route behind the host's `Permissions.MerchantConfig`."},
 	{routes.ControlPlane, "Control plane (standalone)", "Merchant accounts, API keys and the team."},
 	{routes.Platform, "Platform (standalone)", "The operator tier."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},
@@ -44,9 +45,9 @@ func (m *model) routesMD() []byte {
 	fmt.Fprintf(&b, "Every route of the HTTP API (%d), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). ", len(m.routes))
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
-	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's guard, or its permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
-	b.WriteString("**Guard** is, for a staff route, the `openrails.RouteSet` names covering it, most specific first (the route, its resource groups, its level group): the host guards it with the permission of the most specific one in `Routes.Guards`. Other routes name their own permission.\n\n")
-	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `scope` the narrowest customer exposure that serves it; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
+	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.\n\n")
+	b.WriteString("**Permission** is, for an admin or merchant-config route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.\n\n")
+	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
 	for _, g := range groupTitles {
 		var list []routes.Route
 		for _, r := range m.routes {
@@ -58,11 +59,11 @@ func (m *model) routesMD() []byte {
 			continue
 		}
 		fmt.Fprintf(&b, "\n## %s\n\n%s\n\n", g.title, g.blurb)
-		b.WriteString("| Method | Path | Tier | Guard | Request | Response | Notes |\n|---|---|---|---|---|---|---|\n")
+		b.WriteString("| Method | Path | Tier | Permission | Request | Response | Notes |\n|---|---|---|---|---|---|---|\n")
 		for _, r := range list {
 			perm := "—"
-			if guards := r.Guards(); len(guards) > 0 {
-				perm = "`" + strings.Join(guards, "` · `") + "`"
+			if needs := r.Needs(); needs != "" {
+				perm = "`" + needs + "`"
 			} else if r.Perm != "" {
 				perm = "`" + r.Perm + "`"
 			}
@@ -74,14 +75,8 @@ func (m *model) routesMD() []byte {
 			if r.When != routes.Always {
 				notes = append(notes, "when `"+string(r.When)+"`")
 			}
-			if r.Group == routes.Customer && r.Scope != routes.ScopeSelfService {
-				notes = append(notes, "scope `"+string(r.Scope)+"`")
-			}
 			if r.Sensitive {
 				notes = append(notes, "sensitive")
-			}
-			if r.CatalogWrite {
-				notes = append(notes, "catalog write")
 			}
 			if r.Limit != "" {
 				notes = append(notes, "limit `"+string(r.Limit)+"`")

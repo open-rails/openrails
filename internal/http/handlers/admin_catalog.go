@@ -12,7 +12,7 @@ import (
 )
 
 // Catalog handlers serve both the merchant's catalog routes
-// (/v1/merchant/catalog) and a creator's own (/v1/catalog); the owner scope on
+// (/v1/admin/catalog) and a creator's own (/v1/catalog); the owner scope on
 // the request selects which catalog they act on.
 
 func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bool) {

@@ -196,7 +196,7 @@ func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	}
 }
 
-// IssuerOriginCORSHTTP admits the merchant API (match) from the browser
+// IssuerOriginCORSHTTP admits the admin API (match) from the browser
 // origins trusted issuers declared (#1140): a host's admin UI calls it
 // directly with its users' access tokens. Those are Authorization and DPoP
 // headers, never cookies, so credentials mode stays off; every other origin

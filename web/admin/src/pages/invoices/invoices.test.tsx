@@ -50,8 +50,8 @@ describe("invoice requests and cache", () => {
     await exec(queries, options, retry)
     await exec(queries, options, retry)
     expect(calls(requests)).toEqual([
-      "POST /merchant/invoices/invoice-1/retry-collection",
-      "POST /merchant/invoices/invoice-1/retry-collection",
+      "POST /admin/invoices/invoice-1/retry-collection",
+      "POST /admin/invoices/invoice-1/retry-collection",
     ])
     for (const attempt of requests) {
       expect(attempt.headers.get("Idempotency-Key")).toBe("operation-1")
@@ -70,13 +70,13 @@ describe("invoice requests and cache", () => {
 
   it("reads a customer without a profile as none, and any other failure as one", async () => {
     const queries = client()
-    routes["GET /merchant/customers/settings"] = (request) => ({
+    routes["GET /admin/customers/settings"] = (request) => ({
       data: [{ customer_id: "customer-1", credit_limits: [], trust_levels: [], billing_policy: null, invoice_profile: null }],
       next_cursor: null, query: request.query,
     })
     expect(await queries.fetchQuery(invoiceQueries.profile("customer-1"))).toBeNull()
     expect(requests.at(-1)!.query).toBe("ids=customer-1")
-    routes["GET /merchant/customers/settings"] = () =>
+    routes["GET /admin/customers/settings"] = () =>
       Response.json({ error: { code: "service_unavailable", message: "down" } }, { status: 503 })
     await expect(queries.fetchQuery(invoiceQueries.profile("customer-2"))).rejects.toThrow("down")
   })
@@ -87,7 +87,7 @@ describe("invoice requests and cache", () => {
     const root = invoiceKeys.root()
     queries.setQueryData(root, {})
     queries.setQueryData(queryKeys.customer("customer-1"), {})
-    routes["POST /merchant/invoices/invoice-1/void"] = () =>
+    routes["POST /admin/invoices/invoice-1/void"] = () =>
       Response.json({ error: { message: "uncertain" } }, { status: 503 })
     selectMerchant("merchant-b")
     await expect(exec(queries, options, { id: "invoice-1", action: "void" })).rejects.toThrow("uncertain")
@@ -99,9 +99,9 @@ describe("invoice requests and cache", () => {
     const queries = client()
     const invoiceKey = invoiceKeys.detail("invoice-1")
     queries.setQueryData(invoiceKey, { po_number: "OLD" })
-    routes["PATCH /merchant/customers/settings"] = (request) => ({ items: (request.body as { items: unknown[] }).items })
+    routes["PATCH /admin/customers/settings"] = (request) => ({ items: (request.body as { items: unknown[] }).items })
     await exec(queries, invoiceProfileMutation(queries, "customer-1"), profile({ net_terms_days: 7, po_number: "NEW" }))
-    expect(calls(requests)).toEqual(["PATCH /merchant/customers/settings"])
+    expect(calls(requests)).toEqual(["PATCH /admin/customers/settings"])
     expect(queries.getQueryData(invoiceKey)).toEqual({ po_number: "OLD" })
   })
 })

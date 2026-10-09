@@ -40,7 +40,7 @@ func customerSurface(a billingauth.Auth) http.Handler {
 	mux := http.NewServeMux()
 	rt := &app.Runtime{}
 	rt.SetConfiguredMerchant(merchantA)
-	RegisterSelfServiceRoutes(router.NewMux(mux, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: routesurface.AllProviderRoutes()})
+	RegisterCustomerRoutes(router.NewMux(mux, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: routesurface.AllProviderRoutes()})
 	return mux
 }
 
@@ -86,24 +86,10 @@ func TestCustomerRouteInventories(t *testing.T) {
 	mount := func(providers routesurface.ProviderRoutes) CustomerMount {
 		return CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 	}
-	full := collect(func(r router.Router) { RegisterSelfServiceRoutes(r, nil, mount(all)) })
-	management := collect(func(r router.Router) { RegisterCustomerBillingManagementRoutes(r, nil, mount(all)) })
-	require.Subset(t, full, management)
-	var purchaseOnly []string
-	for _, key := range full {
-		if !slices.Contains(management, key) {
-			purchaseOnly = append(purchaseOnly, key)
-		}
-	}
-	require.ElementsMatch(t, []string{
-		"POST /me/checkout-sessions", "POST /me/billing-portal",
-		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/change-tier/preview",
-	}, purchaseOnly, "management scope never starts a purchase or changes plans")
-	require.Subset(t, management, []string{"GET /me/spend-limits"})
-
-	require.ElementsMatch(t, []string{
-		"PUT /me/collection-payment-method", "POST /me/subscriptions/{id}/cancel", "POST /me/subscriptions/{id}/resume", "PUT /me/subscriptions/{id}/payment-method",
-	}, collect(func(r router.Router) { RegisterCustomerSubscriptionManagementRoutes(r, nil, mount(all)) }))
+	require.Subset(t, collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(all)) }), []string{
+		"POST /me/checkout-sessions", "POST /me/billing-portal", "GET /me/spend-limits",
+		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/cancel", "PUT /me/collection-payment-method",
+	})
 
 	for _, tc := range []struct {
 		providers routesurface.ProviderRoutes
@@ -114,7 +100,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 		{routesurface.ProviderRoutes{Solana: true}, false},
 		{routesurface.ProviderRoutes{SolanaSigning: true}, false},
 	} {
-		self := collect(func(r router.Router) { RegisterSelfServiceRoutes(r, nil, mount(tc.providers)) })
+		self := collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(tc.providers)) })
 		require.Equal(t, tc.portal, slices.Contains(self, "POST /me/billing-portal"), "%+v", tc.providers)
 	}
 }

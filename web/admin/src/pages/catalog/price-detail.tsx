@@ -26,6 +26,7 @@ import {
 } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
+import { useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
@@ -34,7 +35,7 @@ import { adminQueries } from "@/lib/queries"
 // lives here alongside the catalog list row.
 export function PriceDetailPage() {
   const { id = "" } = useParams()
-  const { data: capability } = useQuery(adminQueries.catalogRevision())
+  const writesAllowed = useCatalogWrites()
   const navigate = useNavigate()
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
   // against every attached provider, which is a network round trip per PSP.
@@ -88,7 +89,7 @@ export function PriceDetailPage() {
           </p>
         </div>
         <div className="ml-auto">
-          {capability?.writes_allowed && (
+          {writesAllowed && (
             <PriceChangeWizard
               price={price}
               productName={product?.display_name ?? "…"}

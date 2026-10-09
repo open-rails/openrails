@@ -54,7 +54,7 @@ func freshAddresses() func(int) string {
 // SEC: card-testing attack mode belongs to the merchant under attack. A wave
 // of declines at one merchant puts a captcha in front of that merchant's card
 // routes only. Another merchant on the same Redis keeps its card routes and
-// its merchant API, and no merchant's server-to-server API ever meets a
+// its admin API, and no merchant's server-to-server API ever meets a
 // captcha, the attacked merchant's included.
 func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	t.Parallel()
@@ -79,10 +79,10 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	status, body := attacked.newCustomer().cardSave(ip(100), visa)
 	require.Equal(t, http.StatusForbidden, status, "the attacked merchant's card routes ask everyone for a captcha: %s", body)
 	require.Contains(t, body, "captcha_required")
-	status, body = attacked.staff(http.MethodGet, "/v1/merchant/findings")
+	status, body = attacked.staff(http.MethodGet, "/v1/admin/findings")
 	require.Equal(t, http.StatusOK, status, "its server-to-server API never meets a captcha: %s", body)
 
-	status, body = bystander.staff(http.MethodGet, "/v1/merchant/findings")
+	status, body = bystander.staff(http.MethodGet, "/v1/admin/findings")
 	require.Equal(t, http.StatusOK, status, "another merchant's API is untouched: %s", body)
 	status, body = bystander.newCustomer().cardSave(ip(101), visa)
 	require.Equal(t, http.StatusCreated, status, "another merchant's card routes are untouched: %s", body)

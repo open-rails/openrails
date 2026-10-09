@@ -34,7 +34,7 @@ func TestRemoteClientRefusesHostingOperations(t *testing.T) {
 	c, err := NewRemote("https://billing.example", WithAPIKey("k"))
 	require.NoError(t, err)
 	require.ErrorIs(t, c.Start(t.Context()), ErrRemoteClient)
-	_, err = c.Routes(Routes{Storefront: true})
+	_, err = c.Routes(Routes{Prefix: "/billing"})
 	require.ErrorIs(t, err, ErrRemoteClient)
 	require.Nil(t, c.Probes())
 	_, err = c.DeclarePSP(t.Context(), billing.MerchantID(uuid.New()), billing.PSPDeclaration{})

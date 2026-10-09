@@ -103,7 +103,7 @@ describe("catalog", () => {
 
   it("reads the public configuration", async () => {
     const capabilities = {
-      route_groups: { checkout: true, customer: true },
+      route_groups: { admin: true, catalog_write: false, merchant_config: false },
       features: { team_invites: false },
     }
     const { client, request } = served(

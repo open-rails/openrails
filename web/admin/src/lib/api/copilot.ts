@@ -14,7 +14,7 @@ export type {
 
 // askCatalog is not mounted unless the deployment enables the assistant.
 export const askCatalog = (question: string) =>
-  api<CatalogAnswer>("/merchant/catalog/ask", {
+  api<CatalogAnswer>("/admin/catalog/ask", {
     method: "POST",
     body: { question } satisfies AskCatalogParams,
   })

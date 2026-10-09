@@ -28,7 +28,6 @@ import (
 func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.start()
 	price := w.membership("content:members", 9_990_000)
 	a, b := w.newCustomer(), w.newCustomer()
@@ -38,9 +37,9 @@ func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
 	staff := w.auth.token(t, "support")
 	attempt := billing.CheckoutAttemptID(uuid.New()).String()
 	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/v1/merchant/checkout-attempts"},
-		{http.MethodGet, "/v1/merchant/checkout-attempts/" + attempt},
-		{http.MethodPost, "/v1/merchant/checkout-attempts/" + attempt + "/confirm"},
+		{http.MethodPost, "/v1/admin/checkout-attempts"},
+		{http.MethodGet, "/v1/admin/checkout-attempts/" + attempt},
+		{http.MethodPost, "/v1/admin/checkout-attempts/" + attempt + "/confirm"},
 	} {
 		status, out := w.merchantCall(staff, route.method, route.path)
 		require.Equal(t, http.StatusNotFound, status, "%s %s is not mounted: %s", route.method, route.path, out)
@@ -48,9 +47,9 @@ func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
 
 	// The checkout-sessions route is a staff write: a reader is refused.
 	mint := map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID}
-	status, out := w.merchantJSON(w.auth.token(t, "reader"), http.MethodPost, "/v1/merchant/checkout-sessions", mint)
+	status, out := w.merchantJSON(w.auth.token(t, "reader"), http.MethodPost, "/v1/admin/checkout-sessions", mint)
 	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	status, out = w.merchantJSON(staff, http.MethodPost, "/v1/merchant/checkout-sessions", mint)
+	status, out = w.merchantJSON(staff, http.MethodPost, "/v1/admin/checkout-sessions", mint)
 	require.Equal(t, http.StatusCreated, status, "%v", out)
 	staffSession := hostedSession{w: w, id: out["id"].(string)}
 	status, out = staffSession.pay(map[string]any{"option_id": staffSession.option("nmi"), "payment_method_id": aCard})
@@ -212,7 +211,6 @@ func TestIntentsRecordSubjectInvokerAndCredential(t *testing.T) {
 func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.start()
 	ctx := t.Context()
 	group := "g" + uuid.NewString()[:8]
@@ -354,16 +352,16 @@ func TestHarnessAuthConforms(t *testing.T) {
 	v.revoked.Store("s_out", struct{}{})
 	req := func(token string) func() *http.Request {
 		return func() *http.Request {
-			r := httptest.NewRequest(http.MethodPost, mountPrefix+"/v1/merchant/payments/pay_x/refunds", nil)
+			r := httptest.NewRequest(http.MethodPost, mountPrefix+"/v1/admin/payments/pay_x/refunds", nil)
 			r.Header.Set("Authorization", "Bearer "+token)
 			return r
 		}
 	}
 	openrailstest.CheckAuth(t, v, openrailstest.AuthCases{
-		Guards:   guards,
-		Customer: req(v.token(t, customer)),
-		Staff:    req(v.token(t, "staff")),
-		Holders:  map[openrails.RouteSet]func() *http.Request{openrails.StaffReads: req(v.token(t, "reader"))},
+		Permissions: permissions,
+		Customer:    req(v.token(t, customer)),
+		Staff:       req(v.token(t, "staff")),
+		Holders:     map[string]func() *http.Request{staffReads.String(): req(v.token(t, "reader"))},
 		Refused: map[string]func() *http.Request{
 			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),
 		},

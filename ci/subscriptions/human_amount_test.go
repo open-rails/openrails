@@ -17,7 +17,7 @@ import (
 
 func applyHumanAmountYAML(t *testing.T, w *world, document string) (int, billing.CatalogApplicationReceipt) {
 	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/merchant/catalog/applications", strings.NewReader(document))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/admin/catalog/applications", strings.NewReader(document))
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/yaml")
 	request.Header.Set("Authorization", "Bearer "+w.auth.token(t, "staff"))
@@ -64,7 +64,7 @@ func TestHumanAmountCatalogUsesExactCurrencyNativeUnits(t *testing.T) {
 			require.Equal(t, tc.currency, price.Currency)
 			require.Equal(t, tc.native, price.UnitAmount)
 			var replay billing.CatalogApplicationReceipt
-			status = w.staffCall(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
+			status = w.staffCall(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
 				"schema_version": 1,
 				"products": map[string]any{key: map[string]any{"display_name": "Human money", "prices": map[string]any{"buy": map[string]any{
 					"currency": tc.currency, "unit_amount": strconv.FormatInt(tc.native, 10),

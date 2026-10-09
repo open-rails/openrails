@@ -108,7 +108,7 @@ func TestClassifyBucket(t *testing.T) {
 		{"POST", "/v1/checkout-attempts/chk_1/solana-pay", "checkout"},
 		{"GET", "/v1/checkout-sessions/ocs_1", ""},
 		{"POST", "/v1/config", ""},
-		{"POST", "/v1/merchant/checkout-sessions", ""},
+		{"POST", "/v1/admin/checkout-sessions", ""},
 		{"POST", "/v1/me/payment-methods", "payment-methods"},
 		{"POST", "/v1/customers/customer_123/checkout", ""},
 		{"POST", "/v1/me/subscriptions/sub_123/cancel", "subscriptions"},
@@ -263,7 +263,7 @@ func TestCaptchaChallenges(t *testing.T) {
 		call{path: "/v1/me/checkout-sessions", ip: ip, merchant: attacked, want: 403, body: "captcha_required"}.do(t, h)
 		call{path: "/v1/me/checkout-sessions", ip: ip, merchant: attacked, token: "good", want: 200}.do(t, h)
 		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.3", merchant: attacked, want: 403}.do(t, h)
-		call{method: "GET", path: "/v1/merchant/findings", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
+		call{method: "GET", path: "/v1/admin/findings", ip: "198.51.100.3", merchant: attacked, want: 200}.do(t, h)
 		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
 		call{path: "/v1/me/checkout-sessions", ip: "198.51.100.4", want: 200}.do(t, h)
 	})
@@ -273,8 +273,8 @@ func TestCaptchaChallenges(t *testing.T) {
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
 		h := engine(deps, okHandler())
 		call{path: "/v1/me/payment-methods", ip: ip, want: 403, body: "captcha_required"}.do(t, h)
-		call{method: "GET", path: "/v1/merchant/findings", ip: ip, want: 200}.do(t, h)
-		call{path: "/v1/merchant/admissions", ip: ip, want: 200}.do(t, h)
+		call{method: "GET", path: "/v1/admin/findings", ip: ip, want: 200}.do(t, h)
+		call{path: "/v1/admin/admissions", ip: ip, want: 200}.do(t, h)
 	})
 
 	// Without a captcha to solve, neither a challenged subject nor a merchant's

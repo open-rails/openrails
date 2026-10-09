@@ -11,19 +11,14 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// CustomerProfiles are the customer surfaces a selection mounts: Customers
-// at /v1/me, then CustomerProfiles. A profile without its own Auth uses
-// Routes.Auth; one without a merchant serves the configured one.
+// CustomerProfiles are the customer surfaces a selection mounts: /v1/me,
+// then CustomerProfiles. A profile without its own Auth uses Routes.Auth; one
+// without a merchant serves the configured one.
 func CustomerProfiles(sel config.Routes) []config.CustomerRoutes {
-	var out []config.CustomerRoutes
-	if sel.Customers != config.CustomersNone {
-		out = append(out, config.CustomerRoutes{Scope: sel.Customers})
-	}
-	out = append(out, sel.CustomerProfiles...)
+	out := append([]config.CustomerRoutes{{}}, sel.CustomerProfiles...)
 	for i := range out {
 		if out[i].Prefix == "" {
 			out[i].Prefix = "/v1/me"
@@ -35,40 +30,39 @@ func CustomerProfiles(sel config.Routes) []config.CustomerRoutes {
 	return out
 }
 
-// ValidateRoutes refuses a selection whose groups lack the Auth they need,
-// before anything mounts: nothing is ever mounted open.
-func ValidateRoutes(sel config.Routes, profiles []config.CustomerRoutes, rt *app.Runtime) error {
-	if (sel.Merchant || sel.MerchantConfig) && httproutes.IsNilAuth(sel.Auth) {
-		return fmt.Errorf("openrails: Routes.Merchant and Routes.MerchantConfig need Routes.Auth (its RequirePermission and Sensitive gate every staff route)")
+// ValidateRoutes refuses a selection without the Auth its routes need, or
+// with a bundle or customer surface it cannot mount, before anything mounts:
+// nothing is ever mounted open.
+func ValidateRoutes(sel config.Routes) error {
+	if httproutes.IsNilAuth(sel.Auth) {
+		return fmt.Errorf("openrails: Routes.Auth is required: the customer routes ask it who is signed in")
 	}
-	return validateCustomerRoutes(profiles, rt)
+	if _, err := RoutePermissions(sel); err != nil {
+		return err
+	}
+	return validateCustomerRoutes(CustomerProfiles(sel))
 }
 
-// StaffGuard resolves sel.Guards over the staff routes sel mounts on rt:
-// each route's permission. It fails when a mounted staff route has no guard
-// or a guard is wrong (httproutes.ResolveGuards).
-func StaffGuard(rt *app.Runtime, sel config.Routes) (func(httproutes.Route) string, error) {
-	guards := make(map[httproutes.GuardKey]string, len(sel.Guards))
-	for key, perm := range sel.Guards {
-		guards[httproutes.GuardKey(key)] = permissionText(perm)
+// RoutePermissions is sel's Permissions as the routes check them. It refuses
+// AdminWrite or CatalogWrite without AdminRead, and any bundle without
+// Routes.Auth: nothing is ever mounted open.
+func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
+	perms := httproutes.Permissions{
+		AdminRead:      permissionText(sel.Permissions.AdminRead),
+		AdminWrite:     permissionText(sel.Permissions.AdminWrite),
+		CatalogWrite:   permissionText(sel.Permissions.CatalogWrite),
+		MerchantConfig: permissionText(sel.Permissions.MerchantConfig),
 	}
-	var groups []httproutes.Group
-	if sel.Merchant {
-		groups = append(groups, httproutes.Merchant)
+	if err := perms.Validate(); err != nil {
+		return perms, err
 	}
-	if sel.MerchantConfig {
-		groups = append(groups, httproutes.MerchantConfig)
+	if perms != (httproutes.Permissions{}) && httproutes.IsNilAuth(sel.Auth) {
+		return perms, fmt.Errorf("openrails: Routes.Permissions need Routes.Auth (its RequirePermission and Sensitive gate every admin route)")
 	}
-	if len(groups) == 0 {
-		if len(guards) > 0 {
-			return nil, fmt.Errorf("openrails: Routes.Guards guard staff routes; set Routes.Merchant or Routes.MerchantConfig")
-		}
-		return nil, nil
-	}
-	return httproutes.ResolveGuards(httproutes.PlanStaffRoutes(rt, httproutes.Options{}, groups...), guards)
+	return perms, nil
 }
 
-// permissionText is a guard's permission, "" for a nil one.
+// permissionText is a permission's text, "" for a nil one.
 func permissionText(perm fmt.Stringer) (text string) {
 	if perm == nil {
 		return ""
@@ -79,45 +73,26 @@ func permissionText(perm fmt.Stringer) (text string) {
 	return perm.String()
 }
 
-func routeSets(sel config.Routes) []RouteSet {
-	sets := []RouteSet{RouteSetWebhooks}
-	if sel.Storefront {
-		sets = append(sets, RouteSetCheckout)
-	}
-	if sel.Merchant {
-		sets = append(sets, RouteSetMerchant)
-	}
-	if sel.MerchantConfig {
-		sets = append(sets, RouteSetMerchantConfig)
-	}
-	return sets
-}
-
 // ConfiguredRoutes is the embedded HTTP surface sel selects, under /billing.
 func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	if a == nil || a.Runtime == nil || a.Config == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
-	profiles := CustomerProfiles(sel)
-	if err := ValidateRoutes(sel, profiles, a.Runtime); err != nil {
+	if err := ValidateRoutes(sel); err != nil {
 		return nil, err
 	}
+	perms, _ := RoutePermissions(sel)
+	profiles := CustomerProfiles(sel)
 	asm := FromApp(a)
 	asm.Auth = sel.Auth
-	active := routeSets(sel)
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, sel.Storefront || len(profiles) > 0)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
 	if err != nil {
 		return nil, err
 	}
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	capabilities := configuredCapabilities(a.Runtime, active, profiles, providers)
-	guard, err := StaffGuard(a.Runtime, sel)
-	if err != nil {
-		return nil, err
-	}
-	table := asm.NewRoutes(Options{RouteSets: active, AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities, Guard: guard})
+	table := asm.NewRoutes(Options{Permissions: perms, ProviderRoutes: &providers})
 	extra, err := BuildCustomerRoutes(a, profiles, nil)
 	if err != nil {
 		return nil, err
@@ -130,17 +105,4 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
 	}, CustomerPrefixes("/billing", profiles)...)
 	return table, nil
-}
-
-func configuredCapabilities(rt *app.Runtime, active []RouteSet, profiles []config.CustomerRoutes, providers routesurface.ProviderRoutes) Capabilities {
-	fullCustomer := false
-	for _, profile := range profiles {
-		fullCustomer = fullCustomer || profile.Scope == config.CustomerSelfService
-	}
-	if len(profiles) > 0 {
-		active = append(append([]RouteSet(nil), active...), RouteSetCustomer)
-	}
-	caps := buildCapabilities(rt, active, providers)
-	caps.Features["stripe_billing_portal"] = fullCustomer && providers.StripePortal
-	return caps
 }

@@ -63,7 +63,7 @@ type Webhook struct {
 	UpdatedAt       time.Time
 }
 
-// API is the webhook as the merchant API answers it.
+// API is the webhook as the admin API answers it.
 func (w Webhook) API() billing.AlertWebhook {
 	return billing.AlertWebhook{
 		ID: billing.AlertWebhookID(w.ID), Name: w.Name, DestinationHost: w.DestinationHost,

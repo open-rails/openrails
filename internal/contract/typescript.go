@@ -124,15 +124,12 @@ export type OpenRailsRoute = {
   path: string
   group: string
   auth: string
-  // A staff route's guards, most specific first; another route's own permission.
-  guards: readonly string[]
+  // A staff route's Routes.Permissions field; another route's own permission.
   permission: string | null
   // A user in person also needs a recent sign-in.
   sensitive: boolean
   // The configuration the route needs; null when always mounted.
   mountedWhen: string | null
-  // The narrowest customer exposure serving a customer route.
-  scope: "self_service" | "billing_management" | "subscription_management" | null
   // wire.ts type names: the JSON body, and each success by status.
   request: string | null
   responses: Readonly<Record<number, string | null>>
@@ -145,18 +142,12 @@ export const OPENRAILS_ROUTES = [
 `)
 	sets := map[string][]string{}
 	for _, r := range m.routes {
-		perm, when, scope := "null", "null", "null"
-		if r.Perm != "" {
-			perm = fmt.Sprintf("%q", r.Perm)
+		perm, when := "null", "null"
+		if p := routePermission(r); p != "" {
+			perm = fmt.Sprintf("%q", p)
 		}
 		if r.When != routes.Always {
 			when = fmt.Sprintf("%q", r.When)
-		}
-		if r.Group == routes.Customer {
-			scope = `"self_service"`
-			if r.Scope != routes.ScopeSelfService {
-				scope = fmt.Sprintf("%q", r.Scope)
-			}
 		}
 		var replies []string
 		seen := map[int]bool{}
@@ -167,8 +158,8 @@ export const OPENRAILS_ROUTES = [
 			seen[reply.Status] = true
 			replies = append(replies, fmt.Sprintf("%d: %s", reply.Status, m.bodyTS(reply.Body)))
 		}
-		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, guards: [%s], permission: %s, sensitive: %t, mountedWhen: %s, scope: %s, request: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
-			r.Method, r.Path, r.Group, r.Auth, quoted(r.Guards()), perm, r.Sensitive, when, scope, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
+		fmt.Fprintf(&b, "  { method: %q, path: %q, group: %q, auth: %q, permission: %s, sensitive: %t, mountedWhen: %s, request: %s, responses: { %s }, errors: [%s], errorSets: [%s] },\n",
+			r.Method, r.Path, r.Group, r.Auth, perm, r.Sensitive, when, m.bodyTS(r.Request), strings.Join(replies, ", "), quoted(r.Errors), quoted(r.ErrorSets()))
 		for _, name := range r.ErrorSets() {
 			sets[name] = routes.ErrorSet(name)
 		}

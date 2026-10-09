@@ -211,7 +211,7 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
-	self := w.peer(w.slug, openrails.CustomerSelfService, w.auth, w.declaredPSPs())
+	self := w.peer(w.slug, w.auth, w.declaredPSPs())
 	group := "g" + uuid.NewString()[:8]
 	basic := w.tierPrice(group, 1, 1000, monthHours, false)
 	plus := w.tierPrice(group, 2, 2000, monthHours, false)
@@ -255,7 +255,7 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 		{"subscription_id": victim.sub.String()},
 		{"customer_id": victim.c.id},
 	} {
-		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/findings/fnd_"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
+		status, body := w.staffJSON(http.MethodPost, "/v1/admin/findings/fnd_"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
 		require.Equal(t, http.StatusBadRequest, status, "%v %v", override, body)
 		require.Contains(t, fmt.Sprint(body), "override_params", "refused for its override, not its id")
 	}
@@ -310,7 +310,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 	t.Run("merchant-configured Collect.js origin", func(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
-		r := w.peer("script-"+uuid.NewString()[:8], openrails.CustomerBillingManagement, w.auth, psps)
+		r := w.peer("script-"+uuid.NewString()[:8], w.auth, psps)
 		cfg, err := r.client.GetPublicConfig(t.Context())
 		require.NoError(t, err)
 		found := false

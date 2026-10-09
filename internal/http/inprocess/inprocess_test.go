@@ -94,7 +94,7 @@ func TestTransportAuthority(t *testing.T) {
 	require.NotEmpty(t, capability)
 
 	for _, auth := range []string{"Bearer " + capability, "", "Bearer in-process-host", "Bearer merchant-key", capability} {
-		res, body := roundTrip(t, transport, hostContext(t, bound), http.MethodGet, "/v1/merchant/payments", auth)
+		res, body := roundTrip(t, transport, hostContext(t, bound), http.MethodGet, "/v1/admin/payments", auth)
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		require.Equal(t, "ok", body)
 		require.Equal(t, auth, got.auth, "explicit credentials pass through for normal verification")
@@ -106,7 +106,7 @@ func TestTransportAuthority(t *testing.T) {
 			require.Nil(t, got.host)
 		}
 	}
-	_, _ = roundTrip(t, other, hostContext(t, bound), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
+	_, _ = roundTrip(t, other, hostContext(t, bound), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
 	require.Nil(t, got.host, "a capability is scoped to the client that minted it")
 }
 
@@ -127,7 +127,7 @@ func TestTransportRefusesMerchantMismatch(t *testing.T) {
 		{"runtime rebound", original, billing.MerchantID(uuid.New())},
 	} {
 		bound = tc.rebind
-		res, body := roundTrip(t, transport, hostContext(t, tc.pin), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
+		res, body := roundTrip(t, transport, hostContext(t, tc.pin), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
 		require.Equal(t, http.StatusConflict, res.StatusCode, tc.name)
 		var envelope api.ErrorResponse
 		require.NoError(t, json.Unmarshal([]byte(body), &envelope))
@@ -135,7 +135,7 @@ func TestTransportRefusesMerchantMismatch(t *testing.T) {
 	}
 	require.Zero(t, called)
 	bound = billing.MerchantID{}
-	res, _ := roundTrip(t, transport, hostContext(t, original), http.MethodGet, "/v1/merchant/payments", "")
+	res, _ := roundTrip(t, transport, hostContext(t, original), http.MethodGet, "/v1/admin/payments", "")
 	require.Equal(t, http.StatusOK, res.StatusCode, "a not-yet-bound runtime accepts the client's own binding")
 }
 
@@ -154,7 +154,7 @@ func TestTransportExplicitSelector(t *testing.T) {
 		return target, resolveErr
 	})
 
-	res, _ := roundTrip(t, transport, hostContext(t, billing.MerchantID(uuid.New())), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
+	res, _ := roundTrip(t, transport, hostContext(t, billing.MerchantID(uuid.New())), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
 	require.Equal(t, http.StatusOK, res.StatusCode, "the resolved target replaces the client's construction pin")
 	require.False(t, sawAmbient, "resolution never sees host context values")
 	require.Equal(t, target, selected)
@@ -172,7 +172,7 @@ func TestTransportExplicitSelector(t *testing.T) {
 		{nil, billing.MerchantID(uuid.New()), http.StatusConflict, ""},
 	} {
 		resolveErr, bound, selected = tc.err, tc.bound, billingauth.Target{}
-		res, body := roundTrip(t, transport, t.Context(), http.MethodGet, "/v1/merchant/payments", "Bearer "+capability)
+		res, body := roundTrip(t, transport, t.Context(), http.MethodGet, "/v1/admin/payments", "Bearer "+capability)
 		require.Equal(t, tc.status, res.StatusCode)
 		require.Contains(t, body, tc.code)
 		require.Zero(t, selected, "refused selections never reach the handler")
@@ -190,7 +190,7 @@ func TestArchiveResponsesStream(t *testing.T) {
 		_, err := w.Write(book)
 		done <- err
 	}), func() billing.MerchantID { return bound })
-	req, _ := http.NewRequestWithContext(merchant.WithID(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/merchant/billing-archive", nil)
+	req, _ := http.NewRequestWithContext(merchant.WithID(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/admin/billing-archive", nil)
 	res, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	select {
@@ -271,7 +271,7 @@ func TestUploadCancellationClosesRequestBody(t *testing.T) {
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
 	}), func() billing.MerchantID { return bound })
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/merchant/billing-archive", reader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/admin/billing-archive", reader)
 	require.NoError(t, err)
 	returned := make(chan struct{})
 	go func() {

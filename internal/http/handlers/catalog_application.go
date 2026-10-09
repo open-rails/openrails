@@ -67,7 +67,7 @@ func GetCatalogRevision(r *httprequest.Request) {
 
 // ReplaceEntitlements moves keys across every product granting them.
 //
-//	POST /v1/merchant/catalog/entitlement-replacements
+//	POST /v1/admin/catalog/entitlement-replacements
 func ReplaceEntitlements(r *httprequest.Request) {
 	var params billing.ReplaceEntitlementsParams
 	if !r.BindJSON(&params) {

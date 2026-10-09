@@ -108,7 +108,7 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 		notes[m.id] = billing.NotificationID(note).String()
 	}
 
-	routes, err := cp.Routes(openrails.CustomerRoutes{Prefix: "/billing/v1/me", Scope: openrails.CustomerSelfService, Auth: customerOf{Auth: cp.AuthKit(), customers: customers}})
+	routes, err := cp.Routes(openrails.CustomerRoutes{Prefix: "/billing/v1/me", Auth: customerOf{Auth: cp.AuthKit(), customers: customers}})
 	require.NoError(t, err)
 	mux := http.NewServeMux()
 	for _, r := range routes {

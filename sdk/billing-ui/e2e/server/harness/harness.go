@@ -31,8 +31,6 @@ const (
 	PSPKey       = "nmi"
 	PSPRail      = "nmi"
 	PSPAccountID = "billing-ui-e2e"
-	// ManagePrefix mounts the CustomerBillingManagement scope beside /v1/me.
-	ManagePrefix = "/v1/manage"
 	SolanaPSPKey = "solana"
 	// CardPSPKey is an armed NMI account on the loopback gateway (nmimock):
 	// hosted checkout sells card subscriptions and one-time sales through it.
@@ -147,14 +145,7 @@ func checkoutConfig(baseURL, pageURL string) openrails.CheckoutConfig {
 }
 
 // billingRoutes is the billing surface the storefront and account pages call.
-var billingRoutes = openrails.Routes{
-	Prefix:     "/billing",
-	Storefront: true,
-	Customers:  openrails.CustomerSelfService,
-	CustomerProfiles: []openrails.CustomerRoutes{
-		{Scope: openrails.CustomerBillingManagement, Prefix: ManagePrefix},
-	},
-}
+var billingRoutes = openrails.Routes{Prefix: "/billing"}
 
 // authConfig is AuthKit's configuration: its JSON API at /auth/v1 beside
 // OpenRails at /billing, open registration and no second factor.

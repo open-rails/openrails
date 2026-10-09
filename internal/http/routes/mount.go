@@ -45,9 +45,9 @@ type Options struct {
 	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// Guard is the permission Auth.RequirePermission checks for each staff
-	// route (ResolveGuards); a staff route it names none for refuses to mount.
-	Guard func(Route) string
+	// Permissions are what Auth.RequirePermission checks on each staff route;
+	// a staff route without one is not mounted.
+	Permissions Permissions
 
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
 	// it; without it the public read is not mounted.
@@ -125,7 +125,7 @@ func controlPlane(pick func(*External) router.Handler) func(*Env) router.Handler
 }
 
 // gated binds a handler that asks whether its caller would pass another
-// route's guard.
+// route's permission.
 func gated(build func(httphandlers.StaffCan) func(*httprequest.Request)) func(*Env) router.Handler {
 	return func(e *Env) router.Handler { return router.Handler(build(e.staffCan)) }
 }
@@ -197,7 +197,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthCustomer:
 		mw = append(e.customerGates(route), conn...)
 	case AuthMerchant:
-		if route.CatalogWrite {
+		if route.Group == CatalogWrite {
 			mw = append(mw, catalogWriteGuardMW(e.Runtime))
 		}
 		mw = append(mw, e.staffGates(route)...)
@@ -363,21 +363,24 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterMerchantRoutes mounts the staff routes of groups (Merchant,
-// MerchantConfig), each behind opts.Guard's permission, on a router rooted at
+// RegisterStaffRoutes mounts the admin and merchant-config routes
+// opts.Permissions gives a permission, each behind it, on a router rooted at
 // /v1.
-func RegisterMerchantRoutes(rr router.Router, rt *app.Runtime, opts Options, groups ...Group) {
+func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
 	}
-	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Staff() && inGroups(r, groups) })
+	newEnv(rt, opts).mount(rr, "/v1", opts.Permissions.mounts)
 }
 
-// RegisterMerchantRoutesUnder mounts the staff routes under prefix, on a
-// router rooted at /v1: the CLI's database-only runtimes serve one resource.
-func RegisterMerchantRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
-	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Staff() && under(prefix)(r) })
+// RegisterStaffRoutesUnder mounts the staff routes under prefix, on a router
+// rooted at /v1: the CLI's database-only runtimes serve one resource.
+func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, prefix string) {
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) && under(prefix)(r) })
 }
+
+// mounts reports a staff route its bundle's permission mounts.
+func (p Permissions) mounts(r Route) bool { return r.Staff() && p.For(r) != "" }
 
 // RegisterControlPlaneRoutes mounts the standalone control plane's merchant
 // accounts, API keys and team, on a router rooted at /v1.
@@ -395,13 +398,6 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // SelfRoutePrefix is the customer surface's path: one stable /me, whatever
 // credential the mount's Auth accepts.
 const SelfRoutePrefix = "/me"
-
-var scopeRank = map[CustomerScope]int{ScopeSelfService: 0, ScopeBillingManagement: 1, ScopeSubscriptionManagement: 2}
-
-// serves reports whether an exposure of scope serves a Customer route.
-func serves(scope CustomerScope) func(Route) bool {
-	return func(r Route) bool { return scopeRank[scope] <= scopeRank[r.Scope] }
-}
 
 // CustomerMount is one customer surface: the Auth that admits its
 // customers and the merchant they buy from. Without a Merchant, a server's
@@ -421,23 +417,9 @@ func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 	return env
 }
 
-// RegisterSelfServiceRoutes mounts the whole customer surface. Every
-// operation is scoped to the verified customer and their merchant: no path
-// names a customer.
-func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
-	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeSelfService)))
-}
-
-// RegisterCustomerBillingManagementRoutes exposes the customer's existing
-// billing history, access, payment methods and agreement management. Creating a
-// checkout or selecting a different product/price remains with the host.
-func RegisterCustomerBillingManagementRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
-	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeBillingManagement)))
-}
-
-// RegisterCustomerSubscriptionManagementRoutes exposes only customer-owned
-// cancellation, resumption and payment-method selection.
-func RegisterCustomerSubscriptionManagementRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
-	m.Providers = routesurface.ProviderRoutes{}
-	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer, serves(ScopeSubscriptionManagement)))
+// RegisterCustomerRoutes mounts the customer surface. Every operation is
+// scoped to the verified customer and their merchant: no path names a
+// customer.
+func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
+	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
 }

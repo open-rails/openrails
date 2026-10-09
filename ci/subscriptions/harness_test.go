@@ -58,18 +58,19 @@ const (
 	remote   topology = "remote"
 )
 
-// The harness host's own permissions, guarding the staff routes it mounts.
+// The harness host's own permissions, for the staff bundles it mounts.
 type perm string
 
 func (p perm) String() string { return string(p) }
 
 const (
-	staffReads  perm = "e2e:billing:read"
-	staffWrites perm = "e2e:billing:write"
-	staffConfig perm = "e2e:billing:admin"
+	staffReads   perm = "e2e:billing:read"
+	staffWrites  perm = "e2e:billing:write"
+	staffCatalog perm = "e2e:catalog:write"
+	staffConfig  perm = "e2e:billing:admin"
 )
 
-var guards = openrails.Guards{openrails.StaffReads: staffReads, openrails.StaffWrites: staffWrites, openrails.MerchantConfig: staffConfig}
+var permissions = openrails.Permissions{AdminRead: staffReads, AdminWrite: staffWrites, CatalogWrite: staffCatalog, MerchantConfig: staffConfig}
 
 // verifier is a neutral host's Auth: HS256 tokens. "staff" is a user holding
 // every permission, "support" the staff reads and writes but not the
@@ -249,9 +250,6 @@ type world struct {
 	declare func(map[string]openrails.PSPConfig)
 	// custodians are the merchant's declared card custodians.
 	custodians map[string]openrails.CustodianConfig
-	// selfService mounts the full customer self-service API (tier changes
-	// included) instead of billing management.
-	selfService bool
 	// mount adjusts the mounted HTTP surface before start.
 	mount func(*openrails.Routes)
 	// deps adjusts the host hooks before start.
@@ -371,11 +369,7 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
-	scope := openrails.CustomerBillingManagement
-	if w.selfService {
-		scope = openrails.CustomerSelfService
-	}
-	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Storefront: true, Merchant: true, MerchantConfig: true, Guards: guards, Customers: scope}
+	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, Permissions: permissions}
 	if w.mount != nil {
 		w.mount(&routes)
 	}

@@ -15,16 +15,13 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-func validateCustomerRoutes(profiles []config.CustomerRoutes, rt *app.Runtime) error {
+func validateCustomerRoutes(profiles []config.CustomerRoutes) error {
 	for _, e := range profiles {
 		if e.Prefix == "" {
 			e.Prefix = "/v1/me"
 		}
 		if httproutes.IsNilAuth(e.Auth) {
 			return fmt.Errorf("openrails: customer routes %q need Routes.Auth (or the profile's own Auth)", e.Prefix)
-		}
-		if e.Scope != config.CustomerSelfService && e.Scope != config.CustomerSubscriptionManagement && e.Scope != config.CustomerBillingManagement {
-			return fmt.Errorf("openrails: customer routes %q need a Scope (CustomerSelfService, CustomerSubscriptionManagement or CustomerBillingManagement)", e.Prefix)
 		}
 		if e.Prefix == "" || e.Prefix == "/" || !strings.HasPrefix(e.Prefix, "/") || path.Clean(e.Prefix) != e.Prefix || strings.ContainsAny(e.Prefix, "*+?#%\\ \t\r\n") {
 			return fmt.Errorf("openrails: invalid customer routes prefix %q", e.Prefix)
@@ -55,14 +52,14 @@ func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string 
 // else the configured one. host resolves a merchant's API host: the
 // standalone server's; nil embedded.
 func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host merchant.HostResolver) (*router.Table, error) {
-	if err := validateCustomerRoutes(exposures, a.Runtime); err != nil {
+	if err := validateCustomerRoutes(exposures); err != nil {
 		return nil, err
 	}
 	out := &router.Table{}
 	if len(exposures) == 0 {
 		return out, nil
 	}
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, true)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +77,7 @@ func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host mer
 		}
 		table := &router.Table{}
 		rr := router.NewMux(table, e.Prefix, a.Runtime)
-		switch e.Scope {
-		case config.CustomerSubscriptionManagement:
-			httproutes.RegisterCustomerSubscriptionManagementRoutes(rr, a.Runtime, mount)
-		case config.CustomerBillingManagement:
-			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, mount)
-		default:
-			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, mount)
-		}
+		httproutes.RegisterCustomerRoutes(rr, a.Runtime, mount)
 		wrapped := wrapCustomerRoutes(a.Runtime, table, host, e.Prefix)
 		out.Entries = append(out.Entries, wrapped.Entries...)
 	}

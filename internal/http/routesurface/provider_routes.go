@@ -1,7 +1,7 @@
 package routesurface
 
 // ProviderRoutes describes provider-specific public routes mounted for one
-// runtime surface. Generic billing routes are controlled by RouteSet.
+// runtime surface.
 type ProviderRoutes struct {
 	StripePortal bool
 	Solana       bool // one-off Solana (config, solana-pay) — buyer signs, needs only a recipient

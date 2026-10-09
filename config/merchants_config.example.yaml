@@ -22,7 +22,7 @@ merchants:
       issuer: https://local-stack.example
       jwks_uri: https://local-stack.example/.well-known/jwks.json
 
-    # The merchant's settings: the same document GET /v1/merchant/configuration
+    # The merchant's settings: the same document GET /v1/admin/configuration
     # reads and an application changes (docs/api/merchant-settings.md), with the
     # same field names and units. Omitted fields keep their stored values.
     settings:

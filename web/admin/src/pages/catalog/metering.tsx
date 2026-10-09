@@ -45,6 +45,7 @@ import type {
 import { formatCap } from "@/lib/duration"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
+import { useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { MeterFormDialog } from "./meter-form"
@@ -63,7 +64,7 @@ export function CatalogMeteringPage() {
   const { data, isPending, error, refetch } = useQuery(
     adminQueries.usageMeters(PAGE_SIZE, pages.cursor)
   )
-  const { data: capability } = useQuery(adminQueries.catalogRevision())
+  const writesAllowed = useCatalogWrites()
   const meters = data?.data ?? []
   const normalizedSearch = search.trim().toLowerCase()
   const filtered = normalizedSearch
@@ -82,7 +83,6 @@ export function CatalogMeteringPage() {
     error: error instanceof ApiError ? error : error ? { status: 500 } : null,
     count: meters.length,
   })
-  const writesAllowed = capability?.writes_allowed ?? false
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -255,8 +255,7 @@ export function MeterDetailPage() {
   const navigate = useNavigate()
   const overridePages = useCursorPages()
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
-  const { data: capability } = useQuery(adminQueries.catalogRevision())
-  const writesAllowed = capability?.writes_allowed ?? false
+  const writesAllowed = useCatalogWrites()
   const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
     adminQueries.allProducts({ errorAction: "Load products for metering" })
@@ -361,7 +360,7 @@ export function MeterDetailPage() {
           <p className="mt-1 max-w-3xl text-sm text-pretty text-muted-foreground">
             Creating this meter does not send events. The host application must
             report idempotent usage to{" "}
-            <code className="text-foreground">/merchant/usage-events</code> with
+            <code className="text-foreground">/admin/usage-events</code> with
             this shape.
           </p>
         </div>

@@ -127,10 +127,10 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
 }
 
-// An embedded host mounts the console with the merchant API, from its own
+// An embedded host mounts the console with the admin API, from its own
 // build, at Routes.AdminConsole.Path on the root router; the console finds the
 // API at Routes.Prefix. A missing or broken build, an invalid path, or no
-// merchant API fails the mount; without AdminConsole no console route exists.
+// admin API fails the mount; without AdminConsole no console route exists.
 func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
@@ -146,7 +146,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 		return client
 	}
 	console := &openrails.AdminConsole{AuthBaseURL: "/api/v1"}
-	routes := openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites, AdminConsole: console}
+	routes := openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions, AdminConsole: console}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
 	require.ErrorContains(t, err, "needs a console build")
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
@@ -154,9 +154,9 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 
 	client := boot(consoleBuild("host"))
 	_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: console})
-	require.ErrorContains(t, err, "set Routes.Merchant")
+	require.ErrorContains(t, err, "set Routes.Permissions.AdminRead")
 	for _, path := range []string{"/", "admin", "/billing/admin/", "/a/../b", "/a b", `/x"><script>`} {
-		_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
+		_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
 		require.ErrorContains(t, err, "invalid Routes.AdminConsole.Path", path)
 	}
 
@@ -175,12 +175,12 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	// The host keeps its own /admin pages and mounts the console elsewhere.
 	moved := http.NewServeMux()
 	moved.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
-	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites,
+	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions,
 		AdminConsole: &openrails.AdminConsole{Path: "/billing/admin", AuthBaseURL: "/api/v1"}}))
 	requireConsoleAt(t, moved, "/billing/admin", "host")
 	require.Equal(t, "host admin", get(moved, "/admin/").Body.String())
 
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", Merchant: true, Guards: readsAndWrites}))
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions}))
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "not selected, not mounted")
 }

@@ -19,7 +19,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ListInvoices (GET /merchant/invoices) is one page of the merchant's
+// ListInvoices (GET /admin/invoices) is one page of the merchant's
 // invoices, newest period first.
 func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
@@ -80,7 +80,7 @@ func ListInvoices(gate StaffCan) func(*httprequest.Request) {
 	}
 }
 
-// GetInvoice (GET /merchant/invoices/{id}) reads one of the merchant's
+// GetInvoice (GET /admin/invoices/{id}) reads one of the merchant's
 // invoices.
 func GetInvoice(gate StaffCan) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
@@ -93,7 +93,7 @@ func GetInvoice(gate StaffCan) func(*httprequest.Request) {
 	}
 }
 
-// ListInvoicePayments (GET /merchant/invoices/{id}/payments) is one page of an
+// ListInvoicePayments (GET /admin/invoices/{id}/payments) is one page of an
 // invoice's payments, newest first.
 func ListInvoicePayments(r *httprequest.Request) {
 	svc, invoice, ok := loadMerchantInvoice(r)
@@ -150,7 +150,7 @@ func applyInvoiceAction(r *httprequest.Request, action billing.InvoiceAction) {
 	r.SuccessJSON(out)
 }
 
-// RetryInvoiceCollection (POST /merchant/invoices/{id}/retry-collection)
+// RetryInvoiceCollection (POST /admin/invoices/{id}/retry-collection)
 // charges an open invoice to one of its customer's cards: 200 when the charge
 // settled or failed, 202 while it is unresolved.
 func RetryInvoiceCollection(r *httprequest.Request) {
@@ -303,10 +303,10 @@ func loadMerchantInvoice(r *httprequest.Request) (*billingservice.Service, *bill
 
 // invoiceActionRoutes are the routes that perform an invoice's actions.
 var invoiceActionRoutes = map[billing.InvoiceAction]string{
-	billing.InvoiceActionVoid:            "POST /v1/merchant/invoices/{id}/void",
-	billing.InvoiceActionUncollectible:   "POST /v1/merchant/invoices/{id}/uncollectible",
-	billing.InvoiceActionRecordPayment:   "POST /v1/merchant/invoices/{id}/payments",
-	billing.InvoiceActionRetryCollection: "POST /v1/merchant/invoices/{id}/retry-collection",
+	billing.InvoiceActionVoid:            "POST /v1/admin/invoices/{id}/void",
+	billing.InvoiceActionUncollectible:   "POST /v1/admin/invoices/{id}/uncollectible",
+	billing.InvoiceActionRecordPayment:   "POST /v1/admin/invoices/{id}/payments",
+	billing.InvoiceActionRetryCollection: "POST /v1/admin/invoices/{id}/retry-collection",
 }
 
 // permittedInvoiceActions are the actions whose routes' guards admit the

@@ -69,7 +69,7 @@ auth:
   # keys.json and totp.key there
 
 # Access tokens (RFC 9068 at+jwt) that your identity provider mints for this
-# deployment: its users call the merchant API directly, and OpenRails holds no
+# deployment: its users call the admin API directly, and OpenRails holds no
 # accounts for them. Permissions come from the token, within the ceiling.
 # resource_server:
 #   identifier: https://openrails.example.com  # the tokens' aud

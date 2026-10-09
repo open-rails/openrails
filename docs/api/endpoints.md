@@ -4,7 +4,7 @@ The API is served on one port under `/v1`. A standalone server serves it at the
 root; an embedded host mounts the same routes beneath its prefix (usually
 `/billing`), so `/v1/me/balance` there is `/billing/v1/me/balance`.
 
-- **Every route**, with its tier, guard, request and response:
+- **Every route**, with its tier, permission, request and response:
   [routes.md](routes.md).
 - **Every shape and each route's error codes**:
   [`api/openapi.json`](../../api/openapi.json).
@@ -72,14 +72,14 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Public: `/v1/config`, `/v1/catalog/products` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
-| Merchant and merchant configuration: `/v1/merchant/*` | embedded: the host's credential its guard admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
+| Admin, catalog edits and merchant configuration: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
 | Control plane: `/v1/merchants`, the team and API-key routes | a signed-in user, or a trusted issuer's access token (standalone) |
 | Platform: `/v1/platform/*` | an operator session holding the root permission (standalone) |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
-Every staff route is gated by the host's permission for its guard
-(`Routes.Guards`; each route's guards are in [routes.md](routes.md)), whatever
-the credential. On the standalone server the guards are its merchant
+Every staff route is gated by the host's permission for its bundle
+(`Routes.Permissions`; each route's is in [routes.md](routes.md)), whatever
+the credential. On the standalone server the permissions are its merchant
 persona's `server.MerchantRead`, `server.MerchantWrite` and
 `server.MerchantAdmin`: an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
@@ -119,8 +119,8 @@ an `ETag`). It holds what a browser needs before anything else:
   `config`, and then the document is not cached. With a Solana PSP armed,
   `solana` carries the network and accepted tokens.
 
-The merchant reads the same document at `GET /v1/merchant/config`.
-`GET /v1/merchant/checkout-options` lists, for a `price_id` or a `product_key`
+The merchant reads the same document at `GET /v1/admin/config`.
+`GET /v1/admin/checkout-options` lists, for a `price_id` or a `product_key`
 and `price_key`, the options that can sell that price.
 
 ## Subscriptions
@@ -225,17 +225,17 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 ## Customers, credit and usage
 
 - A **customer** is created by its first use or declared, up to 100 at a time,
-  with `POST /v1/merchant/customers/ensure`; `GET /v1/merchant/customers?ids=`
+  with `POST /v1/admin/customers/ensure`; `GET /v1/admin/customers?ids=`
   reads up to 100. Its balance, credit limit, trust level, spend delegations,
-  credit grants and ledger all live beneath `/v1/merchant/customers/{customer_id}`.
-- **Credit grants** (`POST /v1/merchant/credit-grants`, up to 100 across
+  credit grants and ledger all live beneath `/v1/admin/customers/{customer_id}`.
+- **Credit grants** (`POST /v1/admin/credit-grants`, up to 100 across
   customers, all or none) are idempotent on each customer's `source_id`: an
   identical retry answers the same grant with `replayed: true`; other terms
   refuse the batch with `409 idempotency_key_reused`. Revoking takes the
   unspent remainder (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
-- **Usage events** (`POST /v1/merchant/usage-events`, up to 1,000 per call, one
+- **Usage events** (`POST /v1/admin/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
   up to 35 days old.
 - **Provider operations** authorize and settle upstream compute cost:
@@ -253,10 +253,9 @@ one-time); `access_duration_hours` independently determines access (`null`: no
 scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
-Reads are `Routes.Merchant`'s (guard `openrails.StaffReads`, or
-`openrails.Catalog`). Writes are `Routes.MerchantConfig`'s (guard
-`openrails.MerchantConfig`, or `openrails.Catalog`): without it they are not
-mounted, and they are refused while `Config.Catalog` is the catalog's truth
+Reads need `Permissions.AdminRead`; writes are the catalog-edits bundle,
+`Permissions.CatalogWrite`: without it they are not mounted, and they are
+refused while `Config.Catalog` is the catalog's truth
 (standalone: unless `secret_backend` is `vault` or `db`). The in-process Client
 is not gated. JSON/YAML batches are deduplicated permanently by content hash,
 even after intervening edits.
@@ -265,7 +264,7 @@ A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
 automatic revisions starting at zero. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
-copy and reports drift; `GET /v1/merchant/catalog/drift` lists the open drift
+copy and reports drift; `GET /v1/admin/catalog/drift` lists the open drift
 findings, each with the `psp_id` that was compared.
 
 ## PSPs
@@ -285,7 +284,7 @@ active PSP on a rail is `409 psp_last_active` unless `allow_last` is `true`.
 
 ## Refunds
 
-`POST /v1/merchant/payments/{id}/refunds` refunds through the rail: `{amount}`
+`POST /v1/admin/payments/{id}/refunds` refunds through the rail: `{amount}`
 or `{full: true}`, an optional `reason`, and an explicit `revoke_access`.
 `Idempotency-Key` is required. `201` settled, `202` pending. A rail with no
 automatic refund is `400 refund_unsupported`; one that cannot take it now is
@@ -293,15 +292,15 @@ automatic refund is `400 refund_unsupported`; one that cannot take it now is
 
 ## Host events
 
-`GET /v1/merchant/host-events` is the feed a host drains: `payment.settled`,
+`GET /v1/admin/host-events` is the feed a host drains: `payment.settled`,
 `delinquency.grace`, `delinquency.entered`, `delinquency.cleared`, oldest
 first, filtered by `type`. Acknowledge them, up to 100 at a time
-(`POST /v1/merchant/host-events/acknowledge`), after the host's own
+(`POST /v1/admin/host-events/acknowledge`), after the host's own
 processing commits, then fetch again. Acknowledgment is idempotent and
 independent of notification read state. Acknowledged events are kept 30 days;
 pending ones are never deleted.
 
-`GET /v1/merchant/customers/{customer_id}/payment-settlement-status?price_id=`
+`GET /v1/admin/customers/{customer_id}/payment-settlement-status?price_id=`
 answers whether the customer ever paid for that price on a rail, from the
 durable payment records.
 

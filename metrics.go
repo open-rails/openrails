@@ -10,7 +10,7 @@ import (
 // QueryMetrics runs one metrics query.
 func (c *Client) QueryMetrics(ctx context.Context, query billing.MetricsQuery, options ...RequestOption) (*billing.MetricsResult, error) {
 	var out billing.MetricsResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/metrics/query", query, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/metrics/query", query, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -19,7 +19,7 @@ func (c *Client) QueryMetrics(ctx context.Context, query billing.MetricsQuery, o
 // GetMetricsSchema lists every measure, dimension and grain a query may use.
 func (c *Client) GetMetricsSchema(ctx context.Context, options ...RequestOption) (*billing.MetricsSchema, error) {
 	var out billing.MetricsSchema
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/metrics/schema", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/metrics/schema", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -29,7 +29,7 @@ func (c *Client) GetMetricsSchema(ctx context.Context, options ...RequestOption)
 // runs queries; the deployment must enable it.
 func (c *Client) AskMetrics(ctx context.Context, req billing.AskMetricsParams, options ...RequestOption) (*billing.MetricsAnswer, error) {
 	var out billing.MetricsAnswer
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/metrics/ask", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/metrics/ask", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -38,7 +38,7 @@ func (c *Client) AskMetrics(ctx context.Context, req billing.AskMetricsParams, o
 // GetDashboard returns the merchant's widget layout.
 func (c *Client) GetDashboard(ctx context.Context, options ...RequestOption) (*billing.Dashboard, error) {
 	var out billing.Dashboard
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/dashboard", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/dashboard", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -47,7 +47,7 @@ func (c *Client) GetDashboard(ctx context.Context, options ...RequestOption) (*b
 // SetDashboard replaces the merchant's widget layout.
 func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParams, options ...RequestOption) (*billing.Dashboard, error) {
 	var out billing.Dashboard
-	if err := c.do(ctx, http.MethodPut, "/v1/merchant/dashboard", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/v1/admin/dashboard", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -57,7 +57,7 @@ func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParam
 // must enable it.
 func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error) {
 	var out billing.GeneratedWidget
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/dashboard/widgets/generate", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/dashboard/widgets/generate", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

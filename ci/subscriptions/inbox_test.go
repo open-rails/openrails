@@ -61,7 +61,7 @@ func TestOperationalAlertsLandInTheMerchantInbox(t *testing.T) {
 	require.Len(t, stalls, 1, "%+v", page.Items)
 	require.Equal(t, billing.AlertSeverityCritical, stalls[0].Severity)
 
-	status, raw := w.staff(http.MethodGet, "/v1/merchant/notifications")
+	status, raw := w.staff(http.MethodGet, "/v1/admin/notifications")
 	require.Equal(t, http.StatusOK, status, raw)
 	require.NotContains(t, raw, "cus_0000")
 

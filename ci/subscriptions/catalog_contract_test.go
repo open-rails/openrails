@@ -90,7 +90,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	require.Equal(t, billing.PSPLinkLinked, price.PSPs["nmi"].Status)
 	require.NotEmpty(t, price.PSPs["nmi"].IDs["plan_id"])
 	var wire map[string]any
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices/"+price.ID.String(), nil, &wire))
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/admin/catalog/prices/"+price.ID.String(), nil, &wire))
 	for _, field := range []string{"id", "key", "product_id", "archived", "unit_amount", "currency", "access_duration_hours", "billing_interval_hours", "trial_unit_amount", "trial_duration_hours", "psps", "pending_manual_actions", "created_at", "updated_at"} {
 		require.Contains(t, wire, field, "nulls are present, never omitted")
 	}
@@ -114,10 +114,10 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	}
 	require.Len(t, seen, 3)
 	var envelope map[string]any
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices?limit=1&recurring=true", nil, &envelope))
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/admin/catalog/prices?limit=1&recurring=true", nil, &envelope))
 	require.Len(t, envelope["data"], 1)
 	require.NotNil(t, envelope["next_cursor"])
-	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices?cursor=nope", nil, nil))
+	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodGet, "/v1/admin/catalog/prices?cursor=nope", nil, nil))
 
 	// A buyer sees the same objects, on sale only, without PSP identifiers.
 	archived := true
@@ -143,9 +143,9 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 
 	// Retired routes and fields are gone.
 	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodGet, "/v1/prices", nil, nil), "a product embeds its prices")
-	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/merchant/catalog/products/"+products[0].ID.String()+"/activate", nil, nil))
-	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/merchant/catalog/prices/"+price.ID.String()+"/key", map[string]any{"key": "x"}, nil))
-	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/merchant/catalog/products/"+products[0].ID.String(), map[string]any{"set_tier_group": true}, nil))
+	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/admin/catalog/products/"+products[0].ID.String()+"/activate", nil, nil))
+	require.Equal(t, http.StatusNotFound, w.staffCall(http.MethodPost, "/v1/admin/catalog/prices/"+price.ID.String()+"/key", map[string]any{"key": "x"}, nil))
+	require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+products[0].ID.String(), map[string]any{"set_tier_group": true}, nil))
 }
 
 // A product patch is a merge: omitted fields stay, null clears. New financial
@@ -175,7 +175,7 @@ func TestCatalogPatchSemantics(t *testing.T) {
 		require.Equal(t, first.Key, second.Key)
 		require.EqualValues(t, 0, first.Revision)
 		require.EqualValues(t, 1, second.Revision)
-		require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/merchant/catalog/prices/"+second.ID.String(), map[string]any{"key": "renamed"}, nil), "a key rename cannot rewrite price identity")
+		require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/admin/catalog/prices/"+second.ID.String(), map[string]any{"key": "renamed"}, nil), "a key rename cannot rewrite price identity")
 		current, err := c.GetPriceByKey(t.Context(), product.Key, first.Key)
 		require.NoError(t, err)
 		require.Equal(t, second.ID, current.ID)

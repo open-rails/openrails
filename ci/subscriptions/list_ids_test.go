@@ -167,31 +167,31 @@ func TestListsReadNamedRecords(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	customer, funded := "/v1/merchant/customers/"+c.id, "/v1/merchant/customers/"+d.id
+	customer, funded := "/v1/admin/customers/"+c.id, "/v1/admin/customers/"+d.id
 	invoice := invoices.Items[0].ID.String()
 	fixtures := map[string]struct{ path, query, table, set, key string }{
-		"GET /v1/merchant/customers/settings":                           {"/v1/merchant/customers/settings", "", "customers", "", "customer_id"},
-		"GET /v1/merchant/customers":                                    {"/v1/merchant/customers", "", "customers", "", ""},
-		"GET /v1/merchant/catalog/products":                             {"/v1/merchant/catalog/products", "", "products", "", ""},
-		"GET /v1/merchant/catalog/prices":                               {"/v1/merchant/catalog/prices", "", "prices", "", ""},
-		"GET /v1/merchant/catalog/drift":                                {"/v1/merchant/catalog/drift", "", "reconciliation_findings", "", ""},
-		"GET /v1/merchant/subscriptions":                                {"/v1/merchant/subscriptions", "", "subscriptions", "", ""},
-		"GET /v1/merchant/reprice-batches":                              {"/v1/merchant/reprice-batches", "", "reprice_batches", "", ""},
-		"GET /v1/merchant/reprices":                                     {"/v1/merchant/reprices", "", "subscription_reprices", "", ""},
-		"GET /v1/merchant/customers/{customer_id}/product-access":       {customer + "/product-access", "", "product_access", "", ""},
-		"GET /v1/merchant/customers/{customer_id}/credit-grants":        {funded + "/credit-grants", "", "grants", "", ""},
-		"GET /v1/merchant/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
-		"GET /v1/merchant/invoices":                                     {"/v1/merchant/invoices", "", "invoices", "", ""},
-		"GET /v1/merchant/invoices/{id}/payments":                       {"/v1/merchant/invoices/" + invoice + "/payments", "", "invoice_payments", "", ""},
-		"GET /v1/merchant/payments":                                     {"/v1/merchant/payments", "", "payments", "", ""},
-		"GET /v1/merchant/payment-attempts":                             {"/v1/merchant/payment-attempts", "", "payment_attempts", "", ""},
-		"GET /v1/merchant/rebill-cycles":                                {"/v1/merchant/rebill-cycles", "", "rebill_cycles", "", ""},
-		"GET /v1/merchant/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
-		"GET /v1/merchant/psps":                                         {"/v1/merchant/psps", "", "psps", ", account_id = 'elsewhere'", ""},
-		"GET /v1/merchant/alert-webhooks":                               {"/v1/merchant/alert-webhooks", "", "merchant_webhooks", "", ""},
-		"GET /v1/merchant/host-events":                                  {"/v1/merchant/host-events", "include_acknowledged=true", "host_outbox", "", ""},
-		"GET /v1/merchant/notifications":                                {"/v1/merchant/notifications", "", "notifications", "", ""},
-		"GET /v1/merchant/findings":                                     {"/v1/merchant/findings", "", "reconciliation_findings", "", ""},
+		"GET /v1/admin/customers/settings":                           {"/v1/admin/customers/settings", "", "customers", "", "customer_id"},
+		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
+		"GET /v1/admin/catalog/products":                             {"/v1/admin/catalog/products", "", "products", "", ""},
+		"GET /v1/admin/catalog/prices":                               {"/v1/admin/catalog/prices", "", "prices", "", ""},
+		"GET /v1/admin/catalog/drift":                                {"/v1/admin/catalog/drift", "", "reconciliation_findings", "", ""},
+		"GET /v1/admin/subscriptions":                                {"/v1/admin/subscriptions", "", "subscriptions", "", ""},
+		"GET /v1/admin/reprice-batches":                              {"/v1/admin/reprice-batches", "", "reprice_batches", "", ""},
+		"GET /v1/admin/reprices":                                     {"/v1/admin/reprices", "", "subscription_reprices", "", ""},
+		"GET /v1/admin/customers/{customer_id}/product-access":       {customer + "/product-access", "", "product_access", "", ""},
+		"GET /v1/admin/customers/{customer_id}/credit-grants":        {funded + "/credit-grants", "", "grants", "", ""},
+		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
+		"GET /v1/admin/invoices":                                     {"/v1/admin/invoices", "", "invoices", "", ""},
+		"GET /v1/admin/invoices/{id}/payments":                       {"/v1/admin/invoices/" + invoice + "/payments", "", "invoice_payments", "", ""},
+		"GET /v1/admin/payments":                                     {"/v1/admin/payments", "", "payments", "", ""},
+		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},
+		"GET /v1/admin/rebill-cycles":                                {"/v1/admin/rebill-cycles", "", "rebill_cycles", "", ""},
+		"GET /v1/admin/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
+		"GET /v1/admin/psps":                                         {"/v1/admin/psps", "", "psps", ", account_id = 'elsewhere'", ""},
+		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "merchant_webhooks", "", ""},
+		"GET /v1/admin/host-events":                                  {"/v1/admin/host-events", "include_acknowledged=true", "host_outbox", "", ""},
+		"GET /v1/admin/notifications":                                {"/v1/admin/notifications", "", "notifications", "", ""},
+		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
 	}
 	listed := 0
 	for _, route := range routes.Catalog() {
@@ -246,7 +246,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	require.Len(t, fixtures, listed, "every fixture names a list that takes ids")
 
 	// The same customer id at another merchant is another customer.
-	status, page := w.staffJSON(http.MethodGet, "/v1/merchant/customers?ids="+c.id, nil)
+	status, page := w.staffJSON(http.MethodGet, "/v1/admin/customers?ids="+c.id, nil)
 	require.Equal(t, http.StatusOK, status)
 	before := idsOf(t, page)
 	tx, err := w.pool.Begin(ctx)
@@ -258,7 +258,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
 	t.Cleanup(func() { w.dropElsewhere("customers", elsewhere) })
-	status, page = w.staffJSON(http.MethodGet, "/v1/merchant/customers?ids="+c.id, nil)
+	status, page = w.staffJSON(http.MethodGet, "/v1/admin/customers?ids="+c.id, nil)
 	require.Equal(t, http.StatusOK, status)
 	require.Equal(t, before, idsOf(t, page))
 	require.NotEqual(t, "elsewhere@example.test", page["data"].([]any)[0].(map[string]any)["email"])
@@ -300,7 +300,7 @@ func TestEffectiveTierLookups(t *testing.T) {
 		ids[i] = uuid.NewString()
 	}
 	for _, body := range []map[string]any{{"group": group, "customer_ids": ids}, {"group": group, "customer_ids": []string{}}, {"customer_ids": ids[:1]}} {
-		status, refused := w.staffJSON(http.MethodPost, "/v1/merchant/tiers/lookup", body)
+		status, refused := w.staffJSON(http.MethodPost, "/v1/admin/tiers/lookup", body)
 		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
 		require.Equal(t, "invalid_param", refused["error"].(map[string]any)["code"])
 	}
@@ -314,12 +314,12 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	w := newWorld(t)
 	c := w.newCustomer()
 	for _, probe := range []struct{ method, path string }{
-		{http.MethodPost, "/v1/merchant/customers/lookup"},
-		{http.MethodGet, "/v1/merchant/customers/" + c.id + "/tier?group=g"},
-		{http.MethodPut, "/v1/merchant/customers/" + c.id + "/spend-delegations/invoker/someone"},
-		{http.MethodPost, "/v1/merchant/customers/" + c.id + "/credit-grants"},
-		{http.MethodPost, "/v1/merchant/admissions/req-1/release"},
-		{http.MethodPost, "/v1/merchant/admissions/req-1/extend"},
+		{http.MethodPost, "/v1/admin/customers/lookup"},
+		{http.MethodGet, "/v1/admin/customers/" + c.id + "/tier?group=g"},
+		{http.MethodPut, "/v1/admin/customers/" + c.id + "/spend-delegations/invoker/someone"},
+		{http.MethodPost, "/v1/admin/customers/" + c.id + "/credit-grants"},
+		{http.MethodPost, "/v1/admin/admissions/req-1/release"},
+		{http.MethodPost, "/v1/admin/admissions/req-1/extend"},
 	} {
 		status, body := w.staff(probe.method, probe.path)
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, status, "%s %s: %s", probe.method, probe.path, body)
@@ -336,14 +336,14 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	}
 	expires := w.clock.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	for path, body := range map[string]map[string]any{
-		"/v1/merchant/admissions/release": {"request_ids": many(billing.MaxAdmissionBatchItems+1, func(i int) any { return fmt.Sprint("r", i) })},
-		"/v1/merchant/admissions/extend": {"items": many(billing.MaxAdmissionBatchItems+1, func(i int) any {
+		"/v1/admin/admissions/release": {"request_ids": many(billing.MaxAdmissionBatchItems+1, func(i int) any { return fmt.Sprint("r", i) })},
+		"/v1/admin/admissions/extend": {"items": many(billing.MaxAdmissionBatchItems+1, func(i int) any {
 			return map[string]any{"request_id": fmt.Sprint("r", i), "expires_at": expires}
 		})},
-		"/v1/merchant/wasted-spend": {"items": many(billing.MaxBatchItems+1, func(i int) any {
+		"/v1/admin/wasted-spend": {"items": many(billing.MaxBatchItems+1, func(i int) any {
 			return map[string]any{"customer_id": c.id, "invoker": c.id, "currency": "USD", "amount": "1", "source": "s", "source_id": fmt.Sprint(i)}
 		})},
-		"/v1/merchant/credit-grants": {"items": many(billing.MaxBatchItems+1, func(i int) any {
+		"/v1/admin/credit-grants": {"items": many(billing.MaxBatchItems+1, func(i int) any {
 			return map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1", "source": "s", "source_id": fmt.Sprint(i)}
 		})},
 	} {
@@ -357,9 +357,9 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 
 	grant := map[string]any{"items": []any{map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1000", "source": "support", "source_id": uuid.NewString()}}}
-	status, body = w.staffJSON(http.MethodPost, "/v1/merchant/credit-grants", grant)
+	status, body = w.staffJSON(http.MethodPost, "/v1/admin/credit-grants", grant)
 	require.Equal(t, http.StatusCreated, status, "%v", body)
-	status, body = w.staffJSON(http.MethodPost, "/v1/merchant/credit-grants", grant)
+	status, body = w.staffJSON(http.MethodPost, "/v1/admin/credit-grants", grant)
 	require.Equal(t, http.StatusOK, status, "a replay creates nothing: %v", body)
 	require.Equal(t, true, body["items"].([]any)[0].(map[string]any)["replayed"])
 
@@ -367,7 +367,7 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 	items := many(9, func(int) any {
 		return map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1", "source": "support", "source_id": uuid.NewString()}
 	})
-	status, body = w.staffJSON(http.MethodPost, "/v1/merchant/credit-grants", map[string]any{"items": items})
+	status, body = w.staffJSON(http.MethodPost, "/v1/admin/credit-grants", map[string]any{"items": items})
 	require.Equal(t, http.StatusTooManyRequests, status, "two grants and nine more pass ten a minute: %v", body)
 	require.Equal(t, "rate_limit_exceeded", body["error"].(map[string]any)["code"])
 }

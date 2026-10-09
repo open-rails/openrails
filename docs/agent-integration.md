@@ -76,7 +76,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
    `push-merchant-config --insert` → `apply-catalog --merchant NAME --file PATH`.
    Mint an API key. Verify: key works via `client.GetMerchantConfiguration(ctx)` (Go) or an
-   authenticated `GET /v1/merchant/configuration` call.
+   authenticated `GET /v1/admin/configuration` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
 4. **Frontend.** Access tokens: your identity provider mints DPoP-bound

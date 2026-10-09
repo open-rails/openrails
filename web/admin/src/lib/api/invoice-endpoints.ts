@@ -26,18 +26,18 @@ export const listInvoices = (
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Invoice>>("/merchant/invoices", {
+  api<ListPage<Invoice>>("/admin/invoices", {
     query: { ...filters, ...page },
     signal,
   })
 export const getInvoice = (id: string, signal?: AbortSignal) =>
-  api<Invoice>(`/merchant/invoices/${id}`, { signal })
+  api<Invoice>(`/admin/invoices/${id}`, { signal })
 export const listInvoicePayments = (
   id: string,
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<InvoicePayment>>(`/merchant/invoices/${id}/payments`, {
+  api<ListPage<InvoicePayment>>(`/admin/invoices/${id}/payments`, {
     query: { ...page },
     signal,
   })
@@ -79,7 +79,7 @@ export function applyInvoiceAction(request: InvoiceActionRequest) {
         ? { payment_method_id: request.paymentMethodId }
         : undefined
   return api<Invoice | InvoiceCollection>(
-    `/merchant/invoices/${request.id}/${path}`,
+    `/admin/invoices/${request.id}/${path}`,
     {
       method: "POST",
       headers:

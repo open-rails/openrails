@@ -2,7 +2,7 @@
 // findings (#692). Checks that emit ADMIN/OPERATOR findings write a
 // machine-executable Recommendation into finding evidence under EvidenceKey,
 // alongside the human prose in reconciliation_findings.recommended_action.
-// The admin findings queue (POST /merchant/findings/{id}/resolve, outcome
+// The admin findings queue (POST /admin/findings/{id}/resolve, outcome
 // approve) executes it through existing machinery.
 //
 // Leaf package by design: importable from internal/intents,

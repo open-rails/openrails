@@ -26,7 +26,7 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) billing.Pending
 	return billing.PendingAction{
 		PSP:    "ccbill",
 		Action: "create_flexform",
-		Hint:   "Create a FlexForm in the CCBill admin portal, then PATCH /merchant/catalog/prices/" + priceID.String() + " with psp_links.ccbill.{form_name,flex_id}",
+		Hint:   "Create a FlexForm in the CCBill admin portal, then PATCH /admin/catalog/prices/" + priceID.String() + " with psp_links.ccbill.{form_name,flex_id}",
 		PatchRequired: map[string]map[string]map[string]string{
 			"psp_links": {
 				"ccbill": {

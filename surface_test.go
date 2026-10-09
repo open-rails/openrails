@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routes"
 )
 
-// The Go client is the merchant API: every merchant route has exactly one
+// The Go client is the admin API: every merchant route has exactly one
 // Client method and every Client method is exactly one merchant route. The
 // two lists below are every exception, each with its reason.
 
@@ -243,7 +243,7 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 			continue
 		}
 		if route.Name != m.Name {
-			t.Errorf("%s calls %s, which the catalog names %s (its RouteSet)", m.Name, seen[0], route.Name)
+			t.Errorf("%s calls %s, which the catalog names %s (its Client method)", m.Name, seen[0], route.Name)
 		}
 		methodsOf[seen[0]] = append(methodsOf[seen[0]], m.Name)
 

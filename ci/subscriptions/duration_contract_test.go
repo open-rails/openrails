@@ -24,7 +24,7 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 			product["display_name"] = "Duration contract"
 		}
 		var receipt billing.CatalogApplicationReceipt
-		status := w.staffCall(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
+		status := w.staffCall(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
 			"schema_version": 1, "products": map[string]any{key: product},
 		}, &receipt)
 		require.Equal(t, http.StatusOK, status, "%+v", receipt)
@@ -56,7 +56,7 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	}
 	// The YAML HTTP entry point shares the normalized JSON replay identity.
 	yaml := fmt.Sprintf("schema_version: 1\nproducts:\n  %s:\n    display_name: Duration contract\n    prices:\n      mixed:\n        currency: USD\n        unit_amount: 10000000\n        access_duration: 72 hours\n        billing_interval: 30 days\n", key)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/merchant/catalog/applications", strings.NewReader(yaml))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/admin/catalog/applications", strings.NewReader(yaml))
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/yaml")
 	request.Header.Set("Authorization", "Bearer "+w.auth.token(t, "staff"))
@@ -116,7 +116,7 @@ func TestCatalogDurationCreatePriceAPIContract(t *testing.T) {
 				require.Equal(t, tc.access, read.AccessDurationHours, tc.key)
 				require.Equal(t, tc.interval, read.BillingIntervalHours, tc.key)
 				var wire map[string]any
-				require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/merchant/catalog/prices/"+price.ID.String(), nil, &wire))
+				require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/admin/catalog/prices/"+price.ID.String(), nil, &wire))
 				require.NotContains(t, wire, "auto_renew", "renewal choice must not be a catalog property")
 			}
 		})
@@ -130,7 +130,7 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 	revision, err := w.client[remote].GetCatalogRevision(t.Context())
 	require.NoError(t, err)
 	for _, value := range []bool{true, false} {
-		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/catalog/prices", map[string]any{
+		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/prices", map[string]any{
 			"product_id": product.ID.String(), "key": "invalid", "currency": "USD", "unit_amount": "1000000", "auto_renew": value,
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
@@ -143,7 +143,7 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 		{"auto_renew": false},
 	} {
 		invalid["currency"], invalid["unit_amount"] = "USD", "1000000"
-		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/catalog/applications", map[string]any{
+		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
 			"schema_version": 1, "products": map[string]any{product.Key: map[string]any{"prices": map[string]any{"invalid": invalid}}},
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
@@ -155,7 +155,6 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 
 func TestCheckoutOrderRenewalAPIContract(t *testing.T) {
 	w := prepareWorld(t, 12)
-	w.selfService = true
 	w.start()
 	product, err := w.client[remote].CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "renewal-choice", DisplayName: "Order renewal", Entitlements: []string{"content:renewal-choice"},

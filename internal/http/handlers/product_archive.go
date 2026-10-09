@@ -117,7 +117,7 @@ func validateProductArchive(req *billing.ArchiveProductParams) *api.APIError {
 }
 
 // CreateProductArchive archives a product and applies the caller's purchase
-// policy. POST /merchant/catalog/product-archives, Idempotency-Key required.
+// policy. POST /admin/catalog/product-archives, Idempotency-Key required.
 func CreateProductArchive(r *httprequest.Request) {
 	var req billing.ArchiveProductParams
 	if !bindCatalogJSON(r, &req) {

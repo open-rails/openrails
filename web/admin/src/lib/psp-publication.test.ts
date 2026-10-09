@@ -7,7 +7,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 it("sends a stable operation and the reviewed revision on manual retry, without rebasing a conflict", async () => {
   const requests = await server({
-    "PATCH /merchant/psps/psp_a": Response.json(
+    "PATCH /admin/psps/psp_a": Response.json(
       { code: "credential_operation_conflict", message: "conflict" },
       { status: 409 }
     ),

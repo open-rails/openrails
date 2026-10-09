@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -182,7 +183,7 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	require.Equal(t, strings.TrimPrefix(session.attempt(f).String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
 
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{}))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
 	now := time.Now()
 	completed := stripeWebhookBody(t, "evt_e2e_completed", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataPriceID, now.Unix())
 	status, body := postSignedStripeWebhook(t, mux, account, secret, completed, now)

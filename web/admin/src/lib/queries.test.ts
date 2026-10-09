@@ -38,9 +38,9 @@ it("scopes cached server state before a merchant is selected", () => {
 it("keeps same-named price histories and reprice batches separate by product", async () => {
   selectMerchant("merchant-a")
   const requests = await server({
-    "/merchant/catalog/products/by-key/premium/prices/by-key/monthly/history": { data: [{ price_id: "premium_price" }] },
-    "/merchant/catalog/products/by-key/basic/prices/by-key/monthly/history": { data: [{ price_id: "basic_price" }] },
-    "/merchant/reprice-batches": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
+    "/admin/catalog/products/by-key/premium/prices/by-key/monthly/history": { data: [{ price_id: "premium_price" }] },
+    "/admin/catalog/products/by-key/basic/prices/by-key/monthly/history": { data: [{ price_id: "basic_price" }] },
+    "/admin/reprice-batches": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
   })
   const queries = client({ staleTime: Infinity })
   try {
@@ -54,10 +54,10 @@ it("keeps same-named price histories and reprice batches separate by product", a
     expect(premiumBatches.data).toEqual([{ id: "premium" }])
     expect(basicBatches.data).toEqual([{ id: "basic" }])
     expect(calls(requests)).toEqual([
-      "GET /merchant/catalog/products/by-key/premium/prices/by-key/monthly/history",
-      "GET /merchant/catalog/products/by-key/basic/prices/by-key/monthly/history",
-      "GET /merchant/reprice-batches",
-      "GET /merchant/reprice-batches",
+      "GET /admin/catalog/products/by-key/premium/prices/by-key/monthly/history",
+      "GET /admin/catalog/products/by-key/basic/prices/by-key/monthly/history",
+      "GET /admin/reprice-batches",
+      "GET /admin/reprice-batches",
     ])
     expect(new URLSearchParams(requests[2].query).get("price_key")).toBe("monthly")
     expect(new URLSearchParams(requests[3].query).get("price_key")).toBe("monthly")
@@ -108,8 +108,8 @@ describe("complete collections", () => {
     const products = Array.from({ length: 1001 }, (_, i) => aProduct(`prod_${i}`, i))
     const prices = products.map((product, i) => aPrice(`price_${i}`, product.id))
     const requests = await server({
-      "/merchant/catalog/products": (request) => pageOf(products, request.query),
-      "/merchant/catalog/prices": (request) => pageOf(prices, request.query),
+      "/admin/catalog/products": (request) => pageOf(products, request.query),
+      "/admin/catalog/prices": (request) => pageOf(prices, request.query),
     })
     const queries = client()
 

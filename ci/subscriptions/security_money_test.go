@@ -53,7 +53,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			require.Error(t, err, "an archived price is not purchasable")
 
 			// The caller cannot name a currency or a quantity.
-			status, body := w.hostJSON(http.MethodPost, "/v1/merchant/checkout-sessions", map[string]any{
+			status, body := w.hostJSON(http.MethodPost, "/v1/admin/checkout-sessions", map[string]any{
 				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "currency": "JPY", "quantity": 0,
 			})
 			require.Equal(t, http.StatusBadRequest, status, "%v", body)

@@ -25,14 +25,14 @@ func providerOperationPath(operationID string) (string, error) {
 	if trimmed := strings.TrimSpace(operationID); trimmed == "" || trimmed != operationID || operationID == "." || operationID == ".." {
 		return "", invalidErr(fmt.Sprintf("operation_id %q is not a valid operation id", operationID))
 	}
-	return "/v1/merchant/provider-operations/" + url.PathEscape(operationID), nil
+	return "/v1/admin/provider-operations/" + url.PathEscape(operationID), nil
 }
 
 // OpenOperationAuthorization reserves capacity for one provider operation. An
 // identical retry replays; any changed immutable field is refused.
 func (c *Client) OpenOperationAuthorization(ctx context.Context, req billing.OpenOperationAuthorizationParams, requestOptions ...RequestOption) (*billing.OperationAuthorization, error) {
 	var out billing.OperationAuthorization
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/provider-operations", req, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/provider-operations", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -142,7 +142,7 @@ func (c *Client) ListProviderBillingQualifications(ctx context.Context, params b
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"state": commaList(params.State), "authorization_state": commaList(params.AuthorizationState)})
 	var out billing.ListPage[billing.ProviderBillingQualification]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/provider-qualifications", q), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/provider-qualifications", q), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -192,7 +192,7 @@ func (c *Client) ListOperationAuthorizations(ctx context.Context, params billing
 	}
 	setQuery(q, values)
 	var out billing.ListPage[billing.OperationAuthorization]
-	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/provider-operations", q), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/admin/provider-operations", q), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

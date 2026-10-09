@@ -123,7 +123,7 @@ The standalone server serves `GET /metrics` with one gauge per dependency,
 `openrails_dependency_up{dependency,class}` (class `required` or `optional`);
 alert on optional ones at 0 as degraded. Beyond that there is no runtime
 telemetry endpoint.
-`/v1/merchant/metrics`, `/query`, and `/schema` are authenticated merchant
+`/v1/admin/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
@@ -201,7 +201,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   `secret/openrails/merchants/<merchant-uuid>/<name>`. Published references select exact validated versions. Direct backend edits do
   not publish a new active credential. Managed publication does not require restarting the runtime.
 - **Rotation within the same PSP** uses `Client.UpdatePSP`
-  (`PATCH /v1/merchant/psps/{id}`) with a stable operation ID and the
+  (`PATCH /v1/admin/psps/{id}`) with a stable operation ID and the
   expected revision. A candidate is
   staged and account/environment validated before its exact version is published.
   Retry the same operation to recover a lost response. A failed publication leaves
@@ -243,14 +243,14 @@ checkout_routing:
 - **Why did this customer get CCBill?** `checkout_attempts.routing_reason` holds the
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
-- **Preview without charging**: `POST /v1/merchant/psps/routing-preview`
+- **Preview without charging**: `POST /v1/admin/psps/routing-preview`
   with `{"price_id": "...", "country": "US"}` returns the same decision a real session
   would make, including the exact `routing_reason` it would store.
 
 ### Observability
 
-- **Metrics / analytics API**: `GET /v1/merchant/metrics/schema` (self-describing
-  measure/dimension registry) + `POST /v1/merchant/metrics/query` — aggregate-only,
+- **Metrics / analytics API**: `GET /v1/admin/metrics/schema` (self-describing
+  measure/dimension registry) + `POST /v1/admin/metrics/query` — aggregate-only,
   scoped to the API key's merchant, designed to be driven by an LLM agent.
   [metrics-for-llms.md](metrics-for-llms.md).
 - **Logs**: structured logrus to stdout; level via `logger.level` in

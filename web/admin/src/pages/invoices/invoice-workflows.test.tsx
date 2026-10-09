@@ -60,17 +60,17 @@ const paid = (i: number): InvoicePayment => ({
 })
 
 it("retries collection with a card read from the customer's saved methods", async () => {
-  routes["/merchant/customers/cus_1/payment-methods"] = cursorPages(
+  routes["/admin/customers/cus_1/payment-methods"] = cursorPages(
     [aPaymentMethod("pm_1")],
     100
   )
-  routes["POST /merchant/invoices/inv_1/retry-collection"] = {
+  routes["POST /admin/invoices/inv_1/retry-collection"] = {
     invoice: { ...invoice, status: "paid" },
     payment: { ...paid(9), status: "settled" },
     replayed: false,
   }
   await show(<InvoiceDetail invoice={invoice} />)
-  expect(sent("/merchant/customers/cus_1/payment-methods")).toHaveLength(0)
+  expect(sent("/admin/customers/cus_1/payment-methods")).toHaveLength(0)
   await click("Retry collection")
   await vi.waitFor(() => expect(text()).toContain("visa ••••4242 (nmi)"))
   const select = document.querySelector<HTMLSelectElement>(
@@ -81,13 +81,13 @@ it("retries collection with a card read from the customer's saved methods", asyn
     select.dispatchEvent(new Event("change", { bubbles: true }))
   })
   await click("Confirm")
-  const [retry] = sent("/merchant/invoices/inv_1/retry-collection")
+  const [retry] = sent("/admin/invoices/inv_1/retry-collection")
   expect(retry.body).toEqual({ payment_method_id: "pm_1" })
   expect(retry.headers.get("Idempotency-Key")).toMatch(/^[\da-f-]{36}$/)
 })
 
 it("pages the payment history by cursor", async () => {
-  routes["/merchant/invoices/inv_1/payments"] = cursorPages(
+  routes["/admin/invoices/inv_1/payments"] = cursorPages(
     Array.from({ length: 21 }, (_, i) => paid(i)),
     20
   )
@@ -98,13 +98,13 @@ it("pages the payment history by cursor", async () => {
   )!
   await act(async () => next.click())
   await vi.waitFor(() => expect(text()).toContain("txn_20"))
-  expect(sent("/merchant/invoices/inv_1/payments").map((r) => r.query)).toEqual(
+  expect(sent("/admin/invoices/inv_1/payments").map((r) => r.query)).toEqual(
     ["limit=20", "limit=20&cursor=20"]
   )
 })
 
 it("creates the profile of a customer who has none", async () => {
-  routes["GET /merchant/customers/settings"] = {
+  routes["GET /admin/customers/settings"] = {
     data: [
       {
         customer_id: "cus_1",
@@ -116,7 +116,7 @@ it("creates the profile of a customer who has none", async () => {
     ],
     next_cursor: null,
   }
-  routes["PATCH /merchant/customers/settings"] = (request) => ({
+  routes["PATCH /admin/customers/settings"] = (request) => ({
     items: (request.body as { items: unknown[] }).items,
   })
   await show(<CustomerInvoiceProfileSection customerId="cus_1" />)

@@ -52,7 +52,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	mintCheckoutSession(r, billing.CreateCheckoutSessionParams{Customer: customer, PriceID: body.PriceID, PriceKey: body.PriceKey, ProductKey: body.ProductKey, Amount: body.Amount, AutoRenew: body.AutoRenew, SuccessURL: body.SuccessURL})
 }
 
-// ServiceCreateCheckoutSession handles POST /v1/merchant/checkout-sessions:
+// ServiceCreateCheckoutSession handles POST /v1/admin/checkout-sessions:
 // the merchant's credential hands a purchase to its customer, who pays it.
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	var body billing.CreateCheckoutSessionParams

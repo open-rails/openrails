@@ -40,7 +40,7 @@ type Dependencies struct {
 	ControlPlane *controlplane.ControlPlane
 	// Issuer is the control plane's issuer: its users' and API keys'.
 	Issuer string
-	// ResourceServer is the trusted issuers the merchant API accepts, and
+	// ResourceServer is the trusted issuers the admin API accepts, and
 	// ConsoleIssuer the one of them the admin console signs staff in at.
 	ResourceServer *hostconfig.ResourceServerConfig
 	ConsoleIssuer  *hostconfig.ConsoleIssuer
@@ -86,7 +86,7 @@ type Server struct {
 	// registerSelfServiceRoutes mount their routes, consulted by
 	// wrapPublicHandler's PermissiveCORSHTTP. Never nil once New() has run.
 	browserTierRoutes *middleware.BrowserTierRoutes
-	// merchantTierRoutes are the merchant API's patterns, which trusted
+	// merchantTierRoutes are the admin API's patterns, which trusted
 	// issuers' origins may call cross-origin (#1140).
 	merchantTierRoutes *middleware.BrowserTierRoutes
 
@@ -128,7 +128,7 @@ func (s *Server) recordBrowserRoute(pattern string) {
 	s.browserTierRoutes.Add(pattern)
 }
 
-// recordMerchantRoute is recordRoute for a merchant API route: trusted
+// recordMerchantRoute is recordRoute for a admin API route: trusted
 // issuers' origins may call it cross-origin (#1140).
 func (s *Server) recordMerchantRoute(pattern string) {
 	s.recordRoute(pattern)
@@ -270,7 +270,7 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerStandaloneMetaRoutes(mux)
 	// Canonical: /v1/*
 	s.registerUserRoutes(mux)
-	// #555/#561: merchant/support routes live only under `/v1/merchant/*`.
+	// #555/#561: merchant/support routes live only under `/v1/admin/*`.
 	s.registerMerchantActionRoutes(mux)
 	// #721: cross-merchant platform operator directory (/v1/platform/*),
 	// standalone-only (root-group-gated; no embedded analogue).
@@ -394,7 +394,7 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 	)
 }
 
-// staffAuth is the standalone server's Auth for the merchant API: its API
+// staffAuth is the standalone server's Auth for the admin API: its API
 // keys, trusted issuers' access tokens and control-plane user sessions.
 func (s *Server) staffAuth() *httproutes.StandaloneAuth {
 	auth := &httproutes.StandaloneAuth{Issuer: s.issuer, Authenticator: s.authenticator}

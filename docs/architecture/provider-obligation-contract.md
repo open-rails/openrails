@@ -11,22 +11,20 @@ Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
 error classes; the embedded Client dispatches to the same handlers.
 
-| Command | Route | Level group |
+| Command | Route | Permission |
 |---|---|---|
-| `OpenOperationAuthorization` | `POST /v1/merchant/provider-operations` | `openrails.StaffWrites` |
-| `GetOperationAuthorization` | `GET /v1/merchant/provider-operations/{operation_id}` | `openrails.StaffReads` |
-| `ExtendOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/extend` | `openrails.StaffWrites` |
-| `ReleaseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/release` | `openrails.StaffWrites` |
-| `RecordProviderBillingObservation` | `POST /v1/merchant/provider-operations/{operation_id}/observations` | `openrails.StaffWrites` |
-| `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `openrails.StaffReads` |
-| `ListProviderBillingQualifications` | `GET /v1/merchant/provider-qualifications` | `openrails.StaffReads` |
-| `ResolveProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/resolution` | `openrails.StaffWrites` |
-| `ListOperationAuthorizations` | `GET /v1/merchant/provider-operations` | `openrails.StaffReads` |
-| `RefuseProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/refusal` | `openrails.StaffWrites` |
-| `CloseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/close` | `openrails.StaffWrites` |
+| `OpenOperationAuthorization` | `POST /v1/admin/provider-operations` | `AdminWrite` |
+| `GetOperationAuthorization` | `GET /v1/admin/provider-operations/{operation_id}` | `AdminRead` |
+| `ExtendOperationAuthorization` | `POST /v1/admin/provider-operations/{operation_id}/extend` | `AdminWrite` |
+| `ReleaseOperationAuthorization` | `POST /v1/admin/provider-operations/{operation_id}/release` | `AdminWrite` |
+| `RecordProviderBillingObservation` | `POST /v1/admin/provider-operations/{operation_id}/observations` | `AdminWrite` |
+| `GetProviderBillingQualification` | `GET /v1/admin/provider-operations/{operation_id}/qualification` | `AdminRead` |
+| `ListProviderBillingQualifications` | `GET /v1/admin/provider-qualifications` | `AdminRead` |
+| `ResolveProviderBillingQualification` | `POST /v1/admin/provider-operations/{operation_id}/resolution` | `AdminWrite` |
+| `ListOperationAuthorizations` | `GET /v1/admin/provider-operations` | `AdminRead` |
+| `RefuseProviderBillingQualification` | `POST /v1/admin/provider-operations/{operation_id}/refusal` | `AdminWrite` |
+| `CloseOperationAuthorization` | `POST /v1/admin/provider-operations/{operation_id}/close` | `AdminWrite` |
 
-All eleven are in the `openrails.Usage` resource group, which a guard may cover
-instead.
 
 An authorization binds an immutable operation id, customer, record owner, claim
 reference, the exact body bytes with their SHA-256, and an `amount` in `USD`.

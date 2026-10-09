@@ -48,7 +48,7 @@ type (
 	// merchant names users claim.
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
 	// ResourceServerConfig is Config.ResourceServer: the authorization servers
-	// whose access tokens the merchant API accepts.
+	// whose access tokens the admin API accepts.
 	ResourceServerConfig = hostconfig.ResourceServerConfig
 	// TrustedIssuerConfig is one of ResourceServerConfig.TrustedIssuers.
 	TrustedIssuerConfig = hostconfig.TrustedIssuerConfig
@@ -109,7 +109,7 @@ type Config struct {
 	// policy; nil for operator-provisioned deployments.
 	MerchantCreation *MerchantCreationConfig
 	// ResourceServer accepts RFC 9068 access tokens (at+jwt) that trusted
-	// issuers mint for this deployment, so their users reach the merchant API
+	// issuers mint for this deployment, so their users reach the admin API
 	// without the server holding their accounts. Nil accepts none.
 	ResourceServer *ResourceServerConfig
 

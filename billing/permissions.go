@@ -1,7 +1,7 @@
 package billing
 
 // The OAuth scopes of a trusted issuer's access tokens: ScopeMerchant reaches
-// the merchant API, ScopeSelf a customer's own billing (/v1/me).
+// the admin API, ScopeSelf a customer's own billing (/v1/me).
 const (
 	ScopeMerchant = "openrails:merchant"
 	ScopeSelf     = "openrails:self"

@@ -95,8 +95,9 @@ type SetAPIHostParams struct {
 	APIHost string `json:"api_host"`
 }
 
-// Capabilities is what this deployment serves: each route group, on or off,
-// and the optional features its configuration enables.
+// Capabilities is what this deployment serves: each optional route bundle
+// (admin, catalog_write, merchant_config), on or off, and the optional
+// features its configuration enables.
 type Capabilities struct {
 	RouteGroups map[string]bool `json:"route_groups"`
 	Features    map[string]bool `json:"features"`

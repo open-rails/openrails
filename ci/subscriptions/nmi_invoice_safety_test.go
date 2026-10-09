@@ -42,7 +42,7 @@ func invoicePasses(f *fleet, collect bool, on ...*world) []pass {
 	return pending
 }
 
-// Usage enters through the merchant API and the ordinary invoice worker closes
+// Usage enters through the admin API and the ordinary invoice worker closes
 // it. Provider and financial tables are observed, never fabricated or edited.
 func newNMIInvoice(f *fleet, c *customer, on ...*world) billing.InvoiceID {
 	f.t.Helper()

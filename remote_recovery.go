@@ -28,7 +28,7 @@ func (c *Client) ListSubscriptions(ctx context.Context, params billing.Subscript
 		return nil, err
 	}
 	var out billing.ListPage[billing.Subscription]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -39,7 +39,7 @@ func subscriptionPath(id billing.SubscriptionID) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/v1/merchant/subscriptions/" + subscription, nil
+	return "/v1/admin/subscriptions/" + subscription, nil
 }
 
 func customerPath(customerID string) (string, error) {
@@ -47,7 +47,7 @@ func customerPath(customerID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "/v1/merchant/customers/" + customer, nil
+	return "/v1/admin/customers/" + customer, nil
 }
 
 // GetSubscription reads one subscription.

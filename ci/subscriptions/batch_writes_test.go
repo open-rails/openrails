@@ -48,7 +48,7 @@ func TestCustomerBatches(t *testing.T) {
 		{[]any{map[string]any{"id": late}, map[string]any{"id": a, "email": "not-an-address"}}, "items[1].email"},
 		{[]any{}, "items"},
 	} {
-		status, refused := w.staffJSON(http.MethodPost, "/v1/merchant/customers/ensure", map[string]any{"items": body.items})
+		status, refused := w.staffJSON(http.MethodPost, "/v1/admin/customers/ensure", map[string]any{"items": body.items})
 		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
 		require.Equal(t, body.param, refused["error"].(map[string]any)["param"])
 	}
@@ -120,7 +120,7 @@ func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	}
 	_, err = w.client[remote].RecordUsage(t.Context(), nil)
 	require.ErrorIs(t, err, billing.ErrInvalid)
-	status, body := w.staffJSON(http.MethodPost, "/v1/merchant/usage-events", map[string]any{"items": []any{}})
+	status, body := w.staffJSON(http.MethodPost, "/v1/admin/usage-events", map[string]any{"items": []any{}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 }
 

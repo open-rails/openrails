@@ -35,8 +35,8 @@ describe("credit support requests", () => {
     await queries.fetchQuery(creditQueries.grants("alpha", "cus_a", "EUR", 20, "c2"))
     await queries.fetchQuery(creditQueries.transactions("alpha", "cus_a", "USD", 20, ""))
     expect(calls(requests)).toEqual([
-      "GET /merchant/customers/cus_a/credit-grants",
-      "GET /merchant/customers/cus_a/balance/transactions",
+      "GET /admin/customers/cus_a/credit-grants",
+      "GET /admin/customers/cus_a/balance/transactions",
     ])
     expect(requests.map((request) => request.query)).toEqual([
       "currency=EUR&limit=20&cursor=c2",
@@ -49,7 +49,7 @@ describe("credit support requests", () => {
     const queries = client()
     const options = creditMutations.grant(queries, "alpha", "cus_a")
     let attempt = 0
-    routes["POST /merchant/credit-grants"] = () =>
+    routes["POST /admin/credit-grants"] = () =>
       attempt++ === 0
         ? Response.json({ error: { message: "network failed" } }, { status: 503 })
         : { items: [{ id: "cgr_a", replayed: true }] }
@@ -75,7 +75,7 @@ describe("credit support requests", () => {
     const key = creditCustomerKey("alpha", "cus_a")
     queries.setQueryData(key, { balance: 100 })
     const revocation = { id: "grant-a", revoked_amount: "70", replayed: false }
-    routes["POST /merchant/customers/cus_a/credit-grants/grant-a/revoke"] = revocation
+    routes["POST /admin/customers/cus_a/credit-grants/grant-a/revoke"] = revocation
     const revoke = (reason: string) =>
       exec(queries, creditMutations.revoke(queries, "alpha", "cus_a"), { grant: "grant-a", reason })
 
@@ -85,7 +85,7 @@ describe("credit support requests", () => {
     expect(queries.getQueryData(key)).toEqual({ balance: 100 })
     expect(queries.getQueryState(key)?.isInvalidated).toBe(true)
 
-    routes["POST /merchant/customers/cus_a/credit-grants/grant-a/revoke"] = () =>
+    routes["POST /admin/customers/cus_a/credit-grants/grant-a/revoke"] = () =>
       Response.json({ error: { message: "The remaining credit is needed by active holds" } }, { status: 409 })
     await expect(revoke("support")).rejects.toThrow("needed by active holds")
   })
@@ -166,13 +166,13 @@ describe("collection defaults", () => {
   it("refreshes the profile and saved-method views together", async () => {
     const method = aPaymentMethod("pm_a", { collection_currencies: ["USD"] })
     let methods = [method, aPaymentMethod("pm_b")]
-    routes["/merchant/customers/cus_a/billing-profile"] = () => ({
+    routes["/admin/customers/cus_a/billing-profile"] = () => ({
       customer: { id: "cus_a", email: null, created_at: "2026-09-16T00:00:00Z", last_seen_at: "2026-09-16T00:00:00Z" },
       balances: [], subscriptions: [], entitlements: { data: [], next_cursor: null }, payments: [],
       payment_methods: methods, product_access: { data: [], next_cursor: null },
     })
     // One method per page: the picker list walks every page.
-    routes["/merchant/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
+    routes["/admin/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
     const queries = client()
     const profile = adminQueries.customer("cus_a")
     const saved = adminQueries.customerPaymentMethods("cus_a")

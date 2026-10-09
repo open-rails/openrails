@@ -58,7 +58,7 @@ func writeAPIHostError(r *httprequest.Request, err error, claim *merchants.APIHo
 	case errors.Is(err, merchants.ErrAPIHostTaken):
 		refuse(http.StatusConflict, "api_host_taken", "that api_host is already assigned to another merchant")
 	case errors.Is(err, merchants.ErrAPIHostClaimMissing):
-		refuse(http.StatusConflict, "api_host_claim_missing", "claim an api_host with PUT /v1/merchant/api-host first")
+		refuse(http.StatusConflict, "api_host_claim_missing", "claim an api_host with PUT /v1/admin/api-host first")
 	case errors.Is(err, merchants.ErrAPIHostUnproven):
 		message := "the challenge record does not carry the claim's token yet"
 		if claim != nil {
@@ -72,7 +72,7 @@ func writeAPIHostError(r *httprequest.Request, err error, claim *merchants.APIHo
 	}
 }
 
-// GetMerchantAPIHost handles GET /v1/merchant/api-host: the proven api_host
+// GetMerchantAPIHost handles GET /v1/admin/api-host: the proven api_host
 // (null when unset) and the open claim, if any.
 func GetMerchantAPIHost(r *httprequest.Request) {
 	mid, ok := apiHostMerchantScope(r)
@@ -93,7 +93,7 @@ func GetMerchantAPIHost(r *httprequest.Request) {
 	r.JSON(http.StatusOK, apiHostResponse(cfg.APIHost, claim))
 }
 
-// PutMerchantAPIHost handles PUT /v1/merchant/api-host {"api_host": …}. A new
+// PutMerchantAPIHost handles PUT /v1/admin/api-host {"api_host": …}. A new
 // host opens a claim (202) that routes nothing until verified; "" releases
 // the api_host and any claim at once; the current host is a no-op.
 func PutMerchantAPIHost(r *httprequest.Request) {
@@ -136,7 +136,7 @@ func PutMerchantAPIHost(r *httprequest.Request) {
 	r.JSON(http.StatusAccepted, apiHostResponse(cfg.APIHost, claim))
 }
 
-// VerifyMerchantAPIHost handles POST /v1/merchant/api-host/verify: proves the
+// VerifyMerchantAPIHost handles POST /v1/admin/api-host/verify: proves the
 // open claim through DNS and binds its host.
 func VerifyMerchantAPIHost(r *httprequest.Request) {
 	mid, ok := apiHostMerchantScope(r)

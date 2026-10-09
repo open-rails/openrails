@@ -61,7 +61,7 @@ func adminRefundLockKey(paymentID string) int64 {
 	return key
 }
 
-// RefundPayment (POST /merchant/payments/{id}/refunds) refunds a charge.
+// RefundPayment (POST /admin/payments/{id}/refunds) refunds a charge.
 func RefundPayment(r *httprequest.Request) {
 	var path paymentPath
 	if err := r.ShouldBindURI(&path); err != nil {
@@ -421,7 +421,7 @@ func adminRefundMetadata(idempotencyKey string, req RefundRequest, status string
 	return metadata
 }
 
-// ListPayments (GET /merchant/payments) is one page of the merchant's
+// ListPayments (GET /admin/payments) is one page of the merchant's
 // payments, newest first.
 func ListPayments(r *httprequest.Request) {
 	params, ok := paymentListParams(r)
@@ -511,7 +511,7 @@ func writePaymentPage(r *httprequest.Request, params billing.PaymentListParams) 
 	r.SuccessJSON(out)
 }
 
-// GetPayment (GET /merchant/payments/{id}) reads one payment with its
+// GetPayment (GET /admin/payments/{id}) reads one payment with its
 // refunds.
 func GetPayment(r *httprequest.Request) {
 	id, err := billing.ParsePaymentID(r.Param("id"))
@@ -530,7 +530,7 @@ func GetPayment(r *httprequest.Request) {
 	r.SuccessJSON(PaymentToAPI(payment, refunds))
 }
 
-// CreateOffChannelPayment (POST /merchant/customers/{customer_id}/payments/off-channel)
+// CreateOffChannelPayment (POST /admin/customers/{customer_id}/payments/off-channel)
 // records a purchase paid outside any rail: 201 with the payment, 200 when the
 // same transaction_id was already recorded with the same terms, and 409
 // idempotency_key_reused when it was recorded with other terms.

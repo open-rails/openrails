@@ -34,6 +34,8 @@ var _ = gin.Mount
 var _ = fiber.Mount
 type ownAuth struct{}
 type userKey struct{}
+type perm string
+func (p perm) String() string { return string(p) }
 func (ownAuth) gate(next http.Handler) http.Handler {
  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
   if r.Header.Get("Authorization") == "" { http.Error(w, "sign in", http.StatusUnauthorized); return }
@@ -49,7 +51,7 @@ func (ownAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
   Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}, ok
 }
 func main() {
- routes := openrails.Routes{Auth: ownAuth{}, Merchant: true, Customers: openrails.CustomerSelfService}
+ routes := openrails.Routes{Auth: ownAuth{}, Permissions: openrails.Permissions{AdminRead: perm("billing:read")}}
  cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
  if routes.Auth == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
 }

@@ -2,7 +2,7 @@
 
 You are the merchant: the business operator of an OpenRails deployment. This guide
 covers defining what's for sale (the catalog), understanding entitlements, and running
-day-to-day customer operations via the merchant API and admin console.
+day-to-day customer operations via the admin API and admin console.
 
 Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a
 **PSP** is *your account* on a rail (e.g. a `mobius` key on the nmi rail; `stripe`,
@@ -15,9 +15,9 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 
 The database is the catalog. The authorized in-process client can always edit
 individual records or apply a JSON/YAML batch. Catalog writes over HTTP are
-part of the merchant's configuration: an embedded host exposes them by
-mounting `Routes.MerchantConfig` (refused while `Config.Catalog` is the
-catalog's truth); the standalone server exposes them when its
+their own bundle: an embedded host exposes them by giving
+`Permissions.CatalogWrite` (refused while `Config.Catalog` is the catalog's
+truth); the standalone server exposes them when its
 `secret_backend` is `vault` or `db`.
 
 Each batch is applied atomically once per merchant, identified by a canonical
@@ -27,7 +27,7 @@ retires an entry, and `prune: true` opts into archiving omitted products and pri
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
-The API is `POST /v1/merchant/catalog/applications`, and the in-process client
+The API is `POST /v1/admin/catalog/applications`, and the in-process client
 method is `ApplyCatalog`. The operator CLI (`openrails apply-catalog`) applies the
 same document with local authority. No application ID or expected revision is
 written by the caller.
@@ -109,7 +109,7 @@ products:
 
 Prepaid balance products use `credit_grant`; see the
 [prepaid catalog example](../README.md#prepaid-api-balance-catalog). Administrative
-funding uses `POST /v1/merchant/credit-grants`
+funding uses `POST /v1/admin/credit-grants`
 (`Client.CreateCreditGrants`), whose grants carry their own expiry. The price
 `amount` alias does not change numeric credit-grant amounts, customer-selected
 bounds, or metered rate-card fields.
@@ -212,30 +212,31 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 
 ### Managing customers day-to-day
 
-All merchant-admin operations live under `/v1/merchant/*` (same public port; each
-route behind its guard: on the standalone server `server.MerchantRead` for
-reads, `server.MerchantWrite` for actions on customers, `server.MerchantAdmin`
-for the merchant's configuration). Auth is a merchant API key
+All merchant-admin operations live under `/v1/admin/*` (same public port; each
+route behind its bundle's permission: on the standalone server
+`server.MerchantRead` for reads, `server.MerchantWrite` for actions on
+customers, `server.MerchantAdmin` for catalog edits and the merchant's
+configuration). Auth is a merchant API key
 (`Bearer openrails_st_...`), a user session, or a trusted issuer's access token. Full
 reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
 |---|---|---|
-| Look up a customer (profile, balances, entitlements, history) | `GET /v1/merchant/customers/{customer_id}/billing-profile` | Customers → search |
-| Grant a product free / revoke a window | `POST /v1/merchant/product-access` (a batch), `DELETE /v1/merchant/customers/{customer_id}/product-access/{id}` | Customers → profile |
-| Record an off-channel/manual purchase | `POST /v1/merchant/customers/{customer_id}/payments/off-channel` | Customers → profile |
-| List / inspect payments | `GET /v1/merchant/payments[/{id}]` | Payments |
-| Refund (with explicit `revoke_access` choice) | `POST /v1/merchant/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
-| List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
-| Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
-| Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Grant / revoke credit | `POST /v1/merchant/credit-grants`, `POST /v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | Customers → profile |
-| Ask what a grant key did | `GET /v1/merchant/customers/{customer_id}/credit-grants?source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{customer_id}/spend-delegations`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
-| Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/merchant/customers/settings` | Settings; Customers → profile |
-| Catalog over HTTP | `POST /v1/merchant/catalog/products`, `PATCH /v1/merchant/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
-| Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
-| Operational alerts / findings | `GET /v1/merchant/notifications`, `GET /v1/merchant/findings` | Ops |
+| Look up a customer (profile, balances, entitlements, history) | `GET /v1/admin/customers/{customer_id}/billing-profile` | Customers → search |
+| Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `DELETE /v1/admin/customers/{customer_id}/product-access/{id}` | Customers → profile |
+| Record an off-channel/manual purchase | `POST /v1/admin/customers/{customer_id}/payments/off-channel` | Customers → profile |
+| List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
+| Refund (with explicit `revoke_access` choice) | `POST /v1/admin/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
+| List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
+| Cancel / resume a subscription | `POST /v1/admin/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
+| Change a subscription's payment method | `PUT /v1/admin/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
+| Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` | Customers → profile |
+| Ask what a grant key did | `GET /v1/admin/customers/{customer_id}/credit-grants?source_id=` | — |
+| Spend delegations (per-customer agent budgets) | `PUT /v1/admin/customers/{customer_id}/spend-delegations`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
+| Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/settings` | Settings; Customers → profile |
+| Catalog over HTTP | `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
+| Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
+| Operational alerts / findings | `GET /v1/admin/notifications`, `GET /v1/admin/findings` | Ops |
 
 A user session needs a recent sign-in for every write here (403
 `step_up_required` otherwise); API keys and access tokens do not. A manual
@@ -272,7 +273,7 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 
 ### Archiving a product with purchase refunds
 
-`Client.ArchiveProduct` (`POST /v1/merchant/catalog/product-archives`, catalog
+`Client.ArchiveProduct` (`POST /v1/admin/catalog/product-archives`, catalog
 update plus payment refund permission) archives a product — never deletes it —
 and applies the host's policy to its one-time purchases at or after
 `PurchaseWindowStartsAt` (or within `WindowSeconds` of first acceptance), chosen by
@@ -292,15 +293,13 @@ grandfathered). A purchase under review is a finding
 resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
 and ends access, `ignore` keeps both.
 
-Granting credits is money-in: a host that keeps it from everyone who can grant
-access guards `openrails.Credits` (or `openrails.CreateCreditGrants`) with a
-stricter permission than `openrails.StaffWrites`. Each grant item's `source_id`
+Granting credits is money-in, an `AdminWrite`. Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 
 ### The admin console
 
-A React SPA served at its path (`/admin/` by default), driving the same `/v1/merchant/*` API — off by
+A React SPA served at its path (`/admin/` by default), driving the same `/v1/admin/*` API — off by
 default. It mounts only when console assets are built into the binary **and** it is
 switched on: `Routes.AdminConsole` embedded, `admin_console.enabled: true` (env
 `ADMIN_CONSOLE_ENABLED`) standalone. Login is a real AuthKit

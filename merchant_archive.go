@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/archivewire"
 )
 
-const merchantBillingArchivePath = "/v1/merchant/billing-archive"
+const merchantBillingArchivePath = "/v1/admin/billing-archive"
 
 // ExportBillingArchive writes the bound merchant's versioned billing archive.
 // Stop source writers for the final cutover export. Authentication identities,

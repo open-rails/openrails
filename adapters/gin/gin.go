@@ -12,8 +12,8 @@ import (
 
 // Mount registers one native route per method and path of the routes
 // selection selects (Client.Routes) on the root engine: the API under
-// selection.Prefix, e.g. Mount(r, client, openrails.Routes{Prefix: "/billing",
-// Storefront: true}) serves /billing/v1/*. Gin keeps its own 404, 405 and
+// selection.Prefix, e.g. Mount(r, client, openrails.Routes{Auth: auth,
+// Prefix: "/billing"}) serves /billing/v1/*. Gin keeps its own 404, 405 and
 // redirect policy.
 func Mount(router *gin.Engine, client *openrails.Client, selection openrails.Routes) error {
 	if client == nil || router == nil {

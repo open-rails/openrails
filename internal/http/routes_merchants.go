@@ -12,7 +12,7 @@ import (
 // under a declared hosted creation policy and behind a per-IP and per-user
 // velocity limit. A trusted issuer's user lists and accepts its pending
 // federated grants at /v1/merchants/invites (#1140). Trusted issuers' origins
-// reach them like the merchant API.
+// reach them like the admin API.
 func (s *Server) registerMerchantAccountRoutes(mux router.Registrar) {
 	if s.controlPlane == nil {
 		return

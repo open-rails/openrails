@@ -82,7 +82,7 @@ func TestAdminRateLimitMW(t *testing.T) {
 	handled := 0
 	serveAs := func(subject string, kind billingauth.SubjectKind) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		wire := httptest.NewRequest(http.MethodPost, "/v1/merchant/subscriptions/sub_1/cancel", nil)
+		wire := httptest.NewRequest(http.MethodPost, "/v1/admin/subscriptions/sub_1/cancel", nil)
 		if subject != "" {
 			staff := billingauth.Staff{Identity: billingauth.Identity{Issuer: "test", Subject: subject, SubjectKind: kind, Invoker: billingauth.Invoker{Issuer: "test", ID: subject}}, Merchant: billing.MerchantID(uuid.New())}
 			wire = wire.WithContext(billingauth.BindStaff(wire.Context(), staff))
@@ -149,7 +149,7 @@ func TestAdminRateLimitCountsBatchItems(t *testing.T) {
 	var bodies []string
 	serve := func(items int) *httptest.ResponseRecorder {
 		body := `{"items":[` + strings.TrimSuffix(strings.Repeat(`{"product_id":"prod_1"},`, items), ",") + `]}`
-		req := httptest.NewRequest(http.MethodPost, "/v1/merchant/product-access", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/v1/admin/product-access", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		staff := billingauth.Staff{Identity: billingauth.Identity{Issuer: "test", Subject: adminUser, SubjectKind: billingauth.SubjectUser, Invoker: billingauth.Invoker{Issuer: "test", ID: adminUser}}, Merchant: billing.MerchantID(uuid.New())}
 		req = req.WithContext(billingauth.BindStaff(req.Context(), staff))

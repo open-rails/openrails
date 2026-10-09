@@ -14,7 +14,7 @@ func customerIDPath(id billing.CustomerID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr("customer_id is required")
 	}
-	return "/v1/merchant/customers/" + id.String(), nil
+	return "/v1/admin/customers/" + id.String(), nil
 }
 
 // pageValues adds a list page's limit and cursor to q.
@@ -56,7 +56,7 @@ func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateC
 		body.Items[i] = item
 	}
 	var out billing.CreateCreditGrantBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credit-grants", body, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/credit-grants", body, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Items, nil

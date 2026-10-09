@@ -56,7 +56,7 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 	}
 }
 
-// ListAlertWebhooks handles GET /v1/merchant/alert-webhooks.
+// ListAlertWebhooks handles GET /v1/admin/alert-webhooks.
 func ListAlertWebhooks(r *httprequest.Request) {
 	ids, ok := listIDs(r, billing.ParseAlertWebhookID)
 	if !ok {
@@ -74,7 +74,7 @@ func ListAlertWebhooks(r *httprequest.Request) {
 	r.SuccessJSON(billing.ListPage[billing.AlertWebhook]{Items: hooks})
 }
 
-// CreateAlertWebhook handles POST /v1/merchant/alert-webhooks.
+// CreateAlertWebhook handles POST /v1/admin/alert-webhooks.
 func CreateAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
@@ -92,7 +92,7 @@ func CreateAlertWebhook(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, hook)
 }
 
-// SetAlertWebhookURL handles PUT /v1/merchant/alert-webhooks/{id}/url: a new
+// SetAlertWebhookURL handles PUT /v1/admin/alert-webhooks/{id}/url: a new
 // credential, the same webhook.
 func SetAlertWebhookURL(r *httprequest.Request) {
 	svc, ok := alertService(r)
@@ -115,7 +115,7 @@ func SetAlertWebhookURL(r *httprequest.Request) {
 	r.SuccessJSON(hook)
 }
 
-// DeleteAlertWebhook handles DELETE /v1/merchant/alert-webhooks/{id}.
+// DeleteAlertWebhook handles DELETE /v1/admin/alert-webhooks/{id}.
 func DeleteAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
@@ -142,7 +142,7 @@ type ListMerchantNotificationsQuery struct {
 	Unread bool `form:"unread"`
 }
 
-// ListMerchantNotifications handles GET /v1/merchant/notifications.
+// ListMerchantNotifications handles GET /v1/admin/notifications.
 func ListMerchantNotifications(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
@@ -168,7 +168,7 @@ func ListMerchantNotifications(r *httprequest.Request) {
 	r.SuccessJSON(notes)
 }
 
-// MarkMerchantNotificationsRead handles POST /v1/merchant/notifications/read.
+// MarkMerchantNotificationsRead handles POST /v1/admin/notifications/read.
 func MarkMerchantNotificationsRead(r *httprequest.Request) {
 	var req billing.MarkNotificationsReadParams
 	if !r.BindJSON(&req) {
@@ -190,7 +190,7 @@ func MarkMerchantNotificationsRead(r *httprequest.Request) {
 	r.SuccessJSON(billing.NotificationLookup{Notifications: notes})
 }
 
-// MerchantNotificationsUnreadCount handles GET /v1/merchant/notifications/unread-count.
+// MerchantNotificationsUnreadCount handles GET /v1/admin/notifications/unread-count.
 func MerchantNotificationsUnreadCount(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {

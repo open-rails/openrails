@@ -11,7 +11,7 @@ Once per loaded credential set, never per payment:
 - At startup, in the background: `openrails.New` and the standalone server
   never wait on a provider. An embedded engine verifies only its declared
   merchant.
-- When a credential is created or rotated through the merchant API (the write
+- When a credential is created or rotated through the admin API (the write
   is refused on anything but a simulated verdict).
 - At the first mutation of a credential set this process has not verified yet
   (for example one rotated by another process).

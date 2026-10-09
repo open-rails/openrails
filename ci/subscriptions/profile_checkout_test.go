@@ -140,8 +140,8 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	oliviaToken, oscarToken, malloryToken := token(olivia), token(oscar), token(mallory)
 
 	routes, err := srv.Routes(
-		openrails.CustomerRoutes{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: openrails.CustomerBillingManagement, Merchant: platform.slug, Auth: ownerAuth{Auth: auth, owners: owners}},
-		openrails.CustomerRoutes{Prefix: "/billing/v1/me", Scope: openrails.CustomerSelfService, Auth: auth},
+		openrails.CustomerRoutes{Prefix: "/api/v1/merchants/{slug}/billing/me", Merchant: platform.slug, Auth: ownerAuth{Auth: auth, owners: owners}},
+		openrails.CustomerRoutes{Prefix: "/billing/v1/me", Auth: auth},
 	)
 	require.NoError(t, err)
 	mux := http.NewServeMux()

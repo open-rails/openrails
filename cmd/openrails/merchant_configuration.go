@@ -140,7 +140,7 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	}
 	rt := &app.Runtime{DB: database, Config: cfg, MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	table := &router.Table{}
-	httproutes.RegisterMerchantRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/merchant/configuration")
+	httproutes.RegisterStaffRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/admin/configuration")
 	transport, capability := inprocess.NewTransport(table.Handler(), func() billing.MerchantID { return selected.ID })
 	client, err := openrails.NewRemote("http://openrails.invalid", openrails.WithHTTPClient(&http.Client{Transport: transport}), openrails.WithMerchantID(selected.ID), openrails.WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
 	return client, cleanup, err

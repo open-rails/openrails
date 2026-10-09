@@ -12,11 +12,12 @@ it("keeps catalog reads visible but only offers creation when the server enables
   browserEnvironment()
   let enabled = false
   const requests = await server({
-    "GET /merchant/catalog/revision": () => ({
+    "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
+    "GET /admin/catalog/revision": () => ({
       revision: 4,
       writes_allowed: enabled,
     }),
-    "GET /merchant/catalog/products": {
+    "GET /admin/catalog/products": {
       items: [],
       total: 0,
       limit: 100,

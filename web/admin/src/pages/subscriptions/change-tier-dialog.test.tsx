@@ -52,8 +52,8 @@ beforeEach(async () => {
   answer = async () => result("succeeded")
   previewAnswer = async () => Response.json(preview)
   const routes: Record<string, Reply> = {
-    "POST /merchant/subscriptions/sub-one/change-tier/preview": () => previewAnswer(),
-    "POST /merchant/subscriptions/sub-one/change-tier": (request) => {
+    "POST /admin/subscriptions/sub-one/change-tier/preview": () => previewAnswer(),
+    "POST /admin/subscriptions/sub-one/change-tier": (request) => {
       sent.push({
         key: request.headers.get("Idempotency-Key")!,
         price: (request.body as { price_id: string }).price_id,

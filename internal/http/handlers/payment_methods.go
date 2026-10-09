@@ -48,7 +48,7 @@ func ListPaymentMethods(r *httprequest.Request) {
 	listPaymentMethods(r, customer)
 }
 
-// ListCustomerPaymentMethods (GET /merchant/customers/{customer_id}/payment-methods)
+// ListCustomerPaymentMethods (GET /admin/customers/{customer_id}/payment-methods)
 // is one page of a customer's saved cards, newest first.
 func ListCustomerPaymentMethods(r *httprequest.Request) {
 	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))

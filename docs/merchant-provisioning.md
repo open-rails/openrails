@@ -196,14 +196,14 @@ Per merchant:
   globally unique): the `Host` header public routes and Host-routed webhooks
   resolve this merchant from. Declared hosts are asserted on every apply;
   omitted leaves the stored value untouched. An owner claims one at runtime
-  with `PUT /v1/merchant/api-host` and binds it once a TXT record proves
-  control of the domain (`POST /v1/merchant/api-host/verify`).
+  with `PUT /v1/admin/api-host` and binds it once a TXT record proves
+  control of the domain (`POST /v1/admin/api-host/verify`).
 - `remote_application` — the host app's issuer (JWKS URI, inline static
   `jwks`, or raw `public_keys`), registered as merchant **owner**: its RFC 9068
   access tokens act for this one merchant and no other, within that role
   ([auth](auth.md#trusted-issuers); needs `resource_server`).
 - `settings` — the merchant's settings (`billing.MerchantSettings`), the same
-  document `GET /v1/merchant/configuration` reads and a configuration
+  document `GET /v1/admin/configuration` reads and a configuration
   application changes, with the same names, units and validation
   ([merchant settings](api/merchant-settings.md)): `profile`, invoicing
   (`billing_period_boundary`, `collection_threshold`, `monthly_floor`, amounts in
@@ -352,13 +352,13 @@ must pass, and payload account identity must agree. Host headers and merchant
 slugs do not grant callback authority. The public billing base supplies only the
 external mount prefix; generated Stripe URLs use this same path.
 
-## What the merchant API can change
+## What the admin API can change
 
 Merchant routes are scoped to the authenticated merchant; cross-merchant
 operations are the standalone operator's (`/v1/platform`). PSP metadata and
 archive decisions are always available through the Client; writing a PSP
 credential needs a writable secret backend, so it is refused under `snapshot`
-custody. Catalog mutation routes are `Routes.MerchantConfig`'s, refused while
+custody. Catalog mutation routes are `Permissions.CatalogWrite`'s, refused while
 `Config.Catalog` is the catalog's truth (standalone: allowed when
 `secret_backend` is `vault` or `db`, read-only under `snapshot`); the embedded
 in-process Client is the process owner and writes its own catalog whatever the

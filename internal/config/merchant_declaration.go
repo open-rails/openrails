@@ -24,7 +24,7 @@ type MerchantDeclaration struct {
 	// APIHost is the merchant's canonical API host (e.g. "api.myapp.example"):
 	// the Host-header value public routes resolve this merchant from.
 	// Globally unique across active merchants. Omitted leaves the stored value
-	// untouched (it can also be assigned via PUT /v1/merchant/api-host).
+	// untouched (it can also be assigned via PUT /v1/admin/api-host).
 	APIHost string `yaml:"api_host,omitempty"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).

@@ -3,13 +3,14 @@
 ### What it is
 
 A React SPA (`web/admin`, Vite), the staff dashboard, driving the
-`/v1/merchant/*` API. It is the browser UI for the **merchant operator**, the
+`/v1/admin/*` API. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, team, API keys. It holds no state and no privileges of its own; every
-action is a merchant-API call its guard admits the caller for. Its PSP,
-settings and notification pages, and dashboard editing, appear only where the
-merchant's configuration is mounted (`Routes.MerchantConfig`; always on the
-standalone server).
+action is an admin-API call its permission admits the caller for. Catalog
+editing appears only where catalog edits are mounted (`Permissions.CatalogWrite`),
+its PSP, settings and notification pages, and dashboard editing, only where the
+merchant's configuration is (`Permissions.MerchantConfig`); both are always on
+the standalone server.
 
 ### Turning it on and off
 
@@ -23,9 +24,9 @@ On is one switch, where the HTTP surface is chosen:
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
-    Prefix:       "/billing",                                     // the API at /billing/v1/*
-    Merchant:     true,                                           // the console drives the merchant API
-    Guards:       openrails.Guards{openrails.StaffReads: customersRead, openrails.StaffWrites: customersUpdate},
+    Auth:         ak,
+    Prefix:       "/billing", // the API at /billing/v1/*
+    Permissions:  openrails.Permissions{AdminRead: customersRead, AdminWrite: customersUpdate}, // the console drives the admin API
     AdminConsole: &openrails.AdminConsole{Path: "/billing-admin"}, // nil: no console
 })
 ```
@@ -40,7 +41,7 @@ Env: `ADMIN_CONSOLE_ENABLED`, `ADMIN_CONSOLE_PATH`.
 
 Mounting the console fails loudly, before anything registers, when:
 
-- `Routes.Merchant` is off: the console has no API to drive;
+- `Permissions.AdminRead` is not given: the console has no API to drive;
 - there is no console build (see below);
 - the path is invalid or overlaps an OpenRails route (`/v1`, or a path under the
   API's `Prefix/v1`).
@@ -76,7 +77,7 @@ and accepted invitations decide what each person may do.
 `auth_base_url` is the AuthKit JSON API staff sign in through:
 `Routes.AdminConsole.AuthBaseURL` embedded (required), the control plane's
 standalone. Both are paths on the console's own origin. The
-merchant API answers no cross-origin requests, so the console, the API and
+admin API answers no cross-origin requests, so the console, the API and
 AuthKit share one origin. A separate host such as `billing.example.com` works by
 sending that host to the same server, or to a router (for example a Gin engine
 chosen by `Host`) that mounts AuthKit and OpenRails, with `Merchant` and
@@ -206,9 +207,9 @@ What the engine enforces:
   **no authentication at the transport layer**. Anyone who can reach the
   console path gets the app shell and the bootstrap document (base URLs +
   feature flags; no secrets, no data).
-- All **data and actions** go through `/v1/merchant/*` with a Bearer token
+- All **data and actions** go through `/v1/admin/*` with a Bearer token
   (AuthKit user session or merchant API key) and are enforced server-side by
-  each route's guard plus per-query merchant scoping. The console
+  each route's permission plus per-query merchant scoping. The console
   has no client-side privilege of its own; a 403 renders as a
   "role lacks permission" toast.
 - Core OpenRails imposes **no environment restriction**: a mounted console
@@ -223,8 +224,8 @@ Standalone SaaS deployments that do serve it in production should front it with
 their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
-Who may sign in is decided by the merchant API, not the console: embedded, the
-mount's `Auth.RequirePermission` decides each route's guard (`Routes.Guards`).
+Who may sign in is decided by the admin API, not the console: embedded, the
+mount's `Auth.RequirePermission` checks each route's permission (`Routes.Permissions`).
 
 ### Viewing it
 

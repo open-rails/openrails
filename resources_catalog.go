@@ -24,7 +24,7 @@ func setID(q url.Values, name string, id wireID) {
 // CreateProduct creates a product.
 func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProductParams, requestOptions ...RequestOption) (*billing.Product, error) {
 	var out billing.Product
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/products", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/products", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -38,7 +38,7 @@ func (c *Client) EnsureProduct(ctx context.Context, params billing.CreateProduct
 		return nil, err
 	}
 	var out billing.Product
-	if err := c.do(ctx, http.MethodPut, "/v1/merchant/catalog/products/by-key/"+key, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/v1/admin/catalog/products/by-key/"+key, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -51,7 +51,7 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 		return nil, err
 	}
 	var out billing.Product
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/"+path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/"+path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -64,7 +64,7 @@ func (c *Client) GetProductByKey(ctx context.Context, key string, requestOptions
 		return nil, err
 	}
 	var out billing.Product
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -86,7 +86,7 @@ func (c *Client) ListProducts(ctx context.Context, params billing.ProductListPar
 		return nil, err
 	}
 	var out billing.ListPage[billing.Product]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -99,7 +99,7 @@ func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params
 		return nil, err
 	}
 	var out billing.Product
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/products/"+path, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/admin/catalog/products/"+path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -119,7 +119,7 @@ func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePricePara
 		return nil, invalidErr("exactly one of product_id, product_key and product_data is required")
 	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/prices", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -136,7 +136,7 @@ func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billin
 		path += "?verify=true"
 	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/"+path, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/prices/"+path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -153,7 +153,7 @@ func (c *Client) GetPriceByKey(ctx context.Context, productKey, key string, requ
 		return nil, err
 	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+productKey+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+productKey+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -172,7 +172,7 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 		return nil, err
 	}
 	var out billing.ListPage[billing.Price]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/prices?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -190,7 +190,7 @@ func (c *Client) ListPriceKeyHistory(ctx context.Context, productKey, key string
 		return nil, err
 	}
 	var out billing.ListPage[billing.PriceKeyMovement]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+productKey+"/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+productKey+"/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -204,7 +204,7 @@ func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params bil
 		return nil, err
 	}
 	var out billing.Price
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/prices/"+path, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/admin/catalog/prices/"+path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

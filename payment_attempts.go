@@ -24,7 +24,7 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.Payment
 		return nil, err
 	}
 	var out billing.ListPage[billing.PaymentAttempt]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payment-attempts?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/payment-attempts?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -37,7 +37,7 @@ func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemp
 		return nil, err
 	}
 	var out billing.PaymentAttempt
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payment-attempts/"+attempt, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/payment-attempts/"+attempt, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -54,7 +54,7 @@ func (c *Client) ListRebillCycles(ctx context.Context, filter billing.RebillCycl
 		return nil, err
 	}
 	var out billing.ListPage[billing.RebillCycle]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/rebill-cycles?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/rebill-cycles?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -67,7 +67,7 @@ func (c *Client) GetRebillCycle(ctx context.Context, id billing.RebillCycleID, r
 		return nil, err
 	}
 	var out billing.RebillCycle
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/rebill-cycles/"+cycle, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/rebill-cycles/"+cycle, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

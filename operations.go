@@ -10,7 +10,7 @@ import (
 // ListWorkerHealth returns each background job kind's recent runs.
 func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error) {
 	var out billing.ListPage[billing.WorkerHealth]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/worker-health", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/worker-health", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -29,7 +29,7 @@ func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams
 		return nil, err
 	}
 	var out billing.ListPage[billing.Finding]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings?"+q.Encode(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/findings?"+q.Encode(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -38,7 +38,7 @@ func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams
 // GetFindingSummary returns the findings queue at a glance.
 func (c *Client) GetFindingSummary(ctx context.Context, options ...RequestOption) (*billing.FindingSummary, error) {
 	var out billing.FindingSummary
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings/summary", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/findings/summary", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -50,7 +50,7 @@ func (c *Client) GetFinding(ctx context.Context, id billing.FindingID, options .
 		return nil, invalidErr("finding id is required")
 	}
 	var out billing.Finding
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings/"+id.String(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/findings/"+id.String(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -63,7 +63,7 @@ func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req b
 		return nil, invalidErr("finding id is required")
 	}
 	var out billing.FindingResolution
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/findings/"+id.String()+"/resolve", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/admin/findings/"+id.String()+"/resolve", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
