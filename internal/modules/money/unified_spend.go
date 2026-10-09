@@ -285,9 +285,10 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	if fromOwed > 0 {
 		if preAuthorized {
 			// Pre-authorized capture never re-gates: the remainder becomes
-			// owed/overdraft regardless of the credit line. Ensure a settings row
-			// exists so the owed accrual has a home (mirrors the arrears flow).
-			if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModeArrears, now); err != nil {
+			// owed/overdraft regardless of the credit line. An involuntary
+			// overdraft leaves a prepaid customer prepaid: the owed blocks new
+			// holds until funding repays it.
+			if err := s.ensureSettingsRowTx(ctx, q, tenantID, payerID, cur, BillingModePrepaid, now); err != nil {
 				return 0, 0, false, err
 			}
 		} else {

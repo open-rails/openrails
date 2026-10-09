@@ -17,8 +17,9 @@ import (
 
 // Arrears transaction types (postpaid usage ledger, issue #241).
 const (
-	txOwedAccrual = "owed_accrual" // usage accrued to outstanding owed (positive amount)
-	txOwedPayment = "owed_payment" // owed collected via a card charge (negative amount)
+	txOwedAccrual   = "owed_accrual"   // usage accrued to outstanding owed (positive amount)
+	txOwedPayment   = "owed_payment"   // owed collected via a card charge (negative amount)
+	txOwedRepayment = "owed_repayment" // owed repaid from newly funded credit (negative amount)
 )
 
 // AccrueOwed records postpaid usage against an arrears account. It writes the

@@ -17,7 +17,7 @@ var (
 )
 
 // CreateCreditGrant grants a customer prepaid credit, idempotent on the
-// customer and SourceID.
+// customer and SourceID. The credit repays outstanding owed first.
 func (s *Service) CreateCreditGrant(ctx context.Context, customer identity.CustomerID, params billing.CreateCreditGrantParams) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -51,6 +51,7 @@ func (s *Service) CreateCreditGrant(ctx context.Context, customer identity.Custo
 	trx, err := s.moneyService().Deposit(ctx, money.DepositParams{
 		CustomerID: &customer, Invoker: invoker, Currency: currency, Amount: params.Amount,
 		Source: key.Source(), SourceID: &sourceID, ExpiresAt: expiresAt, Description: params.Description,
+		RepayOwed: true,
 	})
 	if err != nil {
 		return nil, err

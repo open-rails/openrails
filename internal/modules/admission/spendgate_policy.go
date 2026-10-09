@@ -184,7 +184,8 @@ func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (ava
 	available = capacity.Balance - capacity.Held
 	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode != money.BillingModeArrears {
-		return available, 0, outstanding
+		// Prepaid: money already owed is not available to new work.
+		return available - outstanding, 0, outstanding
 	}
 	limit := capacity.CreditLimit
 	if policy.OutstandingCapAmount > 0 {

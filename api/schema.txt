@@ -15,6 +15,7 @@ migration 0011_currency_codes.up.sql sha256:513950fd96eae6df288a7afd6956ded16b0c
 migration 0012_provider_applied_coverage.up.sql sha256:33533330adbe12918eae947cd4c94f5c791ebff7a7e65d65d60eeafca9986f16
 migration 0013_federated_grants.up.sql sha256:515cb9f231fbfd2850c0c3e379009be93da9ca702b8cec7bfdf31710857830cf
 migration 0014_operation_authorization_extensions.up.sql sha256:7e96a488b7144c28ce497c77a1c746bd3175cfb056f145fa69559d72b2215c69
+migration 0015_owed_repayment.up.sql sha256:54ad22cbf5293b6a00f7cbf18822c8c013f32c6e75a9e910899e7d95f50da460
 
 table billing.account_updater_batches
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -745,7 +746,7 @@ table billing.invoice_payments
   column payment_method_id uuid
   column idempotency_key text
   constraint invoice_payments_amount_positive_check CHECK ((amount > 0))
-  constraint invoice_payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
+  constraint invoice_payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text, 'balance'::text])))
   constraint invoice_payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
   constraint invoice_payments_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint invoice_payments_customer_id_currency_invoice_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, invoice_id) REFERENCES billing.invoices(merchant_id, customer_id, currency, id) ON DELETE CASCADE
@@ -897,7 +898,7 @@ table billing.ledger_transfers
   constraint ledger_transfers_pkey PRIMARY KEY (merchant_id, id)
   constraint ledger_transfers_source_check CHECK (((octet_length(source) >= 1) AND (octet_length(source) <= 512)))
   constraint ledger_transfers_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 512)))
-  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text])))
+  constraint ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'deposit_bonus'::text, 'credit_purchase_revenue'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text, 'owed_repayment'::text, 'credit_refund'::text, 'credit_refund_restore'::text, 'credit_refund_cash'::text, 'credit_refund_cash_restore'::text, 'credit_refund_funding'::text])))
   index CREATE INDEX ledger_transfers_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, created_at)
   index CREATE INDEX ledger_transfers_credit_account_id_idx ON billing.ledger_transfers USING btree (merchant_id, credit_account_id)
   index CREATE INDEX ledger_transfers_customer_id_currency_created_at_idx ON billing.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL)

@@ -130,6 +130,9 @@ const (
 	CreditOwedAccrual  CreditTransactionType = "owed_accrual"
 	CreditOwedPayment  CreditTransactionType = "owed_payment"
 	CreditOwedWriteoff CreditTransactionType = "owed_writeoff"
+	// CreditOwedRepayment pays debt from newly funded credit; Amount is the
+	// (negative) change to both the balance and what is owed.
+	CreditOwedRepayment CreditTransactionType = "owed_repayment"
 )
 
 // CreditTransaction is one movement on a customer's credit ledger. Amount is
