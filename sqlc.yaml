@@ -27,10 +27,10 @@ sql:
       - "internal/migrate/postgres/0024_cost_resolutions.up.sql"
       - "internal/migrate/postgres/0025_cost_refusals.up.sql"
       - "internal/migrate/postgres/0029_subscription_quantity.up.sql"
-      - "internal/migrate/postgres/0032_price_migrations.up.sql"
       - "internal/migrate/postgres/0031_write_posture.up.sql"
       - "internal/migrate/postgres/0032_mandates.up.sql"
       - "internal/migrate/postgres/0033_customer_contacts.up.sql"
+      - "internal/migrate/postgres/0034_price_migrations.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
