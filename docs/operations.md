@@ -79,7 +79,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
 | `migrate up` / `migrate pg` | apply OpenRails' and River's migrations ahead of a rollout; the server applies them, and AuthKit's, at boot |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
-| `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so `migrate up` applies exactly that list — see "Cutover to product access" |
+| `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so the cutover migration applies exactly that list — see "Cutover to product access" |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
 | `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
@@ -869,18 +869,20 @@ the products changed their keys after a sale, the customer gains or loses them
 at the cutover, and the migration refuses until an operator approves every such
 change:
 
-1. Deploy the new version without running `migrate up`.
-2. Run `openrails access-cutover preflight`. It applies the migrations before
-   the cutover and dry-runs the conversion for every merchant. It lists each
-   customer and key the conversion **lost** or **gained**, the windows it
-   cannot carry (`unmapped`, e.g. a manual key grant no product matches), and
+1. Stop the old version: the cutover migration drops a column it reads. The new
+   version migrates as it boots, so do not start it yet.
+2. Run `openrails access-cutover preflight` with the new binary. It applies the
+   migrations before the cutover and dry-runs the conversion for every
+   merchant. It lists each customer and key the conversion **lost** or
+   **gained**, the windows it cannot carry (`unmapped`, e.g. a manual key grant no product matches), and
    purchases whose keys had different durations (`mixed_duration`: they keep
    the longest).
 3. Fix what should not change (give a key a product, adjust a product), and
    rerun the preflight.
 4. Run `openrails access-cutover preflight --approve <your name>` to record
-   the list, then `openrails migrate up`. The migration refuses any change that
-   is not on the approved list.
+   the list, and only then start the new version; its boot runs the cutover
+   migration. The migration refuses any change that is not on the approved
+   list, and the version's boot fails until it is approved.
 
 A billing archive exported before the cutover restores through the same
 conversion. It is refused (`unsupported_state`, table `entitlements`) if the
