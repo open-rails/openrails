@@ -129,6 +129,8 @@ var pendingNumericMoney = map[string]string{
 	"billing/invoices.go:InvoiceProfile.Tax tax": notMoneyTaxFacts,
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
+
+	"billing/entitlements.go:CheckEntitlementsParams.PrefixLimit prefix_limit": notMoneyPageSize,
 }
 
 const (
@@ -182,13 +184,13 @@ var pendingDynamicMoney = map[string]string{
 // the test that pins its money encoding; a marshaler the struct-tag scan
 // cannot see must be pinned or it is a violation.
 var pinnedMarshalers = map[string]string{
-	"billing/merchant_configuration.go:ApplyMerchantConfigurationParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
-	"billing/amount_map.go:AmountMap":                                    "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
-	"internal/modules/metrics/service.go:MoneyCell":                      "TestResultWireEncoding — decimal string",
-	"catalog/application.go:Field":                                       "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
-	"internal/cardguard/card.go:Card":                                    "TestCardRedactsItself — no money: always the redaction",
-	"billing/list_page.go:ListPage":                                      "TestListPageWire — no money of its own: {data, next_cursor}, items encode as their own type",
-	"internal/contract/openapi.go:obj":                                   "TestOpenAPICoversTheCatalog — the generated OpenAPI document, never a wire value",
+	"billing/merchant_configuration.go:UpdateMerchantConfigurationParams": "TestMerchantConfigurationExplicitEmptyListsSurviveTransport",
+	"billing/amount_map.go:AmountMap":                                     "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
+	"internal/modules/metrics/service.go:MoneyCell":                       "TestResultWireEncoding — decimal string",
+	"catalog/application.go:Field":                                        "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
+	"internal/cardguard/card.go:Card":                                     "TestCardRedactsItself — no money: always the redaction",
+	"billing/list_page.go:ListPage":                                       "TestListPageWire — no money of its own: {data, next_cursor}, items encode as their own type",
+	"internal/contract/openapi.go:obj":                                    "TestOpenAPICoversTheCatalog — the generated OpenAPI document, never a wire value",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {

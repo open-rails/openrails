@@ -3,6 +3,7 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -17,12 +18,15 @@ func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...Reques
 	return &out, nil
 }
 
-// ApplyMerchantConfiguration commits one configuration change against the
+// UpdateMerchantConfiguration commits one configuration change against the
 // revision it read: omitted fields keep their stored values, and the same
-// application replays its original receipt.
-func (c *Client) ApplyMerchantConfiguration(ctx context.Context, params billing.ApplyMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
+// IdempotencyKey replays its original receipt.
+func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
+	if strings.TrimSpace(params.IdempotencyKey) == "" {
+		return nil, invalidErr("Idempotency-Key required")
+	}
 	var out billing.MerchantConfigurationReceipt
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/configuration/applications", params, &out, options...); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPatch, "/v1/admin/configuration", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -13,7 +13,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
@@ -224,8 +223,8 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	configuration := map[string]any{}
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&configuration))
-	refused(on(shared, squatter.session, http.MethodPost, "/v1/admin/configuration/applications", squatter.slug,
-		map[string]any{"application_id": uuid.NewString(), "expected_revision": configuration["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
+	refused(on(shared, squatter.session, http.MethodPatch, "/v1/admin/configuration", squatter.slug,
+		map[string]any{"expected_revision": configuration["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
 
 	// Control: the squatter proves a domain it does control.
 	const own = "shop.squatter.e2e.test"

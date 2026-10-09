@@ -322,21 +322,46 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 	return &out, nil
 }
 
-// GetEffectiveTiers answers the tier each of 1 to billing.MaxBatchItems
-// customers holds in params.Group. Every requested customer is in the answer;
-// one holding none, or unknown to the merchant, is nil.
-func (c *Client) GetEffectiveTiers(ctx context.Context, params billing.GetEffectiveTiersParams, requestOptions ...RequestOption) (map[billing.CustomerID]*billing.Tier, error) {
-	if strings.TrimSpace(params.Group) == "" {
-		return nil, invalidErr("group is required")
+// CheckEntitlements is the programmatic content gate: which of
+// params.Entitlements params.CustomerID holds, and the keys they hold under
+// each of params.Prefixes, at params.At (zero: now); every requested key and
+// prefix is in the answer. One call checks at most
+// billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
+// prefixes; more is refused with invalid_param, not split. It needs an
+// application credential and RouteGroups.Programmatic.
+func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
+	switch {
+	case params.CustomerID.IsZero():
+		return nil, invalidErr("customer_id is required")
+	case len(params.Entitlements) == 0 && len(params.Prefixes) == 0:
+		return nil, invalidErr("entitlements or prefixes is required")
+	case len(params.Entitlements) > billing.MaxEntitlementChecks:
+		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per check", billing.MaxEntitlementChecks))
+	case len(params.Prefixes) > billing.MaxEntitlementPrefixes:
+		return nil, invalidErr(fmt.Sprintf("at most %d prefixes per check", billing.MaxEntitlementPrefixes))
 	}
-	if err := batchIDs("customer_ids", params.CustomerIDs, billing.MaxBatchItems); err != nil {
+	for _, key := range params.Entitlements {
+		if strings.TrimSpace(key) == "" {
+			return nil, invalidErr("entitlements must not contain a blank key")
+		}
+	}
+	if params.Entitlements == nil {
+		params.Entitlements = []string{}
+	}
+	var out billing.EntitlementCheck
+	if err := c.do(ctx, http.MethodPost, "/v1/app/entitlements/check", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
-	var out billing.EffectiveTierLookup
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/tiers/lookup", params, &out, requestOptions...); err != nil {
-		return nil, err
+	if out.Entitlements == nil {
+		out.Entitlements = map[string]bool{}
 	}
-	return out.Tiers, nil
+	if out.Quantities == nil {
+		out.Quantities = map[string]*int{}
+	}
+	if out.Held == nil {
+		out.Held = map[string]billing.HeldEntitlements{}
+	}
+	return &out, nil
 }
 
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service
@@ -419,17 +444,27 @@ type clientResponse struct {
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header, requestOptions ...RequestOption) (*clientResponse, error) {
 	var rdr io.Reader
+	var raw []byte
+	headers = headers.Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
 	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
+		var err error
+		if raw, err = json.Marshal(body); err != nil {
 			return nil, fmt.Errorf("openrails: marshal request: %w", err)
 		}
 		rdr = bytes.NewReader(raw)
-		headers = headers.Clone()
-		if headers == nil {
-			headers = make(http.Header)
-		}
 		headers.Set("Content-Type", "application/json")
+	}
+	// A programmatic write runs once per Idempotency-Key; without the
+	// caller's, each call is its own and the operation's ids keep a retry safe.
+	if method != http.MethodGet && strings.HasPrefix(path, "/v1/app/") && headers.Get("Idempotency-Key") == "" {
+		key := idempotencyKey(requestOptions)
+		if key == "" {
+			key = uuid.NewString()
+		}
+		headers.Set("Idempotency-Key", key)
 	}
 	var response *clientResponse
 	err := c.withHTTPResponse(ctx, method, path, rdr, headers, func(resp *http.Response) error {

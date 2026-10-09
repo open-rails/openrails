@@ -19,6 +19,9 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	if s.adminConsole == nil {
 		return nil
 	}
+	if g := s.groups; !g.Admin && !g.Catalog && !g.MerchantConfig && !g.Metrics {
+		return fmt.Errorf("admin_console.enabled drives the staff routes; turn on at least one of route_groups.admin, catalog, merchant_config or metrics")
+	}
 	if !adminconsole.Present(s.consoleAssets) {
 		return fmt.Errorf("admin_console.enabled is set but web/admin holds no console build: " +
 			"build it (`task admin-build`) before go build — or unset admin_console.enabled")
@@ -36,14 +39,11 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		}
 	}
 	cfg := adminconsole.Config{
-		AuthBaseURL:            s.adminConsole.AuthBaseURL,
-		APIBaseURL:             StandaloneV1Prefix,
-		NLWidgetsEnabled:       config.LLMConfigured(s.cfg.LLM),
-		AskEnabled:             config.LLMAskConfigured(s.cfg.LLM),
-		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(s.cfg.LLM),
-		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
-		Extensions:             s.adminConsole.Extensions,
+		AuthBaseURL: s.adminConsole.AuthBaseURL,
+		APIBaseURL:  StandaloneV1Prefix,
+		Extensions:  s.adminConsole.Extensions,
 	}
+	cfg.Assistants(s.cfg.LLM, s.groups.Catalog, s.groups.Metrics)
 	issuer, err := consoleIssuer(s.consoleIssuer, s.resourceServer)
 	if err != nil {
 		return err

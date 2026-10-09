@@ -12,45 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const getProductArchiveByID = `-- name: GetProductArchiveByID :one
-SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
-FROM billing.product_archive_operations o
-JOIN billing.products p ON p.merchant_id = o.merchant_id AND p.id = o.product_id
-WHERE o.merchant_id = $1::uuid AND o.id = $2::uuid
-`
-
-type GetProductArchiveByIDParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-type GetProductArchiveByIDRow struct {
-	ID                     uuid.UUID
-	ProductID              uuid.UUID
-	ProductKey             string
-	PurchaseAction         string
-	PurchaseWindowStartsAt *time.Time
-	Reason                 *string
-	CreatedAt              time.Time
-	RequestSha256          []byte
-}
-
-func (q *Queries) GetProductArchiveByID(ctx context.Context, arg GetProductArchiveByIDParams) (GetProductArchiveByIDRow, error) {
-	row := q.db.QueryRow(ctx, getProductArchiveByID, arg.MerchantID, arg.ID)
-	var i GetProductArchiveByIDRow
-	err := row.Scan(
-		&i.ID,
-		&i.ProductID,
-		&i.ProductKey,
-		&i.PurchaseAction,
-		&i.PurchaseWindowStartsAt,
-		&i.Reason,
-		&i.CreatedAt,
-		&i.RequestSha256,
-	)
-	return i, err
-}
-
 const getProductArchiveByKey = `-- name: GetProductArchiveByKey :one
 SELECT o.id, o.product_id, p.key AS product_key, o.purchase_action, o.purchase_window_starts_at, o.reason, o.created_at, o.request_sha256
 FROM billing.product_archive_operations o

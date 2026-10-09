@@ -66,7 +66,7 @@ var catalogPerms = func() map[string]iam.Perm {
 			out[perm] = p.Permission(resource, action)
 		}
 	}
-	declare(merchantPersona, staffperm.Read, staffperm.Write, staffperm.Admin)
+	declare(merchantPersona, staffperm.Read, staffperm.Write, staffperm.Admin, staffperm.Metrics)
 	declare(Roles.Root.PersonaDef,
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
 		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)

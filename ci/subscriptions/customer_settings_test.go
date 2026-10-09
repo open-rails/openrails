@@ -168,8 +168,8 @@ func declareBillingPolicy(t *testing.T, w *world, name string) {
 	client := w.client[embedded]
 	got, err := client.GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
-	_, err = client.ApplyMerchantConfiguration(t.Context(), billing.ApplyMerchantConfigurationParams{
-		ApplicationID: uuid.NewString(), ExpectedRevision: &got.Revision,
+	_, err = client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
+		IdempotencyKey: uuid.NewString(), ExpectedRevision: &got.Revision,
 		Settings: &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{{Name: name, Kind: "outstanding_cap", OutstandingCapAmount: 100_000_000}}},
 	})
 	require.NoError(t, err)

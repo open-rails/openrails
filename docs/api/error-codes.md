@@ -15,6 +15,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
 | `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
 | `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
+| `application_required` | 403 | `authorization_error` | The route is your backend's: it takes an application's credential, never a person's. |
 | `as_of_required` | 400 | `invalid_request_error` | The import needs as_of, its RFC 3339 evidence horizon. |
 | `authentication_required` | 401 | `authentication_error` | No valid credential was presented. |
 | `authentication_unavailable` | 503 | `api_error` | The credential could not be verified right now; retry. |
@@ -75,6 +76,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
+| `idempotency_key_in_progress` | 409 | `invalid_request_error` | A request with this Idempotency-Key is still running; retry it later. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |
 | `idempotency_key_reused` | 422 | `invalid_request_error` | The idempotency key already committed with different terms. |
@@ -98,7 +100,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invoice_retry_outcome_unknown` | 409 | `invalid_request_error` | The last collection attempt's outcome is unknown. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `merchant_binding_mismatch` | 409 | `invalid_request_error` | The selected merchant is not the one the credential, deployment or request is bound to. |
-| `merchant_configuration_application_conflict` | 409 | `invalid_request_error` | The application id already committed with different content. |
 | `merchant_configuration_revision_conflict` | 409 | `invalid_request_error` | The merchant configuration changed; read its revision before applying. |
 | `merchant_context_mismatch` | 403 | `authorization_error` | The authorized merchant is not the one the request resolved. |
 | `merchant_directory_unavailable` | 503 | `api_error` | The merchant directory could not be read; retry. |
@@ -189,7 +190,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `service_unavailable` | 503 | `api_error` | A dependency is temporarily unavailable; retry. |
 | `solana_rpc_unavailable` | 502 | `api_error` | The Solana RPC endpoints did not answer; retry. |
 | `solana_transaction_refused` | 400 | `invalid_request_error` | The wallet transaction could not be prepared or confirmed; the message says why. |
-| `spend_delegation_not_found` | 404 | `invalid_request_error` | The spend delegation does not exist. |
 | `step_up_required` | 403 | `authorization_error` | The operation needs a recent sign-in; metadata carries the challenge. |
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |
 | `stored_credential_required` | 409 | `invalid_request_error` | The card has no active agreement for a merchant-initiated charge; the customer makes this change. |

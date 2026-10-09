@@ -62,10 +62,12 @@ import { CustomerCreditSupportSection } from "./credits"
 import { CursorPager } from "@/components/cursor-pager"
 import { useCursorPages } from "@/lib/cursor-pages"
 import { dunningSummary } from "@/pages/subscriptions/dunning"
+import { useAdminUpdates } from "@/lib/capabilities"
 
 const LIST_PAGE = 20
 
 export function CustomerDetailPage() {
+  const canUpdate = useAdminUpdates()
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
   const { data: customer, isPending: loading } = useQuery(
@@ -96,9 +98,11 @@ export function CustomerDetailPage() {
             seen {formatDate(customer.last_seen_at)}
           </p>
         </div>
-        <div className="ml-auto flex gap-2">
-          <GrantProductAccessDialog customerId={customerId} />
-        </div>
+        {canUpdate && (
+          <div className="ml-auto flex gap-2">
+            <GrantProductAccessDialog customerId={customerId} />
+          </div>
+        )}
       </div>
 
       <CustomerContactCard contact={customer.contact} />
@@ -386,6 +390,7 @@ function CustomerEntitlements({ customerId }: { customerId: string }) {
 }
 
 function CustomerProductAccess({ customerId }: { customerId: string }) {
+  const canUpdate = useAdminUpdates()
   const pages = useCursorPages(customerId)
   const { data, isFetching } = useQuery(
     adminQueries.customerProductAccess(customerId, LIST_PAGE, pages.cursor)
@@ -419,11 +424,13 @@ function CustomerProductAccess({ customerId }: { customerId: string }) {
                     {g.ends_at ? `Ends ${formatDate(g.ends_at)}` : "No end date"}
                   </p>
                 </div>
-                <RevokeProductAccessButton
-                  customerId={customerId}
-                  grantId={g.id}
-                  label="Revoke product access"
-                />
+                {canUpdate && (
+                  <RevokeProductAccessButton
+                    customerId={customerId}
+                    grantId={g.id}
+                    label="Revoke product access"
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -435,37 +442,6 @@ function CustomerProductAccess({ customerId }: { customerId: string }) {
         />
       </CardContent>
     </Card>
-  )
-}
-
-function RevokeButton({
-  label,
-  busy,
-  onRevoke,
-  successMessage,
-}: {
-  label: string
-  busy: boolean
-  onRevoke: () => Promise<unknown>
-  successMessage: string
-}) {
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      aria-label={label}
-      disabled={busy}
-      onClick={async () => {
-        try {
-          await onRevoke()
-          toast.success(successMessage)
-        } catch (err) {
-          toastApiError(err, label)
-        }
-      }}
-    >
-      <HugeiconsIcon icon={Delete02Icon} className="size-4 text-destructive" />
-    </Button>
   )
 }
 
@@ -482,14 +458,60 @@ function RevokeProductAccessButton({
   const revoke = useMutation(
     adminMutations.revokeCustomerProductAccess(queryClient, customerId)
   )
+  const [open, setOpen] = React.useState(false)
+  const [reason, setReason] = React.useState("")
 
   return (
-    <RevokeButton
-      label={label}
-      busy={revoke.isPending}
-      onRevoke={() => revoke.mutateAsync(grantId)}
-      successMessage="Product access revoked"
-    />
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button variant="ghost" size="icon" aria-label={label}>
+            <HugeiconsIcon
+              icon={Delete02Icon}
+              className="size-4 text-destructive"
+            />
+          </Button>
+        }
+      />
+      <DialogContent className={DIALOG_FORM}>
+        <DialogHeader>
+          <DialogTitle>Take the product back</DialogTitle>
+          <DialogDescription>
+            The customer loses its entitlements now. The grant stays on record
+            with your reason.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="revoke-access-reason">Reason</Label>
+          <Input
+            id="revoke-access-reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            maxLength={500}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={!reason.trim() || revoke.isPending}
+            onClick={async () => {
+              try {
+                await revoke.mutateAsync({ grantId, reason: reason.trim() })
+                toast.success("Product access revoked")
+                setOpen(false)
+              } catch (err) {
+                toastApiError(err, label)
+              }
+            }}
+          >
+            {revoke.isPending ? "Revoking…" : "Revoke"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

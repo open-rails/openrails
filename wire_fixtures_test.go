@@ -58,10 +58,6 @@ func canonicalWireFixtures() map[string]any {
 			},
 			BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "credit_line"}, {PolicyName: "monthly", Tier: "cloud"}},
 		},
-		"spend_delegations.json": billing.ListPage[billing.SpendDelegation]{Items: []billing.SpendDelegation{
-			{Scope: billing.SpendDelegationInvoker, ScopeKey: "worker-1", Windows: []billing.BudgetWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: ptr("sha256:fixture")},
-			{Scope: billing.SpendDelegationInvokerTier, ScopeKey: "free", Windows: []billing.BudgetWindow{}},
-		}},
 		"checkout_session.json": checkoutsession.CheckoutSession{
 			ID: "ocs_fixture", Status: "requires_action", Merchant: checkoutsession.CheckoutSessionMerchant{DisplayName: "Acme Demo"},
 			Plan:      checkoutsession.CheckoutSessionPlan{AutoRenew: true, DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, BillingIntervalHours: &periodHours, AccessDurationHours: &periodHours},

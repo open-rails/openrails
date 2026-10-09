@@ -12,10 +12,10 @@ import (
 // MaxMerchantConfigurationBytes bounds a merchant configuration document.
 const MaxMerchantConfigurationBytes = 1 << 20
 
-// ParseMerchantConfigurationYAML reads one ApplyMerchantConfiguration document,
+// ParseMerchantConfigurationYAML reads one UpdateMerchantConfiguration document,
 // YAML or JSON, bounded and without aliases, anchors, tags, duplicate fields
 // or unknown fields.
-func ParseMerchantConfigurationYAML(raw []byte) (*ApplyMerchantConfigurationParams, error) {
+func ParseMerchantConfigurationYAML(raw []byte) (*UpdateMerchantConfigurationParams, error) {
 	body, err := configdocument.YAMLToJSON(raw, MaxMerchantConfigurationBytes)
 	if err != nil {
 		return nil, err
@@ -23,18 +23,18 @@ func ParseMerchantConfigurationYAML(raw []byte) (*ApplyMerchantConfigurationPara
 	return parseMerchantConfigurationJSON(body)
 }
 
-func parseMerchantConfigurationJSON(raw []byte) (*ApplyMerchantConfigurationParams, error) {
+func parseMerchantConfigurationJSON(raw []byte) (*UpdateMerchantConfigurationParams, error) {
 	if err := configdocument.GuardJSON(raw, MaxMerchantConfigurationBytes); err != nil {
 		return nil, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var params ApplyMerchantConfigurationParams
+	var params UpdateMerchantConfigurationParams
 	if err := decoder.Decode(&params); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(params.ApplicationID) == "" || len(params.ApplicationID) > 128 || params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
-		return nil, fmt.Errorf("application_id and expected_revision are required")
+	if params.ExpectedRevision == nil || strings.TrimSpace(*params.ExpectedRevision) == "" {
+		return nil, fmt.Errorf("expected_revision is required")
 	}
 	return &params, nil
 }

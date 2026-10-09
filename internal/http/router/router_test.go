@@ -111,7 +111,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 	patterns := []string{
-		"GET /billing/v1/admin/payments", "POST /billing/v1/admin/billing-import",
+		"GET /billing/v1/admin/payments", "POST /billing/v1/admin/billing-import", "POST /billing/v1/app/usage-events",
 		"GET /billing/v1/me/invoices/{id}", "GET /billing/account/invoices",
 		"OPTIONS /billing/v1/me/invoices/{id}",
 		"GET /billing/v1/merchants", "GET /billing/v1/catalog/products", "GET /billing/v1/config",
@@ -146,21 +146,25 @@ func TestMerchantSelectorResolution(t *testing.T) {
 	}
 	slug := http.Header{merchant.SelectorHeader: {"store"}}
 
-	for _, path := range []string{"/billing/v1/admin/payments", "/billing/v1/me/invoices/inv_1", "/billing/account/invoices"} {
-		rec := call(http.MethodGet, path, nil)
+	for _, path := range []string{"/billing/v1/admin/payments", "/billing/v1/app/usage-events", "/billing/v1/me/invoices/inv_1", "/billing/account/invoices"} {
+		method := http.MethodGet
+		if strings.Contains(path, "/v1/app/") {
+			method = http.MethodPost
+		}
+		rec := call(method, path, nil)
 		require.Equal(t, http.StatusOK, rec.Code, path)
 		require.False(t, last.resolved, "%s: no selector, nothing pinned", path)
 		require.True(t, last.merchant.IsZero())
 
 		for _, header := range []http.Header{slug, {merchant.SelectorHeader: {"id:" + target.MerchantID.String()}}} {
-			rec = call(http.MethodGet, path, header)
+			rec = call(method, path, header)
 			require.Equal(t, http.StatusOK, rec.Code, path)
 			require.Equal(t, path, last.path, "the proof-bound URI is never rewritten")
 			require.Equal(t, target.MerchantID, last.merchant)
 			require.Equal(t, target, last.target)
 		}
 	}
-	require.Equal(t, 6, calls)
+	require.Equal(t, 8, calls)
 
 	// Routes that act on no credential's merchant never resolve a selector.
 	for _, route := range []string{"GET /billing/v1/merchants", "GET /billing/v1/catalog/products", "GET /billing/v1/config", "OPTIONS /billing/v1/me/invoices/inv_1"} {
@@ -169,7 +173,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, route)
 		require.False(t, last.resolved, route)
 	}
-	require.Equal(t, 6, calls)
+	require.Equal(t, 8, calls)
 
 	for name, header := range map[string]http.Header{
 		"repeated":     {merchant.SelectorHeader: {"store", "store"}},
@@ -182,7 +186,7 @@ func TestMerchantSelectorResolution(t *testing.T) {
 		require.Contains(t, rec.Body.String(), `"code":"merchant_selector_invalid"`, name)
 		require.Nil(t, last, name)
 	}
-	require.Equal(t, 6, calls, "a malformed selector is refused before resolution")
+	require.Equal(t, 8, calls, "a malformed selector is refused before resolution")
 
 	for _, tc := range []struct {
 		err    error

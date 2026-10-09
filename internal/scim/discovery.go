@@ -23,7 +23,7 @@ func (s *Server) ServiceProviderConfig() http.Handler {
 			"etag":             supported(false),
 			"authenticationSchemes": []map[string]any{{
 				"type": "oauthbearertoken", "name": "OAuth Bearer Token", "primary": true,
-				"description": "The merchant's provisioning token, or a client-credentials access token with scope scim from the merchant's trusted issuer.",
+				"description": "The merchant's provisioning token, or an application credential the deployment's auth accepts, such as a client-credentials access token from the merchant's trusted issuer.",
 			}},
 			"meta": map[string]string{"resourceType": "ServiceProviderConfig", "location": baseURL(r, "ServiceProviderConfig") + "/ServiceProviderConfig"},
 		})

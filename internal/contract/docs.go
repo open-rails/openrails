@@ -19,11 +19,13 @@ var groupTitles = []struct {
 	{routes.Meta, "Process", "Health and capability discovery. Only the standalone server serves the root paths."},
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
-	{routes.Admin, "Admin", "Staff work on customers: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, a write its `Permissions.AdminWrite`."},
-	{routes.CatalogWrite, "Catalog edits", "Every catalog edit and document application, behind the host's `Permissions.CatalogWrite`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},
-	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, every route behind the host's `Permissions.MerchantConfig`."},
+	{routes.Admin, "Admin: customer support", "Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, an update its `Permissions.AdminUpdate`."},
+	{routes.CatalogAdmin, "Catalog", "The catalog, with `RouteGroups.Catalog`: its reads and edits and price migrations, every route behind the host's `Permissions.Catalog`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},
+	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route behind the host's `Permissions.MerchantConfig`."},
+	{routes.Metrics, "Business metrics", "Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`, every route behind the host's `Permissions.Metrics`."},
+	{routes.Access, "Access", "What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group."},
+	{routes.App, "Programmatic (`/v1/app`)", "The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, and no permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},
-	{routes.Provisioning, "Provisioning (SCIM 2.0)", "A merchant's directory (AuthKit, Okta, Entra ID) pushing its users, which become its customers' contacts (RFC 7643, RFC 7644). Each request carries the merchant's provisioning token, or a client-credentials access token with scope `scim` from its trusted issuer. Bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves these routes out. The standalone server serves them; an embedded host with `Routes.Provisioning`."},
 }
 
 func (m *model) bodyDoc(v any) string {
@@ -44,9 +46,18 @@ func (m *model) routesMD() []byte {
 	fmt.Fprintf(&b, "Every route of the HTTP API (%d), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). ", len(m.routes))
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
-	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).\n\n")
-	b.WriteString("**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks.\n\n")
-	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
+	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).\n\n")
+	b.WriteString("**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.\n\n")
+	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
+	titled := map[routes.Group]bool{}
+	for _, g := range groupTitles {
+		titled[g.group] = true
+	}
+	for _, r := range m.routes {
+		if !titled[r.Group] {
+			panic("contract: route group " + string(r.Group) + " has no section in routes.md")
+		}
+	}
 	for _, g := range groupTitles {
 		var list []routes.Route
 		for _, r := range m.routes {
@@ -74,6 +85,9 @@ func (m *model) routesMD() []byte {
 			}
 			if r.Sensitive {
 				notes = append(notes, "sensitive")
+			}
+			if r.CatalogUpdate() {
+				notes = append(notes, "catalog update")
 			}
 			if r.Limit != "" {
 				notes = append(notes, "limit `"+string(r.Limit)+"`")

@@ -441,7 +441,7 @@ var families = map[Family]familySpec{
 
 // Each rebill cycle with its first attempt, the attempt that collected it and
 // when it closes: collected, the subscription canceled, or 15 days past due
-// (the dunning window is at most 14). ListRebillCycles derives the same facts.
+// (the dunning window is at most 14). ListRenewals derives the same facts.
 const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner, c.due_at, c.currency, c.missed_at, c.miss_reason,
 		f.category AS first_category, f.reason AS first_reason, f.attempted_at AS first_at,
 		w.attempted_at AS won_at, w.ordinal AS won_ordinal,

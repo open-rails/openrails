@@ -195,17 +195,17 @@ func TestProviderObligationRequestsCarryNoRatedAmount(t *testing.T) {
 }
 
 func TestProviderOperationPathIsOneSegment(t *testing.T) {
-	path, err := providerOperationPath("rental/1?#%/create")
+	path, err := providerOperationPath("/v1/app", "rental/1?#%/create")
 	require.NoError(t, err)
-	require.Equal(t, "/v1/admin/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
+	require.Equal(t, "/v1/app/provider-operations/rental%2F1%3F%23%25%2Fcreate", path)
 	for _, id := range []string{"", " ", ".", "..", " x"} {
-		_, err := providerOperationPath(id)
+		_, err := providerOperationPath("/v1/admin", id)
 		require.ErrorIs(t, err, billing.ErrInvalid, "%q", id)
 	}
 }
 
 func TestMerchantConfigurationDocument(t *testing.T) {
-	valid := "application_id: initial\nexpected_revision: revision\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
+	valid := "expected_revision: revision\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
 	params, err := billing.ParseMerchantConfigurationYAML([]byte(valid))
 	require.NoError(t, err)
 	require.Equal(t, "https://help.example.test", params.Settings.Profile.SupportURL)
@@ -213,11 +213,12 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 		valid + "display_name: Duplicate\n",
 		valid + "unexpected: true\n",
 		valid + "other: &anchor value\n",
-		valid + "---\napplication_id: extra\n",
-		"application_id: missing-revision\n",
+		valid + "---\nexpected_revision: extra\n",
+		valid + "application_id: retired\n",
+		"display_name: missing-revision\n",
 		strings.Repeat(" ", billing.MaxMerchantConfigurationBytes+1),
-		`{"application_id":"a","application_id":"b","expected_revision":"r"}`,
-		`{"application_id":"a","expected_revision":"r","settings":{"profile":{"unknown":1}}}`,
+		`{"expected_revision":"a","expected_revision":"b"}`,
+		`{"expected_revision":"r","settings":{"profile":{"unknown":1}}}`,
 	} {
 		_, err := billing.ParseMerchantConfigurationYAML([]byte(document))
 		require.Error(t, err, document)
@@ -227,7 +228,7 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
 	revision, amount := "before", int64(9007199254740993)
-	params := billing.ApplyMerchantConfigurationParams{ApplicationID: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+	params := billing.UpdateMerchantConfigurationParams{IdempotencyKey: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 		InvoiceCollectionThreshold: &amount,
 		BillingPolicies:            []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}

@@ -94,27 +94,8 @@ func UpdatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ArchivePSP handles POST /v1/admin/psps/{id}/archive. The body is
-// optional; no provider call is made, so a dark account archives too.
-func ArchivePSP(r *httprequest.Request) {
-	svc, id, pspID, ok := pspPathContext(r)
-	if !ok {
-		return
-	}
-	var req billing.ArchivePSPParams
-	if !r.BindOptionalJSON(&req) {
-		return
-	}
-	out, err := svc.ArchivePSP(r.Request.Context(), id, pspID, req)
-	if err != nil {
-		writePSPError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-// RefreshPSPs handles POST /v1/admin/psps/refresh: the merchant's PSP
-// pull runs now.
+// RefreshPSPs handles POST /v1/admin/psps/refresh: the merchant's PSP pull
+// and its catalog drift pass run now.
 func RefreshPSPs(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	mid, ok := merchant.FromContext(ctx)
@@ -127,6 +108,9 @@ func RefreshPSPs(r *httprequest.Request) {
 		return
 	}
 	id, queued, err := riverjobs.EnqueueMerchantRefresh(ctx, r.State.RiverProducer, mid.UUID(), r.State.ProviderRefreshQueue)
+	if err == nil {
+		err = riverjobs.EnqueueCatalogReconciliation(ctx, r.State.RiverProducer, mid.UUID())
+	}
 	if err != nil {
 		r.InternalError("failed to request PSP refresh", err)
 		return

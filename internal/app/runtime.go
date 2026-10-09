@@ -166,13 +166,15 @@ type Runtime struct {
 	MoneyService         *money.MoneyService
 	// MetricsService is the #733 merchant analytics query engine.
 	MetricsService *metrics.Service
-	// DashboardService is the #741 configurable dashboard (saved widgets +
-	// NL widget generation; nil-LLM = generation fail-closed).
+	// DashboardService is the merchant's saved dashboard, its widget
+	// generation and its metrics questions (each off without an LLM).
 	DashboardService *dashboard.Service
-	// CopilotService is the #779 catalog copilot (read-only Q&A always; the
-	// Phase 2 draft_* tools are additionally gated on
-	// llm.catalog_drafting_enabled — see copilot.Service.DraftingConfigured).
+	// CopilotService answers catalog questions and drafts price changes for a
+	// person to review (off without an LLM and its consent).
 	CopilotService *copilot.Service
+	// AppRequests replays the programmatic routes' writes by their
+	// Idempotency-Key.
+	AppRequests *idempotency.Store
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the

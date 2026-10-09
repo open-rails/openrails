@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useAdminUpdates } from "@/lib/capabilities"
 
 const PAGE = 20
 const errorText = (error: unknown) =>
@@ -70,6 +71,7 @@ function CreditSupport({
   customer: string
   initialCurrency: string
 }) {
+  const canUpdate = useAdminUpdates()
   const [currency, setCurrency] = React.useState(initialCurrency)
   const [currencyInput, setCurrencyInput] = React.useState(initialCurrency)
   const grantPages = useCursorPages(currency)
@@ -95,13 +97,15 @@ function CreditSupport({
       <CardHeader className="gap-3">
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-sm">Credits</CardTitle>
-          <Button
-            size="sm"
-            disabled={decimals === undefined}
-            onClick={() => setGranting(true)}
-          >
-            Grant credit
-          </Button>
+          {canUpdate && (
+            <Button
+              size="sm"
+              disabled={decimals === undefined}
+              onClick={() => setGranting(true)}
+            >
+              Grant credit
+            </Button>
+          )}
         </div>
         <form
           className="flex max-w-sm items-end gap-2"
@@ -189,14 +193,16 @@ function CreditSupport({
                           : "No expiry"}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={!canRevokeCredit(grant)}
-                          onClick={() => setRevokeGrant(grant)}
-                        >
-                          Revoke
-                        </Button>
+                        {canUpdate && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!canRevokeCredit(grant)}
+                            onClick={() => setRevokeGrant(grant)}
+                          >
+                            Revoke
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

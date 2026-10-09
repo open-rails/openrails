@@ -27,8 +27,8 @@ func TestFailedUsage(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
 	config, err := client.GetMerchantConfiguration(ctx)
 	require.NoError(t, err)
-	_, err = client.ApplyMerchantConfiguration(ctx, billing.ApplyMerchantConfigurationParams{
-		ApplicationID: uuid.NewString(), ExpectedRevision: &config.Revision,
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
+		IdempotencyKey: uuid.NewString(), ExpectedRevision: &config.Revision,
 		Settings: &billing.MerchantSettings{
 			BillingPolicies: []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap",
 				BadSpendWindows: []billing.BudgetWindow{{Key: "hour", WindowSeconds: 3600, Limit: 30_000, Currency: "USD"}}}},

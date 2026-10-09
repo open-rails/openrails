@@ -109,7 +109,7 @@ explicit:
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
 blocked list. A customer is your user's id; its email, username and name come
 from `Deps.UserInfo`, or from your directory's SCIM pushes with
-`Routes.Provisioning`.
+`RouteGroups.Programmatic`.
 
 Under `Sandbox` every rail routes to its test environment and live credentials
 refuse to boot. NMI accounts get an arm-time probe that refuses a conclusively
@@ -245,7 +245,7 @@ refuses it the same way.
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads snapshot credentials without overwriting later API edits or reviving
 archived accounts. Deliberate metadata changes use
-`Client.ApplyMerchantConfiguration` with a stable application ID and reviewed
+`Client.UpdateMerchantConfiguration` with a stable `IdempotencyKey` and reviewed
 revision. Imported billing facts attributed to a PSP without credentials need
 its identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
 during setup.
@@ -282,7 +282,7 @@ the background, with `Ready` failing until that startup batch succeeds.
 **Catalog authoring**: storage is always the database.
 The in-process Client is the process owner and writes its catalog directly
 (`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
-`Permissions.CatalogWrite` publishes catalog mutations to HTTP and delegated
+`RouteGroups.Catalog` publishes catalog changes to HTTP and delegated
 callers. YAML is decoded into the same `catalog.Application` as JSON
 (`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
@@ -304,8 +304,8 @@ routes, as `Routes.Auth`: net/http middleware in AuthKit's own shape.
 
 | Method | OpenRails stacks it on |
 |---|---|
-| `Required()` | every customer route: a signed-in request |
-| `RequirePermission(permission)` | every staff route, with your permission for the route's bundle (`Routes.Permissions`), checked live on the mounted merchant; it authenticates the request itself |
+| `Required()` | every customer route, every programmatic route and the access read: a signed-in request |
+| `RequirePermission(permission)` | every staff route, with your permission for the route's group (`Routes.Permissions`), checked live on the mounted merchant; it authenticates the request itself |
 | `Sensitive()` | after `RequirePermission`, when a user in person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An API key or application has no sign-in to renew |
 | `Identity(ctx)` | read after them: who was admitted |
 
@@ -323,26 +323,32 @@ nothing admits no one. Each handler checks the identity again before it runs.
   acts itself, else whoever acts on its behalf, possibly another issuer's user
   spending the subject's balance. Spend limits and staff rate limits key on
   it (`issuer|id` when another issuer vouches for it). An invoker acting for
-  someone else, or an application subject, may only read its own
-  `/v1/me/spend-limits`.
+  someone else, or an application subject, calls no `/v1/me` route.
 - `Credential` is how it was proven: `openrails.CredentialSession`,
   `CredentialDeviceKey`, `CredentialAPIKey`, `CredentialSignedToken` or
   `CredentialAccessToken`, with its id for audit. Only a user acting in person
   (not with an API key or signed token) starts a payment for itself.
 
-OpenRails names no staff permissions: you give it four of your own in
-`Routes.Permissions` and grant them to staff roles in your RBAC. `AdminRead`
-and `AdminWrite` mount the admin routes that read and those that write (each
-route's level is OpenRails'), `CatalogWrite` the catalog edits and
-`MerchantConfig` the merchant's own configuration; a bundle without its
-permission is not mounted, and `AdminWrite` and `CatalogWrite` need
-`AdminRead`. `Auth` is helpers/auth's, and AuthKit's
-`*authkit.Client` implements it: a `root:` permission is checked on your root
-group with no configuration. A host with its own sessions implements the four
-methods directly. `openrailstest.CheckAuth` checks an implementation in your CI:
-it fires anonymous, refused, customer, other merchant, stale sign-in and machine
-requests at each permission, and one permission's holder at the others, and
-fails on any acceptance.
+OpenRails names no staff permissions: you turn staff route groups on in
+`Routes.RouteGroups`, give each its permission of your own in
+`Routes.Permissions`, and grant them to staff roles in your RBAC. The admin
+group's reads need `AdminRead` and its updates `AdminUpdate` (each route's
+level is OpenRails'; without `AdminUpdate` the group is read-only), the catalog
+`Catalog`, the merchant's own configuration `MerchantConfig` and the business
+metrics `Metrics`. The groups are independent; one turned on without its
+permission, or a permission given for a group that is off, fails the mount.
+The programmatic routes your backend calls over HTTP (`/v1/app/*`,
+`RouteGroups.Programmatic`) need no permission: they admit the application
+your `Auth` vouches for, by its `Identity.SubjectKind`, and refuse a person.
+`Auth` is helpers/auth's, and AuthKit's `*authkit.Client` implements it: a
+`root:` permission is checked on your root group with no configuration. A host
+with its own sessions implements the four methods directly; its `Identity`
+must name a person `SubjectUser` and an application's credential
+`SubjectApplication`, since the programmatic routes admit by that alone.
+`openrailstest.CheckAuth` checks an implementation in your CI: it fires
+anonymous, refused, customer, other merchant, stale sign-in and machine
+requests at each permission, and one permission's holder at the others, checks
+each one's subject kind, and fails on any acceptance or mix-up.
 
 An `openrails.Routes` selects the routes `client.Routes` returns; mount them
 on your root router with the adapter for it. Validation happens here: a mount
@@ -364,19 +370,17 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
 | (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay, the captcha, the customer routes (`/v1/me/*` for `Config.Merchant`) and signature-checked provider callbacks. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`) |
 | `Auth` | Your auth (above); required. A checkout session shows saved cards only to its own customer, admitted by it |
-| `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or their own `Auth` |
-| `Permissions.AdminRead`, `AdminWrite` | Staff work on customers (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, invoices, credits, access, usage, metrics, operations, catalog reads, checkout sessions; reads with `AdminRead`, writes with `AdminWrite` |
-| `Permissions.CatalogWrite` | Catalog edits: products, prices, meters and their rates, archiving a product, applying a catalog document. With `Config.Catalog`, the file skips what an edit changed |
-| `Permissions.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout |
-| `CookieOrigin` | Admits cookie-authenticated requests from this exact origin |
-| `AdminConsole` | The staff dashboard at its own `Path` (`/admin` by default); requires `AdminRead`. Nil mounts none |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, invoices, credits, access, usage, operations, checkout sessions; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
+| `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
+| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
+| `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): usage events, admissions, provider operations, host events and SCIM provisioning. They refuse a person and need no permission; each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
 
-A customer surface serves `Config.Merchant` (or its own `Merchant` slug). A
-further audience mounts a `CustomerProfiles` entry under its own `Prefix`,
-optionally with its own `Auth`. Every customer route acts only on the admitted
-subject: no path, query or body names a customer, and another customer's
-resource reads exactly like a missing one. See
-[hosted customer audiences](architecture/customer-http-exposures.md).
+The customer surface, `/v1/me`, serves `Config.Merchant`. Every customer route
+acts only on the admitted subject: no path, query or body names a customer, and
+another customer's resource reads exactly like a missing one. Ambient cookies
+never reach your `Auth`: a browser call carries its credential in a header.
 
 Each adapter registers ordinary method and path routes, so route inspection
 sees the real endpoints and unrelated paths keep the host's 404/405 behavior.
@@ -385,12 +389,13 @@ unchanged. One selection is materialized once, so remounting it never resets
 rate limits.
 
 **Admin console** (optional): `Routes.AdminConsole` mounts the staff
-dashboard at its `Path` beside the admin API it drives; the console finds
-that API at `Routes.Prefix` and signs staff in through your AuthKit's JSON API
-at `AdminConsole.AuthBaseURL`. It needs `AdminRead` and a console build
-(`Deps.ConsoleAssets`); `Mount` fails without either. Catalog editing appears
-only with `CatalogWrite`; its PSP, settings and notification pages, and
-dashboard editing, only with `MerchantConfig`.
+dashboard at `Routes.Prefix`'s `/admin`, beside the routes it drives, and signs
+staff in through your AuthKit's JSON API at `/api/v1` on the same origin. It
+needs a staff group on and a console build (`Deps.ConsoleAssets`); `Mount` fails
+without either. Each area appears only to staff holding its group's permission
+(`GET /v1/admin/access`): customer support, read-only without `AdminUpdate`;
+the catalog; the PSP, settings and notification pages; and the metrics
+dashboard, whose layout editing also needs `MerchantConfig`.
 See [admin-console.md](admin-console.md).
 
 ### 7. Calling the engine
@@ -403,17 +408,16 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
+| Admission (hot path) | `Admit`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
-| Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost` |
-| Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
+| Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration`, `GetAPIHost` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
-| Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `ListEntitlements`, `GetEffectiveTiers`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `RefreshCatalogDrift` (drift is `ListFindings` with type `catalog.*`) |
-| Checkout | `CreateCheckoutSession`, `ListCheckoutOptions`, `GetPublicConfig` |
+| Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements` (programmatic), `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |
+| Checkout | `CreateCheckoutSession`, `ListCheckoutOptions` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Orders | `ListOrders`, `GetOrder` (staff read; only the customer pays) |
-| Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
+| Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
 | Invoices | `ListInvoices`, `GetInvoice`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice` |
 | Provider obligations | `OpenProviderOperation`, `IncrementProviderOperation`, `ReleaseProviderOperation`, `RecordProviderBillingObservation`, `ListProviderOperations`, `GetProviderOperation`, `CloseProviderOperation` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
@@ -526,9 +530,10 @@ end-to-end tests, `openrailstest/nmimock` stands in for NMI and
 and [Stripe](rails/stripe.md#sandbox-testing) sandbox testing).
 
 Customers' emails and names come from `Deps.UserInfo`, asked on every read. A
-host that keeps a pushed copy instead mounts `Routes.Provisioning` and points
-its directory at `{Prefix}/scim/v2` with a provisioning token
-(`client.CreateProvisioningToken`); a directory in the same binary pushes to
+host that keeps a pushed copy instead leaves `UserInfo` out, turns on
+`RouteGroups.Programmatic` and points its directory at
+`{Prefix}/v1/app/scim/v2` with an application credential or a provisioning
+token (`client.CreateProvisioningToken`); a directory in the same binary pushes to
 `client.SCIMHandler()` with no token. In tests, `openrailstest.UserInfo` is an
 in-memory `openrails.UserInfo`. See [customer contacts](customer-contacts.md).
 
@@ -549,7 +554,7 @@ team UI. Worker health is the host's `Client.Probes` (`openrails_job_progress`).
 A customer usually starts a purchase with their own credential: their browser
 mints a checkout session at `/v1/me/checkout-sessions`. `Client.CreateCheckoutSession`
 mints one with the merchant's credential instead, in process or remote with a
-merchant API key your `AdminWrite` admits, for a host whose own purchase
+merchant API key your `AdminUpdate` admits, for a host whose own purchase
 rules decide what a customer may buy. Either way the customer pays it on the
 payment page, and paying with a saved card needs the customer's own proof
 (`403 customer_proof_required` otherwise): staff never buy for someone else.

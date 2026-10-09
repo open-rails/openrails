@@ -44,8 +44,10 @@ import {
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { useAdminUpdates } from "@/lib/capabilities"
 
 export function PaymentDetailPage() {
+  const canUpdate = useAdminUpdates()
   const { id = "" } = useParams()
   const navigate = useNavigate()
   const { data: payment, isPending: loading } = useQuery(
@@ -88,13 +90,15 @@ export function PaymentDetailPage() {
             {payment.transaction_id || "—"}
           </p>
         </div>
-        <div className="ml-auto">
-          <RefundDialog
-            payment={payment}
-            disabled={!refundable}
-            disabledNote={refundNote}
-          />
-        </div>
+        {canUpdate && (
+          <div className="ml-auto">
+            <RefundDialog
+              payment={payment}
+              disabled={!refundable}
+              disabledNote={refundNote}
+            />
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

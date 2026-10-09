@@ -49,9 +49,9 @@ type Options struct {
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
 
-	// Provisioning authenticates the SCIM routes: the merchant a request
-	// acts for. Without it they are not mounted.
-	Provisioning func(*http.Request) (billing.MerchantID, error)
+	// SCIMMerchant serves the SCIM routes for this merchant without a
+	// credential: a directory in the same process holding the engine.
+	SCIMMerchant billing.MerchantID
 
 	// External are the handlers the assembly owns.
 	External External
@@ -83,18 +83,19 @@ type Env struct {
 	permissions *sync.Map
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
-	// scim is the SCIM server Provisioning authenticates, built once.
+	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
 }
 
-// scimServer is the SCIM server the assembly's Provisioning authenticates.
+// scimServer is the assembly's SCIM server, acting for the merchant its
+// gate admitted.
 func (e *Env) scimServer() *scim.Server {
-	if e.Provisioning == nil || e.Runtime == nil {
+	if e.Runtime == nil {
 		return nil
 	}
 	if e.scim == nil {
 		rt := e.Runtime
-		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.Provisioning, Now: func() time.Time {
+		e.scim = &scim.Server{DB: rt.DB, Authenticate: e.scimMerchant, Now: func() time.Time {
 			if rt.Clock != nil {
 				return rt.Clock.Now()
 			}
@@ -188,11 +189,20 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthPublic, AuthSessionID, AuthProvider:
 		mw = conn
 	case AuthProvisioning:
-		// The SCIM server authenticates its merchant and answers SCIM errors.
+		if e.SCIMMerchant.IsZero() {
+			mw = []router.Middleware{e.provisioningGate(route)}
+		}
+	case AuthApplication:
+		mw = append(e.appGates(route), conn...)
+		if route.AppWrite() {
+			mw = append(mw, e.appRequestReplay(route))
+		}
 	case AuthCheckoutSession:
 		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
 	case AuthCustomer:
 		mw = append(e.customerGates(route), conn...)
+	case AuthSignedIn:
+		mw = append(e.signedInGates(route), conn...)
 	case AuthMerchant:
 		mw = append(mw, e.staffGates(route)...)
 		// The staff gate stays outermost; the actor-keyed operation limiter
@@ -316,14 +326,15 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	newEnv(rt, opts).mount(rr, "/v1", in(Checkout))
 }
 
-// RegisterStaffRoutes mounts the admin and merchant-config routes
-// opts.Permissions gives a permission, each behind it, on a router rooted at
-// /v1.
+// RegisterStaffRoutes mounts the staff groups opts.Permissions gives a
+// permission, each route behind it, and with any of them the access read, on
+// a router rooted at /v1.
 func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient, rt.RateWindows)
 	}
-	newEnv(rt, opts).mount(rr, "/v1", opts.Permissions.mounts)
+	any := opts.Permissions != (Permissions{})
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) || any && r.Group == Access })
 }
 
 // RegisterStaffRoutesUnder mounts the staff routes under prefix, on a router
@@ -332,7 +343,7 @@ func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, p
 	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) && under(prefix)(r) })
 }
 
-// mounts reports a staff route its bundle's permission mounts.
+// mounts reports a staff route its group's permission mounts.
 func (p Permissions) mounts(r Route) bool { return r.Staff() && p.For(r) != "" }
 
 // RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
@@ -342,11 +353,23 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
 }
 
-// RegisterProvisioningRoutes mounts the SCIM 2.0 service provider on a
-// router rooted at /scim/v2, authenticated by opts.Provisioning.
-func RegisterProvisioningRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/scim/v2", in(Provisioning))
+// RegisterAppRoutes mounts the programmatic routes (Routes.Programmatic) on
+// a router rooted at /v1: SCIM provisioning too, unless the runtime reads the
+// host's user directory instead of keeping a pushed copy.
+func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	scim := rt != nil && !rt.HostUserInfo
+	newEnv(rt, opts).mount(rr, "/v1", in(App, func(r Route) bool { return r.Auth == AuthApplication || scim }))
 }
+
+// RegisterSCIMRoutes mounts the SCIM routes for merchant, without a
+// credential, on a router rooted at the SCIM root: a directory in the same
+// process pushes to them.
+func RegisterSCIMRoutes(rr router.Router, rt *app.Runtime, merchant billing.MerchantID) {
+	newEnv(rt, Options{SCIMMerchant: merchant}).mount(rr, SCIMRoot, in(App, func(r Route) bool { return r.Auth == AuthProvisioning }))
+}
+
+// SCIMRoot is where the SCIM routes are, beneath the API root.
+const SCIMRoot = "/v1/app/scim/v2"
 
 // SelfRoutePrefix is the customer surface's path: one stable /me, whatever
 // credential the mount's Auth accepts.

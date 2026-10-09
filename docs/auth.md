@@ -17,8 +17,10 @@ same contract, and the in-process Go client its own host authority.
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | checkout session | the session id; `Required` only to show saved cards | the session's own customer sees and pays with its saved cards |
-| customer (`/v1/me`) | `Required` | a user subject, the customer; an invoker acting for someone else, or an application, only on its own spend limits |
-| merchant (`/v1/admin`) | `RequirePermission(permission)` with the host's permission for the route's bundle (`Routes.Permissions`), then `Sensitive` when a user in person moves money, removes access or exports data | a subject holding that permission on the mounted merchant |
+| customer (`/v1/me`) | `Required` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
+| merchant (`/v1/admin`) | `RequirePermission(permission)` with the host's permission for the route's group (`Routes.Permissions`), then `Sensitive` when a user in person moves money, removes access or exports data | a person or an application holding that permission on the mounted merchant |
+| access (`GET /v1/admin/access`) | `Required` | any person or application; it answers what they hold |
+| application (`/v1/app`) | `Required` | an application (its `Identity.SubjectKind`), never a person; no permission |
 
 OpenRails binds the merchant a customer route serves before `Required` runs;
 the middleware reads it with `openrails.RequestMerchant` rather than resolving
@@ -95,13 +97,9 @@ issuer stops minting, and the access token's lifetime bounds the exposure.
 
 ## Cookies and local account admission
 
-Billing HTTP mounts ignore ambient cookies by default. A cookie-based host
-sets `Routes.CookieOrigin` to `"https://merchant.example"` when it mounts. Every unsafe
-cookie request must carry that exact Origin, including bodyless POSTs. Missing,
-opaque, cross-origin and sibling origins are refused. Explicit Authorization
-never falls back to an attached cookie. AuthKit's own `/auth` transport keeps
-its separate session/refresh/CSRF cookie protocol and must not be wrapped by
-the billing cookie adapter.
+Billing HTTP mounts strip ambient cookies: a browser call carries its
+credential in a header. AuthKit's own `/auth` transport keeps its separate
+session/refresh/CSRF cookie protocol.
 
 The control plane enables AuthKit's browser refresh transport: access tokens
 stay in memory, while the rotating refresh credential is an HttpOnly,
@@ -146,7 +144,7 @@ HTTP is allowed for explicit localhost/loopback development origins.
 
 ## Customer portal membership
 
-Billing customer records and spend-delegation policies are merchant-scoped and
+Billing customer records are merchant-scoped and
 do not create AuthKit customer groups as a side effect. Hosts such as
 OpenRails-SaaS explicitly call `EnsureCustomerPermissionGroup` when a user
 creates a portal account. The group's id is the customer's user id:

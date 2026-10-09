@@ -59,7 +59,7 @@ func requireConsoleAt(t *testing.T, handler http.Handler, mount, marker string) 
 
 // standaloneConsole serves c from a standalone build on a server whose issuer
 // is issuer.
-func standaloneConsole(issuer string, c *openrails.AdminConsole) func(*server.Config, *server.Deps) {
+func standaloneConsole(issuer string, c *server.AdminConsole) func(*server.Config, *server.Deps) {
 	return func(cfg *server.Config, deps *server.Deps) {
 		cfg.Auth.Issuer = issuer
 		cfg.AdminConsole = c
@@ -76,7 +76,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 		"http://127.0.0.1":             "/auth/v1",
 		"http://127.0.0.1/" + f.schema: "/" + f.schema + "/v1",
 	} {
-		srv := f.newServer(t, standaloneConsole(issuer, &openrails.AdminConsole{}))
+		srv := f.newServer(t, standaloneConsole(issuer, &server.AdminConsole{}))
 		handler, err := standaloneHandler(srv)
 		require.NoError(t, err)
 		requireConsoleAt(t, handler, "/admin", "standalone")
@@ -99,7 +99,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 // Without a console selected no console route exists.
 func TestStandaloneAdminConsolePath(t *testing.T) {
 	f := newFixture(t)
-	moved := f.newServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Path: "/billing/admin"}))
+	moved := f.newServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Path: "/billing/admin"}))
 	handler, err := standaloneHandler(moved)
 	require.NoError(t, err)
 	routes, err := moved.Routes()
@@ -117,20 +117,25 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
 
 	// A hosted product's console extensions read their data from config.json.
-	hosted, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}})))
+	hosted, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}})))
 	require.NoError(t, err)
 	require.Contains(t, get(hosted, "/admin/config.json").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
-	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Extensions: map[string]any{"Hosted": true}}))
+	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Extensions: map[string]any{"Hosted": true}}))
 	require.ErrorContains(t, err, `invalid Routes.AdminConsole.Extensions key "Hosted"`)
 
-	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &openrails.AdminConsole{Path: "/v1"}))
+	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Path: "/v1"}))
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)
+	_, err = f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
+		standaloneConsole("http://127.0.0.1", &server.AdminConsole{})(cfg, deps)
+		cfg.RouteGroups = openrails.RouteGroups{Programmatic: true}
+	})
+	require.ErrorContains(t, err, "turn on at least one of route_groups.admin")
 }
 
-// An embedded host mounts the console with the admin API, from its own
-// build, at Routes.AdminConsole.Path on the root router; the console finds the
-// API at Routes.Prefix. A missing or broken build, an invalid path, or no
-// admin API fails the mount; without AdminConsole no console route exists.
+// An embedded host mounts the console with a staff route group, from its own
+// build, at Routes.Prefix's /admin; the console finds the API there and
+// AuthKit at /api/v1 on the same origin. A missing or broken build, or no
+// staff group, fails the mount; without AdminConsole no console route exists.
 func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
@@ -145,25 +150,23 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 		t.Cleanup(func() { _ = client.Close(context.Background()) })
 		return client
 	}
-	console := &openrails.AdminConsole{AuthBaseURL: "/api/v1"}
-	routes := openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions, AdminConsole: console}
+	routes := openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
 	require.ErrorContains(t, err, "needs a console build")
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
 	require.ErrorContains(t, err, `<base href="/admin/">`)
 
 	client := boot(consoleBuild("host"))
-	_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: console})
-	require.ErrorContains(t, err, "set Routes.Permissions.AdminRead")
-	for _, path := range []string{"/", "admin", "/billing/admin/", "/a/../b", "/a b", `/x"><script>`} {
-		_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions, AdminConsole: &openrails.AdminConsole{Path: path, AuthBaseURL: "/api/v1"}})
-		require.ErrorContains(t, err, "invalid Routes.AdminConsole.Path", path)
-	}
+	_, err = client.Routes(openrails.Routes{Auth: deny, Prefix: "/billing", AdminConsole: true})
+	require.ErrorContains(t, err, "turn on at least one of RouteGroups.Admin")
 
+	// The host keeps its own /admin pages.
 	root := http.NewServeMux()
+	root.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
 	require.NoError(t, openrailshttp.Mount(root, client, routes))
-	requireConsoleAt(t, root, "/admin", "host")
-	w := get(root, "/admin/config.json")
+	requireConsoleAt(t, root, "/billing/admin", "host")
+	require.Equal(t, "host admin", get(root, "/admin/").Body.String())
+	w := get(root, "/billing/admin/config.json")
 	var bootstrap struct {
 		AuthBaseURL string `json:"auth_base_url"`
 		APIBaseURL  string `json:"api_base_url"`
@@ -172,15 +175,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	require.Equal(t, "/api/v1", bootstrap.AuthBaseURL)
 	require.Equal(t, "/billing/v1", bootstrap.APIBaseURL)
 
-	// The host keeps its own /admin pages and mounts the console elsewhere.
-	moved := http.NewServeMux()
-	moved.HandleFunc("/admin/", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("host admin")) })
-	require.NoError(t, openrailshttp.Mount(moved, client, openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions,
-		AdminConsole: &openrails.AdminConsole{Path: "/billing/admin", AuthBaseURL: "/api/v1"}}))
-	requireConsoleAt(t, moved, "/billing/admin", "host")
-	require.Equal(t, "host admin", get(moved, "/admin/").Body.String())
-
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", Permissions: adminPermissions}))
-	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "not selected, not mounted")
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions}))
+	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
 }

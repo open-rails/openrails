@@ -44,9 +44,9 @@ func (c *Client) GetPaymentAttempt(ctx context.Context, id billing.PaymentAttemp
 	return &out, nil
 }
 
-// ListRebillCycles is one page of the merchant's rebill cycles, latest due
+// ListRenewals is one page of the merchant's renewals, latest due
 // first.
-func (c *Client) ListRebillCycles(ctx context.Context, filter billing.RebillCycleListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RebillCycle], error) {
+func (c *Client) ListRenewals(ctx context.Context, filter billing.RenewalListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Renewal], error) {
 	q := pageValues(nil, filter.PageRequest)
 	setQuery(q, map[string]string{"owner": commaList(filter.Owner), "first_outcome": commaList(filter.FirstOutcome), "miss_reason": commaList(filter.MissReason),
 		"outcome": commaList(filter.Outcome), "psp_id": filter.PSPID.String(), "subscription_id": filter.SubscriptionID.String(),
@@ -54,21 +54,21 @@ func (c *Client) ListRebillCycles(ctx context.Context, filter billing.RebillCycl
 	if err := setIDs(q, filter.IDs); err != nil {
 		return nil, err
 	}
-	var out billing.ListPage[billing.RebillCycle]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/rebill-cycles?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	var out billing.ListPage[billing.Renewal]
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/renewals?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// GetRebillCycle reads one rebill cycle with its attempts.
-func (c *Client) GetRebillCycle(ctx context.Context, id billing.RebillCycleID, requestOptions ...RequestOption) (*billing.RebillCycle, error) {
-	cycle, err := requireTypedID("rebill_cycle_id", id)
+// GetRenewal reads one renewal with its attempts.
+func (c *Client) GetRenewal(ctx context.Context, id billing.RenewalID, requestOptions ...RequestOption) (*billing.Renewal, error) {
+	cycle, err := requireTypedID("renewal_id", id)
 	if err != nil {
 		return nil, err
 	}
-	var out billing.RebillCycle
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/rebill-cycles/"+cycle, nil, &out, requestOptions...); err != nil {
+	var out billing.Renewal
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/renewals/"+cycle, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

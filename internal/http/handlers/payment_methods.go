@@ -323,16 +323,6 @@ func DeletePaymentMethod(r *httprequest.Request) {
 	deletePaymentMethodForCustomer(r, user.ID)
 }
 
-// DeleteCustomerPaymentMethod is DeletePaymentMethod for merchant staff, after
-// permission and customer scope are checked.
-func DeleteCustomerPaymentMethod(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
-		return
-	}
-	deletePaymentMethodForCustomer(r, customer.String())
-}
-
 func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 	methodID, err := billing.ParsePaymentMethodID(r.Param("id"))
 	if err != nil || methodID.IsZero() {

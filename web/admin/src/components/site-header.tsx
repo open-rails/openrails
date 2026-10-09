@@ -36,6 +36,7 @@ import type { ConsoleMenuItem } from "@/extensions/types"
 import { useExtensions, userMenuItems } from "@/extensions/registry"
 import { useConsoleContextFor } from "@/extensions/use-console"
 import { useAuth } from "@/lib/auth"
+import { useAdminArea } from "@/lib/capabilities"
 
 export interface Crumb {
   label: string
@@ -45,6 +46,8 @@ export interface Crumb {
 
 export function SiteHeader({ trail }: { trail: Crumb[] }) {
   const { activeMerchant } = useAuth()
+  // Merchant notifications are customer support's.
+  const admin = useAdminArea()
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
@@ -79,7 +82,7 @@ export function SiteHeader({ trail }: { trail: Crumb[] }) {
         </BreadcrumbList>
       </Breadcrumb>
       <div className="ml-auto flex items-center gap-2">
-        {activeMerchant && <NotificationBell />}
+        {activeMerchant && admin && <NotificationBell />}
         <UserMenu />
       </div>
     </header>

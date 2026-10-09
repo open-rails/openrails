@@ -174,24 +174,6 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 	}, nil
 }
 
-// ResolveProvisioningToken verifies r's client-credentials access token with
-// scope scim and resolves the merchant whose users it provisions: the one the
-// request names, or the issuer's only one.
-func (c *ControlPlane) ResolveProvisioningToken(r *http.Request) (billing.MerchantID, error) {
-	if c == nil || c.resource == nil {
-		return billing.MerchantID{}, credential.ErrResourceServerNotConfigured
-	}
-	cl, is, err := c.verifyResourceToken(r, billing.ScopeSCIM)
-	if err != nil {
-		return billing.MerchantID{}, err
-	}
-	if cl.Kind != verify.TokenOAuthClient {
-		return billing.MerchantID{}, credential.ErrResourceTokenInvalid
-	}
-	mid, _, err := c.resourceMerchant(r.Context(), r, is)
-	return mid, err
-}
-
 // federatedSignInWindow is how recent a trusted issuer's sign-in must be for
 // an operation that moves money or grants access: AuthKit's own window.
 const federatedSignInWindow = 15 * time.Minute

@@ -13,6 +13,8 @@ import {
 } from "@hugeicons/core-free-icons"
 import { matchPath, type RouteObject } from "react-router-dom"
 
+import { useAdminArea, useCatalogArea, useMetrics } from "@/lib/capabilities"
+
 import type {
   ConsoleContext,
   ConsoleExtension,
@@ -28,32 +30,53 @@ export const BILLING_GROUP = "Billing"
 export const ACCOUNT_GROUP = "Account"
 
 export const coreNav: ConsoleNavItem[] = [
-  { title: "Dashboard", path: "/", icon: DashboardCircleIcon, order: 0 },
-  { title: "Customers", path: "/customers", icon: UserGroupIcon, order: 10 },
+  {
+    title: "Dashboard",
+    path: "/",
+    icon: DashboardCircleIcon,
+    order: 0,
+    useVisible: useMetrics,
+  },
+  {
+    title: "Customers",
+    path: "/customers",
+    icon: UserGroupIcon,
+    order: 10,
+    useVisible: useAdminArea,
+  },
   {
     title: "Subscriptions",
     path: "/subscriptions",
     icon: RepeatIcon,
     order: 20,
+    useVisible: useAdminArea,
   },
   {
     title: "Payments",
     path: "/payments",
     icon: CreditCardIcon,
     order: 30,
+    useVisible: useAdminArea,
     items: [
       { title: "Payments", path: "/payments" },
-      { title: "Health", path: "/payments/health" },
+      { title: "Health", path: "/payments/health", useVisible: useMetrics },
       { title: "Attempts", path: "/payments/attempts" },
-      { title: "Rebill cycles", path: "/payments/cycles" },
+      { title: "Renewals", path: "/payments/cycles" },
     ],
   },
-  { title: "Invoices", path: "/invoices", icon: CreditCardIcon, order: 40 },
+  {
+    title: "Invoices",
+    path: "/invoices",
+    icon: CreditCardIcon,
+    order: 40,
+    useVisible: useAdminArea,
+  },
   {
     title: "Catalog",
     path: "/catalog",
     icon: PackageIcon,
     order: 50,
+    useVisible: useCatalogArea,
     items: [
       { title: "Products", path: "/catalog" },
       { title: "Prices", path: "/catalog/prices" },
@@ -61,7 +84,13 @@ export const coreNav: ConsoleNavItem[] = [
       { title: "Drift", path: "/catalog/drift" },
     ],
   },
-  { title: "Ops", path: "/ops", icon: Wrench01Icon, order: 60 },
+  {
+    title: "Ops",
+    path: "/ops",
+    icon: Wrench01Icon,
+    order: 60,
+    useVisible: useAdminArea,
+  },
   { title: "Settings", path: "/settings", icon: Settings01Icon, order: 70 },
 ].map((item) => ({ ...item, scope: "merchant" as const, group: BILLING_GROUP }))
 

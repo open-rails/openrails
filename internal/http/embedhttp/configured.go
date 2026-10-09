@@ -14,50 +14,55 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-// CustomerProfiles are the customer surfaces a selection mounts: /v1/me,
-// then CustomerProfiles. A profile without its own Auth uses Routes.Auth; one
-// without a merchant serves the configured one.
-func CustomerProfiles(sel config.Routes) []config.CustomerRoutes {
-	out := append([]config.CustomerRoutes{{}}, sel.CustomerProfiles...)
-	for i := range out {
-		if out[i].Prefix == "" {
-			out[i].Prefix = "/v1/me"
-		}
-		if httproutes.IsNilAuth(out[i].Auth) {
-			out[i].Auth = sel.Auth
-		}
-	}
-	return out
-}
-
 // ValidateRoutes refuses a selection without the Auth its routes need, or
-// with a bundle or customer surface it cannot mount, before anything mounts:
-// nothing is ever mounted open.
+// with a route group it cannot mount, before anything mounts: nothing is ever
+// mounted open.
 func ValidateRoutes(sel config.Routes) error {
 	if httproutes.IsNilAuth(sel.Auth) {
 		return fmt.Errorf("openrails: Routes.Auth is required: the customer routes ask it who is signed in")
 	}
-	if _, err := RoutePermissions(sel); err != nil {
-		return err
-	}
-	return validateCustomerRoutes(CustomerProfiles(sel))
+	_, err := RoutePermissions(sel)
+	return err
 }
 
-// RoutePermissions is sel's Permissions as the routes check them. It refuses
-// AdminWrite or CatalogWrite without AdminRead, and any bundle without
+// RoutePermissions is sel's staff route groups as the routes check them:
+// each group that is on, with its permission. It refuses a group on without
+// its permission, a permission for a group that is off, and any group without
 // Routes.Auth: nothing is ever mounted open.
 func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
+	b, p := sel.RouteGroups, sel.Permissions
 	perms := httproutes.Permissions{
-		AdminRead:      permissionText(sel.Permissions.AdminRead),
-		AdminWrite:     permissionText(sel.Permissions.AdminWrite),
-		CatalogWrite:   permissionText(sel.Permissions.CatalogWrite),
-		MerchantConfig: permissionText(sel.Permissions.MerchantConfig),
+		AdminRead:      permissionText(p.AdminRead),
+		AdminUpdate:    permissionText(p.AdminUpdate),
+		Catalog:        permissionText(p.Catalog),
+		MerchantConfig: permissionText(p.MerchantConfig),
+		Metrics:        permissionText(p.Metrics),
+	}
+	for _, c := range []struct {
+		on         bool
+		group      string
+		perm, name string
+	}{
+		{b.Admin, "Admin", perms.AdminRead, "AdminRead"},
+		{b.Catalog, "Catalog", perms.Catalog, "Catalog"},
+		{b.MerchantConfig, "MerchantConfig", perms.MerchantConfig, "MerchantConfig"},
+		{b.Metrics, "Metrics", perms.Metrics, "Metrics"},
+	} {
+		switch {
+		case c.on && c.perm == "":
+			return perms, fmt.Errorf("openrails: RouteGroups.%s is on without Permissions.%s", c.group, c.name)
+		case !c.on && c.perm != "":
+			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.%s is off", c.name, c.group)
+		}
+	}
+	if !b.Admin && perms.AdminUpdate != "" {
+		return perms, fmt.Errorf("openrails: Permissions.AdminUpdate is given, but RouteGroups.Admin is off")
 	}
 	if err := perms.Validate(); err != nil {
 		return perms, err
 	}
-	if perms != (httproutes.Permissions{}) && httproutes.IsNilAuth(sel.Auth) {
-		return perms, fmt.Errorf("openrails: Routes.Permissions need Routes.Auth (its RequirePermission and Sensitive gate every admin route)")
+	if (perms != (httproutes.Permissions{}) || b.Programmatic) && httproutes.IsNilAuth(sel.Auth) {
+		return perms, fmt.Errorf("openrails: RouteGroups need Routes.Auth (it gates every staff and programmatic route)")
 	}
 	return perms, nil
 }
@@ -81,11 +86,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	if err := ValidateRoutes(sel); err != nil {
 		return nil, err
 	}
-	if sel.Provisioning && a.Runtime.HostUserInfo {
-		return nil, fmt.Errorf("openrails: Routes.Provisioning keeps a pushed copy of your users, and Deps.UserInfo reads your directory instead; choose one")
-	}
 	perms, _ := RoutePermissions(sel)
-	profiles := CustomerProfiles(sel)
 	asm := FromApp(a)
 	asm.Auth = sel.Auth
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
@@ -95,8 +96,8 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	table := asm.NewRoutes(Options{Permissions: perms, ProviderRoutes: &providers, Provisioning: sel.Provisioning})
-	extra, err := BuildCustomerRoutes(a, profiles, nil)
+	table := asm.NewRoutes(Options{Permissions: perms, ProviderRoutes: &providers, Programmatic: sel.RouteGroups.Programmatic})
+	extra, err := BuildCustomerRoutes(a, sel.Auth, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +107,6 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	}
 	router.ResolveMerchantSelectors(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
-	}, CustomerPrefixes("/billing", profiles)...)
+	}, embeddedMount+CustomerPrefix)
 	return table, nil
 }

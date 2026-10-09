@@ -14,11 +14,11 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 ### The mental model
 
 The database is the catalog. The authorized in-process client can always edit
-individual records or apply a JSON/YAML batch. Catalog writes over HTTP are
-their own bundle: an embedded host exposes them by giving
-`Permissions.CatalogWrite` (refused while `Config.Catalog` is the catalog's
-truth); the standalone server exposes them when its
-`secret_backend` is `vault` or `db`.
+individual records or apply a JSON/YAML batch. The catalog over HTTP is its own
+route group: an embedded host turns on `RouteGroups.Catalog` with
+`Permissions.Catalog` (changes refused while `Config.Catalog` is the catalog's
+truth); the standalone server turns on `route_groups.catalog`, and its changes
+follow `secret_backend` (`vault` or `db`).
 
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
@@ -216,10 +216,12 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 ### Managing customers day-to-day
 
 All merchant-admin operations live under `/v1/admin/*` (same public port; each
-route behind its bundle's permission: on the standalone server
+route behind its group's permission: on the standalone server
 `server.MerchantRead` for reads, `server.MerchantWrite` for actions on
-customers, `server.MerchantAdmin` for catalog edits and the merchant's
-configuration). Auth is a trusted issuer's access token (client credentials
+customers, `server.MerchantAdmin` for the catalog and the merchant's
+configuration, `server.MerchantMetrics` for business metrics); your backend's
+own calls live under `/v1/app/*`, taking its application credential with no
+permission. Auth is a trusted issuer's access token (client credentials
 for a backend), a user session, or, on a hosted product, a merchant API key. Full
 reference: [api/routes.md](api/routes.md).
 
@@ -228,16 +230,15 @@ reference: [api/routes.md](api/routes.md).
 | Look up a customer (settings, balances, arrears, default cards) | `GET /v1/admin/customers/{customer_id}` | Customers → search |
 | Find overdue invoices | `GET /v1/admin/invoices?overdue=true` (each says whether it is `delinquent`) | Invoices → Overdue only |
 | Follow failed renewals | `GET /v1/admin/subscriptions?dunning=true` (each with its `dunning`) | Subscriptions → Dunning |
-| Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `DELETE /v1/admin/customers/{customer_id}/product-access/{id}` | Customers → profile |
+| Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `POST /v1/admin/product-access/{id}/revoke` | Customers → profile |
 | Record money received outside OpenRails for an invoice or an order | `POST /v1/admin/payments` | Invoices → detail |
 | List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/admin/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
 | List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/admin/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/admin/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` | Customers → profile |
-| Ask what a grant key did | `GET /v1/admin/customers/{customer_id}/credit-grants?source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/admin/customers/{customer_id}/spend-delegations`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
+| Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/credit-grants/{id}/revoke` | Customers → profile |
+| Ask what a grant key did | `GET /v1/admin/credit-grants?customer_id=&source_id=` | — |
 | Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/{customer_id}` | Customers → profile |
 | Catalog over HTTP | `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
@@ -274,7 +275,7 @@ the refund is returned `pending` and settles when the gate allows it.
 A refund made in the provider's own dashboard carries no `revoke_access`
 choice; the merchant setting `provider_refund_access` decides it on every rail:
 `revoke_on_full` (default: access ends once the charge is fully refunded),
-`revoke_on_any`, or `keep`. Set it in the merchant configuration (`ApplyMerchantConfiguration`).
+`revoke_on_any`, or `keep`. Set it in the merchant configuration (`UpdateMerchantConfiguration`).
 
 ### Archiving a product with purchase refunds
 
@@ -297,7 +298,7 @@ grandfathered). A purchase under review is a finding
 resolved with `Client.ResolveFinding`: `approve` refunds the remaining amount
 and ends access, `ignore` keeps both.
 
-Granting credits is money-in, an `AdminWrite`. Each grant item's `source_id`
+Granting credits is money-in, an `AdminUpdate`. Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 
@@ -316,7 +317,8 @@ method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift
 view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
-pages, such as the team and API keys.
+pages, such as the team and API keys. Each area shows only to staff holding its
+route group's permission (`GET /v1/admin/access`).
 - **Dashboard**: a widget grid over the metrics API. Widget queries are written by a
   server-side LLM from natural language ("count of cancels per day, past 7 days") —
   requires `llm.api_key`; without it everything else still works and the add-widget

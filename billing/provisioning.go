@@ -6,10 +6,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// ScopeSCIM is the OAuth scope of a client-credentials access token that
-// provisions the merchant's users over SCIM (/scim/v2).
-const ScopeSCIM = "scim"
-
 // ProvisioningTokenID names a provisioning token; on the wire "ptk_<uuid>".
 type ProvisioningTokenID uuid.UUID
 

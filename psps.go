@@ -65,7 +65,8 @@ func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, 
 
 // UpdatePSP changes a PSP's settings or rotates its credentials; new
 // credentials are checked with the provider first. ExpectedRevision is the
-// revision the caller read.
+// revision the caller read. Archived, alone, retires the PSP without a
+// provider call.
 func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
 	path, err := pspPath(id)
 	if err != nil {
@@ -73,20 +74,6 @@ func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing
 	}
 	var out billing.PSP
 	if err := c.do(ctx, http.MethodPatch, path, params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ArchivePSP archives a PSP: it takes no new work and keeps serving its
-// existing subscriptions until they drain. No provider call is made.
-func (c *Client) ArchivePSP(ctx context.Context, id billing.PSPID, params billing.ArchivePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
-	path, err := pspPath(id)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.PSP
-	if err := c.do(ctx, http.MethodPost, path+"/archive", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

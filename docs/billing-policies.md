@@ -85,7 +85,7 @@ settings:
 ```
 
 The same settings through the API, as the `settings` of
-`POST /v1/admin/configuration/applications`:
+`PATCH /v1/admin/configuration`:
 
 ```json
 {
@@ -106,7 +106,7 @@ policy the API would have refused. Each kind accepts only its own limit: putting
 `spend_windows` on an `outstanding_cap` policy is an error, not a silently
 ignored field.
 
-A `spend_windows` entry (and a spend delegation's window) is at most 31 days
+A `spend_windows` entry is at most 31 days
 (`window_seconds` ≤ 2678400): admitted requests are kept for the longest window
 plus 30 days, and a longer window would count requests already dropped.
 
@@ -132,7 +132,7 @@ clears it. `GET
 /v1/admin/customers/{customer_id}` reads it, as `settings.billing_policy`.
 This is the explicit assignment, not the effective tier or default policy.
 
-The read needs `AdminRead` and the write `AdminWrite`. Customer self-service
+The read needs `AdminRead` and the write `AdminUpdate`. Customer self-service
 cannot change it. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer

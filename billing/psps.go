@@ -78,9 +78,9 @@ type CreatePSPParams struct {
 	Credentials map[string]string `json:"credentials"`
 }
 
-// UpdatePSPParams changes a PSP's settings or rotates its credentials.
-// ExpectedRevision is the revision the caller read; a PSP changed since is a
-// conflict. Omitted credentials and settings keep their values.
+// UpdatePSPParams changes a PSP's settings, rotates its credentials or
+// archives it. ExpectedRevision is the revision the caller read; a PSP changed
+// since is a conflict. Omitted credentials and settings keep their values.
 type UpdatePSPParams struct {
 	OperationID      uuid.UUID         `json:"operation_id"`
 	ExpectedRevision int64             `json:"expected_revision"`
@@ -89,6 +89,12 @@ type UpdatePSPParams struct {
 	// RetireWebhookOverlap refuses the rotated-out webhook signing secret at
 	// once instead of at the end of its overlap.
 	RetireWebhookOverlap bool `json:"retire_webhook_overlap"`
+	// Archived retires the PSP, alone in its request: it takes no new work and
+	// serves its subscriptions until they drain; no provider call is made, and
+	// an archived PSP is never restored. The last active PSP on its rail
+	// archives only with AllowLast, and new checkout on the rail stops.
+	Archived  bool `json:"archived"`
+	AllowLast bool `json:"allow_last"`
 }
 
 // PSPDeclaration names a PSP account without credentials, for imported
@@ -98,13 +104,6 @@ type PSPDeclaration struct {
 	Key       string
 	Rail      Rail
 	AccountID string
-}
-
-// ArchivePSPParams archives a PSP. The last active PSP on its rail is
-// refused unless AllowLast: new checkout on the rail stops until another is
-// armed.
-type ArchivePSPParams struct {
-	AllowLast bool `json:"allow_last"`
 }
 
 // RailDefinition is a rail a merchant can arm a PSP on, with the credential

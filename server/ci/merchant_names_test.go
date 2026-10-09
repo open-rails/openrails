@@ -47,7 +47,7 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 		Schema: f.authSchema(),
-	}}
+	}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}
 	deps := server.Deps{Engine: openrails.Deps{Postgres: f.pool}}
 	if edit != nil {
 		edit(&cfg, &deps)

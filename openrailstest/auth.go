@@ -21,6 +21,9 @@ import (
 type AuthCases struct {
 	// Permissions are the host's mount (Routes.Permissions).
 	Permissions openrails.Permissions
+	// Programmatic is the host's Routes.Programmatic: Machine is then
+	// required, since the subject kind Auth reports is all that admits it.
+	Programmatic bool
 	// Customer is a signed-in user who is not staff.
 	Customer func() *http.Request
 	// Staff is a person holding every one of Permissions on the mounted
@@ -39,28 +42,30 @@ type AuthCases struct {
 	// StaleStaff holds every permission but signed in too long ago to move
 	// money; nil skips the case.
 	StaleStaff func() *http.Request
-	// Machine is a machine credential (an API key) holding every
-	// permission; nil skips the case. RequirePermission must admit it, and it
-	// must never read as a user acting in person, who would buy as a customer.
+	// Machine is your backend's application credential; required with
+	// Programmatic, else nil skips the case. Required must admit it, and its
+	// Identity must name an application, never a user in person: the
+	// programmatic routes take it for that alone.
 	Machine func() *http.Request
 }
 
 // CheckAuth fails t when a's middleware admits what it must refuse:
 // anonymous and refused credentials, a customer or another merchant's staff
 // on a permission, one permission's holder on another, a stale sign-in on an
-// operation that moves money, or a machine reading as a user. It also fails
-// when a refuses the customer or staff it must admit, so a check cannot pass
-// vacuously.
+// operation that moves money. It fails when a person reads as an application
+// or an application as a person: the programmatic routes admit by that alone.
+// It also fails when a refuses the customer, staff or machine it must admit,
+// so a check cannot pass vacuously.
 func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 	t.Helper()
 	perms := map[string]bool{}
-	for _, perm := range []fmt.Stringer{c.Permissions.AdminRead, c.Permissions.AdminWrite, c.Permissions.CatalogWrite, c.Permissions.MerchantConfig} {
+	for _, perm := range []fmt.Stringer{c.Permissions.AdminRead, c.Permissions.AdminUpdate, c.Permissions.Catalog, c.Permissions.MerchantConfig, c.Permissions.Metrics} {
 		if perm != nil && perm.String() != "" {
 			perms[perm.String()] = true
 		}
 	}
-	if a == nil || len(perms) == 0 || c.Customer == nil || c.Staff == nil {
-		t.Fatal("openrailstest: CheckAuth needs an Auth, Permissions, and Customer and Staff requests")
+	if a == nil || len(perms) == 0 && !c.Programmatic || c.Customer == nil || c.Staff == nil || c.Programmatic && c.Machine == nil {
+		t.Fatal("openrailstest: CheckAuth needs an Auth, Permissions or Programmatic, Customer and Staff requests, and a Machine with Programmatic")
 		return
 	}
 	required := chain(a.Required())
@@ -89,7 +94,25 @@ func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 			t.Errorf("openrailstest: the customer's Identity Subject %q is not a canonical UUID", who.Subject)
 		}
 	}
-	admits(t, "Required refused the staff member", a, required, c.Staff)
+	person := func(name string, req func() *http.Request) {
+		if who, ok := admits(t, "Required refused "+name, a, required, req); ok && who.SubjectKind != openrails.SubjectUser {
+			t.Errorf("openrailstest: %s's Identity is SubjectKind %q; a person is a user, or the programmatic routes would take them", name, who.SubjectKind)
+		}
+	}
+	person("the staff member", c.Staff)
+	for own, holder := range c.Holders {
+		person("the holder of "+own, holder)
+	}
+	if c.Machine != nil {
+		if who, ok := admits(t, "Required refused the machine credential", a, required, c.Machine); ok {
+			if who.SubjectKind != openrails.SubjectApplication {
+				t.Errorf("openrailstest: the machine credential's Identity is SubjectKind %q; your backend is an application", who.SubjectKind)
+			}
+			if billingauth.Interactive(who) {
+				t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
+			}
+		}
+	}
 
 	for _, perm := range sortedKeys(perms) {
 		permission := chain(a.RequirePermission(perm))
@@ -108,14 +131,9 @@ func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
 			refuses(t, "Sensitive admitted a stale sign-in holding "+perm, sensitive, c.StaleStaff)
 		}
 		if c.Machine != nil {
-			if who, ok := admits(t, "RequirePermission refused the machine credential holding "+perm, a, permission, c.Machine); ok && billingauth.Interactive(who) {
-				t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
+			if who, ok := admitted(a, permission, c.Machine); ok && who.SubjectKind != openrails.SubjectApplication {
+				t.Errorf("openrailstest: RequirePermission(%s) admitted the machine credential as SubjectKind %q", perm, who.SubjectKind)
 			}
-		}
-	}
-	if c.Machine != nil {
-		if who, ok := admitted(a, required, c.Machine); ok && billingauth.Interactive(who) {
-			t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
 		}
 	}
 	for own, holder := range c.Holders {

@@ -17,15 +17,16 @@ import (
 // commit its provider operation atomically uses the embedded Client's Tx
 // operations. Every command answers the operation.
 
-// providerOperationPath refuses ids that cannot name a path segment with the
-// same invalid_param refusal the server-side validation returns. Operation ids
-// are exact canonical host strings: surrounding whitespace is refused, not
-// trimmed, as validateOperationID does.
-func providerOperationPath(operationID string) (string, error) {
+// providerOperationPath is an operation's path beneath root (the staff
+// /v1/admin or the backend's /v1/app). It refuses ids that cannot name a path
+// segment with the same invalid_param refusal the server-side validation
+// returns. Operation ids are exact canonical host strings: surrounding
+// whitespace is refused, not trimmed, as validateOperationID does.
+func providerOperationPath(root, operationID string) (string, error) {
 	if trimmed := strings.TrimSpace(operationID); trimmed == "" || trimmed != operationID || operationID == "." || operationID == ".." {
 		return "", invalidErr(fmt.Sprintf("operation_id %q is not a valid operation id", operationID))
 	}
-	return "/v1/admin/provider-operations/" + url.PathEscape(operationID), nil
+	return root + "/provider-operations/" + url.PathEscape(operationID), nil
 }
 
 func (c *Client) providerOperation(ctx context.Context, method, path string, body any, requestOptions []RequestOption) (*billing.ProviderOperation, error) {
@@ -39,13 +40,13 @@ func (c *Client) providerOperation(ctx context.Context, method, path string, bod
 // OpenProviderOperation reserves capacity for one provider operation. An
 // identical retry replays; any changed immutable field is refused.
 func (c *Client) OpenProviderOperation(ctx context.Context, req billing.OpenProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	return c.providerOperation(ctx, http.MethodPost, "/v1/admin/provider-operations", req, requestOptions)
+	return c.providerOperation(ctx, http.MethodPost, "/v1/app/provider-operations", req, requestOptions)
 }
 
 // GetProviderOperation reads one operation by its id, with its latest
 // increment, qualification, refusal and resolution.
 func (c *Client) GetProviderOperation(ctx context.Context, operationID string, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	path, err := providerOperationPath(operationID)
+	path, err := providerOperationPath("/v1/admin", operationID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +57,7 @@ func (c *Client) GetProviderOperation(ctx context.Context, operationID string, r
 // than MinimumAmount, or refuses with nothing written. Repeating an ordinal
 // with the same amounts replays it.
 func (c *Client) IncrementProviderOperation(ctx context.Context, req billing.IncrementProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	path, err := providerOperationPath(req.OperationID)
+	path, err := providerOperationPath("/v1/app", req.OperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (c *Client) IncrementProviderOperation(ctx context.Context, req billing.Inc
 // ReleaseProviderOperation releases an open hold after proven provider
 // non-creation. It is refused once billing evidence exists.
 func (c *Client) ReleaseProviderOperation(ctx context.Context, req billing.ReleaseProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	path, err := providerOperationPath(req.OperationID)
+	path, err := providerOperationPath("/v1/app", req.OperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +84,7 @@ func (c *Client) ReleaseProviderOperation(ctx context.Context, req billing.Relea
 // oversized observation gets the server's invalid_param refusal in every
 // deployment instead of the transport's body-limit status.
 func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billing.RecordProviderBillingObservationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	path, err := providerOperationPath(req.OperationID)
+	path, err := providerOperationPath("/v1/app", req.OperationID)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +103,7 @@ func (c *Client) RecordProviderBillingObservation(ctx context.Context, req billi
 // written_off releases it uncharged. Repeating the same close replays; a
 // changed term is refused.
 func (c *Client) CloseProviderOperation(ctx context.Context, req billing.CloseProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error) {
-	path, err := providerOperationPath(req.OperationID)
+	path, err := providerOperationPath("/v1/admin", req.OperationID)
 	if err != nil {
 		return nil, err
 	}

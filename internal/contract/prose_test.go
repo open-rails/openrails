@@ -173,6 +173,9 @@ func TestREADMEEmbeddedExample(t *testing.T) {
 	require.True(t, ok)
 	roles, _, _ = strings.Cut(roles, "```")
 	for _, line := range strings.Split(strings.TrimSpace(roles), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		require.Contains(t, program, "\t"+strings.TrimRight(line, " ")+"\n", "the README's role registration")
 	}
 	_, config, ok := strings.Cut(readme, "ak, err := authkit.New(ctx, authkit.Config{\n")

@@ -65,6 +65,10 @@ const (
 	// the simple, honest per-provider rate limit (thousands of merchants share
 	// each provider's API budget; a small worker cap is the brake).
 	standaloneRiverProviderRefreshQueueMaxWorkers = 4
+	// appRequestTTL is how long a programmatic write replays its response,
+	// appRequestLease how long a silent one keeps its claim.
+	appRequestTTL   = 24 * time.Hour
+	appRequestLease = 30 * time.Second
 	// idempotencyLeaseConns sizes the lease-renewal pool: one short UPDATE per
 	// held claim every quarter lease.
 	idempotencyLeaseConns = 4
@@ -249,6 +253,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			_ = leaseDB.Close()
 		}
 	}()
+	appRequests, err := idempotency.NewStore(database, leaseDB, appRequestTTL, appRequestLease)
+	if err != nil {
+		return nil, err
+	}
 	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
@@ -362,6 +370,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		MetricsService:         serviceInstances.MetricsService,
 		DashboardService:       serviceInstances.DashboardService,
 		CopilotService:         serviceInstances.CopilotService,
+		AppRequests:            appRequests,
 		AlertService:           alertService,
 		WebhookHealth:          &webhookhealth.Recorder{DB: database, Clock: clock},
 		MoneyCharger:           moneyCharger,
@@ -594,11 +603,9 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		}
 	}
 	metricsService := metrics.NewService(database)
-	// #741 dashboard: NL widget generation is armed only when an LLM key is
-	// configured — nil LLM = the generate endpoint fail-closes with 501.
-	// #756 metrics Q&A additionally requires the llm.ask_enabled consent
-	// (aggregate query results flow to the provider) and is rate-limited
-	// by the shared HTTP feature-bucket limiter.
+	// The assistants run only with an LLM key; metrics questions and catalog
+	// questions each need their own consent, as they send aggregate results to
+	// the provider.
 	var dashboardLLM dashboard.LLM
 	if config.LLMConfigured(cfg.LLM) {
 		llmBaseURL := strings.TrimSpace(cfg.LLM.BaseURL)
@@ -670,9 +677,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		&subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), clock)
 
 	// Catalog Q&A and drafting are independently opt-in. Draft tools only
-	// propose changes; the reprice API owns #781 notice-window enforcement.
-	// The copilot shares the dashboard LLM client and uses its own rate-limit
-	// namespace.
+	// propose changes; the price-migration API enforces notice windows.
 	copilotService := copilot.NewService(copilot.Deps{
 		Products: productService,
 		Prices:   priceService,

@@ -128,16 +128,6 @@ func ListProductAccess(r *httprequest.Request) {
 	listProductAccess(r, productaccess.Filter{Customers: uuidutil.Of(customers), Products: uuidutil.Of(products)})
 }
 
-// SelfListProductAccess is one page of the customer's own product-access
-// windows.
-func SelfListProductAccess(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
-	if !ok {
-		return
-	}
-	listProductAccess(r, productaccess.Filter{Customers: []uuid.UUID{payer.UUID()}})
-}
-
 func listProductAccess(r *httprequest.Request, filter productaccess.Filter) {
 	page, ok := r.Page()
 	if !ok {
@@ -298,16 +288,24 @@ func CreateProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-// DeleteProductAccess revokes one of the customer's product-access windows: a
-// free grant in the grant ledger, so its future windows end with it.
-func DeleteProductAccess(r *httprequest.Request) {
-	customer, ok := productAccessCustomer(r)
-	if !ok {
-		return
-	}
+// RevokeProductAccess revokes a product-access window with the reason; a window
+// not yet started is removed. Revoking again changes nothing.
+func RevokeProductAccess(r *httprequest.Request) {
 	id, err := billing.ParseProductAccessID(r.Param("id"))
 	if err != nil || id.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product access id").WithParam("id"))
+		return
+	}
+	if !requireMerchantRoutePrincipal(r) {
+		return
+	}
+	var params billing.RevokeProductAccessParams
+	if !r.BindJSON(&params) {
+		return
+	}
+	params.Reason = strings.TrimSpace(params.Reason)
+	if params.Reason == "" || utf8.RuneCountInString(params.Reason) > 500 {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is required (at most 500 characters)").WithParam("reason"))
 		return
 	}
 	svc := productAccessService(r)
@@ -315,14 +313,14 @@ func DeleteProductAccess(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	found, err := svc.RevokeProductAccess(r.Request.Context(), customer.UUID(), id.UUID(), models.AccessRevokeAdmin)
+	found, err := svc.RevokeProductAccess(r.Request.Context(), id.UUID(), models.AccessRevokeReason(params.Reason))
 	if err != nil {
 		r.InternalError("failed to revoke product access", err)
 		return
 	}
 	if !found {
-		r.APIError(api.Coded(billing.CodeResourceNotFound, "product access not found or already revoked"))
+		r.ErrorCode(billing.CodeResourceNotFound, "product access not found")
 		return
 	}
-	r.Status(http.StatusNoContent)
+	r.NoContent()
 }

@@ -47,7 +47,7 @@ func inventoryBundle(t *testing.T) *Bundle {
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}
-	selection := config.Routes{Auth: authtest.Deny{}, Permissions: authtest.Permissions()}
+	selection := config.Routes{Auth: authtest.Deny{}, RouteGroups: authtest.Groups(), Permissions: authtest.Permissions()}
 	table, err := embedhttp.ConfiguredRoutes(graph, selection)
 	require.NoError(t, err)
 	for i := range table.Entries {
@@ -144,52 +144,6 @@ func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 	require.Error(t, nilBundle.Mount(engine))
 	require.Error(t, (&Bundle{}).Mount(nil))
 	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "client")
-}
-
-// Configured customer prefixes may use a merchant parameter, never a Gin wildcard.
-func TestCustomerPrefixCannotWidenToANativeWildcard(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
-	rt := &app.Runtime{Config: cfg}
-	rt.SetConfiguredMerchant(testMerchant)
-	graph := &app.App{Config: cfg, Runtime: rt}
-	for _, tc := range []struct {
-		prefixes []string
-		valid    bool
-	}{
-		{[]string{"/portal/*audience"}, false},
-		{[]string{"/audiences/{portal}/one", "/audiences/{platform}/two"}, false},
-		{[]string{"/api/v1/merchants/{slug}/billing/me"}, true},
-	} {
-		fake := &authtest.Fake{}
-		var profiles []config.CustomerRoutes
-		for _, prefix := range tc.prefixes {
-			profiles = append(profiles, config.CustomerRoutes{Prefix: prefix, Auth: fake})
-		}
-		err := embedhttp.ValidateRoutes(config.Routes{Auth: fake, CustomerProfiles: profiles})
-		if err == nil {
-			table, buildErr := embedhttp.BuildCustomerRoutes(graph, profiles, nil)
-			require.NoError(t, buildErr)
-			if err = embedhttp.ValidateRouteTable(table); err == nil {
-				engine := gin.New()
-				require.NoError(t, (&Bundle{routes: toRoutes(routebundle.FromTable(table))}).Mount(engine))
-				for _, request := range []struct {
-					method, path string
-					status       int
-				}{
-					{http.MethodPost, "/api/v1/merchants/acme/billing/me/subscriptions/not-id/cancel", http.StatusUnauthorized},
-					{http.MethodOptions, "/api/v1/merchants/acme/billing/me/subscriptions/not-id/cancel", http.StatusNoContent},
-					{http.MethodPost, "/api/v1/merchants/acme/billing/me/checkout", http.StatusNotFound},
-					{http.MethodPost, "/portal/anyone/subscriptions/not-id/cancel", http.StatusNotFound},
-				} {
-					w := serve(engine, request.method, request.path, nil)
-					require.Equal(t, request.status, w.Code, "%s %s: %s", request.method, request.path, w.Body.String())
-				}
-				require.Equal(t, 1, fake.Refused("Required"))
-			}
-		}
-		require.Equal(t, tc.valid, err == nil, "%v: %v", tc.prefixes, err)
-	}
 }
 
 // A client that serves no payment page lets only itself frame one.

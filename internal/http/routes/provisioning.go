@@ -15,34 +15,34 @@ import (
 // these routes out.
 var scimBody = Stream{ContentType: scim.MediaType}
 
-// provisioningRoutes are the SCIM 2.0 service provider: the merchant's
-// directory pushing its users, which become its customers' contacts. Each
-// authenticates the merchant itself, by provisioning token or a
-// client-credentials access token with scope scim.
+// provisioningRoutes are the SCIM 2.0 service provider, in the programmatic
+// group: the merchant's directory pushing its users, which become its
+// customers' contacts. Each takes the merchant's provisioning token, which
+// opens nothing else, or an application credential.
 var provisioningRoutes = []Route{
-	{Method: GET, Path: "/scim/v2/ServiceProviderConfig", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/ServiceProviderConfig", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ServiceProviderConfig)},
-	{Method: GET, Path: "/scim/v2/ResourceTypes", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/ResourceTypes", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ResourceTypes)},
-	{Method: GET, Path: "/scim/v2/ResourceTypes/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/ResourceTypes/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ResourceType)},
-	{Method: GET, Path: "/scim/v2/Schemas", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/Schemas", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).Schemas)},
-	{Method: GET, Path: "/scim/v2/Schemas/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/Schemas/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).Schema)},
-	{Method: POST, Path: "/scim/v2/Users", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: POST, Path: "/v1/app/scim/v2/Users", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{201, scimBody}}, Bind: provision((*scim.Server).CreateUser)},
-	{Method: GET, Path: "/scim/v2/Users", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/Users", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Query: params(text("filter"), text("startIndex"), text("count")), Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ListUsers)},
-	{Method: GET, Path: "/scim/v2/Users/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: GET, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).GetUser)},
-	{Method: PUT, Path: "/scim/v2/Users/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: PUT, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).ReplaceUser)},
-	{Method: PATCH, Path: "/scim/v2/Users/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: PATCH, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).PatchUser)},
-	{Method: DELETE, Path: "/scim/v2/Users/{id}", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: DELETE, Path: "/v1/app/scim/v2/Users/{id}", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Responses: []Reply{{204, nil}}, Bind: provision((*scim.Server).DeleteUser)},
-	{Method: POST, Path: "/scim/v2/Bulk", Group: Provisioning, Auth: AuthProvisioning, NoConn: true,
+	{Method: POST, Path: "/v1/app/scim/v2/Bulk", Group: App, Auth: AuthProvisioning, NoConn: true,
 		Request: scimBody, Responses: []Reply{{200, scimBody}}, Bind: provision((*scim.Server).Bulk)},
 
 	// The merchant's provisioning tokens.
@@ -54,8 +54,7 @@ var provisioningRoutes = []Route{
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.DeleteProvisioningToken)},
 }
 
-// provision binds a route to the assembly's SCIM server; an assembly that
-// authenticates no provisioning mounts none.
+// provision binds a route to the assembly's SCIM server.
 func provision(route func(*scim.Server) http.Handler) func(*Env) router.Handler {
 	return func(e *Env) router.Handler {
 		s := e.scimServer()

@@ -46,7 +46,7 @@ type PaymentAttempt struct {
 	// InvoiceID or OrderID is what the attempt tried to pay.
 	InvoiceID       *InvoiceID       `json:"invoice_id"`
 	OrderID         *OrderID         `json:"order_id"`
-	CycleID         *RebillCycleID   `json:"cycle_id"`
+	CycleID         *RenewalID       `json:"cycle_id"`
 	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 	PaymentID       *PaymentID       `json:"payment_id"`
@@ -75,16 +75,16 @@ type PaymentAttemptListParams struct {
 	InvoiceID                                              InvoiceID
 	OrderID                                                OrderID
 	SubscriptionID                                         SubscriptionID
-	CycleID                                                RebillCycleID
+	CycleID                                                RenewalID
 	Since, Until                                           time.Time
 }
 
-// RebillCycle is one paid period that came due (#1111) and what its attempts
+// Renewal is one paid period that came due (#1111) and what its attempts
 // decided. Outcome is collected, lost (closed without a collection) or open;
 // a cycle closes when collected, when its subscription is canceled, or 15
 // days past due.
-type RebillCycle struct {
-	ID             RebillCycleID  `json:"id"`
+type Renewal struct {
+	ID             RenewalID      `json:"id"`
 	SubscriptionID SubscriptionID `json:"subscription_id"`
 	CustomerID     CustomerID     `json:"customer_id"`
 	PSPID          PSPID          `json:"psp_id"`
@@ -108,15 +108,15 @@ type RebillCycle struct {
 	Attempts []PaymentAttempt `json:"attempts"`
 }
 
-// RebillCycleListParams selects cycles, latest due first; every field is
+// RenewalListParams selects cycles, latest due first; every field is
 // optional, and a list matches any of its values. DueSince and DueUntil bound
 // due_at to [DueSince, DueUntil).
 //
 // IDs instead reads 1 to MaxBatchItems named cycles in one page; unknown ones
 // are absent.
-type RebillCycleListParams struct {
+type RenewalListParams struct {
 	PageRequest
-	IDs                                      []RebillCycleID
+	IDs                                      []RenewalID
 	Owner, FirstOutcome, MissReason, Outcome []string
 	PSPID                                    PSPID
 	SubscriptionID                           SubscriptionID

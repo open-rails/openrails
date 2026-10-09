@@ -145,49 +145,6 @@ func CreateProductArchive(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetProductArchive projects the current outcome of each qualifying purchase
-// without issuing refunds or reviews.
-func GetProductArchive(r *httprequest.Request) {
-	id, err := billing.ParseProductArchiveID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product archive id").WithParam("id"))
-		return
-	}
-	if r.State == nil || r.State.DB == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "product archive ledger unavailable")
-		return
-	}
-	ctx := r.Request.Context()
-	op, err := loadProductArchiveByID(ctx, r.State.DB, id.UUID())
-	if err != nil {
-		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
-			r.ErrorCode(billing.CodeResourceNotFound, "product archive not found")
-			return
-		}
-		r.InternalError("product archive could not be loaded", err)
-		return
-	}
-	out, err := evaluateProductArchive(ctx, r, op, false)
-	if err != nil {
-		r.InternalError("product archive purchases could not be evaluated", err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-func loadProductArchiveByID(ctx context.Context, d *db.DB, id uuid.UUID) (productArchiveOperation, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return productArchiveOperation{}, err
-	}
-	row, err := d.Gen(ctx).GetProductArchiveByID(ctx, gen.GetProductArchiveByIDParams{MerchantID: mid.UUID(), ID: id})
-	if err != nil {
-		return productArchiveOperation{}, err
-	}
-	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: billing.PurchaseAction(row.PurchaseAction),
-		PurchaseWindowStartsAt: row.PurchaseWindowStartsAt, Reason: row.Reason, CreatedAt: row.CreatedAt}, nil
-}
-
 func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (productArchiveOperation, []byte, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

@@ -83,7 +83,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, stripe.Redeliver(ctx, event))
 	cid := billing.CustomerID(uuid.MustParse(user.ID))
-	grants, err := client.ListCreditGrants(ctx, cid, billing.CreditGrantListParams{})
+	grants, err := client.ListCreditGrants(ctx, billing.CreditGrantListParams{CustomerID: cid})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 1, "one deposit, one lot")
 	require.EqualValues(t, 12_990_000, grants.Items[0].Amount, "the chosen amount is the credit")

@@ -58,9 +58,11 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
   `provider_credential_writes`, `api_host`, `catalog_copilot`, `metrics_ask`,
-  `dashboard_generation`). Its route groups include `merchant`
-  (staff work on customers) and `merchant_config` (the merchant's own
-  configuration). A route the deployment cannot serve
+  `dashboard_generation`). Its route groups are `admin`
+  (customer support), `catalog`, `merchant_config` (the merchant's own
+  configuration), `metrics` (business metrics) and `app` (the host backend's
+  programmatic routes). What a signed-in staff member holds of them is
+  `GET /v1/admin/access`. A route the deployment cannot serve
   is not registered: it answers `404 route_not_found`.
 - **Health.** `/health/live` and `/health/ready` on the standalone server; a
   failing dependency is logged, never answered.
@@ -72,18 +74,22 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Public: `/v1/config`, `/v1/catalog/products` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
-| Admin, catalog edits and merchant configuration: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
+| Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session, or a trusted issuer's access token with scope `openrails:merchant`; on a hosted product, a merchant API key |
+| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, with no permission; each write sends an `Idempotency-Key`. SCIM also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
-Every staff route is gated by the host's permission for its bundle
+Every staff route is gated by the host's permission for its route group
 (`Routes.Permissions`; each route's is in [routes.md](routes.md)), whatever
 the credential. On the standalone server the permissions are its merchant
-persona's `server.MerchantRead`, `server.MerchantWrite` and
-`server.MerchantAdmin`: an API key carries its role's, a trusted issuer's token
+persona's `server.MerchantRead`, `server.MerchantWrite`,
+`server.MerchantAdmin` and `server.MerchantMetrics`: an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. A user in person also needs a recent sign-in on
 a `sensitive` route: otherwise `403 step_up_required`, with the step-up methods
-in `metadata`.
+in `metadata`; an application never steps up. A `/v1/app` route refuses a person
+(`403 application_required`), and answers a retried write's `Idempotency-Key`
+with the first response; the key sent with another request is
+`422 idempotency_key_reused`.
 
 A `/v1/me` route acts on the credential's own customer; no path names a user.
 The merchant a request acts on comes from its credential, or from the
@@ -124,7 +130,6 @@ an `ETag`). It holds what a browser needs before anything else:
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
 
-The merchant reads the same document at `GET /v1/admin/config`.
 `GET /v1/admin/checkout-options` lists, for a `price_id` or a `product_key`
 and `price_key`, the options that can sell that price.
 
@@ -255,7 +260,7 @@ default not set is `400 default_payment_method_required`.
   `409 payment_method_update_retry_required` when a fresh token is needed.
 - **Delete**: `204` when the provider and the local record are both gone, `202`
   while that converges. Stripe cards are managed in Stripe's billing portal
-  (`POST /v1/me/billing-portal`).
+  (`POST /v1/me/billing-portal-sessions`).
 - **Stripe cards** are saved through a setup: `POST /v1/me/payment-method-setups`,
   Stripe.js confirms it in the page, then `…/{id}/confirm`.
 
@@ -272,8 +277,9 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 - A **customer** is the host's user id, created by its first use (a purchase,
   a credit grant, a settings change). `GET /v1/admin/customers?ids=` reads up
   to 100, and `?search=` finds them by email, username or name. Its `contact`
-  comes from the merchant's directory ([customer contacts](../customer-contacts.md)). Its balance, credit limit, trust level, spend delegations,
-  credit grants and ledger all live beneath `/v1/admin/customers/{customer_id}`.
+  comes from the merchant's directory ([customer contacts](../customer-contacts.md)). Its balance, credit limit, trust level and ledger live
+  beneath `/v1/admin/customers/{customer_id}`; its credit grants are
+  `/v1/admin/credit-grants?customer_id=`.
 - **Credit grants** (`POST /v1/admin/credit-grants`, up to 100 across
   customers, all or none) are idempotent on each customer's `source_id`: an
   identical retry answers the same grant with `replayed: true`; other terms
@@ -281,7 +287,7 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
   unspent remainder (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
-- **Usage events** (`POST /v1/admin/usage-events`, up to 1,000 per call, one
+- **Usage events** (`POST /v1/app/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
   up to 35 days old. An item with `outcome: failed` is work that cost and did
   not deliver: the customer's own failures are forgiven up to its policy's
@@ -307,8 +313,8 @@ one-time); `access_duration_hours` independently determines access (`null`: no
 scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
-Reads need `Permissions.AdminRead`; writes are the catalog-edits bundle,
-`Permissions.CatalogWrite`: without it they are not mounted, and they are
+Reads and writes are the catalog route group, `RouteGroups.Catalog` with
+`Permissions.Catalog`: without it they are not mounted, and its changes are
 refused while `Config.Catalog` is the catalog's truth
 (standalone: unless `secret_backend` is `vault` or `db`). The in-process Client
 is not gated. JSON/YAML batches are deduplicated permanently by content hash,
@@ -319,7 +325,8 @@ and archives the old one. Price keys are product-local and immutable; each has
 automatic revisions starting at zero. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
 copy and reports drift; `GET /v1/admin/findings?type=catalog.*` lists the open
-drift findings, each with the `psp_id` that was compared.
+drift findings, each with the `psp_id` that was compared, and
+`POST /v1/admin/psps/refresh` reads every PSP's catalog again.
 
 ## PSPs
 
@@ -327,9 +334,10 @@ A PSP is one merchant account on a rail (`mobius` and `paykings` are two PSPs on
 `nmi`). `key` is the merchant's name for it, unique among its live PSPs; price
 `psp_links` name PSPs by it. Creating one checks its credentials with the
 provider before anything is stored; `PATCH` changes settings or rotates
-credentials against the `expected_revision` it read. Credential writes need a
-writable secret backend (`credential_source_read_only`,
-`credential_store_read_only` otherwise); settings changes and archive do not.
+credentials against the `expected_revision` it read, or archives it with
+`{archived: true}` alone. Credential writes need a writable secret backend
+(`credential_source_read_only`, `credential_store_read_only` otherwise);
+settings changes and archive do not.
 
 Archive is not deletion: the row, its id, credentials and history remain, and
 existing subscriptions, operations and inbound webhooks keep resolving to it
@@ -346,10 +354,10 @@ automatic refund is `400 refund_unsupported`; one that cannot take it now is
 
 ## Host events
 
-`GET /v1/admin/host-events` is the feed a host drains: `payment.settled`,
+`GET /v1/app/host-events` is the feed a host's backend drains: `payment.settled`,
 `delinquency.grace`, `delinquency.entered`, `delinquency.cleared`, oldest
 first, filtered by `type`. Acknowledge them, up to 100 at a time
-(`POST /v1/admin/host-events/acknowledge`), after the host's own
+(`POST /v1/app/host-events/acknowledge`), after the host's own
 processing commits, then fetch again. Acknowledgment is idempotent and
 independent of notification read state. Acknowledged events are kept 30 days;
 pending ones are never deleted.
@@ -374,8 +382,9 @@ agree. There is no bearer credential and no accountless route. Success is
 ## Alert webhooks
 
 An outbound alert webhook's URL is a write-only credential, path and query
-included: reads show `destination_host` only. `PUT …/{id}/url` rotates it and
-keeps the webhook's identity.
+included: reads show `destination_host` only. `PATCH …/{id}` changes its
+`url`, `name`, `format` or `enabled`; a new URL rotates the credential and keeps
+the webhook's identity.
 
 ## Not routes
 

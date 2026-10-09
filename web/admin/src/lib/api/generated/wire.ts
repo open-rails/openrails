@@ -22,6 +22,13 @@ export type AcknowledgeHostEventsParams = {
   host_event_ids?: string[]
 }
 
+export type AdminAccess = {
+  admin: "none" | "read" | "update"
+  catalog: boolean
+  merchant_config: boolean
+  metrics: boolean
+}
+
 export type Admission = {
   request_id: string
   customer_id: string
@@ -101,13 +108,6 @@ export type Application = {
   meters?: Record<string, ApplyMeter>
 }
 
-export type ApplyMerchantConfigurationParams = {
-  application_id?: string
-  expected_revision?: string | null
-  settings?: MerchantSettings
-  display_name?: string
-}
-
 export type ApplyMeter = {
   event_type?: string | null
   value_property?: string | null
@@ -146,10 +146,6 @@ export type ApplyProduct = {
   credit_grant?: CreditGrantSpec | null
   prices?: Record<string, ApplyPrice>
   rate_cards?: RateCard[] | null
-}
-
-export type ArchivePSPParams = {
-  allow_last?: boolean
 }
 
 export type ArchiveProductParams = {
@@ -379,16 +375,6 @@ export type CatalogDraftRefusal = {
   workaround: string
 }
 
-export type CatalogDriftRefresh = {
-  scanned_products: number
-  scanned_prices: number
-  scanned_nmi_plans: number
-  scanned_solana_plans: number
-  opened_findings: number
-  resolved_findings: number
-  open_findings: number
-}
-
 export type CatalogEvidence = {
   tool: string
   args: string
@@ -411,6 +397,14 @@ export type ChangeSubscriptionParams = {
   price_id?: string
   quantity?: number
   reason?: string
+}
+
+export type CheckEntitlementsParams = {
+  customer_id?: string
+  entitlements?: string[]
+  prefixes?: string[]
+  prefix_limit?: number
+  at?: string
 }
 
 export type CheckoutCustomerIdentity = {
@@ -890,16 +884,18 @@ export type DunningTier = {
   retry_after_hours?: number[]
 }
 
-export type EffectiveTierLookup = {
-  tiers: Record<string, Tier | null> | null
-}
-
 export type EntitlementChange = {
   product_id: string
   product_key: string
   added: string[]
   removed: string[]
   holders: number
+}
+
+export type EntitlementCheck = {
+  entitlements: Record<string, boolean> | null
+  quantities: Record<string, number | null> | null
+  held: Record<string, HeldEntitlements> | null
 }
 
 export type EntitlementReplacement = {
@@ -977,13 +973,13 @@ export type GeneratedWidget = {
   viz: string
 }
 
-export type GetEffectiveTiersParams = {
-  group?: string
-  customer_ids?: string[]
-}
-
 export type Health = {
   status: "ok" | "ready"
+}
+
+export type HeldEntitlements = {
+  keys: string[]
+  truncated: boolean
 }
 
 export type HostEvent = {
@@ -1127,7 +1123,6 @@ export type MerchantAPIHost = {
 }
 
 export type MerchantConfigurationReceipt = {
-  application_id: string
   revision: string
   replayed: boolean
 }
@@ -2053,26 +2048,6 @@ export type RateTier = {
   flat_amount?: string
 }
 
-export type RebillCycle = {
-  id: string
-  subscription_id: string
-  customer_id: string
-  psp_id: string
-  rail: string
-  owner: string
-  due_at: string
-  amount: string
-  currency: string
-  first_outcome: string
-  outcome: string
-  missed_at: string | null
-  miss_reason: string
-  collected_at: string | null
-  recovered_by: string
-  closes_at: string
-  attempts: PaymentAttempt[]
-}
-
 export type RecordProviderBillingObservationParams = {
   observation_id?: string
   lifecycle?: ProviderBillingLifecycleEvidence
@@ -2123,6 +2098,26 @@ export type ReleaseProviderOperationParams = {
   release_reference?: string
 }
 
+export type Renewal = {
+  id: string
+  subscription_id: string
+  customer_id: string
+  psp_id: string
+  rail: string
+  owner: string
+  due_at: string
+  amount: string
+  currency: string
+  first_outcome: string
+  outcome: string
+  missed_at: string | null
+  miss_reason: string
+  collected_at: string | null
+  recovered_by: string
+  closes_at: string
+  attempts: PaymentAttempt[]
+}
+
 export type ReplacePaymentMethodCardParams = {
   payment_token?: string
   card?: CardEntry
@@ -2147,6 +2142,10 @@ export type RevokeCreditGrantParams = {
   reason?: string
 }
 
+export type RevokeProductAccessParams = {
+  reason?: string
+}
+
 export type ScheduledChange = {
   price_id: string
   quantity: number | null
@@ -2156,10 +2155,6 @@ export type ScheduledChange = {
   created_at: string
   price?: Price
   product?: ProductSummary
-}
-
-export type SetAlertWebhookURLParams = {
-  url?: string
 }
 
 export type SetDashboardParams = {
@@ -2184,10 +2179,6 @@ export type SetRateOverrideParams = {
   price?: RatePrice
   allowance?: Allowance
   expected_revision?: number
-}
-
-export type SetSpendDelegationsParams = {
-  delegations?: SpendDelegation[]
 }
 
 export type SetSubscriptionPaymentMethodParams = {
@@ -2222,31 +2213,6 @@ export type SolanaPaymentToken = {
   decimals: number
   preferred: boolean
   recurring_eligible: boolean
-}
-
-export type SpendDelegation = {
-  scope: "invoker" | "invoker_tier" | "role"
-  scope_key: string
-  windows: BudgetWindow[]
-  provenance: string | null
-}
-
-export type SpendLimits = {
-  currency: string
-  invoker: string
-  windows: SpendWindow[]
-}
-
-export type SpendWindow = {
-  scope: "invoker" | "invoker_tier" | "role"
-  key: string
-  window_seconds: number
-  limit: string
-  currency: string
-  used: string
-  reserved: string
-  remaining: string
-  resets_at: string
 }
 
 export type StripeEngineAuthentication = {
@@ -2354,14 +2320,6 @@ export type SupportedTokensResponse = {
   tokens: TokenInfo[]
 }
 
-export type Tier = {
-  entitlement: string
-  display_name: string
-  tier_rank: number
-  product_id: string
-  product_key: string
-}
-
 export type TieredPrice = {
   mode?: "graduated" | "volume"
   tiers?: RateTier[]
@@ -2400,11 +2358,24 @@ export type TrustLevel = {
   trust_level: string
 }
 
+export type UpdateAlertWebhookParams = {
+  name?: string | null
+  url?: string | null
+  format?: "discord" | "generic" | "slack" | null
+  enabled?: boolean | null
+}
+
 export type UpdateCustomerParams = {
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
   billing_policy?: string | null
   invoice_profile?: InvoiceProfile | null
+}
+
+export type UpdateMerchantConfigurationParams = {
+  expected_revision?: string | null
+  settings?: MerchantSettings
+  display_name?: string
 }
 
 export type UpdatePSPParams = {
@@ -2413,6 +2384,8 @@ export type UpdatePSPParams = {
   settings?: Record<string, unknown> | null
   credentials?: Record<string, string> | null
   retire_webhook_overlap?: boolean
+  archived?: boolean
+  allow_last?: boolean
 }
 
 export type UpdatePaymentMethodParams = {

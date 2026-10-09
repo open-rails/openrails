@@ -77,11 +77,14 @@ type perm string
 
 func (p perm) String() string { return string(p) }
 
-// staffPermissions give every bundle its own permission.
-var staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminWrite: perm("host:billing:write"), CatalogWrite: perm("host:catalog:write"), MerchantConfig: perm("host:billing:admin")}
+// staffPermissions give every staff route group its own permission.
+var staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminUpdate: perm("host:billing:write"), Catalog: perm("host:catalog:write"), MerchantConfig: perm("host:billing:admin"), Metrics: perm("host:billing:metrics")}
 
-// adminPermissions mount the admin bundle alone.
-var adminPermissions = openrails.Permissions{AdminRead: staffPermissions.AdminRead, AdminWrite: staffPermissions.AdminWrite}
+// adminPermissions are the admin group's alone.
+var adminPermissions = openrails.Permissions{AdminRead: staffPermissions.AdminRead, AdminUpdate: staffPermissions.AdminUpdate}
+
+// adminGroups turns on the admin group alone.
+var adminGroups = openrails.RouteGroups{Admin: true}
 
 // hostKey admits every request as the host backend's API key.
 type hostKey struct{}

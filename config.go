@@ -27,14 +27,11 @@ type (
 	CheckoutConfig = config.CheckoutConfig
 	// Routes is the HTTP surface the adapters mount on the root router.
 	Routes = config.Routes
-	// Permissions is Routes.Permissions: the host's permissions for the admin
-	// and merchant-config bundles.
+	// RouteGroups is Routes.RouteGroups: the route groups turned on.
+	RouteGroups = config.RouteGroups
+	// Permissions is Routes.Permissions: what a caller must hold for each
+	// staff route group.
 	Permissions = config.Permissions
-	// AdminConsole is Routes.AdminConsole: the staff dashboard.
-	AdminConsole = config.AdminConsole
-	// CustomerRoutes is one further customer surface of
-	// Routes.CustomerProfiles.
-	CustomerRoutes = config.CustomerRoutes
 
 	// MerchantDeclaration is Config.Merchant: the one merchant an embedded
 	// engine serves.

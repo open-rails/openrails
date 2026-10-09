@@ -4,8 +4,8 @@ The console's **Invoices** page and the customer **Invoice profile** section use
 
 ## Reads and permissions
 
-Every invoice route is an admin route: reads need `Permissions.AdminRead`,
-actions `Permissions.AdminWrite`.
+Every invoice route is in the admin group: reads need `Permissions.AdminRead`,
+actions `Permissions.AdminUpdate`.
 
 - `GET /v1/admin/invoices`: a staff read. Filters: `customer_id`, `currency`, `status`, `period_starts_after`, and `period_starts_before`. Period filters select `period_starts_at` in the half-open range `[period_starts_after, period_starts_before)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
 - `GET /v1/admin/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/admin/customers/{customer_id}/payment-methods`.
@@ -19,7 +19,7 @@ actions `Permissions.AdminWrite`.
 | Endpoint suffix | Client method | Behavior |
 |---|---|---|
 | `POST /invoices/{id}/void` | `VoidInvoice` | Voids draft/open/past-due invoices and writes off the remaining debt through the existing ledger operation. Repeating an already completed void returns its current state. |
-| `POST /invoices/{id}/uncollectible` | `MarkInvoiceUncollectible` | Stops scheduled collection of open/past-due invoices; the debt remains owed. Repeating the same completed transition returns its current state. |
+| `POST /invoices/{id}/mark-uncollectible` | `MarkInvoiceUncollectible` | Stops scheduled collection of open/past-due invoices; the debt remains owed. Repeating the same completed transition returns its current state. |
 | `POST /invoices/{id}/retry-collection` | `RetryInvoiceCollection` | Starts one durable `invoice_collection` operation bound to an explicit customer-owned `payment_method_id` and `Idempotency-Key` (1–255 bytes). Reusing the key returns that operation's durable state (200 settled/failed, 202 still unresolved) without another provider charge; the same key with a different method is a 409 conflict. |
 
 Money received outside OpenRails is recorded with `POST /v1/admin/payments` (`CreatePayment`): `{invoice_id, amount, transaction_id, paid_at}`, a positive `amount` up to `amount_due` and a `transaction_id` of 1–255 bytes. It charges no provider. The same `transaction_id` with the same terms answers the first payment; with other terms, or on another invoice, it is 422 `idempotency_key_reused`, never a second settlement. More than is due is 409 `payment_exceeds_due`.

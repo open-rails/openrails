@@ -93,7 +93,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 	}
 	out := make([]billing.CreditGrant, len(trxs))
 	for i, trx := range trxs {
-		grant, err := s.moneyService().GetCreditGrant(ctx, *deposits[i].CustomerID, trx.ID)
+		grant, err := s.moneyService().GetCreditGrant(ctx, trx.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -103,34 +103,34 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 	return out, nil
 }
 
-// ListCreditGrants lists a customer's credit grants, newest first.
-func (s *Service) ListCreditGrants(ctx context.Context, customer identity.CustomerID, params billing.CreditGrantListParams) (billing.ListPage[billing.CreditGrant], error) {
+// ListCreditGrants lists credit grants, newest first.
+func (s *Service) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams) (billing.ListPage[billing.CreditGrant], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return billing.ListPage[billing.CreditGrant]{}, err
 	}
 	defer release()
-	return s.moneyService().ListCreditGrants(ctx, customer, params)
+	return s.moneyService().ListCreditGrants(ctx, params)
 }
 
-// GetCreditGrant reads one of a customer's credit grants.
-func (s *Service) GetCreditGrant(ctx context.Context, customer identity.CustomerID, id billing.CreditGrantID) (*billing.CreditGrant, error) {
+// GetCreditGrant reads one credit grant.
+func (s *Service) GetCreditGrant(ctx context.Context, id billing.CreditGrantID) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().GetCreditGrant(ctx, customer, id.UUID())
+	return s.moneyService().GetCreditGrant(ctx, id.UUID())
 }
 
 // RevokeCreditGrant revokes a grant's unspent remainder.
-func (s *Service) RevokeCreditGrant(ctx context.Context, customer identity.CustomerID, id billing.CreditGrantID, reason string) (*billing.CreditGrant, error) {
+func (s *Service) RevokeCreditGrant(ctx context.Context, id billing.CreditGrantID, reason string) (*billing.CreditGrant, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().RevokeCreditGrant(ctx, customer, id.UUID(), reason)
+	return s.moneyService().RevokeCreditGrant(ctx, id.UUID(), reason)
 }
 
 // ListBalanceTransactions lists a customer's ledger in one currency, newest

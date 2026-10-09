@@ -15,7 +15,7 @@ remote clients, each behind the host's permission for it (`Routes.Permissions`):
 
 | Client method | HTTP operation | Permission |
 | --- | --- | --- |
-| CreateCheckoutSession | POST /v1/admin/checkout-sessions | `AdminWrite` |
+| CreateCheckoutSession | POST /v1/admin/checkout-sessions | `AdminUpdate` |
 | ListCheckoutOptions | GET /v1/admin/checkout-options?price_id=…\|product_key=…&price_key=… | `AdminRead` |
 
 `Customer.ID` is the merchant-owned customer id. Verified email and username are
@@ -65,13 +65,12 @@ database share it, so one of them can serve the payment page for all.
 | GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
 | GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link (`flow: transaction_request`) |
-| POST | `/v1/admin/checkout-sessions` | the merchant's credential, `AdminWrite` | Mint for a customer (`Client.CreateCheckoutSession`) |
+| POST | `/v1/admin/checkout-sessions` | the merchant's credential, `AdminUpdate` | Mint for a customer (`Client.CreateCheckoutSession`) |
 
-- A host whose customer surface defines who the customer is (its own
-  `CustomerRoutes` with an `Auth` that maps the signed-in user) has the
-  customer pay there: the surface serves `{prefix}/checkout-sessions/{id}` and
-  `{prefix}/checkout-sessions/{id}/pay`, and its `Auth` is the proof a saved
-  card needs. A session of another merchant than the surface's, or of another
+- On the customer surface the host's `Auth` names the customer, so the
+  customer pays there: `/v1/me/checkout-sessions/{id}` and
+  `/v1/me/checkout-sessions/{id}/pay`, and the `Auth` is the proof a saved
+  card needs. A session of another merchant than the request's, or of another
   customer, is `404 checkout_session_not_found`.
 - The id is `ocs_` + 256 random bits, stored as its SHA-256 and never logged.
   Hand it only to that customer's browser; put it in a URL fragment, not a

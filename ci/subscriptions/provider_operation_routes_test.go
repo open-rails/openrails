@@ -27,12 +27,12 @@ func TestProviderOperationRoutes(t *testing.T) {
 		{CustomerID: c.cid(), Currency: "USD", Amount: 10_000_000, Source: "support", SourceID: "seed"},
 	})
 	require.NoError(t, err)
-	base := "/v1/admin/provider-operations"
+	app, base := "/v1/app/provider-operations", "/v1/admin/provider-operations"
 	open := func(id string) (int, map[string]any) {
 		t.Helper()
 		body := []byte(`{"rental":"` + id + `"}`)
 		digest := sha256.Sum256(body)
-		return w.hostJSON(http.MethodPost, base, map[string]any{
+		return w.hostJSON(http.MethodPost, app, map[string]any{
 			"operation_id": id, "customer_id": c.id, "record_owner": "user:1", "currency": "USD", "amount": "1000000",
 			"claim_reference": "claim:" + id, "authorization_body": base64.StdEncoding.EncodeToString(body),
 			"authorization_body_sha256": hex.EncodeToString(digest[:]),
@@ -68,11 +68,11 @@ func TestProviderOperationRoutes(t *testing.T) {
 	replay := ok(open("rental-1"))
 	require.Equal(t, true, replay["replayed"])
 
-	grown := ok(w.hostJSON(http.MethodPost, base+"/rental-1/increment", map[string]any{"ordinal": 1, "amount": "500000", "minimum_amount": "100000"}))
+	grown := ok(w.hostJSON(http.MethodPost, app+"/rental-1/increment", map[string]any{"ordinal": 1, "amount": "500000", "minimum_amount": "100000"}))
 	require.Equal(t, "1500000", grown["authorized_amount"])
 	require.Equal(t, "500000", grown["last_increment"].(map[string]any)["granted_amount"])
 
-	observed := ok(w.hostJSON(http.MethodPost, base+"/rental-1/observations", evidence))
+	observed := ok(w.hostJSON(http.MethodPost, app+"/rental-1/observations", evidence))
 	require.Equal(t, "pending", observed["qualification"].(map[string]any)["state"])
 	read := ok(w.staffJSON(http.MethodGet, base+"/rental-1", nil))
 	require.Equal(t, observed["qualification"], read["qualification"], "the read carries the qualification")
@@ -80,12 +80,12 @@ func TestProviderOperationRoutes(t *testing.T) {
 
 	status, created = open("rental-2")
 	require.Equal(t, http.StatusCreated, status, "%v", created)
-	refused := ok(w.hostJSON(http.MethodPost, base+"/rental-2/observations", map[string]any{
+	refused := ok(w.hostJSON(http.MethodPost, app+"/rental-2/observations", map[string]any{
 		"observation_id": "host-1", "refusal": map[string]any{"kind": "provider_billing_unavailable", "detail": "vast has no billing reader"},
 	}))
 	require.Equal(t, "provider_billing_unavailable", refused["refusal"].(map[string]any)["reason"])
 	require.Equal(t, "observation host-1: vast has no billing reader", refused["refusal"].(map[string]any)["detail"])
-	status, body := w.hostJSON(http.MethodPost, base+"/rental-2/increment", map[string]any{"ordinal": 1, "amount": "1", "minimum_amount": "1"})
+	status, body := w.hostJSON(http.MethodPost, app+"/rental-2/increment", map[string]any{"ordinal": 1, "amount": "1", "minimum_amount": "1"})
 	require.Equal(t, http.StatusConflict, status)
 	require.Equal(t, "provider_operation_refused", body["error"].(map[string]any)["code"])
 
@@ -121,7 +121,7 @@ func TestProviderOperationRoutes(t *testing.T) {
 
 	status, created = open("rental-3")
 	require.Equal(t, http.StatusCreated, status, "%v", created)
-	released := ok(w.hostJSON(http.MethodPost, base+"/rental-3/release", map[string]any{"release_reference": "never-created"}))
+	released := ok(w.hostJSON(http.MethodPost, app+"/rental-3/release", map[string]any{"release_reference": "never-created"}))
 	require.Equal(t, "released", released["state"])
 
 	for _, gone := range []struct{ method, path string }{
@@ -129,6 +129,8 @@ func TestProviderOperationRoutes(t *testing.T) {
 		{http.MethodPost, base + "/rental-1/resolution"},
 		{http.MethodPost, base + "/rental-1/refusal"},
 		{http.MethodPost, base + "/rental-1/extend"},
+		{http.MethodPost, base},
+		{http.MethodPost, base + "/rental-1/increment"},
 		{http.MethodGet, "/v1/admin/provider-qualifications"},
 		{http.MethodPost, "/v1/admin/wasted-spend"},
 		{http.MethodGet, "/v1/admin/customers/" + c.id + "/usage"},

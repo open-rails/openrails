@@ -51,8 +51,10 @@ type Dependencies struct {
 	// The console mounts only when this is present AND admin_console.enabled;
 	// enabled without assets is a boot error.
 	ConsoleAssets fs.FS
+	// RouteGroups turns the merchant route groups on.
+	RouteGroups config.RouteGroups
 	// AdminConsole serves the merchant admin console; nil serves none.
-	AdminConsole *config.AdminConsole
+	AdminConsole *config.ConsoleMount
 }
 
 type Server struct {
@@ -76,7 +78,11 @@ type Server struct {
 	adminLimiter     *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
-	adminConsole  *config.AdminConsole
+	adminConsole  *config.ConsoleMount
+	// groups are the route groups the server mounts; permissions their
+	// staff permissions.
+	groups      config.RouteGroups
+	permissions httproutes.Permissions
 
 	// merchants is the merchant provisioning + lifecycle + per-merchant secret service
 	// (issue #225). It reuses the control plane's pgx pool (the openrails.*
@@ -244,6 +250,8 @@ func New(deps Dependencies) (*Server, error) {
 		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis, deps.Runtime.RateWindows),
 		consoleAssets:      deps.ConsoleAssets,
 		adminConsole:       deps.AdminConsole,
+		groups:             deps.RouteGroups,
+		permissions:        staffPermissionsFor(deps.RouteGroups),
 		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
 		merchantTierRoutes: middleware.NewBrowserTierRoutes(),
 	}
@@ -290,8 +298,6 @@ func New(deps Dependencies) (*Server, error) {
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.
 	s.registerWebhookRoutes(mux)
-	// SCIM 2.0: each merchant's directory pushes its users.
-	s.registerProvisioningRoutes(mux)
 	// or#893: the merchant-scoped alias (/v1/merchants/:merchant/webhooks/...,
 	// #529) is NOT mounted here. It was a transition alias beside the canonical
 	// surface above; standalone resolves the merchant from PSP

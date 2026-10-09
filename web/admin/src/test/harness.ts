@@ -28,6 +28,7 @@ import type {
   Product,
 } from "@/lib/api/generated/wire"
 import { queryKeys } from "@/lib/queries"
+import type { AdminAccess } from "@/lib/api/generated/wire"
 
 export const MAX_INT64 = "9223372036854775807"
 export const MIN_INT64 = "-9223372036854775808"
@@ -57,6 +58,15 @@ const BOOTSTRAP = {
   issuer: null,
 }
 
+// FULL_ACCESS is the access a test's staff member has unless it routes
+// /admin/access itself: every area, with its changes.
+export const FULL_ACCESS: AdminAccess = {
+  admin: "update",
+  catalog: true,
+  merchant_config: true,
+  metrics: true,
+}
+
 const memoryStorage = (): Storage => {
   const values = new Map<string, string>()
   return {
@@ -71,7 +81,8 @@ const memoryStorage = (): Storage => {
 
 // server stubs fetch and session storage and returns the recorded requests.
 // Routes are keyed "METHOD /admin/..." (or just the path); anything
-// unrouted answers {}, so a test spells out only what it asserts.
+// unrouted answers {} (/admin/access answers FULL_ACCESS), so a test spells
+// out only what it asserts.
 export async function server(routes: Record<string, Reply> = {}) {
   const requests: Recorded[] = []
   vi.stubGlobal("localStorage", memoryStorage())
@@ -90,7 +101,9 @@ export async function server(routes: Record<string, Reply> = {}) {
       }
       requests.push(request)
       const reply =
-        routes[`${request.method} ${request.path}`] ?? routes[request.path]
+        routes[`${request.method} ${request.path}`] ??
+        routes[request.path] ??
+        (request.path === "/admin/access" ? FULL_ACCESS : undefined)
       // A route may answer asynchronously (a pending response a test resolves).
       const value = await (typeof reply === "function" ? reply(request) : reply)
       return value instanceof Response ? value : Response.json(value ?? {})

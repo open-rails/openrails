@@ -125,9 +125,9 @@ func (s *Service) GrantProduct(ctx context.Context, g Grant) (*models.ProductAcc
 	return window, true, nil
 }
 
-// RevokeProductAccess revokes one of the customer's windows. Not found or
-// already revoked reports found=false so callers stay idempotent.
-func (s *Service) RevokeProductAccess(ctx context.Context, customer, accessID uuid.UUID, reason models.AccessRevokeReason) (found bool, err error) {
+// RevokeProductAccess revokes a window; a revoked window stays as it is. Not
+// found reports found=false.
+func (s *Service) RevokeProductAccess(ctx context.Context, accessID uuid.UUID, reason models.AccessRevokeReason) (found bool, err error) {
 	ents := entitlements.NewEntitlementService(s.db, s.clock)
 	window, err := ents.GetAccessByID(ctx, accessID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -136,8 +136,8 @@ func (s *Service) RevokeProductAccess(ctx context.Context, customer, accessID uu
 	if err != nil {
 		return false, err
 	}
-	if window.CustomerID != customer || window.RevokedAt != nil {
-		return false, nil
+	if window.RevokedAt != nil || window.DeletedAt != nil {
+		return true, nil
 	}
 	return true, ents.RevokeGrantedAccess(ctx, window, reason)
 }

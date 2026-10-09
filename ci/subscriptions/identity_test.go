@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -105,63 +104,32 @@ func TestCustomerIsTheSubjectWhateverTheCredential(t *testing.T) {
 	}
 }
 
-// An application spends its own balance through invokers acting for it, each
-// metered on its own window: one invoker exhausting its limit leaves the
-// other's, and together they never spend more than the balance.
-func TestInvokersShareTheSubjectsBalanceOnTheirOwnLimits(t *testing.T) {
+// Only the customer's own credential spends its balance: an invoker acting for
+// it is refused admission and cannot read the account.
+func TestDelegatedInvokersNeverSpendTheBalance(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	ctx, host := t.Context(), w.client[remote]
-	const balance, limit, step = int64(600_000), int64(400_000), int64(100_000)
-	const cozy = "https://cozy.example"
+	const balance, cozy = int64(600_000), "https://cozy.example"
 	app := w.newCustomer()
 	_, err := createCreditGrant(ctx, host, app.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: balance, Source: "test", SourceID: "seed"})
 	require.NoError(t, err)
-	key := func(user string) string { return cozy + "|" + user }
-	var delegations []billing.SpendDelegation
-	for _, user := range []string{"u_1", "u_2"} {
-		delegations = append(delegations, billing.SpendDelegation{Scope: billing.SpendDelegationInvoker, ScopeKey: key(user),
-			Windows: []billing.BudgetWindow{{Key: "hour", WindowSeconds: 3600, Limit: limit, Currency: "USD"}}})
-	}
-	_, err = host.SetSpendDelegations(ctx, app.cid(), delegations)
+	deadline := w.clock.Now().Add(time.Hour)
+	verdicts, err := host.Admit(ctx, []billing.AdmitParams{{RequestID: uuid.NewString(), CustomerID: app.cid(), Invoker: cozy + "|u_1", InvokerType: billing.InvokerTypeDelegated,
+		Currency: "USD", EstimatedAmount: 100_000, ExpiresAt: &deadline}})
 	require.NoError(t, err)
-
-	spend := func(user string) int64 {
-		var admitted int64
-		for range 10 {
-			deadline := w.clock.Now().Add(time.Hour)
-			verdicts, err := host.Admit(ctx, []billing.AdmitParams{{RequestID: uuid.NewString(), CustomerID: app.cid(), Invoker: key(user), InvokerType: billing.InvokerTypeDelegated,
-				Currency: "USD", EstimatedAmount: step, ExpiresAt: &deadline}})
-			require.NoError(t, err)
-			if !verdicts[0].Allowed() {
-				t.Logf("%s refused: %+v", user, verdicts[0].Error)
-				break
-			}
-			admitted += step
-		}
-		return admitted
-	}
-	require.Equal(t, limit, spend("u_1"), "u_1 spends up to its own limit")
-	require.Equal(t, balance-limit, spend("u_2"), "u_2 is not held to u_1's window, only to what the balance has left")
-	require.Zero(t, spend("u_1"))
+	require.False(t, verdicts[0].Allowed())
+	require.NotNil(t, verdicts[0].Admission)
+	require.Equal(t, "delegated_spend_not_allowed", *verdicts[0].Admission.DenyCode)
 	got, err := host.GetBalance(ctx, app.cid(), "USD")
 	require.NoError(t, err)
-	require.Equal(t, balance, got.HeldAmount, "together they never spend more than the balance")
+	require.Zero(t, got.HeldAmount)
 
-	// Each invoker reads its own window, as the application acting for it.
-	for user, used := range map[string]int64{"u_1": limit, "u_2": balance - limit} {
-		token := w.auth.issue(t, grant{subject: app.id, kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialSignedToken), invokerIssuer: cozy, invoker: user})
-		status, out := w.callAt(w.server.URL, token, http.MethodGet, "/spend-limits?currency=USD", "", nil)
-		require.Equal(t, http.StatusOK, status, "%s: %v", user, out)
-		require.Equal(t, key(user), out["invoker"])
-		windows := out["windows"].([]any)
-		require.Len(t, windows, 1)
-		require.Equal(t, fmt.Sprint(used), windows[0].(map[string]any)["used"], user)
-		status, out = w.callAt(w.server.URL, token, http.MethodGet, "", "", nil)
-		require.Equal(t, http.StatusForbidden, status, "an invoker spends the balance but does not manage the account: %v", out)
-		code, _ := errorOf(out)
-		require.Equal(t, billing.CodeInvokerScopedPrincipal, code)
-	}
+	token := w.auth.issue(t, grant{subject: app.id, kind: string(openrails.SubjectApplication), credential: string(openrails.CredentialSignedToken), invokerIssuer: cozy, invoker: "u_1"})
+	status, out := w.callAt(w.server.URL, token, http.MethodGet, "", "", nil)
+	require.Equal(t, http.StatusForbidden, status, "an invoker does not manage the account: %v", out)
+	code, _ := errorOf(out)
+	require.Equal(t, billing.CodeInvokerScopedPrincipal, code)
 }
 
 // A provider write records who made it: the subject whose authority it used,
@@ -380,10 +348,11 @@ func TestHarnessAuthConforms(t *testing.T) {
 		}
 	}
 	openrailstest.CheckAuth(t, v, openrailstest.AuthCases{
-		Permissions: permissions,
-		Customer:    req(v.token(t, customer)),
-		Staff:       req(v.token(t, "staff")),
-		Holders:     map[string]func() *http.Request{staffReads.String(): req(v.token(t, "reader"))},
+		Permissions:  permissions,
+		Programmatic: true,
+		Customer:     req(v.token(t, customer)),
+		Staff:        req(v.token(t, "staff")),
+		Holders:      map[string]func() *http.Request{staffReads.String(): req(v.token(t, "reader"))},
 		Refused: map[string]func() *http.Request{
 			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),
 		},

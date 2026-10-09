@@ -31,20 +31,6 @@ func (c *Client) CreateProduct(ctx context.Context, params billing.CreateProduct
 	return &out, nil
 }
 
-// EnsureProduct creates the product under params.Key unless one exists; an
-// existing product is returned unchanged.
-func (c *Client) EnsureProduct(ctx context.Context, params billing.CreateProductParams, requestOptions ...RequestOption) (*billing.Product, error) {
-	key, err := pathID("key", params.Key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Product
-	if err := c.do(ctx, http.MethodPut, "/v1/admin/catalog/products/by-key/"+key, params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // GetProduct reads a product with its current prices.
 func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) (*billing.Product, error) {
 	path, err := requireTypedID("product_id", id)

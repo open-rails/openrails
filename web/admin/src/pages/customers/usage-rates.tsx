@@ -40,6 +40,7 @@ import {
   summarizeRateCard,
 } from "../catalog/metering-model"
 import { RateCardEditor } from "../catalog/rate-card-editor"
+import { useCatalogWrites } from "@/lib/capabilities"
 
 export function CustomerUsageRatesSection({
   customerId,
@@ -156,6 +157,7 @@ function UsageRateRow({
   meters: Meter[]
   override?: RateOverride
 }) {
+  const canEdit = useCatalogWrites()
   const defaultCard = meter.rate_card!
   return (
     <TableRow>
@@ -187,14 +189,16 @@ function UsageRateRow({
       </TableCell>
       <TableCell>
         <div className="flex justify-end gap-1">
-          <RateCardEditor
-            meter={meter}
-            meters={meters}
-            products={[]}
-            customerId={customerId}
-            override={override}
-          />
-          {override && (
+          {canEdit && (
+            <RateCardEditor
+              meter={meter}
+              meters={meters}
+              products={[]}
+              customerId={customerId}
+              override={override}
+            />
+          )}
+          {canEdit && override && (
             <RemoveOverrideButton
               customerId={customerId}
               meterKey={meter.key}

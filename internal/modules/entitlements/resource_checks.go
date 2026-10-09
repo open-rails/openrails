@@ -230,6 +230,90 @@ func (s *EntitlementService) List(ctx context.Context, q Query) ([]Held, bool, e
 	return rows, false, nil
 }
 
+// ValidateCheck refuses an entitlement check before it reads anything.
+func ValidateCheck(params billing.CheckEntitlementsParams) error {
+	if params.CustomerID.IsZero() {
+		return apperr.Invalidf("valid customer_id required").WithParam("customer_id")
+	}
+	if len(params.Entitlements) == 0 && len(params.Prefixes) == 0 {
+		return apperr.Invalidf("entitlements or prefixes is required").WithParam("entitlements")
+	}
+	if len(params.Entitlements) > billing.MaxEntitlementChecks {
+		return apperr.Invalidf("at most %d entitlements per check", billing.MaxEntitlementChecks).WithParam("entitlements")
+	}
+	for _, key := range params.Entitlements {
+		if strings.TrimSpace(key) == "" || !validKey(key) {
+			return apperr.Invalidf("invalid entitlement key").WithParam("entitlements")
+		}
+	}
+	if len(params.Prefixes) > billing.MaxEntitlementPrefixes {
+		return apperr.Invalidf("at most %d prefixes per check", billing.MaxEntitlementPrefixes).WithParam("prefixes")
+	}
+	for i, prefix := range params.Prefixes {
+		if err := validatePrefix(prefix); err != nil {
+			return apperr.Invalidf("%s", err.Error()).WithParam("prefixes")
+		}
+		if slices.Contains(params.Prefixes[:i], prefix) {
+			return apperr.Invalidf("duplicate prefix").WithParam("prefixes")
+		}
+	}
+	if params.PrefixLimit < 0 || params.PrefixLimit > billing.MaxHeldEntitlements {
+		return apperr.Invalidf("prefix_limit must be between 0 and %d", billing.MaxHeldEntitlements).WithParam("prefix_limit")
+	}
+	return nil
+}
+
+// Check answers an application's content gate through List: whether the
+// customer holds each key at params.At, with its seats, in one read, and the
+// first keys held under each prefix, in byte order.
+func (s *EntitlementService) Check(ctx context.Context, customer uuid.UUID, params billing.CheckEntitlementsParams) (billing.EntitlementCheck, error) {
+	out := billing.EntitlementCheck{Entitlements: map[string]bool{}, Quantities: map[string]*int{}, Held: map[string]billing.HeldEntitlements{}}
+	if err := ValidateCheck(params); err != nil {
+		return out, err
+	}
+	customers := []uuid.UUID{customer}
+	keys := slices.Compact(slices.Sorted(slices.Values(params.Entitlements)))
+	for _, key := range keys {
+		out.Entitlements[key], out.Quantities[key] = false, nil
+	}
+	if len(keys) > 0 {
+		rows, _, err := s.List(ctx, Query{Customers: customers, Keys: keys, At: params.At, Limit: len(keys)})
+		if err != nil {
+			return out, err
+		}
+		for _, row := range rows {
+			out.Entitlements[row.Key], out.Quantities[row.Key] = true, row.Seats
+		}
+	}
+	limit := params.PrefixLimit
+	if limit == 0 {
+		limit = billing.DefaultHeldEntitlements
+	}
+	for _, prefix := range params.Prefixes {
+		held := billing.HeldEntitlements{Keys: []string{}}
+		var after Held
+		for {
+			rows, more, err := s.List(ctx, Query{Customers: customers, Prefix: prefix, At: params.At, After: after, Limit: min(limit-len(held.Keys), MaxEntitlementPage)})
+			if err != nil {
+				return out, err
+			}
+			for _, row := range rows {
+				held.Keys = append(held.Keys, row.Key)
+			}
+			if !more {
+				break
+			}
+			if len(held.Keys) == limit {
+				held.Truncated = true
+				break
+			}
+			after = rows[len(rows)-1]
+		}
+		out.Held[prefix] = held
+	}
+	return out, nil
+}
+
 // listHolders is the reverse lookup: customers holding key at at, after
 // afterID (uuid.Nil starts), in id order.
 func (s *EntitlementService) listHolders(ctx context.Context, mid uuid.UUID, key string, at time.Time, afterID uuid.UUID, limit int) ([]Held, bool, error) {

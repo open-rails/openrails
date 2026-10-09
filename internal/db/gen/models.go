@@ -662,21 +662,6 @@ type BillingInvoiceItem struct {
 	UpdatedAt  time.Time
 }
 
-// Per-invoker spend limits: the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
-type BillingInvokerSpendLimit struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Scope      string
-	// Immutable scope discriminator: role uuid (scope=role), invoker string (scope=invoker), or tier key (scope=invoker_tier).
-	ScopeKey  string
-	Windows   []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	// Opaque caller-supplied provenance reference, e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.
-	Provenance *string
-}
-
 // Double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, revoked_credits). Retention: permanent, never pruned.
 type BillingLedgerAccount struct {
 	ID         uuid.UUID
@@ -916,7 +901,7 @@ type BillingMeteredRatingWatermark struct {
 	UpdatedAt     time.Time
 }
 
-// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in invoker_spend_limits; arrears owed exposure is derived from open invoices.
+// Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.
 type BillingMoneySetting struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID

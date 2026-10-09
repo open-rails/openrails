@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
@@ -10,7 +11,7 @@ import (
 func commerceCustomer(r *httprequest.Request, customerID billing.CustomerID) (identity.CustomerID, bool) {
 	id := servicePayer(customerID)
 	if id == nil {
-		r.ErrorCode(billing.CodeInvalidParam, "valid customer_id required")
+		r.APIError(api.Coded(billing.CodeInvalidParam, "valid customer_id required").WithParam("customer_id"))
 		return identity.CustomerID{}, false
 	}
 	if !requireServiceCustomerScope(r, *id) {

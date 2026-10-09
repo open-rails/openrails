@@ -5,10 +5,13 @@ package staffperm
 
 const (
 	// Read, Write and Admin are the server's Routes.Permissions: AdminRead,
-	// AdminWrite, and Admin for both CatalogWrite and MerchantConfig.
+	// AdminUpdate, and Admin for both Catalog and MerchantConfig.
 	Read  = "merchant:billing:read"
 	Write = "merchant:billing:write"
 	Admin = "merchant:billing:admin"
+	// Metrics is the server's Routes.Permissions.Metrics: revenue and
+	// sales. Support does not hold it.
+	Metrics = "merchant:billing:metrics"
 
 	// AuthKit's built-ins on the merchant persona: the team, and the
 	// merchant's API keys.

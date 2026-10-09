@@ -46,16 +46,6 @@ func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...Reque
 	return &out, nil
 }
 
-// RefreshCatalogDrift reads every linked PSP's catalog now and records the
-// drift it finds; it changes neither the PSPs nor the catalog.
-func (c *Client) RefreshCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftRefresh, error) {
-	var out billing.CatalogDriftRefresh
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/drift/refresh", struct{}{}, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // AskCatalog answers a question about the catalog with a model that reads it
 // and may draft price changes for a person to review; it changes nothing. The
 // deployment must enable it.

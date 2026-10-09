@@ -4,85 +4,35 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"path"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
-func validateCustomerRoutes(profiles []config.CustomerRoutes) error {
-	for _, e := range profiles {
-		if e.Prefix == "" {
-			e.Prefix = "/v1/me"
-		}
-		if httproutes.IsNilAuth(e.Auth) {
-			return fmt.Errorf("openrails: customer routes %q need Routes.Auth (or the profile's own Auth)", e.Prefix)
-		}
-		if e.Prefix == "" || e.Prefix == "/" || !strings.HasPrefix(e.Prefix, "/") || path.Clean(e.Prefix) != e.Prefix || strings.ContainsAny(e.Prefix, "*+?#%\\ \t\r\n") {
-			return fmt.Errorf("openrails: invalid customer routes prefix %q", e.Prefix)
-		}
-		for _, part := range strings.Split(e.Prefix, "/") {
-			if strings.ContainsAny(part, "{}") && (!strings.HasPrefix(part, "{") || !strings.HasSuffix(part, "}") || strings.ContainsAny(part[1:len(part)-1], "{}.") || len(part) < 3) {
-				return fmt.Errorf("openrails: invalid customer routes prefix %q", e.Prefix)
-			}
-		}
-	}
-	return nil
-}
-
-// CustomerPrefixes are the paths, beneath mount, at which the exposures serve
-// customer routes.
-func CustomerPrefixes(mount string, exposures []config.CustomerRoutes) []string {
-	out := make([]string, 0, len(exposures))
-	for _, e := range exposures {
-		if e.Prefix != "" {
-			out = append(out, mount+e.Prefix)
-		}
-	}
-	return out
-}
-
-// BuildCustomerRoutes mounts each customer profile, gated by its Auth at its
-// merchant: the profile's, else on a server the one each request selects,
-// else the configured one. host resolves a merchant's API host: the
-// standalone server's; nil embedded.
-func BuildCustomerRoutes(a *app.App, exposures []config.CustomerRoutes, host merchant.HostResolver) (*router.Table, error) {
-	if err := validateCustomerRoutes(exposures); err != nil {
-		return nil, err
-	}
-	out := &router.Table{}
-	if len(exposures) == 0 {
-		return out, nil
+// BuildCustomerRoutes mounts the customer surface, /v1/me, gated by auth at
+// the merchant on a server each request selects, else the configured one.
+// host resolves a merchant's API host: the standalone server's; nil
+// embedded.
+func BuildCustomerRoutes(a *app.App, auth billingauth.Auth, host merchant.HostResolver) (*router.Table, error) {
+	if httproutes.IsNilAuth(auth) {
+		return nil, fmt.Errorf("openrails: the customer routes need Routes.Auth")
 	}
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
 	if err != nil {
 		return nil, err
 	}
-	for _, e := range exposures {
-		if e.Prefix == "" {
-			e.Prefix = "/v1/me"
-		}
-		mount := httproutes.CustomerMount{Auth: e.Auth, Providers: providers, SelectedMerchant: a.Standalone}
-		if strings.TrimSpace(e.Merchant) != "" {
-			target, err := merchanttarget.Resolve(context.Background(), nil, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), e.Merchant)
-			if err != nil {
-				return nil, fmt.Errorf("customer merchant %q: %w", e.Merchant, err)
-			}
-			mount.Merchant = target
-		}
-		table := &router.Table{}
-		rr := router.NewMux(table, e.Prefix, a.Runtime)
-		httproutes.RegisterCustomerRoutes(rr, a.Runtime, mount)
-		wrapped := wrapCustomerRoutes(a.Runtime, table, host, e.Prefix)
-		out.Entries = append(out.Entries, wrapped.Entries...)
-	}
-	return out, nil
+	table := &router.Table{}
+	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
+		httproutes.CustomerMount{Auth: auth, Providers: providers, SelectedMerchant: a.Standalone})
+	return wrapCustomerRoutes(a.Runtime, table, host), nil
 }
+
+// CustomerPrefix is the customer surface's path beneath the mount.
+const CustomerPrefix = "/v1/me"
 
 // ValidateRouteTable rejects duplicate and ambiguous native registrations before
 // an adapter mutates its host router. ServeMux validates wildcard syntax too.

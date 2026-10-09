@@ -234,6 +234,14 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 // credentials are checked with the provider before anything is stored; the
 // old ones keep serving until the new ones are published.
 func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, req billing.UpdatePSPParams) (billing.PSP, error) {
+	switch {
+	case req.Archived && (len(req.Settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap):
+		return billing.PSP{}, apperr.Invalidf("archived is a request of its own").WithParam("archived")
+	case req.Archived:
+		return s.archivePSP(ctx, id, pspID, req.AllowLast)
+	case req.AllowLast:
+		return billing.PSP{}, apperr.Invalidf("allow_last goes with archived").WithParam("allow_last")
+	}
 	row, err := s.pspRow(ctx, id, pspID)
 	if err != nil {
 		return billing.PSP{}, err
@@ -416,12 +424,12 @@ func mapPSPWriteError(err error) error {
 	return err
 }
 
-// ArchivePSP archives one PSP (#655/#656). It never contacts the provider — a
+// archivePSP archives one PSP (#655/#656). It never contacts the provider — a
 // terminated or dark account must still be archivable — and never touches the
 // stored credentials, so existing obligations and inbound webhooks keep
 // draining. Archiving an archived PSP returns it unchanged. The only active
-// PSP on its rail is refused unless req.AllowLast.
-func (s *Service) ArchivePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, req billing.ArchivePSPParams) (billing.PSP, error) {
+// PSP on its rail is refused unless allowLast.
+func (s *Service) archivePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, allowLast bool) (billing.PSP, error) {
 	if s == nil || s.pool == nil {
 		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
 	}
@@ -455,7 +463,7 @@ func (s *Service) ArchivePSP(ctx context.Context, id billing.MerchantID, pspID b
 			out = *current
 			return nil
 		}
-		if otherActive == 0 && !req.AllowLast {
+		if otherActive == 0 && !allowLast {
 			return &LastActivePSPError{PSP: billing.PSPID(current.ID)}
 		}
 		out, err = q.ArchivePSP(ctx, gen.ArchivePSPParams{ID: current.ID, MerchantID: id.UUID()})

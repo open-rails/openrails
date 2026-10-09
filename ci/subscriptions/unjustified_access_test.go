@@ -44,7 +44,7 @@ func TestUnjustifiedAccessFindingCountsAndClears(t *testing.T) {
 	require.Equal(t, []string{"product_access:" + access.String()}, w.openFindings("derive.access.unjustified"))
 	require.EqualValues(t, 1, freeloaders(), "the gauge counts the freeloader")
 
-	require.NoError(t, w.client[embedded].DeleteProductAccess(t.Context(), c.cid(), billing.ProductAccessID(access)))
+	require.NoError(t, w.client[embedded].RevokeProductAccess(t.Context(), billing.ProductAccessID(access), billing.RevokeProductAccessParams{Reason: "support"}))
 	w.converge()
 	require.Empty(t, w.openFindings("derive.access.unjustified"), "the finding clears with the window")
 	require.Zero(t, freeloaders())

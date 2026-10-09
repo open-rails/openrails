@@ -46,10 +46,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   `api/openapi.json`, the TypeScript wire types of billing-ui and the console, and
   `docs/api/routes.md` / `error-codes.md`.
 - Bundles: public, customer (`/v1/me`) and webhooks are always mounted; under
-  `/v1/admin` the admin routes (`Permissions.AdminRead` for reads, `AdminWrite` for
-  writes), catalog edits (`CatalogWrite`) and the merchant's own configuration
-  (`MerchantConfig`) mount only with the host's permission; `AdminWrite` and
-  `CatalogWrite` need `AdminRead`. No route registers a merchant or manages a
+  `/v1/admin` the admin routes (`Permissions.AdminRead` for reads, `AdminUpdate` for
+  writes), catalog edits (`Catalog`) and the merchant's own configuration
+  (`MerchantConfig`) mount only with the host's permission; `AdminUpdate` needs
+  `AdminRead`. No route registers a merchant or manages a
   team, API keys or the merchant directory: those are `server` Go methods and
   the `openrails` CLI; a hosted product builds its own routes on them.
 - OpenRails names no staff permissions: the host passes its own in
@@ -72,7 +72,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   `billing.Rail` enum). A **PSP** (payment service provider) is a merchant's concrete
   ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi): credentials + `account_id` + key
   (`psps.key`). A PSP is NOT the acquiring bank. Solana is the self-custody wallet slot.
-- PSP routes are `/v1/admin/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, `ArchivePSP`);
+- PSP routes are `/v1/admin/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, which also archives);
   rails are read in `GET /v1/config` (`rails`). Provider callbacks land on
   `/v1/webhooks/{rail}/{account_id}`.
 - A table that stores both `rail` and `psp_id` keeps them in agreement by a composite

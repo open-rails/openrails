@@ -74,8 +74,8 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 	// The configuration API changes the same document; a restart with the
 	// same declaration does not reassert it over that change.
 	grace = 3
-	_, err = client.ApplyMerchantConfiguration(ctx, billing.ApplyMerchantConfigurationParams{
-		ApplicationID: uuid.NewString(), ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
+		IdempotencyKey: uuid.NewString(), ExpectedRevision: &got.Revision, Settings: &billing.MerchantSettings{ArrearsGraceDays: &grace},
 	})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(ctx))

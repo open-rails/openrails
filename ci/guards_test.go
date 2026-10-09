@@ -9,5 +9,9 @@ type perm string
 
 func (p perm) String() string { return string(p) }
 
-// staffPermissions give every bundle its own permission.
-var staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminWrite: perm("host:billing:write"), CatalogWrite: perm("host:catalog:write"), MerchantConfig: perm("host:billing:admin")}
+// staffGroups turns every staff route group on, and staffPermissions gives
+// each its own permission.
+var (
+	staffGroups      = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true}
+	staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminUpdate: perm("host:billing:update"), Catalog: perm("host:catalog"), MerchantConfig: perm("host:billing:admin"), Metrics: perm("host:metrics")}
+)

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,6 +171,9 @@ func (w *world) merchantJSON(token, method, path string, body any) (int, map[str
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("OpenRails-Merchant", w.slug)
 	req.Header.Set("Content-Type", "application/json")
+	if method != http.MethodGet && strings.HasPrefix(path, "/v1/app/") {
+		req.Header.Set("Idempotency-Key", uuid.NewString())
+	}
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()

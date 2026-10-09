@@ -37,21 +37,30 @@ const (
 	Checkout Group = "checkout"
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
-	// Admin is staff work on customers: staff, machines and the Go client
-	// alike, each route behind the host's AdminRead or AdminWrite by its
-	// Level.
+	// Admin is customer support, staff work on customers: staff, machines
+	// and the Go client alike, each route behind the host's AdminRead or
+	// AdminUpdate by its Level.
 	Admin Group = "admin"
-	// CatalogWrite is every catalog edit and document application, behind
-	// the host's CatalogWrite.
-	CatalogWrite Group = "catalog_write"
+	// CatalogAdmin is the catalog, its reads and edits, document
+	// applications and moving subscribers between prices, behind the host's
+	// Catalog. A document skips an object whose field an edit set differently.
+	CatalogAdmin Group = "catalog"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
 	// billing import and export, the dashboard layout, behind the host's
 	// MerchantConfig.
 	MerchantConfig Group = "merchant_config"
+	// Metrics is the merchant's business metrics, read-only: revenue and
+	// sales, the metrics queries and the dashboard, behind the host's Metrics.
+	Metrics Group = "metrics"
+	// Access is what the signed-in caller may use of the staff groups:
+	// any identity the host's Auth admits, mounted with any staff group.
+	Access Group = "access"
+	// App is the host backend's programmatic routes (/v1/app), mounted with
+	// Routes.Programmatic: an application's credential, never a person's.
+	// Each write takes an Idempotency-Key. SCIM provisioning is here too.
+	App Group = "app"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
-	// Provisioning is SCIM 2.0: the merchant's directory pushing its users.
-	Provisioning Group = "provisioning"
 )
 
 // Tier is what a route checks before its handler runs.
@@ -67,14 +76,20 @@ const (
 	AuthSessionID Tier = "session_id"
 	// AuthCustomer: the mount's Auth.Required, then the customer gate.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: the mount's Auth.RequirePermission for the route's bundle
+	// AuthMerchant: the mount's Auth.RequirePermission for the route's group
 	// permission, on the request's merchant;
 	// Auth.Sensitive too for a user in person on a Sensitive route.
 	AuthMerchant Tier = "merchant"
+	// AuthSignedIn: the mount's Auth.Required, a person or an application,
+	// at the request's merchant; no permission.
+	AuthSignedIn Tier = "signed_in"
+	// AuthApplication: the mount's Auth.Required, then an application at the
+	// request's merchant; a person is refused whatever it holds.
+	AuthApplication Tier = "application"
 	// AuthProvider: the payment provider's own signature on the payload.
 	AuthProvider Tier = "provider_signature"
-	// AuthProvisioning: the merchant's provisioning token, or a
-	// client-credentials access token with scope scim from its trusted issuer.
+	// AuthProvisioning: the merchant's provisioning token, which opens only
+	// these routes, or what AuthApplication admits.
 	AuthProvisioning Tier = "provisioning"
 )
 
@@ -99,13 +114,15 @@ const (
 	FeatureDashboardGeneration Feature = "dashboard_generation"
 )
 
-// Level is an admin route's: a read mounts with AdminRead, a write with
-// AdminWrite. Lookups, previews, checks and queries sent as POST are reads.
+// Level is a customer-support or catalog route's: a read, or an update. A
+// support read mounts with AdminRead, an update with AdminUpdate; a
+// catalog update refuses while the catalog is not edited over HTTP.
+// Lookups, previews, checks and queries sent as POST are reads.
 type Level string
 
 const (
-	LevelRead  Level = "read"
-	LevelWrite Level = "write"
+	LevelRead   Level = "read"
+	LevelUpdate Level = "update"
 )
 
 // Throttle is a route's own limiter, beside the deployment's rate limits.
@@ -248,9 +265,6 @@ type Route struct {
 	Throttle Throttle
 	// When is the configuration the route needs to be mounted.
 	When Feature
-	// InvokerScoped: an invoker-scoped credential, which spends a customer's
-	// balance without being the customer, may call this Customer route.
-	InvokerScoped bool
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool
 	// IdempotencyKey: the route reads the Idempotency-Key header.
@@ -274,10 +288,20 @@ type Route struct {
 // Key is the route's identity: "GET /v1/admin/payments/{id}".
 func (r Route) Key() string { return r.Method + " " + r.Path }
 
-// Staff reports a route behind a bundle permission: Admin's, CatalogWrite's
-// and MerchantConfig's.
+// Staff reports a route behind a group permission: Admin's,
+// CatalogAdmin's, MerchantConfig's and Metrics'.
 func (r Route) Staff() bool {
-	return r.Group == Admin || r.Group == CatalogWrite || r.Group == MerchantConfig
+	return r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig || r.Group == Metrics
+}
+
+// CatalogUpdate reports a catalog edit or document application.
+func (r Route) CatalogUpdate() bool { return r.Group == CatalogAdmin && r.Level == LevelUpdate }
+
+// AppWrite reports a programmatic write: it replays by Idempotency-Key. A
+// check sent as POST is a read (LevelRead), and a SCIM write is idempotent by
+// its own protocol.
+func (r Route) AppWrite() bool {
+	return r.Auth == AuthApplication && r.Method != GET && r.Level != LevelRead
 }
 
 // h adapts a handler func to the neutral router.Handler type.
@@ -310,8 +334,19 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if (r.Handler == nil) == (r.Bind == nil) {
 			panic("routes: " + r.Key() + " needs exactly one of Handler and Bind")
 		}
-		if (r.Group == Admin) != (r.Level == LevelRead || r.Level == LevelWrite) || (r.Group != Admin && r.Level != "") {
-			panic("routes: " + r.Key() + ": an admin route, and only one, reads or writes")
+		leveled := r.Group == Admin || r.Group == CatalogAdmin
+		appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
+		if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
+			panic("routes: " + r.Key() + ": an admin or catalog route, and only one, reads or updates; a programmatic POST may say it reads")
+		}
+		if (r.Group == Access) != (r.Auth == AuthSignedIn) {
+			panic("routes: " + r.Key() + ": the access route, and only it, takes any signed-in caller")
+		}
+		if (r.Group == App) != (r.Auth == AuthApplication || r.Auth == AuthProvisioning) {
+			panic("routes: " + r.Key() + ": a programmatic route, and only one, takes an application or a provisioning token")
+		}
+		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
+			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
 		}
 		byKey[r.Key()] = r
 	}
@@ -354,6 +389,24 @@ func TierErrors(tier Tier) []string {
 			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,
 			billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
 		}, selectorErrors...)
+	case AuthSignedIn:
+		own = append([]string{
+			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
+			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
+			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
+			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch,
+			billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown,
+			billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
+		}, selectorErrors...)
+	case AuthApplication:
+		own = append([]string{
+			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
+			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
+			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
+			billing.CodeApplicationRequired, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch,
+			billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown,
+			billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
+		}, selectorErrors...)
 	}
 	out := append(common, own...)
 	sort.Strings(out)
@@ -361,12 +414,15 @@ func TierErrors(tier Tier) []string {
 }
 
 // ErrorSets names the shared code sets a route answers besides its own
-// Errors: its tier's, and the request-shape codes where they apply. ErrorSet
-// lists each set's codes.
+// Errors: its tier's, and the request-shape and programmatic-write codes
+// where they apply. ErrorSet lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
 	if r.Request != nil || len(r.Query) > 0 {
 		sets = append(sets, "request")
+	}
+	if r.AppWrite() {
+		sets = append(sets, "app_write")
 	}
 	return sets
 }
@@ -376,6 +432,8 @@ func ErrorSet(name string) []string {
 	switch name {
 	case "request":
 		return requestShapeErrors
+	case "app_write":
+		return []string{"idempotency_key_in_progress", "idempotency_key_required", billing.CodeIdempotencyKeyReused}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))

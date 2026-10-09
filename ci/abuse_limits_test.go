@@ -48,7 +48,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 		buyers, admins := http.NewServeMux(), http.NewServeMux()
 		require.NoError(t, openrailshttp.Mount(buyers, client, openrails.Routes{Auth: authtest.Deny{}}))
-		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: staffMember{}, Permissions: staffPermissions}))
+		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: staffMember{}, RouteGroups: staffGroups, Permissions: staffPermissions}))
 		public[i], staff[i] = buyers, admins
 	}
 	call := func(on []http.Handler, replica int, method, path, addr string) *httptest.ResponseRecorder {

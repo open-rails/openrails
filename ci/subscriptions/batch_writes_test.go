@@ -3,7 +3,10 @@
 package subscriptions_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -108,8 +111,11 @@ func TestUsageBatchesAnswerPerItem(t *testing.T) {
 	}
 	_, err = w.client[remote].RecordUsage(t.Context(), nil)
 	require.ErrorIs(t, err, billing.ErrInvalid)
-	status, body := w.staffJSON(http.MethodPost, "/v1/admin/usage-events", map[string]any{"items": []any{}})
+	status, body := w.hostJSON(http.MethodPost, "/v1/app/usage-events", map[string]any{"items": []any{}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
+	status, body = w.staffJSON(http.MethodPost, "/v1/app/usage-events", map[string]any{"items": []any{}})
+	require.Equal(t, http.StatusForbidden, status, "a person never writes usage: %v", body)
+	require.Equal(t, billing.CodeApplicationRequired, body["error"].(map[string]any)["code"])
 }
 
 // A drained page of host events is acknowledged in one call; an unknown id
@@ -141,4 +147,53 @@ func TestHostEventsAcknowledgeInBatches(t *testing.T) {
 	pending, err := client.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventPaymentSettled})
 	require.NoError(t, err)
 	require.Empty(t, pending.Items)
+}
+
+// A programmatic write runs once per Idempotency-Key: a retry answers the
+// recorded response, the key sent with another body is refused, a write
+// without one is refused, and a person never reaches the route.
+func TestAppWritesReplayByIdempotencyKey(t *testing.T) {
+	w := newWorld(t)
+	c := w.newCustomer()
+	send := func(token, key string, amount int64) (int, http.Header, map[string]any) {
+		t.Helper()
+		raw, err := json.Marshal(map[string]any{"items": []any{map[string]any{
+			"customer_id": c.id, "invoker": c.id, "currency": "USD", "event_type": "replay",
+			"amount": strconv.FormatInt(amount, 10), "source": "test", "source_id": "replay-1",
+		}}})
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/app/usage-events", bytes.NewReader(raw))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("OpenRails-Merchant", w.slug)
+		req.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			req.Header.Set("Idempotency-Key", key)
+		}
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
+		return res.StatusCode, res.Header, body
+	}
+	host, key := w.auth.hostToken(t), uuid.NewString()
+
+	status, header, first := send(host, key, 1_000)
+	require.Equal(t, http.StatusOK, status, "%v", first)
+	require.Empty(t, header.Get("Idempotent-Replayed"))
+	status, header, again := send(host, key, 1_000)
+	require.Equal(t, http.StatusOK, status, "%v", again)
+	require.Equal(t, "true", header.Get("Idempotent-Replayed"))
+	require.Equal(t, first, again, "a retry answers the recorded response")
+
+	status, _, body := send(host, key, 2_000)
+	require.Equal(t, http.StatusUnprocessableEntity, status, "%v", body)
+	require.Equal(t, billing.CodeIdempotencyKeyReused, body["error"].(map[string]any)["code"])
+	status, _, body = send(host, "", 1_000)
+	require.Equal(t, http.StatusBadRequest, status, "%v", body)
+	require.Equal(t, "idempotency_key_required", body["error"].(map[string]any)["code"])
+	status, _, body = send(w.auth.token(t, "staff"), uuid.NewString(), 1_000)
+	require.Equal(t, http.StatusForbidden, status, "%v", body)
+	require.Equal(t, billing.CodeApplicationRequired, body["error"].(map[string]any)["code"])
 }

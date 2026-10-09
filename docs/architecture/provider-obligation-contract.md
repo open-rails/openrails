@@ -9,17 +9,19 @@ and settles the customer's reservation at the provider's cost.
 
 Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
-error classes; the embedded Client dispatches to the same handlers.
+error classes; the embedded Client dispatches to the same handlers. The
+`/v1/app` routes take the host backend's application credential, never a
+person's, with no permission, and an `Idempotency-Key` on each write.
 
-| Command | Route | Permission |
+| Command | Route | Caller |
 |---|---|---|
-| `OpenProviderOperation` | `POST /v1/admin/provider-operations` | `AdminWrite` |
-| `IncrementProviderOperation` | `POST /v1/admin/provider-operations/{operation_id}/increment` | `AdminWrite` |
-| `ReleaseProviderOperation` | `POST /v1/admin/provider-operations/{operation_id}/release` | `AdminWrite` |
-| `RecordProviderBillingObservation` | `POST /v1/admin/provider-operations/{operation_id}/observations` | `AdminWrite` |
+| `OpenProviderOperation` | `POST /v1/app/provider-operations` | application |
+| `IncrementProviderOperation` | `POST /v1/app/provider-operations/{operation_id}/increment` | application |
+| `ReleaseProviderOperation` | `POST /v1/app/provider-operations/{operation_id}/release` | application |
+| `RecordProviderBillingObservation` | `POST /v1/app/provider-operations/{operation_id}/observations` | application |
 | `ListProviderOperations` | `GET /v1/admin/provider-operations` | `AdminRead` |
 | `GetProviderOperation` | `GET /v1/admin/provider-operations/{operation_id}` | `AdminRead` |
-| `CloseProviderOperation` | `POST /v1/admin/provider-operations/{operation_id}/close` | `AdminWrite` |
+| `CloseProviderOperation` | `POST /v1/admin/provider-operations/{operation_id}/close` | `AdminUpdate` |
 
 Every command answers the one `ProviderOperation`: the hold, its
 `last_increment`, its `qualification` (null before the first observation), its

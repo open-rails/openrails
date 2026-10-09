@@ -107,10 +107,12 @@ type CreditGrant struct {
 
 // CreditGrantListParams filters a customer's credit grants, newest first.
 type CreditGrantListParams struct {
-	Currency string `form:"currency"`
-	SourceID string `form:"source_id"`
-	// IDs instead reads 1 to MaxBatchItems of the customer's named grants in
-	// one page, whatever their state; unknown ones are absent.
+	// CustomerID is whose grants to list; required unless IDs is set.
+	CustomerID CustomerID `form:"-"`
+	Currency   string     `form:"currency"`
+	SourceID   string     `form:"source_id"`
+	// IDs instead reads 1 to MaxBatchItems named grants in one page, whatever
+	// their state; unknown ones are absent.
 	IDs []CreditGrantID `form:"-"`
 	PageRequest
 }
@@ -203,52 +205,6 @@ type BudgetWindow struct {
 	WindowSeconds int64  `json:"window_seconds"`
 	Limit         int64  `json:"limit,string"`
 	Currency      string `json:"currency,omitempty"`
-}
-
-// SpendDelegationScope is who a spend delegation lets spend a customer's
-// balance: one invoker, the holders of a role, or invokers at a trust tier.
-type SpendDelegationScope string
-
-const (
-	SpendDelegationInvoker     SpendDelegationScope = "invoker"
-	SpendDelegationRole        SpendDelegationScope = "role"
-	SpendDelegationInvokerTier SpendDelegationScope = "invoker_tier"
-)
-
-// SpendDelegation lets invokers spend a customer's balance within Windows,
-// each invoker metered on its own. ScopeKey is the invoker, the role UUID or
-// the tier. Provenance is the caller's opaque record of what authorized it.
-type SpendDelegation struct {
-	Scope      SpendDelegationScope `json:"scope"`
-	ScopeKey   string               `json:"scope_key"`
-	Windows    []BudgetWindow       `json:"windows"`
-	Provenance *string              `json:"provenance"`
-}
-
-// SetSpendDelegationsParams replaces a customer's spend delegations.
-type SetSpendDelegationsParams struct {
-	Delegations []SpendDelegation `json:"delegations"`
-}
-
-// SpendWindow is one window an invoker spends under, with its live metering.
-// Used already includes Reserved, the in-flight holds a release returns.
-type SpendWindow struct {
-	Scope         SpendDelegationScope `json:"scope"`
-	Key           string               `json:"key"`
-	WindowSeconds int64                `json:"window_seconds"`
-	Limit         int64                `json:"limit,string"`
-	Currency      string               `json:"currency"`
-	Used          int64                `json:"used,string"`
-	Reserved      int64                `json:"reserved,string"`
-	Remaining     int64                `json:"remaining,string"`
-	ResetsAt      time.Time            `json:"resets_at"`
-}
-
-// SpendLimits are the windows the authenticated invoker spends under.
-type SpendLimits struct {
-	Currency string        `json:"currency"`
-	Invoker  string        `json:"invoker"`
-	Windows  []SpendWindow `json:"windows"`
 }
 
 // MerchantProfile is public/communication metadata stored per merchant.

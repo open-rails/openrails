@@ -1,14 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { AdminAccess } from "@/lib/api/generated/wire"
 import {
+  hasAnyArea,
   settingsTab,
+  useAdminArea,
+  useAdminUpdates,
+  useCatalogArea,
   useCatalogWrites,
+  useDashboardLayout,
   useMerchantConfig,
+  useMetrics,
 } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 import { client, render } from "@/test/harness"
 
-// The catalog's query key names the selected merchant, kept in sessionStorage.
+// The access query key names the selected merchant, kept in sessionStorage.
 beforeEach(() => {
   const values = new Map<string, string>()
   vi.stubGlobal("sessionStorage", {
@@ -19,63 +26,72 @@ beforeEach(() => {
 })
 
 function Probe() {
-  const config = useMerchantConfig() ? "config" : "no-config"
-  const edits = useCatalogWrites() ? "edits" : "no-edits"
+  const flags: [string, boolean][] = [
+    ["admin", useAdminArea()],
+    ["admin-updates", useAdminUpdates()],
+    ["catalog", useCatalogArea()],
+    ["catalog-edits", useCatalogWrites()],
+    ["config", useMerchantConfig()],
+    ["metrics", useMetrics()],
+    ["layout", useDashboardLayout()],
+  ]
   return (
-    <>
-      <span>{config}</span>
-      <span>{edits}</span>
-    </>
+    <span>
+      {flags
+        .filter(([, on]) => on)
+        .map(([name]) => name)
+        .join(",")}
+    </span>
   )
 }
 
-const mounted = (groups: Record<string, boolean> | null) => {
+const holding = (access: AdminAccess | null) => {
   const queries = client()
-  if (groups)
-    queries.setQueryData(adminQueries.config().queryKey, {
-      capabilities: { route_groups: groups, features: {} },
-      currencies: [],
-      rails: [],
-      payment: null,
-      captcha: null,
-    })
+  if (access) queries.setQueryData(adminQueries.access().queryKey, access)
   return render(<Probe />, queries)
 }
 
-describe("the merchant's configuration pages", () => {
-  it("follow the capability route group", () => {
-    expect(mounted({ admin: true, merchant_config: true })).toContain(
-      ">config<"
+const none: AdminAccess = {
+  admin: "none",
+  catalog: false,
+  merchant_config: false,
+  metrics: false,
+}
+
+describe("the console's areas", () => {
+  it("follow what the caller holds", () => {
+    expect(holding(null)).toContain("<span></span>")
+    expect(holding(none)).toContain("<span></span>")
+    expect(holding({ ...none, admin: "read" })).toContain(">admin<")
+    expect(holding({ ...none, admin: "update" })).toContain(
+      ">admin,admin-updates<"
     )
-    expect(mounted({ admin: true, merchant_config: false })).toContain(
-      "no-config"
+    expect(holding({ ...none, catalog: true })).toContain(
+      ">catalog,catalog-edits<"
     )
-    expect(mounted({ admin: true })).toContain("no-config")
-    expect(mounted(null)).toContain("no-config")
+    expect(holding({ ...none, metrics: true })).toContain(">metrics<")
+    expect(
+      holding({ ...none, merchant_config: true, metrics: true })
+    ).toContain(">config,metrics,layout<")
   })
 
-  it("offer catalog edits exactly with the catalog_write bundle", () => {
-    expect(mounted({ admin: true, catalog_write: true })).toContain(">edits<")
-    expect(mounted({ admin: true, merchant_config: true })).toContain(
-      "no-edits"
-    )
-    expect(mounted(null)).toContain("no-edits")
+  it("show no access to a caller holding nothing", () => {
+    expect(hasAnyArea(none)).toBe(false)
+    expect(hasAnyArea({ ...none, metrics: true })).toBe(true)
   })
 
-  it("leave the settings tabs they own when not mounted", () => {
-    expect(settingsTab(null, true)).toBe("merchant")
-    expect(settingsTab("psps", true)).toBe("psps")
-    expect(settingsTab(null, false)).toBe("customer-controls")
+  it("leave the settings tabs they own when not held", () => {
+    expect(settingsTab(null, true, true)).toBe("merchant")
+    expect(settingsTab("psps", true, false)).toBe("psps")
+    expect(settingsTab(null, false, true)).toBe("customer-controls")
     for (const tab of ["merchant", "notifications", "psps"])
-      expect(settingsTab(tab, false)).toBe("customer-controls")
-    expect(settingsTab("customer-controls", false)).toBe("customer-controls")
-  })
-
-  it("show a host's tabs, and no tab nobody declares", () => {
-    expect(settingsTab("team", true)).toBe("merchant")
-    expect(settingsTab("team", true, ["team", "api-keys"])).toBe("team")
-    expect(settingsTab("api-keys", false, ["team", "api-keys"])).toBe(
+      expect(settingsTab(tab, false, true)).toBe("customer-controls")
+    expect(settingsTab("customer-controls", true, false)).toBe("merchant")
+    expect(settingsTab("team", true, true, ["team", "api-keys"])).toBe("team")
+    expect(settingsTab("api-keys", false, false, ["team", "api-keys"])).toBe(
       "api-keys"
     )
+    expect(settingsTab(null, false, false, ["team"])).toBe("team")
+    expect(settingsTab("team", true, true)).toBe("merchant")
   })
 })

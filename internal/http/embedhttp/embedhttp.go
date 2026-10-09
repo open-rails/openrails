@@ -28,7 +28,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
-	"github.com/open-rails/openrails/internal/scim"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -42,14 +41,15 @@ const EmbeddedV1Prefix = embeddedMount + "/v1"
 const embeddedMount = "/billing"
 
 // Options is what the handler mounts beside the public and webhook routes:
-// the staff bundles Permissions gives a permission.
+// the staff route groups Permissions gives a permission.
 type Options struct {
 	Permissions    httproutes.Permissions
 	ProviderRoutes *routesurface.ProviderRoutes
 	// Capabilities is what GET /v1/config reports; nil derives it.
 	Capabilities *Capabilities
-	// Provisioning mounts SCIM under /scim/v2 for the configured merchant.
-	Provisioning bool
+	// Programmatic mounts the programmatic routes (/v1/app), SCIM included
+	// unless the runtime reads the host's directory.
+	Programmatic bool
 }
 
 // Assembler builds the embedded billing surface from the application graph.
@@ -99,7 +99,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 
 // NewRoutes records actual registrations, retaining each route's security chain.
 func (s *Assembler) NewRoutes(opts Options) *router.Table {
-	if err := s.validateAuthBoundary(opts.Permissions); err != nil {
+	if err := s.validateAuthBoundary(opts); err != nil {
 		panic(err)
 	}
 	providerRoutes := s.providerRoutes(opts.ProviderRoutes)
@@ -107,12 +107,10 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 
 	// The public configuration (GET /v1/config) is always on, so even a
 	// minimal deployment is discoverable.
-	capabilities := CapabilitiesFor(s.Runtime, opts.Permissions, providerRoutes, nil)
+	capabilities := CapabilitiesFor(s.Runtime, opts.Permissions, opts.Programmatic, providerRoutes, nil)
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
-	provisioning := opts.Provisioning && s.Runtime != nil && !s.Runtime.HostUserInfo
-	capabilities.RouteGroups[string(httproutes.Provisioning)] = provisioning
 	// browserTier tracks the configuration and checkout patterns mounted
 	// below (#765): the ONLY routes on this combined handler that belong to
 	// the permissive-CORS browser tier.
@@ -139,10 +137,11 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if providerRoutes.Webhooks {
 		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 	}
-	if provisioning {
-		// The configured merchant's own directory pushes its users.
-		auth := scim.Authenticator{Tokens: scim.Tokens{DB: s.Runtime.DB}, Bound: s.Runtime.ConfiguredMerchant}
-		httproutes.RegisterProvisioningRoutes(router.NewMux(mux, embeddedMount+"/scim/v2", s.Runtime), s.Runtime, httproutes.Options{Provisioning: auth.Authenticate})
+	if opts.Programmatic {
+		httproutes.RegisterAppRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
+			Auth:         s.Auth,
+			Capabilities: &capabilities,
+		})
 	}
 
 	// Resolve the configured merchant on each request before merchant-owned
@@ -191,8 +190,8 @@ func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routes
 	return ProviderRoutesForRuntime(s.Runtime, override)
 }
 
-func (s *Assembler) validateAuthBoundary(perms httproutes.Permissions) error {
-	if perms != (httproutes.Permissions{}) && (s == nil || httproutes.IsNilAuth(s.Auth)) {
+func (s *Assembler) validateAuthBoundary(opts Options) error {
+	if (opts.Permissions != (httproutes.Permissions{}) || opts.Programmatic) && (s == nil || httproutes.IsNilAuth(s.Auth)) {
 		return httproutes.MountError{Route: "admin API", Reason: "needs Routes.Auth"}
 	}
 	return nil

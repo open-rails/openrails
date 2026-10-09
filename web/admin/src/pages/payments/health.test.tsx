@@ -234,7 +234,7 @@ describe("drill-down", () => {
     await client().fetchQuery(
       adminQueries.cycles(filtersFrom(params, CYCLE_FILTERS), 50, "cursor-2")
     )
-    expect(requests.at(-1)!.path).toBe("/admin/rebill-cycles")
+    expect(requests.at(-1)!.path).toBe("/admin/renewals")
     expect(Object.fromEntries(new URLSearchParams(requests.at(-1)!.query)))
       .toMatchObject({
         first_outcome: "declined,error,missed",

@@ -17,8 +17,8 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"hosted_extra": true})
-	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false}, caps.RouteGroups)
+	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, true, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"hosted_extra": true})
+	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": true}, caps.RouteGroups)
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "provider_credential_writes": false,
@@ -28,43 +28,45 @@ func TestCapabilities(t *testing.T) {
 
 	// Credential writes need the merchant-config bundle.
 	writable := routesurface.ProviderRoutes{SecretWrite: true}
-	require.False(t, CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r", AdminWrite: "w"}, writable, nil).Features["provider_credential_writes"])
-	config := CapabilitiesFor(nil, httproutes.Permissions{MerchantConfig: "c"}, writable, nil)
+	require.False(t, CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r", AdminUpdate: "w"}, false, writable, nil).Features["provider_credential_writes"])
+	config := CapabilitiesFor(nil, httproutes.Permissions{MerchantConfig: "c"}, false, writable, nil)
 	require.True(t, config.Features["provider_credential_writes"])
-	require.Equal(t, map[string]bool{"admin": false, "catalog_write": false, "merchant_config": true}, config.RouteGroups)
+	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, config.RouteGroups)
 }
 
-// Route selection is refused unless each surface has the Auth it needs:
+// Route selection is refused unless each route group has the Auth and the
+// permission it needs, and no permission is given for a group that is off:
 // nothing mounts open.
 func TestRoutesValidation(t *testing.T) {
 	auth := &authtest.Fake{}
-	read, write, admin := authtest.Perm("r"), authtest.Perm("w"), authtest.Perm("a")
-	customer := func(c config.CustomerRoutes) config.Routes {
-		return config.Routes{Auth: auth, CustomerProfiles: []config.CustomerRoutes{c}}
-	}
+	read, update, catalog, admin, metrics := authtest.Perm("r"), authtest.Perm("u"), authtest.Perm("c"), authtest.Perm("a"), authtest.Perm("m")
 	for _, tc := range []struct {
 		name string
 		sel  config.Routes
-		ok   bool
+		err  string
 	}{
-		{"no Auth: the customer routes need it", config.Routes{}, false},
-		{"a typed nil Auth", config.Routes{Auth: (*authtest.Fake)(nil)}, false},
-		{"public, customer and webhooks", config.Routes{Auth: auth}, true},
-		{"admin reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read}}, true},
-		{"admin reads and writes", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read, AdminWrite: write}}, true},
-		{"admin writes without reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminWrite: write}}, false},
-		{"a typed nil permission is none", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil), AdminWrite: write}}, false},
-		{"merchant configuration alone", config.Routes{Auth: auth, Permissions: config.Permissions{MerchantConfig: admin}}, true},
-		{"catalog edits with reads", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read, CatalogWrite: admin}}, true},
-		{"catalog edits without reads", config.Routes{Auth: auth, Permissions: config.Permissions{CatalogWrite: admin}}, false},
-		{"customer with the mount's Auth", customer(config.CustomerRoutes{Prefix: "/v1/shop/me"}), true},
-		{"customer with its own Auth", customer(config.CustomerRoutes{Prefix: "/v1/shop/me", Auth: auth}), true},
-		{"parameterized prefix", customer(config.CustomerRoutes{Prefix: "/v1/tenants/{tenant}/me"}), true},
+		{"no Auth: the customer routes need it", config.Routes{}, "Routes.Auth is required"},
+		{"a typed nil Auth", config.Routes{Auth: (*authtest.Fake)(nil)}, "Routes.Auth is required"},
+		{"public, customer and webhooks", config.Routes{Auth: auth}, ""},
+		{"admin reads", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
+		{"admin reads and updates", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, AdminUpdate: update}}, ""},
+		{"admin on without its read", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminUpdate: update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		{"a typed nil permission is none", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil)}}, "without Permissions.AdminRead"},
+		{"admin permissions with admin off", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read}}, "Permissions.AdminRead is given, but RouteGroups.Admin is off"},
+		{"an update with admin off", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog, AdminUpdate: update}}, "Permissions.AdminUpdate is given"},
+		{"the catalog alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog}}, ""},
+		{"the catalog without its permission", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}}, "RouteGroups.Catalog is on without Permissions.Catalog"},
+		{"merchant configuration alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: admin}}, ""},
+		{"metrics alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Metrics: true}, Permissions: config.Permissions{Metrics: metrics}}, ""},
+		{"metrics given, off", config.Routes{Auth: auth, Permissions: config.Permissions{Metrics: metrics}}, "RouteGroups.Metrics is off"},
+		{"programmatic needs no permission", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Programmatic: true}}, ""},
 	} {
-		require.Equal(t, tc.ok, ValidateRoutes(tc.sel) == nil, tc.name)
-	}
-	for _, prefix := range []string{"/", "me", "/a/../b", "/a/", "/a/*", "/a b", "/a/{x.y}", "/a/b{c}", "/a/{}"} {
-		require.Error(t, ValidateRoutes(customer(config.CustomerRoutes{Prefix: prefix})), prefix)
+		err := ValidateRoutes(tc.sel)
+		if tc.err == "" {
+			require.NoError(t, err, tc.name)
+		} else {
+			require.ErrorContains(t, err, tc.err, tc.name)
+		}
 	}
 }
 
@@ -86,11 +88,10 @@ func TestNewRoutes(t *testing.T) {
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/config")
-	require.Contains(t, keys, "GET /billing/v1/admin/config")
 	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
 	require.Contains(t, keys, "GET /billing/v1/admin/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
-	require.NotContains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "writes need AdminWrite")
+	require.NotContains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "writes need AdminUpdate")
 	require.NotContains(t, keys, "GET /billing/v1/admin/psps", "configuration needs MerchantConfig")
 }
 

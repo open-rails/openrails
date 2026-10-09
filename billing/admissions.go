@@ -16,8 +16,8 @@ const (
 	// InvokerTypeCustomer is the paying customer's own credential: failed usage
 	// draws the customer's grace, then is charged.
 	InvokerTypeCustomer InvokerType = "customer"
-	// InvokerTypeDelegated spends the customer's balance under a spend
-	// delegation: flat failed-usage cutoffs apply.
+	// InvokerTypeDelegated is another party acting for the customer: admission
+	// refuses it, and its failed usage meets flat cutoffs.
 	InvokerTypeDelegated InvokerType = "delegated"
 )
 

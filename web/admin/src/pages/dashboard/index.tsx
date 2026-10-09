@@ -2,10 +2,12 @@
 // API. Tile registry + serialized Layout[] on react-grid-layout v2 — drag,
 // resize, add, edit, remove; the layout persists via PUT (debounced). First
 // load with no saved row shows the seeded default template.
-import { useMerchantConfig } from "@/lib/capabilities"
+import type { AdminAccess } from "@/lib/api/generated/wire"
+import { useAccess, useDashboardLayout } from "@/lib/capabilities"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
+import { Navigate } from "react-router-dom"
 import { GridLayout, type Layout } from "react-grid-layout"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -110,10 +112,27 @@ function defaultSize(viz: WidgetViz): { w: number; h: number } {
   return viz === "stat" ? { w: 3, h: 2 } : { w: 6, h: 4 }
 }
 
+// DashboardPage is the console's home: the metrics dashboard for a caller
+// holding Metrics, else their first area.
 export function DashboardPage() {
+  const access = useAccess()
+  if (!access) return null
+  if (!access.metrics) return <Navigate to={firstArea(access)} replace />
+  return <MetricsDashboard />
+}
+
+// firstArea is where a caller without metrics starts.
+function firstArea(access: AdminAccess): string {
+  if (access.admin !== "none") return "/customers"
+  if (access.catalog) return "/catalog"
+  return "/settings"
+}
+
+function MetricsDashboard() {
   const queryClient = useQueryClient()
-  // The layout is the merchant's configuration: read-only unless mounted.
-  const editable = useMerchantConfig()
+  // The layout is the merchant's configuration, over its metrics: editable
+  // only to a caller holding both.
+  const editable = useDashboardLayout()
   const { mutate: saveDashboard } = useMutation(
     adminMutations.saveDashboard(queryClient)
   )

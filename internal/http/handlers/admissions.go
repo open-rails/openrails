@@ -156,24 +156,6 @@ func admissionParam(r *httprequest.Request, svc *billingservice.Service) (string
 	return requestID, requireServiceCustomerScope(r, billingidentity.CustomerID(customer))
 }
 
-// GetAdmission reads an allowed admission and its hold.
-func GetAdmission(r *httprequest.Request) {
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	requestID, ok := admissionParam(r, svc)
-	if !ok {
-		return
-	}
-	admission, err := svc.GetAdmission(r.Request.Context(), requestID)
-	if err != nil {
-		writeMoneyError(r, err, "admission read failed")
-		return
-	}
-	r.SuccessJSON(admission)
-}
-
 // CaptureAdmission settles an admitted request.
 func CaptureAdmission(r *httprequest.Request) {
 	var params billing.CaptureAdmissionParams

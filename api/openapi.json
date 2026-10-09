@@ -92,41 +92,6 @@
         ]
       }
     },
-    "/v1/admin/config": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicConfig"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/solana/tokens": {
       "get": {
         "tags": [
@@ -641,7 +606,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "authentication_required",
@@ -1422,7 +1387,7 @@
     "/v1/admin/catalog/revision": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "responses": {
           "200": {
@@ -1445,7 +1410,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -1455,7 +1420,7 @@
     "/v1/admin/catalog/applications": {
       "post": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1496,9 +1461,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "catalog_revision_conflict",
@@ -1515,45 +1480,10 @@
         ]
       }
     },
-    "/v1/admin/catalog/drift/refresh": {
-      "post": {
-        "tags": [
-          "catalog_write"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogDriftRefresh"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/admin/catalog/meters": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1610,7 +1540,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -1621,7 +1551,7 @@
     "/v1/admin/catalog/meters/{key}": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1654,7 +1584,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "allowance_meter_not_found",
           "allowance_source_in_use",
@@ -1677,7 +1607,7 @@
       },
       "put": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1719,9 +1649,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "allowance_meter_not_found",
           "allowance_source_in_use",
@@ -1747,7 +1677,7 @@
     "/v1/admin/catalog/rate-overrides": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1818,7 +1748,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_query"
@@ -1832,7 +1762,7 @@
     "/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}": {
       "put": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1882,9 +1812,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
           "allowance_meter_not_found",
@@ -1909,7 +1839,7 @@
       },
       "delete": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -1943,9 +1873,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "allowance_meter_not_found",
@@ -1971,7 +1901,7 @@
     "/v1/admin/catalog/product-archives": {
       "post": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2012,9 +1942,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "idempotency_key_required",
@@ -2035,60 +1965,10 @@
         ]
       }
     },
-    "/v1/admin/catalog/product-archives/{id}": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductArchive"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "provider_cancel_held",
-          "rebill_terms_committed",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/admin/catalog/ask": {
       "post": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "requestBody": {
           "content": {
@@ -2120,7 +2000,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-mounted-when": "catalog_copilot",
         "x-openrails-errors": [
           "invalid_param",
@@ -2137,7 +2017,7 @@
     "/v1/admin/catalog/products": {
       "post": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "requestBody": {
           "content": {
@@ -2169,9 +2049,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2187,7 +2067,7 @@
       },
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2305,7 +2185,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2323,7 +2203,7 @@
     "/v1/admin/catalog/products/{id}": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2356,7 +2236,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2371,7 +2251,7 @@
       },
       "patch": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2413,71 +2293,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "catalog_benefit_overlap",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict",
-          "revision_mismatch"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/catalog/products/by-key/{product_key}": {
-      "put": {
-        "tags": [
-          "catalog_write"
-        ],
-        "parameters": [
-          {
-            "name": "product_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProductParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "product_not_found",
@@ -2495,7 +2313,7 @@
     "/v1/admin/catalog/prices": {
       "post": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "requestBody": {
           "content": {
@@ -2527,9 +2345,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2547,7 +2365,7 @@
       },
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2660,7 +2478,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2680,7 +2498,7 @@
     "/v1/admin/catalog/prices/{id}": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2720,7 +2538,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2738,7 +2556,7 @@
       },
       "patch": {
         "tags": [
-          "catalog_write"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2780,9 +2598,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -2802,7 +2620,7 @@
     "/v1/admin/catalog/prices/{id}/history": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -2867,7 +2685,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "catalog_benefit_overlap",
           "price_key_cadence_conflict",
@@ -3136,7 +2954,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -3191,7 +3009,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -3264,7 +3082,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -3431,7 +3249,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "card_declined",
@@ -3456,7 +3274,7 @@
     "/v1/admin/price-migrations": {
       "post": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "requestBody": {
           "content": {
@@ -3488,8 +3306,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "invalid_param",
           "price_change_currency_mismatch",
@@ -3505,7 +3324,7 @@
       },
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -3590,7 +3409,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_param",
@@ -3605,7 +3424,7 @@
     "/v1/admin/price-migrations/preview": {
       "post": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "requestBody": {
           "content": {
@@ -3637,7 +3456,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "invalid_param",
           "price_change_currency_mismatch",
@@ -3655,7 +3474,7 @@
     "/v1/admin/price-migrations/{id}": {
       "get": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -3688,7 +3507,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Catalog",
         "x-openrails-errors": [
           "invalid_param",
           "price_migration_not_found"
@@ -3701,7 +3520,7 @@
     "/v1/admin/price-migrations/{id}/cancel": {
       "post": {
         "tags": [
-          "admin"
+          "catalog"
         ],
         "parameters": [
           {
@@ -3734,8 +3553,9 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "Catalog",
         "x-openrails-sensitive": true,
+        "x-openrails-catalog-update": true,
         "x-openrails-errors": [
           "invalid_param",
           "price_migration_not_found",
@@ -4414,16 +4234,16 @@
         ]
       }
     },
-    "/v1/admin/tiers/lookup": {
+    "/v1/app/entitlements/check": {
       "post": {
         "tags": [
-          "admin"
+          "app"
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GetEffectiveTiersParams"
+                "$ref": "#/components/schemas/CheckEntitlementsParams"
               }
             }
           }
@@ -4434,7 +4254,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EffectiveTierLookup"
+                  "$ref": "#/components/schemas/EntitlementCheck"
                 }
               }
             }
@@ -4448,14 +4268,13 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param",
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
+          "tier:application",
           "request"
         ]
       }
@@ -4610,7 +4429,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -4626,20 +4445,12 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/product-access/{id}": {
-      "delete": {
+    "/v1/admin/product-access/{id}/revoke": {
+      "post": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "id",
             "in": "path",
@@ -4649,6 +4460,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeProductAccessParams"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "No Content"
@@ -4663,16 +4483,16 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found",
-          "service_credential_customer_scope_denied"
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant"
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -4723,85 +4543,6 @@
                       "type": "array",
                       "items": {
                         "$ref": "#/components/schemas/CustomerEntitlement"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_cursor",
-          "invalid_param",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/product-access": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "live",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ProductAccessGrant"
                       }
                     },
                     "next_cursor": {
@@ -5024,7 +4765,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -5086,7 +4827,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "grant",
         "x-openrails-errors": [
@@ -5099,22 +4840,12 @@
           "tier:merchant",
           "request"
         ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/credit-grants": {
+      },
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "currency",
             "in": "query",
@@ -5124,6 +4855,13 @@
           },
           {
             "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -5209,20 +4947,12 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/credit-grants/{id}": {
+    "/v1/admin/credit-grants/{id}": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "id",
             "in": "path",
@@ -5256,29 +4986,19 @@
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
           "credit_grant_not_found",
-          "invalid_customer_id",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke": {
+    "/v1/admin/credit-grants/{id}/revoke": {
       "post": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "id",
             "in": "path",
@@ -5318,16 +5038,14 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
           "credit_grant_held",
           "credit_grant_not_found",
           "credit_grant_unavailable",
-          "invalid_customer_id",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -5492,244 +5210,6 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/spend-delegations": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SpendDelegation"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      },
-      "put": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetSpendDelegationsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SpendDelegation"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": {
-      "delete": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "scope_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied",
-          "spend_delegation_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/me/spend-limits": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SpendLimits"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "currency_unsupported"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
     "/v1/me": {
       "get": {
         "tags": [
@@ -5839,10 +5319,19 @@
         ]
       }
     },
-    "/v1/admin/admissions": {
+    "/v1/app/admissions": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -5873,22 +5362,21 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/admissions/{request_id}": {
-      "get": {
+    "/v1/app/admissions/{request_id}/capture": {
+      "post": {
         "tags": [
-          "admin"
+          "app"
         ],
         "parameters": [
           {
@@ -5898,49 +5386,10 @@
             "schema": {
               "type": "string"
             }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Admission"
-                }
-              }
-            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
           {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "admission_not_found",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/admissions/{request_id}/capture": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
+            "name": "Idempotency-Key",
+            "in": "header",
             "schema": {
               "type": "string"
             }
@@ -5975,9 +5424,7 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "admission_not_found",
           "idempotency_key_reused",
@@ -5986,15 +5433,25 @@
           "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/admissions/release": {
+    "/v1/app/admissions/release": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -6025,22 +5482,30 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/admissions/extend": {
+    "/v1/app/admissions/extend": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -6071,22 +5536,30 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/usage-events": {
+    "/v1/app/usage-events": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -6117,15 +5590,14 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
@@ -6194,10 +5666,19 @@
         ]
       }
     },
-    "/v1/admin/provider-operations": {
+    "/v1/app/provider-operations": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -6238,19 +5719,20 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
           "provider_operation_conflict"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
-      },
+      }
+    },
+    "/v1/admin/provider-operations": {
       "get": {
         "tags": [
           "admin"
@@ -6381,16 +5863,23 @@
         ]
       }
     },
-    "/v1/admin/provider-operations/{operation_id}/increment": {
+    "/v1/app/provider-operations/{operation_id}/increment": {
       "post": {
         "tags": [
-          "admin"
+          "app"
         ],
         "parameters": [
           {
             "name": "operation_id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
             "schema": {
               "type": "string"
             }
@@ -6425,9 +5914,7 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6437,21 +5924,29 @@
           "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/provider-operations/{operation_id}/release": {
+    "/v1/app/provider-operations/{operation_id}/release": {
       "post": {
         "tags": [
-          "admin"
+          "app"
         ],
         "parameters": [
           {
             "name": "operation_id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
             "schema": {
               "type": "string"
             }
@@ -6486,9 +5981,7 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param",
           "provider_operation_conflict",
@@ -6498,21 +5991,29 @@
           "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
-    "/v1/admin/provider-operations/{operation_id}/observations": {
+    "/v1/app/provider-operations/{operation_id}/observations": {
       "post": {
         "tags": [
-          "admin"
+          "app"
         ],
         "parameters": [
           {
             "name": "operation_id",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
             "schema": {
               "type": "string"
             }
@@ -6547,9 +6048,7 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6559,8 +6058,9 @@
           "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
         ]
       }
     },
@@ -6609,7 +6109,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
@@ -6832,7 +6332,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -6845,7 +6345,7 @@
         ]
       }
     },
-    "/v1/admin/invoices/{id}/uncollectible": {
+    "/v1/admin/invoices/{id}/mark-uncollectible": {
       "post": {
         "tags": [
           "admin"
@@ -6881,7 +6381,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -6956,7 +6456,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -7223,7 +6723,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
@@ -7489,7 +6989,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-operation-limit": "destructive",
         "x-openrails-errors": [
@@ -7775,7 +7275,7 @@
         ]
       }
     },
-    "/v1/admin/rebill-cycles": {
+    "/v1/admin/renewals": {
       "get": {
         "tags": [
           "admin"
@@ -7877,7 +7377,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/RebillCycle"
+                        "$ref": "#/components/schemas/Renewal"
                       }
                     },
                     "next_cursor": {
@@ -7915,7 +7415,7 @@
         ]
       }
     },
-    "/v1/admin/rebill-cycles/{id}": {
+    "/v1/admin/renewals/{id}": {
       "get": {
         "tags": [
           "admin"
@@ -7936,7 +7436,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RebillCycle"
+                  "$ref": "#/components/schemas/Renewal"
                 }
               }
             }
@@ -8287,63 +7787,6 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/payment-methods/{id}": {
-      "delete": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Accepted"
-          },
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "invalid_param",
-          "payment_method_delete_failed",
-          "payment_method_delete_unsupported",
-          "rate_limit_exceeded",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
         ]
       }
     },
@@ -8954,7 +8397,7 @@
         ]
       }
     },
-    "/v1/me/billing-portal": {
+    "/v1/me/billing-portal-sessions": {
       "post": {
         "tags": [
           "customer"
@@ -9243,64 +8686,6 @@
           "credential_store_read_only",
           "invalid_param",
           "psp_credentials_rejected",
-          "psp_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/psps/{id}/archive": {
-      "post": {
-        "tags": [
-          "merchant_config"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ArchivePSPParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PSP"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
           "psp_last_active",
           "psp_not_found",
           "service_unavailable"
@@ -9359,7 +8744,7 @@
     "/v1/admin/psps/refresh": {
       "post": {
         "tags": [
-          "merchant_config"
+          "admin"
         ],
         "responses": {
           "202": {
@@ -9382,7 +8767,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "service_unavailable"
@@ -9493,18 +8878,25 @@
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
-      }
-    },
-    "/v1/admin/configuration/applications": {
-      "post": {
+      },
+      "patch": {
         "tags": [
           "merchant_config"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ApplyMerchantConfigurationParams"
+                "$ref": "#/components/schemas/UpdateMerchantConfigurationParams"
               }
             }
           }
@@ -9533,8 +8925,9 @@
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
+          "idempotency_key_required",
+          "idempotency_key_reused",
           "invalid_param",
-          "merchant_configuration_application_conflict",
           "merchant_configuration_revision_conflict"
         ],
         "x-openrails-error-sets": [
@@ -9735,10 +9128,8 @@
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
-      }
-    },
-    "/v1/admin/alert-webhooks/{id}/url": {
-      "put": {
+      },
+      "patch": {
         "tags": [
           "merchant_config"
         ],
@@ -9756,7 +9147,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetAlertWebhookURLParams"
+                "$ref": "#/components/schemas/UpdateAlertWebhookParams"
               }
             }
           }
@@ -9933,10 +9324,10 @@
         ]
       }
     },
-    "/v1/admin/host-events": {
+    "/v1/app/host-events": {
       "get": {
         "tags": [
-          "admin"
+          "app"
         ],
         "parameters": [
           {
@@ -10027,22 +9418,30 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_host_event_request"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
+          "tier:application",
           "request"
         ]
       }
     },
-    "/v1/admin/host-events/acknowledge": {
+    "/v1/app/host-events/acknowledge": {
       "post": {
         "tags": [
-          "admin"
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
@@ -10073,21 +9472,53 @@
             "bearer": []
           }
         ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-auth": "application",
         "x-openrails-errors": [
           "invalid_param"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
+          "tier:application",
+          "request",
+          "app_write"
+        ]
+      }
+    },
+    "/v1/admin/access": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccess"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "signed_in",
+        "x-openrails-errors": null,
+        "x-openrails-error-sets": [
+          "tier:signed_in"
         ]
       }
     },
     "/v1/admin/metrics/query": {
       "post": {
         "tags": [
-          "admin"
+          "metrics"
         ],
         "requestBody": {
           "content": {
@@ -10119,7 +9550,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Metrics",
         "x-openrails-errors": [
           "metrics_query_invalid",
           "service_unavailable"
@@ -10133,7 +9564,7 @@
     "/v1/admin/metrics/schema": {
       "get": {
         "tags": [
-          "admin"
+          "metrics"
         ],
         "responses": {
           "200": {
@@ -10156,7 +9587,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Metrics",
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -10166,7 +9597,7 @@
     "/v1/admin/dashboard": {
       "get": {
         "tags": [
-          "admin"
+          "metrics"
         ],
         "responses": {
           "200": {
@@ -10189,7 +9620,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
+        "x-openrails-permission": "Metrics",
         "x-openrails-errors": [
           "service_unavailable"
         ],
@@ -10235,6 +9666,106 @@
         "x-openrails-errors": [
           "dashboard_invalid",
           "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/metrics/ask": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskMetricsParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsAnswer"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "Metrics",
+        "x-openrails-mounted-when": "metrics_ask",
+        "x-openrails-errors": [
+          "invalid_param",
+          "model_unavailable",
+          "rate_limit_exceeded",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/admin/dashboard/widgets/generate": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateDashboardWidgetParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeneratedWidget"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "Metrics",
+        "x-openrails-mounted-when": "dashboard_generation",
+        "x-openrails-errors": [
+          "dashboard_invalid",
+          "invalid_param",
+          "model_unavailable",
+          "rate_limit_exceeded",
+          "service_unavailable",
+          "widget_generation_invalid"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -10440,7 +9971,7 @@
           }
         ],
         "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
+        "x-openrails-permission": "AdminUpdate",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "finding_action_failed",
@@ -10580,106 +10111,6 @@
         ],
         "x-openrails-error-sets": [
           "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/metrics/ask": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AskMetricsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MetricsAnswer"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-mounted-when": "metrics_ask",
-        "x-openrails-errors": [
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/dashboard/widgets/generate": {
-      "post": {
-        "tags": [
-          "merchant_config"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenerateDashboardWidgetParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GeneratedWidget"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
-        "x-openrails-mounted-when": "dashboard_generation",
-        "x-openrails-errors": [
-          "dashboard_invalid",
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable",
-          "widget_generation_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
           "request"
         ]
       }
@@ -10888,6 +10319,34 @@
             }
           }
         }
+      },
+      "AdminAccess": {
+        "type": "object",
+        "properties": {
+          "admin": {
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "update"
+            ]
+          },
+          "catalog": {
+            "type": "boolean"
+          },
+          "merchant_config": {
+            "type": "boolean"
+          },
+          "metrics": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "admin",
+          "catalog",
+          "merchant_config",
+          "metrics"
+        ]
       },
       "Admission": {
         "type": "object",
@@ -11250,30 +10709,6 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ApplyMeter"
             }
-          }
-        }
-      },
-      "ApplyMerchantConfigurationParams": {
-        "type": "object",
-        "properties": {
-          "application_id": {
-            "type": "string"
-          },
-          "expected_revision": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "settings": {
-            "$ref": "#/components/schemas/MerchantSettings"
-          },
-          "display_name": {
-            "type": "string"
           }
         }
       },
@@ -11663,14 +11098,6 @@
                 "type": "null"
               }
             ]
-          }
-        }
-      },
-      "ArchivePSPParams": {
-        "type": "object",
-        "properties": {
-          "allow_last": {
-            "type": "boolean"
           }
         }
       },
@@ -12710,41 +12137,6 @@
           "workaround"
         ]
       },
-      "CatalogDriftRefresh": {
-        "type": "object",
-        "properties": {
-          "scanned_products": {
-            "type": "integer"
-          },
-          "scanned_prices": {
-            "type": "integer"
-          },
-          "scanned_nmi_plans": {
-            "type": "integer"
-          },
-          "scanned_solana_plans": {
-            "type": "integer"
-          },
-          "opened_findings": {
-            "type": "integer"
-          },
-          "resolved_findings": {
-            "type": "integer"
-          },
-          "open_findings": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "scanned_products",
-          "scanned_prices",
-          "scanned_nmi_plans",
-          "scanned_solana_plans",
-          "opened_findings",
-          "resolved_findings",
-          "open_findings"
-        ]
-      },
       "CatalogEvidence": {
         "type": "object",
         "properties": {
@@ -12824,6 +12216,33 @@
           },
           "reason": {
             "type": "string"
+          }
+        }
+      },
+      "CheckEntitlementsParams": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "entitlements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "prefix_limit": {
+            "type": "integer"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -14769,34 +14188,6 @@
           }
         }
       },
-      "EffectiveTierLookup": {
-        "type": "object",
-        "properties": {
-          "tiers": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/Tier"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "tiers"
-        ]
-      },
       "EntitlementChange": {
         "type": "object",
         "properties": {
@@ -14828,6 +14219,62 @@
           "added",
           "removed",
           "holders"
+        ]
+      },
+      "EntitlementCheck": {
+        "type": "object",
+        "properties": {
+          "entitlements": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "held": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/HeldEntitlements"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "entitlements",
+          "quantities",
+          "held"
         ]
       },
       "EntitlementReplacement": {
@@ -15201,20 +14648,6 @@
           "viz"
         ]
       },
-      "GetEffectiveTiersParams": {
-        "type": "object",
-        "properties": {
-          "group": {
-            "type": "string"
-          },
-          "customer_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
       "Health": {
         "type": "object",
         "properties": {
@@ -15228,6 +14661,24 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "HeldEntitlements": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "keys",
+          "truncated"
         ]
       },
       "HostEvent": {
@@ -16103,9 +15554,6 @@
       "MerchantConfigurationReceipt": {
         "type": "object",
         "properties": {
-          "application_id": {
-            "type": "string"
-          },
           "revision": {
             "type": "string"
           },
@@ -16114,7 +15562,6 @@
           }
         },
         "required": [
-          "application_id",
           "revision",
           "replayed"
         ]
@@ -20558,103 +20005,6 @@
           "up_to"
         ]
       },
-      "RebillCycle": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "owner": {
-            "type": "string"
-          },
-          "due_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "first_outcome": {
-            "type": "string"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "missed_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "miss_reason": {
-            "type": "string"
-          },
-          "collected_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "recovered_by": {
-            "type": "string"
-          },
-          "closes_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "attempts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PaymentAttempt"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "subscription_id",
-          "customer_id",
-          "psp_id",
-          "rail",
-          "owner",
-          "due_at",
-          "amount",
-          "currency",
-          "first_outcome",
-          "outcome",
-          "missed_at",
-          "miss_reason",
-          "collected_at",
-          "recovered_by",
-          "closes_at",
-          "attempts"
-        ]
-      },
       "RecordProviderBillingObservationParams": {
         "type": "object",
         "properties": {
@@ -20823,6 +20173,103 @@
           }
         }
       },
+      "Renewal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "first_outcome": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "missed_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "miss_reason": {
+            "type": "string"
+          },
+          "collected_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recovered_by": {
+            "type": "string"
+          },
+          "closes_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAttempt"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "subscription_id",
+          "customer_id",
+          "psp_id",
+          "rail",
+          "owner",
+          "due_at",
+          "amount",
+          "currency",
+          "first_outcome",
+          "outcome",
+          "missed_at",
+          "miss_reason",
+          "collected_at",
+          "recovered_by",
+          "closes_at",
+          "attempts"
+        ]
+      },
       "ReplacePaymentMethodCardParams": {
         "type": "object",
         "properties": {
@@ -20870,6 +20317,14 @@
         }
       },
       "RevokeCreditGrantParams": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "RevokeProductAccessParams": {
         "type": "object",
         "properties": {
           "reason": {
@@ -20933,14 +20388,6 @@
           "price_migration_id",
           "created_at"
         ]
-      },
-      "SetAlertWebhookURLParams": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        }
       },
       "SetDashboardParams": {
         "type": "object",
@@ -21016,17 +20463,6 @@
           },
           "expected_revision": {
             "type": "integer"
-          }
-        }
-      },
-      "SetSpendDelegationsParams": {
-        "type": "object",
-        "properties": {
-          "delegations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpendDelegation"
-            }
           }
         }
       },
@@ -21137,119 +20573,6 @@
           "decimals",
           "preferred",
           "recurring_eligible"
-        ]
-      },
-      "SpendDelegation": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "invoker",
-              "invoker_tier",
-              "role"
-            ]
-          },
-          "scope_key": {
-            "type": "string"
-          },
-          "windows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BudgetWindow"
-            }
-          },
-          "provenance": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "scope",
-          "scope_key",
-          "windows",
-          "provenance"
-        ]
-      },
-      "SpendLimits": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "windows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SpendWindow"
-            }
-          }
-        },
-        "required": [
-          "currency",
-          "invoker",
-          "windows"
-        ]
-      },
-      "SpendWindow": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "string",
-            "enum": [
-              "invoker",
-              "invoker_tier",
-              "role"
-            ]
-          },
-          "key": {
-            "type": "string"
-          },
-          "window_seconds": {
-            "type": "integer"
-          },
-          "limit": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "used": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "reserved": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "remaining": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "resets_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "scope",
-          "key",
-          "window_seconds",
-          "limit",
-          "currency",
-          "used",
-          "reserved",
-          "remaining",
-          "resets_at"
         ]
       },
       "StripeEngineAuthentication": {
@@ -21816,33 +21139,6 @@
           "tokens"
         ]
       },
-      "Tier": {
-        "type": "object",
-        "properties": {
-          "entitlement": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "tier_rank": {
-            "type": "integer"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "entitlement",
-          "display_name",
-          "tier_rank",
-          "product_id",
-          "product_key"
-        ]
-      },
       "TieredPrice": {
         "type": "object",
         "properties": {
@@ -21974,6 +21270,56 @@
           "trust_level"
         ]
       },
+      "UpdateAlertWebhookParams": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "format": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "discord",
+                  "generic",
+                  "slack"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "UpdateCustomerParams": {
         "type": "object",
         "properties": {
@@ -22011,6 +21357,27 @@
           }
         }
       },
+      "UpdateMerchantConfigurationParams": {
+        "type": "object",
+        "properties": {
+          "expected_revision": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/MerchantSettings"
+          },
+          "display_name": {
+            "type": "string"
+          }
+        }
+      },
       "UpdatePSPParams": {
         "type": "object",
         "properties": {
@@ -22045,6 +21412,12 @@
             ]
           },
           "retire_webhook_overlap": {
+            "type": "boolean"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "allow_last": {
             "type": "boolean"
           }
         }
@@ -22489,6 +21862,11 @@
     }
   },
   "x-openrails-error-sets": {
+    "app_write": [
+      "idempotency_key_in_progress",
+      "idempotency_key_required",
+      "idempotency_key_reused"
+    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -22496,6 +21874,36 @@
       "request_body_too_large",
       "unknown_field",
       "unsupported_media_type"
+    ],
+    "tier:application": [
+      "access_token_invalid",
+      "access_token_issuer_unknown",
+      "access_token_merchant_not_bound",
+      "application_required",
+      "authentication_required",
+      "authentication_unavailable",
+      "captcha_invalid",
+      "captcha_required",
+      "credential_expired",
+      "credential_revoked",
+      "database_busy",
+      "host_merchant_mismatch",
+      "host_principal_invalid",
+      "insufficient_scope",
+      "internal_error",
+      "merchant_binding_mismatch",
+      "merchant_context_mismatch",
+      "merchant_directory_unavailable",
+      "merchant_not_found",
+      "merchant_selector_invalid",
+      "merchant_unresolved",
+      "permission_required",
+      "rate_limit_exceeded",
+      "sender_proof_required",
+      "service_credential_invalid",
+      "service_credential_merchant_unresolved",
+      "service_credential_resource_scope_denied",
+      "use_dpop_nonce"
     ],
     "tier:checkout_session": [
       "captcha_invalid",
@@ -22584,6 +21992,35 @@
       "internal_error",
       "merchant_not_found",
       "rate_limit_exceeded"
+    ],
+    "tier:signed_in": [
+      "access_token_invalid",
+      "access_token_issuer_unknown",
+      "access_token_merchant_not_bound",
+      "authentication_required",
+      "authentication_unavailable",
+      "captcha_invalid",
+      "captcha_required",
+      "credential_expired",
+      "credential_revoked",
+      "database_busy",
+      "host_merchant_mismatch",
+      "host_principal_invalid",
+      "insufficient_scope",
+      "internal_error",
+      "merchant_binding_mismatch",
+      "merchant_context_mismatch",
+      "merchant_directory_unavailable",
+      "merchant_not_found",
+      "merchant_selector_invalid",
+      "merchant_unresolved",
+      "permission_required",
+      "rate_limit_exceeded",
+      "sender_proof_required",
+      "service_credential_invalid",
+      "service_credential_merchant_unresolved",
+      "service_credential_resource_scope_denied",
+      "use_dpop_nonce"
     ]
   },
   "x-openrails-error-codes": {
@@ -22631,6 +22068,11 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."
+    },
+    "application_required": {
+      "status": 403,
+      "type": "authorization_error",
+      "meaning": "The route is your backend's: it takes an application's credential, never a person's."
     },
     "as_of_required": {
       "status": 400,
@@ -22932,6 +22374,11 @@
       "type": "authentication_error",
       "meaning": "The in-process host principal is bound to no merchant."
     },
+    "idempotency_key_in_progress": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A request with this Idempotency-Key is still running; retry it later."
+    },
     "idempotency_key_in_use": {
       "status": 409,
       "type": "invalid_request_error",
@@ -23046,11 +22493,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The selected merchant is not the one the credential, deployment or request is bound to."
-    },
-    "merchant_configuration_application_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The application id already committed with different content."
     },
     "merchant_configuration_revision_conflict": {
       "status": 409,
@@ -23501,11 +22943,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The wallet transaction could not be prepared or confirmed; the message says why."
-    },
-    "spend_delegation_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The spend delegation does not exist."
     },
     "step_up_required": {
       "status": 403,

@@ -49,7 +49,12 @@ import { toastApiError } from "@/lib/toast"
 import { PSPPublicationAttempts } from "@/lib/psp-publication"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
-import { settingsTab, useMerchantConfig } from "@/lib/capabilities"
+import {
+  settingsTab,
+  useAdminArea,
+  useAdminUpdates,
+  useMerchantConfig,
+} from "@/lib/capabilities"
 import { extensionSettingsTabs, useExtensions } from "@/extensions/registry"
 import type { ConsoleSettingsTab } from "@/extensions/types"
 import { NotificationsTab } from "./notifications"
@@ -62,14 +67,15 @@ export function SettingsPage() {
   // back button steps through tabs the way it looks like it should.
   const [params, setParams] = useSearchParams()
   const config = useMerchantConfig()
+  const admin = useAdminArea()
   const { activeMerchant } = useAuth()
   const hosted = extensionSettingsTabs(
     useExtensions().extensions,
     activeMerchant
   )
   const values = hosted.map((h) => h.value)
-  const first = settingsTab(null, config, values)
-  const tab = settingsTab(params.get("tab"), config, values)
+  const first = settingsTab(null, config, admin, values)
+  const tab = settingsTab(params.get("tab"), config, admin, values)
 
   return (
     <Tabs
@@ -102,9 +108,11 @@ export function SettingsPage() {
               PSPs
             </TabsTrigger>
           )}
-          <TabsTrigger value="customer-controls" className={LINE_TAB}>
-            Customer controls
-          </TabsTrigger>
+          {admin && (
+            <TabsTrigger value="customer-controls" className={LINE_TAB}>
+              Customer controls
+            </TabsTrigger>
+          )}
           {hosted.map((h) => (
             <TabsTrigger key={h.value} value={h.value} className={LINE_TAB}>
               {h.title}
@@ -127,9 +135,11 @@ export function SettingsPage() {
           <PSPsTab />
         </TabsContent>
       )}
-      <TabsContent value="customer-controls">
-        <CustomerControlsTab />
-      </TabsContent>
+      {admin && (
+        <TabsContent value="customer-controls">
+          <CustomerControlsTab />
+        </TabsContent>
+      )}
       {hosted.map((h) => (
         <TabsContent key={h.value} value={h.value}>
           <HostedTab tab={h} />
@@ -485,7 +495,10 @@ function RepriceNoticeWindowForm({
         <form.Subscribe selector={(state) => state.values.days}>
           {(days) => (
             <dl>
-              <SettingDetail label="Notice period" value={`${days} ${Number(days) === 1 ? "day" : "days"}`} />
+              <SettingDetail
+                label="Notice period"
+                value={`${days} ${Number(days) === 1 ? "day" : "days"}`}
+              />
             </dl>
           )}
         </form.Subscribe>
@@ -1172,6 +1185,7 @@ function CustomerControlsTab() {
   }>()
   const lookupControls = useMutation(adminMutations.lookupCustomerControls())
   const updateCreditLimit = useMutation(adminMutations.setCreditLimit())
+  const canUpdate = useAdminUpdates()
   const creditForm = useForm({
     defaultValues: { newLimit: "" },
     onSubmit: async ({ value }) => {
@@ -1327,76 +1341,80 @@ function CustomerControlsTab() {
               }
             />
           </dl>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              void creditForm.handleSubmit()
-            }}
-          >
-            <SettingEditField
-              label={`New limit (${result.currency.toUpperCase()})`}
-              id="customer-controls-limit"
+          {canUpdate && (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void creditForm.handleSubmit()
+              }}
             >
-              <creditForm.Field
-                name="newLimit"
-                validators={{
-                  onChange: ({ value }) => {
-                    const scale = currencyScale(result.currency)
-                    const amount =
-                      scale === undefined ? null : amountFromInput(value, scale)
-                    return value !== "" &&
-                      amount !== null &&
-                      !amount.startsWith("-")
-                      ? undefined
-                      : "Enter a valid amount"
-                  },
-                }}
+              <SettingEditField
+                label={`New limit (${result.currency.toUpperCase()})`}
+                id="customer-controls-limit"
               >
-                {(field) => (
-                  <div className="grid gap-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        id="customer-controls-limit"
-                        placeholder="0.00"
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(event) =>
-                          field.handleChange(event.target.value)
-                        }
-                        aria-invalid={field.state.meta.errors.length > 0}
-                      />
-                      <creditForm.Subscribe
-                        selector={(state) =>
-                          [
-                            state.values.newLimit,
-                            state.canSubmit,
-                            state.isSubmitting,
-                          ] as const
-                        }
-                      >
-                        {([newLimit, canSubmit, isSubmitting]) => (
-                          <Button
-                            type="submit"
-                            disabled={!newLimit || !canSubmit || isSubmitting}
-                          >
-                            {isSubmitting ? "Updating…" : "Update"}
-                          </Button>
-                        )}
-                      </creditForm.Subscribe>
+                <creditForm.Field
+                  name="newLimit"
+                  validators={{
+                    onChange: ({ value }) => {
+                      const scale = currencyScale(result.currency)
+                      const amount =
+                        scale === undefined
+                          ? null
+                          : amountFromInput(value, scale)
+                      return value !== "" &&
+                        amount !== null &&
+                        !amount.startsWith("-")
+                        ? undefined
+                        : "Enter a valid amount"
+                    },
+                  }}
+                >
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <div className="flex gap-2">
+                        <Input
+                          id="customer-controls-limit"
+                          placeholder="0.00"
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(event) =>
+                            field.handleChange(event.target.value)
+                          }
+                          aria-invalid={field.state.meta.errors.length > 0}
+                        />
+                        <creditForm.Subscribe
+                          selector={(state) =>
+                            [
+                              state.values.newLimit,
+                              state.canSubmit,
+                              state.isSubmitting,
+                            ] as const
+                          }
+                        >
+                          {([newLimit, canSubmit, isSubmitting]) => (
+                            <Button
+                              type="submit"
+                              disabled={!newLimit || !canSubmit || isSubmitting}
+                            >
+                              {isSubmitting ? "Updating…" : "Update"}
+                            </Button>
+                          )}
+                        </creditForm.Subscribe>
+                      </div>
+                      <FormFieldErrors errors={field.state.meta.errors} />
+                      <p className="text-xs text-muted-foreground">
+                        Enter 0 to turn credit off.
+                      </p>
                     </div>
-                    <FormFieldErrors errors={field.state.meta.errors} />
-                    <p className="text-xs text-muted-foreground">
-                      Enter 0 to turn credit off.
-                    </p>
-                  </div>
-                )}
-              </creditForm.Field>
-            </SettingEditField>
-          </form>
+                  )}
+                </creditForm.Field>
+              </SettingEditField>
+            </form>
+          )}
         </section>
       )}
     </div>

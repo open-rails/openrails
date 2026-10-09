@@ -61,7 +61,7 @@ import {
   priceIntervalLabel,
 } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
-import { useCatalogWrites } from "@/lib/capabilities"
+import { useAdminUpdates, useCatalogWrites } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
 
 function catalogCopilotEnabled(): boolean {
@@ -953,26 +953,24 @@ function PriceDialog({ products }: { products: Product[] }) {
 }
 
 function DriftTab() {
-  const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const { data, isPending: loading } = useQuery(adminQueries.catalogDrift())
-  const refreshDrift = useMutation(
-    adminMutations.refreshCatalogDrift(queryClient)
-  )
+  const refreshDrift = useMutation(adminMutations.refreshPSPs(queryClient))
+  // Re-reading the PSPs is customer support's update.
+  const canRefresh = useAdminUpdates()
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
+        {canRefresh && (
         <Button
           variant="outline"
           size="sm"
-          disabled={!writesAllowed || refreshDrift.isPending}
+          disabled={refreshDrift.isPending}
           onClick={async () => {
             try {
-              const report = await refreshDrift.mutateAsync()
-              toast.success(
-                `Drift scan done: ${report.opened_findings} new, ${report.resolved_findings} resolved`
-              )
+              await refreshDrift.mutateAsync()
+              toast.success("Re-reading every PSP: new drift appears here as it is found")
             } catch (err) {
               toastApiError(err, "Refresh drift")
             }
@@ -986,6 +984,7 @@ function DriftTab() {
           />
           Refresh scan
         </Button>
+        )}
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
