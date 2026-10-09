@@ -328,7 +328,7 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 	if len(customers) == 0 {
 		return out, nil
 	}
-	accounts, err := q.ListCustomerSettingsAccounts(ctx, gen.ListCustomerSettingsAccountsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))})
+	accounts, err := q.ListCustomerSettingsAccounts(ctx, gen.ListCustomerSettingsAccountsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers) * len(billing.Currencies()))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit), times the currency registry
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +342,7 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 		}
 		out[a.CustomerID] = doc
 	}
-	policies, err := q.ListCustomerBillingPolicyAssignments(ctx, gen.ListCustomerBillingPolicyAssignmentsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers))})
+	policies, err := q.ListCustomerBillingPolicyAssignments(ctx, gen.ListCustomerBillingPolicyAssignmentsParams{MerchantID: mid, CustomerIds: customers, RowLimit: int32(len(customers))}) // #nosec G115 -- customers is at most 100 ids or one page (MaxPageLimit)
 	if err != nil {
 		return nil, err
 	}

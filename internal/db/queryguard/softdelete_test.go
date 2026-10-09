@@ -40,6 +40,7 @@ var allow = map[string]string{
 	"PermanentBenefitsCovered":                "unresolved checkout reservations survive tombstones until the provider outcome resolves",
 	"MerchantHasActivity":                     "retirement is only for never-used merchants; tombstoned rows disqualify",
 	"ListHostEvents":                          "a settled event stays deliverable after its payment is tombstoned",
+	"ListHostEventsByIDs":                     "a settled event stays deliverable after its payment is tombstoned",
 	"RestoreSubscriptionsByDestructiveRun":    "prune rollback: finds soft-deleted rows",
 	"RestorePaymentsByDestructiveRun":         "prune rollback",
 	"RestoreCheckoutAttemptsByDestructiveRun": "prune rollback",
