@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
@@ -141,5 +142,5 @@ func cutoverSchema(t *testing.T, dsn string) (*pgxpool.Pool, string) {
 }
 
 func migrateAll(ctx context.Context, pool *pgxpool.Pool, schema string) error {
-	return openrails.Migrate(ctx, pool, openrails.Config{Schema: schema, RiverSchema: schema})
+	return engine.Migrate(ctx, pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}})
 }
