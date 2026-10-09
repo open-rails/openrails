@@ -118,6 +118,7 @@ type preparedProviderBillingObservation struct {
 	normalizedRecords       []byte
 	normalizedRecordsDigest [sha256.Size]byte
 	providerCost            *int64
+	records                 int
 	hasNegative             bool
 	refusalKind             *string
 	coversLifetime          bool
@@ -323,6 +324,12 @@ func evaluateProviderBillingObservation(
 	if !prepared.coversLifetime {
 		return ProviderBillingQualificationPending, ProviderBillingCoverageIncomplete, nil, nil, nil, nil, nil
 	}
+	// A provider that bills a resource reports it, at zero if it charged nothing. No record
+	// over the whole provider-confirmed lifetime is a provider that does not report this
+	// resource (RunPod and CPU pods), never zero-cost evidence: the hold waits for an operator.
+	if prepared.records == 0 {
+		return ProviderBillingQualificationRefused, ProviderBillingProviderEvidenceRefused, nil, nil, nil, nil, nil
+	}
 	if qual.BaselineObservationID == nil {
 		id := in.ObservationID
 		return ProviderBillingQualificationPending, ProviderBillingAwaitingEqualObservation, &id, nil, nil, nil, nil
@@ -516,6 +523,7 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 	prepared.normalizedRecords = normalized
 	prepared.normalizedRecordsDigest = sha256.Sum256(normalized)
 	prepared.providerCost = &total
+	prepared.records = len(records)
 	return prepared, nil
 }
 

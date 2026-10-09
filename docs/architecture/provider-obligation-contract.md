@@ -69,9 +69,14 @@ No request type has a rated, settlement or charge field, and the routes decode
 strictly, so a smuggled amount is refused before any command runs. OpenRails
 qualifies evidence after absence, closed windows, full lifetime coverage and
 two equal observations separated by the configured quiescence. Refused,
-negative, corrective or decreasing evidence keeps the money reserved. Eligible
-evidence settles at pass-through: rated cost equals provider cost, and cost
-above the hold posts as owed instead of being clamped.
+negative, corrective or decreasing evidence keeps the money reserved, and so
+does a read with no record over the whole provider lifetime: a provider that
+bills a resource reports it, at zero if it charged nothing, so an empty read is
+a provider that does not report the resource (RunPod never reports a CPU pod),
+not zero cost. It is refused as `provider_evidence_refused`; a read that does
+not yet cover the lifetime stays pending. Eligible evidence settles at
+pass-through: rated cost equals provider cost, and cost above the hold posts as
+owed instead of being clamped.
 
 ## When qualification is refused
 
