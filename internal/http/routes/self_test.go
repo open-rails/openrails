@@ -52,7 +52,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	token := fake.Person(userA)
 	auth := map[string]string{"Authorization": "Bearer " + token}
 	for _, route := range []string{
-		"GET /v1/me/balance", "GET /v1/me/transactions", "GET /v1/me/spend-limits",
+		"GET /v1/me/balance", "GET /v1/me/balance/transactions", "GET /v1/me/spend-limits",
 		"PUT /v1/me/collection-payment-method", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
 		"PUT /v1/me/subscriptions/sub_1/payment-method", "POST /v1/me/subscriptions/sub_1/change-tier",
 	} {

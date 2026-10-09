@@ -216,7 +216,7 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 
 	public := func() map[string]bool {
 		listed := map[string]bool{}
-		for _, item := range w.public("/v1/products")["data"].([]any) {
+		for _, item := range w.public("/v1/catalog/products")["data"].([]any) {
 			listed[item.(map[string]any)["key"].(string)] = true
 		}
 		return listed

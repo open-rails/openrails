@@ -166,14 +166,14 @@ func (p *CaptureAdmissionParams) UnmarshalJSON(raw []byte) error {
 }
 
 // CaptureReceipt is the result of settling one admitted request.
-// CreditTransactionID is null for a zero-cost capture.
+// BalanceTransactionID is null for a zero-cost capture.
 type CaptureReceipt struct {
-	RequestID           string               `json:"request_id"`
-	CustomerID          CustomerID           `json:"customer_id"`
-	Currency            string               `json:"currency"`
-	Amount              int64                `json:"amount,string"`
-	CreditTransactionID *CreditTransactionID `json:"credit_transaction_id"`
-	Replayed            bool                 `json:"replayed"`
+	RequestID            string                `json:"request_id"`
+	CustomerID           CustomerID            `json:"customer_id"`
+	Currency             string                `json:"currency"`
+	Amount               int64                 `json:"amount,string"`
+	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
+	Replayed             bool                  `json:"replayed"`
 }
 
 // ReleaseAdmissionBatchParams releases the holds of 1 to

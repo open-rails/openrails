@@ -405,7 +405,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
-| Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListCreditTransactions`, `GetBalance` |
+| Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `EnsureCustomers`, `ListCustomers`, `GetCustomerBillingProfile`, `ListCustomerSettings`, `UpdateCustomerSettings` (credit limits, trust levels, billing policy, invoice profile), `ListCustomerDelinquency`, `ListDelinquency`, `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
 | Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
 | Checkout | `CreateCheckoutSession`, `ListCheckoutOptions`, `GetPublicConfig` |

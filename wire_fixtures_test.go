@@ -45,10 +45,10 @@ func canonicalWireFixtures() map[string]any {
 			RequestID: "req_fixture", Param: &param,
 			Metadata: map[string]any{"committed_amount": "9223372036854775807", "attempt": json.Number("2"), "detail": nil},
 		}},
-		"page_empty.json": billing.ListPage[billing.CreditTransaction]{Items: []billing.CreditTransaction{}},
-		"page_credit_transactions.json": billing.ListPage[billing.CreditTransaction]{Next: "next-page", Items: []billing.CreditTransaction{
-			{ID: billing.CreditTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")), CustomerID: customerFixture, Currency: "USD", Type: billing.CreditDeposit, Amount: maxMoney, CreditGrantID: &grantFixture, Invoker: &invokerFixture, Source: "grant", SourceID: sourceID, CreatedAt: when},
-			{ID: billing.CreditTransactionID(uuid.MustParse("33333333-3333-3333-3333-333333333333")), CustomerID: customerFixture, Currency: "JPY", Type: billing.CreditSpend, Amount: minMoney, Source: "operator", SourceID: "spend-1", CreatedAt: when},
+		"page_empty.json": billing.ListPage[billing.BalanceTransaction]{Items: []billing.BalanceTransaction{}},
+		"page_balance_transactions.json": billing.ListPage[billing.BalanceTransaction]{Next: "next-page", Items: []billing.BalanceTransaction{
+			{ID: billing.BalanceTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")), CustomerID: customerFixture, Currency: "USD", Type: billing.BalanceTransactionDeposit, Amount: maxMoney, CreditGrantID: &grantFixture, Invoker: &invokerFixture, Source: "grant", SourceID: sourceID, CreatedAt: when},
+			{ID: billing.BalanceTransactionID(uuid.MustParse("33333333-3333-3333-3333-333333333333")), CustomerID: customerFixture, Currency: "JPY", Type: billing.BalanceTransactionSpend, Amount: minMoney, Source: "operator", SourceID: "spend-1", CreatedAt: when},
 		}},
 		"merchant_settings.json": billing.MerchantSettings{
 			InvoiceCollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,

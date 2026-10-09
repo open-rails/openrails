@@ -1,4 +1,4 @@
-export type { CreditGrant, CreditTransaction, ListPage } from "./generated/wire"
+export type { CreditGrant, BalanceTransaction, ListPage } from "./generated/wire"
 
 export interface CreditGrantInput {
   currency: string

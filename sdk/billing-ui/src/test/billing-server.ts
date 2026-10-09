@@ -336,7 +336,7 @@ export function fakeBilling(
           currencies: state.currencies,
           payment: { psps: state.psps, solana: null },
         })
-      if (key === "GET /products")
+      if (key === "GET /catalog/products")
         return json(200, { data: state.products, next_cursor: null })
       if (key === "GET /me/payments")
         return json(200, cursorPage(state.payments, limit, cursor))

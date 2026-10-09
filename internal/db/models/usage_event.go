@@ -50,7 +50,7 @@ type UsageEvent struct {
 	// Replayed reports that this event's idempotency coordinate was ALREADY
 	// recorded, so the call that returned it metered nothing new and moved no
 	// money — the row described here landed earlier (or#903, same contract as
-	// CreditTransaction.Replayed). Not persisted; it is the answer to "did MY
+	// BalanceTransaction.Replayed). Not persisted; it is the answer to "did MY
 	// call apply?", which is what lets a caller derive a cache from a durable
 	// decision instead of keeping a claim table beside it.
 	Replayed bool `json:"replayed,omitempty"`

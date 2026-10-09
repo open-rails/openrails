@@ -22,7 +22,7 @@ const (
 	Catalog RouteSet = "resource:catalog"
 	// CheckoutSessions covers CreateCheckoutSession, ListCheckoutOptions.
 	CheckoutSessions RouteSet = "resource:checkout_sessions"
-	// Credits covers CreateCreditGrants, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListCreditTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, DeleteSpendDelegation.
+	// Credits covers CreateCreditGrants, ListCreditGrants, GetCreditGrant, RevokeCreditGrant, ListBalanceTransactions, GetBalance, ListSpendDelegations, SetSpendDelegations, DeleteSpendDelegation.
 	Credits RouteSet = "resource:credits"
 	// CustomerSettings covers ListCustomerSettings, UpdateCustomerSettings.
 	CustomerSettings RouteSet = "resource:customer_settings"
@@ -206,14 +206,14 @@ const (
 	ImportBillingArchive RouteSet = "route:ImportBillingArchive"
 	// ListAlertWebhooks is GET /v1/merchant/alert-webhooks.
 	ListAlertWebhooks RouteSet = "route:ListAlertWebhooks"
+	// ListBalanceTransactions is GET /v1/merchant/customers/{customer_id}/balance/transactions.
+	ListBalanceTransactions RouteSet = "route:ListBalanceTransactions"
 	// ListCatalogDrift is GET /v1/merchant/catalog/drift.
 	ListCatalogDrift RouteSet = "route:ListCatalogDrift"
 	// ListCheckoutOptions is GET /v1/merchant/checkout-options.
 	ListCheckoutOptions RouteSet = "route:ListCheckoutOptions"
 	// ListCreditGrants is GET /v1/merchant/customers/{customer_id}/credit-grants.
 	ListCreditGrants RouteSet = "route:ListCreditGrants"
-	// ListCreditTransactions is GET /v1/merchant/customers/{customer_id}/transactions.
-	ListCreditTransactions RouteSet = "route:ListCreditTransactions"
 	// ListCustomerDelinquency is GET /v1/merchant/customers/{customer_id}/delinquency.
 	ListCustomerDelinquency RouteSet = "route:ListCustomerDelinquency"
 	// ListCustomerEntitlements is GET /v1/merchant/customers/{customer_id}/entitlements.

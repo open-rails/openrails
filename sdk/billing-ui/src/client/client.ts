@@ -534,7 +534,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
 
     /** Products on sale, each with its current prices. */
     listProducts(opts: ListOptions = {}): Promise<Page<Product>> {
-      return json(productPage, "/products", {
+      return json(productPage, "/catalog/products", {
         query: { limit: opts.limit ?? 100, cursor: opts.cursor },
         signal: opts.signal,
       })

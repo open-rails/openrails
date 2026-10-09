@@ -72,7 +72,7 @@ export const pspLinkStateSchema = z.object({
 })
 
 /**
- * A catalog price, embedded in a product (`GET /products`): `unit_amount` of
+ * A catalog price, embedded in a product (`GET /catalog/products`): `unit_amount` of
  * `currency` for `access_duration_hours` of access (null: for good),
  * charging every `billing_interval_hours` (null: one-time).
  */

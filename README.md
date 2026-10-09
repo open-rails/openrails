@@ -628,7 +628,7 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
+| `GET /billing/v1/catalog/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
 | `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
 | `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
 | `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
@@ -665,7 +665,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/invoices/{id}` | one invoice |
 | `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
 | `GET /billing/v1/me/balance` | prepaid balance |
-| `GET /billing/v1/me/transactions` | its ledger |
+| `GET /billing/v1/me/balance/transactions` | its balance transactions |
 | `GET /billing/v1/me/usage` | metered usage |
 | `GET /billing/v1/me/spend-limits` | spending limits |
 | `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |

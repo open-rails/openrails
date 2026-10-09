@@ -237,7 +237,7 @@ describe("canonical wire fixtures in the browser", () => {
   })
 
   it("round-trips int64 boundary money through the console's own parsing", () => {
-    const page = fixture("page_credit_transactions.json")
+    const page = fixture("page_balance_transactions.json")
     expect([page.data[0].amount, page.data[1].amount]).toEqual([MAX, MIN])
     expect(amountFromInput("9223372036854.775807", 6)).toBe(page.data[0].amount)
     expect(digits(formatUnits(page.data[1].amount, "JPY", 0))).toBe(MIN.slice(1))

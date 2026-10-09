@@ -9,12 +9,12 @@ import (
 // CreditGrantID names one credit grant: a lot of prepaid credit.
 type CreditGrantID uuid.UUID
 
-// CreditTransactionID names one movement on a customer's credit ledger.
-type CreditTransactionID uuid.UUID
+// BalanceTransactionID names one movement on a customer's balance.
+type BalanceTransactionID uuid.UUID
 
 const (
-	CreditGrantIDPrefix       = "cgr_"
-	CreditTransactionIDPrefix = "txn_"
+	CreditGrantIDPrefix        = "cgr_"
+	BalanceTransactionIDPrefix = "txn_"
 )
 
 func ParseCreditGrantID(s string) (CreditGrantID, error) {
@@ -33,20 +33,20 @@ func (id *CreditGrantID) UnmarshalText(text []byte) error {
 	return err
 }
 
-func ParseCreditTransactionID(s string) (CreditTransactionID, error) {
-	u, err := parsePrefixedID("credit transaction", CreditTransactionIDPrefix, s)
-	return CreditTransactionID(u), err
+func ParseBalanceTransactionID(s string) (BalanceTransactionID, error) {
+	u, err := parsePrefixedID("balance transaction", BalanceTransactionIDPrefix, s)
+	return BalanceTransactionID(u), err
 }
-func (id CreditTransactionID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id CreditTransactionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id CreditTransactionID) String() string {
-	return formatPrefixedID(CreditTransactionIDPrefix, uuid.UUID(id))
+func (id BalanceTransactionID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id BalanceTransactionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
+func (id BalanceTransactionID) String() string {
+	return formatPrefixedID(BalanceTransactionIDPrefix, uuid.UUID(id))
 }
-func (id CreditTransactionID) MarshalText() ([]byte, error) {
+func (id BalanceTransactionID) MarshalText() ([]byte, error) {
 	return []byte(id.String()), nil
 }
-func (id *CreditTransactionID) UnmarshalText(text []byte) error {
-	parsed, err := ParseCreditTransactionID(string(text))
+func (id *BalanceTransactionID) UnmarshalText(text []byte) error {
+	parsed, err := ParseBalanceTransactionID(string(text))
 	*id = parsed
 	return err
 }
@@ -132,46 +132,46 @@ type RevokeCreditGrantParams struct {
 	Reason string `json:"reason"`
 }
 
-// CreditTransactionType is what a credit-ledger movement did.
-type CreditTransactionType string
+// BalanceTransactionType is what a balance movement did.
+type BalanceTransactionType string
 
 const (
-	CreditDeposit   CreditTransactionType = "deposit"
-	CreditSpend     CreditTransactionType = "spend"
-	CreditExpire    CreditTransactionType = "expire"
-	CreditRevoke    CreditTransactionType = "revoke"
-	CreditReinstate CreditTransactionType = "reinstate"
+	BalanceTransactionDeposit   BalanceTransactionType = "deposit"
+	BalanceTransactionSpend     BalanceTransactionType = "spend"
+	BalanceTransactionExpire    BalanceTransactionType = "expire"
+	BalanceTransactionRevoke    BalanceTransactionType = "revoke"
+	BalanceTransactionReinstate BalanceTransactionType = "reinstate"
 	// The owed_ types move what the customer owes in arrears.
-	CreditOwedAccrual  CreditTransactionType = "owed_accrual"
-	CreditOwedPayment  CreditTransactionType = "owed_payment"
-	CreditOwedWriteoff CreditTransactionType = "owed_writeoff"
-	// CreditOwedRepayment pays debt from newly funded credit; Amount is the
+	BalanceTransactionOwedAccrual  BalanceTransactionType = "owed_accrual"
+	BalanceTransactionOwedPayment  BalanceTransactionType = "owed_payment"
+	BalanceTransactionOwedWriteoff BalanceTransactionType = "owed_writeoff"
+	// BalanceTransactionOwedRepayment pays debt from newly funded credit; Amount is the
 	// (negative) change to both the balance and what is owed.
-	CreditOwedRepayment CreditTransactionType = "owed_repayment"
+	BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
 )
 
-// CreditTransaction is one movement on a customer's credit ledger. Amount is
+// BalanceTransaction is one movement on a customer's balance. Amount is
 // signed: the change to the balance, or for owed_ types to what is owed.
-type CreditTransaction struct {
-	ID            CreditTransactionID   `json:"id"`
-	CustomerID    CustomerID            `json:"customer_id"`
-	Currency      string                `json:"currency"`
-	Type          CreditTransactionType `json:"type"`
-	Amount        int64                 `json:"amount,string"`
-	CreditGrantID *CreditGrantID        `json:"credit_grant_id"`
-	Invoker       *string               `json:"invoker"`
-	Resource      *string               `json:"resource"`
-	Source        string                `json:"source"`
-	SourceID      string                `json:"source_id"`
-	CreatedAt     time.Time             `json:"created_at"`
+type BalanceTransaction struct {
+	ID            BalanceTransactionID   `json:"id"`
+	CustomerID    CustomerID             `json:"customer_id"`
+	Currency      string                 `json:"currency"`
+	Type          BalanceTransactionType `json:"type"`
+	Amount        int64                  `json:"amount,string"`
+	CreditGrantID *CreditGrantID         `json:"credit_grant_id"`
+	Invoker       *string                `json:"invoker"`
+	Resource      *string                `json:"resource"`
+	Source        string                 `json:"source"`
+	SourceID      string                 `json:"source_id"`
+	CreatedAt     time.Time              `json:"created_at"`
 }
 
-// CreditTransactionListParams selects a customer's ledger in one currency,
+// BalanceTransactionListParams selects a customer's ledger in one currency,
 // newest first. IDs instead reads 1 to MaxBatchItems of the customer's named
 // transactions in one page, in any currency; unknown ones are absent.
-type CreditTransactionListParams struct {
-	Currency string                `form:"currency"`
-	IDs      []CreditTransactionID `form:"-"`
+type BalanceTransactionListParams struct {
+	Currency string                 `form:"currency"`
+	IDs      []BalanceTransactionID `form:"-"`
 	PageRequest
 }
 

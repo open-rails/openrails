@@ -34,7 +34,7 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 | POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/captcha/status` | public | — | — | 200 `CaptchaStatus` |  |
 | GET | `/v1/captcha/client.js` | public | — | — | 200 `application/javascript` |  |
-| GET | `/v1/products` | public | — | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/catalog/products` | public | — | — | 200 `ListPage<Product>` |  |
 
 ## Customer (`/v1/me`)
 
@@ -57,7 +57,7 @@ A customer acting on its own account.
 | GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` | scope `billing_management` |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` | scope `billing_management` |
 | GET | `/v1/me/balance` | customer | — | — | 200 `Balance` | scope `billing_management` |
-| GET | `/v1/me/transactions` | customer | — | — | 200 `ListPage<CreditTransaction>` | scope `billing_management` |
+| GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` | scope `billing_management` |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` | scope `billing_management` |
 | GET | `/v1/me/invoices` | customer | — | — | 200 `ListPage<Invoice>` | scope `billing_management` |
 | GET | `/v1/me/invoices/{id}` | customer | — | — | 200 `Invoice` | scope `billing_management` |
@@ -139,7 +139,7 @@ Staff work on customers (`Routes.Merchant`): staff, machines and the Go client a
 | GET | `/v1/merchant/customers/{customer_id}/credit-grants` | merchant | `ListCreditGrants` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditGrant>` |  |
 | GET | `/v1/merchant/customers/{customer_id}/credit-grants/{id}` | merchant | `GetCreditGrant` · `Credits` · `StaffReads` | — | 200 `CreditGrant` |  |
 | POST | `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` | merchant | `RevokeCreditGrant` · `Credits` · `StaffWrites` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
-| GET | `/v1/merchant/customers/{customer_id}/transactions` | merchant | `ListCreditTransactions` · `Credits` · `StaffReads` | — | 200 `ListPage<CreditTransaction>` |  |
+| GET | `/v1/merchant/customers/{customer_id}/balance/transactions` | merchant | `ListBalanceTransactions` · `Credits` · `StaffReads` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/merchant/customers/{customer_id}/balance` | merchant | `GetBalance` · `Credits` · `StaffReads` | — | 200 `Balance` |  |
 | GET | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `ListSpendDelegations` · `Credits` · `StaffReads` | — | 200 `ListPage<SpendDelegation>` |  |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | merchant | `SetSpendDelegations` · `Credits` · `StaffWrites` | `SetSpendDelegationsParams` | 200 `ListPage<SpendDelegation>` | sensitive |

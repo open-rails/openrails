@@ -69,7 +69,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 
 | Routes | Credential |
 |---|---|
-| Public: `/v1/config`, `/v1/products` | none |
+| Public: `/v1/config`, `/v1/catalog/products` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
 | Merchant and merchant configuration: `/v1/merchant/*` | embedded: the host's credential its guard admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |

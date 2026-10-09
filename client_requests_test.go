@@ -518,7 +518,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"transactions": func() error {
-			_, err := c.ListCreditTransactions(ctx, zero, billing.CreditTransactionListParams{})
+			_, err := c.ListBalanceTransactions(ctx, zero, billing.BalanceTransactionListParams{})
 			return err
 		},
 		"delegations": func() error { _, err := c.ListSpendDelegations(ctx, zero); return err },

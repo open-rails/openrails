@@ -92,10 +92,10 @@ pkg openrails, const ImportBilling RouteSet = "route:ImportBilling"
 pkg openrails, const ImportBillingArchive RouteSet = "route:ImportBillingArchive"
 pkg openrails, const Invoices RouteSet = "resource:invoices"
 pkg openrails, const ListAlertWebhooks RouteSet = "route:ListAlertWebhooks"
+pkg openrails, const ListBalanceTransactions RouteSet = "route:ListBalanceTransactions"
 pkg openrails, const ListCatalogDrift RouteSet = "route:ListCatalogDrift"
 pkg openrails, const ListCheckoutOptions RouteSet = "route:ListCheckoutOptions"
 pkg openrails, const ListCreditGrants RouteSet = "route:ListCreditGrants"
-pkg openrails, const ListCreditTransactions RouteSet = "route:ListCreditTransactions"
 pkg openrails, const ListCustomerDelinquency RouteSet = "route:ListCustomerDelinquency"
 pkg openrails, const ListCustomerEntitlements RouteSet = "route:ListCustomerEntitlements"
 pkg openrails, const ListCustomerSettings RouteSet = "route:ListCustomerSettings"
@@ -285,10 +285,10 @@ pkg openrails, method (*Client) GetUsage(context.Context, billing.CustomerID, bi
 pkg openrails, method (*Client) ImportBilling(context.Context, billing.DeclaredBilling, ...RequestOption) (*billing.BillingImportResult, error)
 pkg openrails, method (*Client) ImportBillingArchive(context.Context, io.Reader, ...RequestOption) (*billing.BillingArchiveImport, error)
 pkg openrails, method (*Client) ListAlertWebhooks(context.Context, billing.AlertWebhookListParams, ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)
+pkg openrails, method (*Client) ListBalanceTransactions(context.Context, billing.CustomerID, billing.BalanceTransactionListParams, ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)
 pkg openrails, method (*Client) ListCatalogDrift(context.Context, billing.CatalogDriftListParams, ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error)
 pkg openrails, method (*Client) ListCheckoutOptions(context.Context, billing.CheckoutOptionListParams, ...RequestOption) (*billing.ListPage[billing.CheckoutOption], error)
 pkg openrails, method (*Client) ListCreditGrants(context.Context, billing.CustomerID, billing.CreditGrantListParams, ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)
-pkg openrails, method (*Client) ListCreditTransactions(context.Context, billing.CustomerID, billing.CreditTransactionListParams, ...RequestOption) (*billing.ListPage[billing.CreditTransaction], error)
 pkg openrails, method (*Client) ListCustomerDelinquency(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.Delinquency], error)
 pkg openrails, method (*Client) ListCustomerEntitlements(context.Context, billing.CustomerID, billing.CustomerEntitlementListParams, ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)
 pkg openrails, method (*Client) ListCustomerSettings(context.Context, billing.CustomerSettingsListParams, ...RequestOption) (*billing.ListPage[billing.CustomerSettings], error)
@@ -667,6 +667,16 @@ pkg openrails/billing, const ArchivedPurchaseRefunded ArchivedPurchaseOutcome = 
 pkg openrails/billing, const ArchivedPurchaseReviewDismissed ArchivedPurchaseOutcome = "review_dismissed"
 pkg openrails/billing, const ArchivedPurchaseReviewOpen ArchivedPurchaseOutcome = "review_open"
 pkg openrails/billing, const ArchivedPurchaseReviewRefunded ArchivedPurchaseOutcome = "review_refunded"
+pkg openrails/billing, const BalanceTransactionDeposit BalanceTransactionType = "deposit"
+pkg openrails/billing, const BalanceTransactionExpire BalanceTransactionType = "expire"
+pkg openrails/billing, const BalanceTransactionIDPrefix untyped string = "txn_"
+pkg openrails/billing, const BalanceTransactionOwedAccrual BalanceTransactionType = "owed_accrual"
+pkg openrails/billing, const BalanceTransactionOwedPayment BalanceTransactionType = "owed_payment"
+pkg openrails/billing, const BalanceTransactionOwedRepayment BalanceTransactionType = "owed_repayment"
+pkg openrails/billing, const BalanceTransactionOwedWriteoff BalanceTransactionType = "owed_writeoff"
+pkg openrails/billing, const BalanceTransactionReinstate BalanceTransactionType = "reinstate"
+pkg openrails/billing, const BalanceTransactionRevoke BalanceTransactionType = "revoke"
+pkg openrails/billing, const BalanceTransactionSpend BalanceTransactionType = "spend"
 pkg openrails/billing, const BillingModeArrears BillingMode = "arrears"
 pkg openrails/billing, const BillingModePrepaid BillingMode = "prepaid"
 pkg openrails/billing, const CardExpiryExpired CardExpiryStatus = "expired"
@@ -775,8 +785,6 @@ pkg openrails/billing, const CodeUnknownField untyped string = "unknown_field"
 pkg openrails/billing, const CodeUnsupportedMediaType untyped string = "unsupported_media_type"
 pkg openrails/billing, const CollectChargeAutomatically InvoiceCollectionMethod = "charge_automatically"
 pkg openrails/billing, const CollectSendInvoice InvoiceCollectionMethod = "send_invoice"
-pkg openrails/billing, const CreditDeposit CreditTransactionType = "deposit"
-pkg openrails/billing, const CreditExpire CreditTransactionType = "expire"
 pkg openrails/billing, const CreditGrantActive CreditGrantState = "active"
 pkg openrails/billing, const CreditGrantExpired CreditGrantState = "expired"
 pkg openrails/billing, const CreditGrantIDPrefix untyped string = "cgr_"
@@ -784,14 +792,6 @@ pkg openrails/billing, const CreditGrantRevoked CreditGrantState = "revoked"
 pkg openrails/billing, const CreditGrantScheduled CreditGrantState = "scheduled"
 pkg openrails/billing, const CreditGrantSpent CreditGrantState = "spent"
 pkg openrails/billing, const CreditGrantTerminated CreditGrantState = "terminated"
-pkg openrails/billing, const CreditOwedAccrual CreditTransactionType = "owed_accrual"
-pkg openrails/billing, const CreditOwedPayment CreditTransactionType = "owed_payment"
-pkg openrails/billing, const CreditOwedRepayment CreditTransactionType = "owed_repayment"
-pkg openrails/billing, const CreditOwedWriteoff CreditTransactionType = "owed_writeoff"
-pkg openrails/billing, const CreditReinstate CreditTransactionType = "reinstate"
-pkg openrails/billing, const CreditRevoke CreditTransactionType = "revoke"
-pkg openrails/billing, const CreditSpend CreditTransactionType = "spend"
-pkg openrails/billing, const CreditTransactionIDPrefix untyped string = "txn_"
 pkg openrails/billing, const CustomerGroupPersona untyped string = "customer"
 pkg openrails/billing, const DeclineAuthenticationRequired DeclineReason = "authentication_required"
 pkg openrails/billing, const DeclineBlockedByPSP DeclineReason = "blocked_by_psp"
@@ -1005,9 +1005,9 @@ pkg openrails/billing, func LookupErrorCode(string) (ErrorCode, bool)
 pkg openrails/billing, func NewCard(string, int, int, string) (*Card, error)
 pkg openrails/billing, func NormalizeMerchantSlug(string) string
 pkg openrails/billing, func ParseAlertWebhookID(string) (AlertWebhookID, error)
+pkg openrails/billing, func ParseBalanceTransactionID(string) (BalanceTransactionID, error)
 pkg openrails/billing, func ParseCheckoutAttemptID(string) (CheckoutAttemptID, error)
 pkg openrails/billing, func ParseCreditGrantID(string) (CreditGrantID, error)
-pkg openrails/billing, func ParseCreditTransactionID(string) (CreditTransactionID, error)
 pkg openrails/billing, func ParseCustomerID(string) (CustomerID, error)
 pkg openrails/billing, func ParseFederatedGrantID(string) (FederatedGrantID, error)
 pkg openrails/billing, func ParseFindingID(string) (FindingID, error)
@@ -1037,6 +1037,7 @@ pkg openrails/billing, func ValidateMerchantSlug(string) error
 pkg openrails/billing, method (*Admission) Active() bool
 pkg openrails/billing, method (*AlertWebhookID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*AmountMap) UnmarshalJSON([]byte) error
+pkg openrails/billing, method (*BalanceTransactionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CaptureAdmissionParams) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*Card) Brand() string
 pkg openrails/billing, method (*Card) Expiry() string
@@ -1047,7 +1048,6 @@ pkg openrails/billing, method (*Card) Zero()
 pkg openrails/billing, method (*CheckoutAttemptID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CreateProductParams) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*CreditGrantID) UnmarshalText([]byte) error
-pkg openrails/billing, method (*CreditTransactionID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*CustomerID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*FederatedGrantID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*FindingID) UnmarshalText([]byte) error
@@ -1091,6 +1091,10 @@ pkg openrails/billing, method (AlertWebhookID) String() string
 pkg openrails/billing, method (AlertWebhookID) UUID() uuid.UUID
 pkg openrails/billing, method (AmountMap) MarshalJSON() ([]byte, error)
 pkg openrails/billing, method (ApplyMerchantConfigurationParams) MarshalJSON() ([]byte, error)
+pkg openrails/billing, method (BalanceTransactionID) IsZero() bool
+pkg openrails/billing, method (BalanceTransactionID) MarshalText() ([]byte, error)
+pkg openrails/billing, method (BalanceTransactionID) String() string
+pkg openrails/billing, method (BalanceTransactionID) UUID() uuid.UUID
 pkg openrails/billing, method (Card) Format(fmt.State, rune)
 pkg openrails/billing, method (Card) GoString() string
 pkg openrails/billing, method (Card) LogValue() slog.Value
@@ -1107,10 +1111,6 @@ pkg openrails/billing, method (CreditGrantID) IsZero() bool
 pkg openrails/billing, method (CreditGrantID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (CreditGrantID) String() string
 pkg openrails/billing, method (CreditGrantID) UUID() uuid.UUID
-pkg openrails/billing, method (CreditTransactionID) IsZero() bool
-pkg openrails/billing, method (CreditTransactionID) MarshalText() ([]byte, error)
-pkg openrails/billing, method (CreditTransactionID) String() string
-pkg openrails/billing, method (CreditTransactionID) UUID() uuid.UUID
 pkg openrails/billing, method (CurrencyUnits) NativeShift() int
 pkg openrails/billing, method (CustomerID) IsZero() bool
 pkg openrails/billing, method (CustomerID) MarshalText() ([]byte, error)
@@ -1342,6 +1342,24 @@ pkg openrails/billing, type Balance struct, Currency string `json:"currency"`
 pkg openrails/billing, type Balance struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Balance struct, HeldAmount int64 `json:"held_amount,string"`
 pkg openrails/billing, type Balance struct, OwedAmount int64 `json:"owed_amount,string"`
+pkg openrails/billing, type BalanceTransaction struct
+pkg openrails/billing, type BalanceTransaction struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type BalanceTransaction struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type BalanceTransaction struct, CreditGrantID *CreditGrantID `json:"credit_grant_id"`
+pkg openrails/billing, type BalanceTransaction struct, Currency string `json:"currency"`
+pkg openrails/billing, type BalanceTransaction struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type BalanceTransaction struct, ID BalanceTransactionID `json:"id"`
+pkg openrails/billing, type BalanceTransaction struct, Invoker *string `json:"invoker"`
+pkg openrails/billing, type BalanceTransaction struct, Resource *string `json:"resource"`
+pkg openrails/billing, type BalanceTransaction struct, Source string `json:"source"`
+pkg openrails/billing, type BalanceTransaction struct, SourceID string `json:"source_id"`
+pkg openrails/billing, type BalanceTransaction struct, Type BalanceTransactionType `json:"type"`
+pkg openrails/billing, type BalanceTransactionID [16]byte
+pkg openrails/billing, type BalanceTransactionListParams struct
+pkg openrails/billing, type BalanceTransactionListParams struct, Currency string `form:"currency"`
+pkg openrails/billing, type BalanceTransactionListParams struct, IDs []BalanceTransactionID `form:"-"`
+pkg openrails/billing, type BalanceTransactionListParams struct, embedded PageRequest
+pkg openrails/billing, type BalanceTransactionType string
 pkg openrails/billing, type BillingAddress struct
 pkg openrails/billing, type BillingAddress struct, City *string `json:"city"`
 pkg openrails/billing, type BillingAddress struct, Country *string `json:"country"`
@@ -1408,7 +1426,7 @@ pkg openrails/billing, type CaptureAdmissionParams struct, Amount int64 `json:"a
 pkg openrails/billing, type CaptureAdmissionParams struct, Usage *CaptureUsage `json:"usage,omitempty"`
 pkg openrails/billing, type CaptureReceipt struct
 pkg openrails/billing, type CaptureReceipt struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type CaptureReceipt struct, CreditTransactionID *CreditTransactionID `json:"credit_transaction_id"`
+pkg openrails/billing, type CaptureReceipt struct, BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 pkg openrails/billing, type CaptureReceipt struct, Currency string `json:"currency"`
 pkg openrails/billing, type CaptureReceipt struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type CaptureReceipt struct, Replayed bool `json:"replayed"`
@@ -1725,24 +1743,6 @@ pkg openrails/billing, type CreditGrantState string
 pkg openrails/billing, type CreditLimit struct
 pkg openrails/billing, type CreditLimit struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type CreditLimit struct, Currency string `json:"currency"`
-pkg openrails/billing, type CreditTransaction struct
-pkg openrails/billing, type CreditTransaction struct, Amount int64 `json:"amount,string"`
-pkg openrails/billing, type CreditTransaction struct, CreatedAt time.Time `json:"created_at"`
-pkg openrails/billing, type CreditTransaction struct, CreditGrantID *CreditGrantID `json:"credit_grant_id"`
-pkg openrails/billing, type CreditTransaction struct, Currency string `json:"currency"`
-pkg openrails/billing, type CreditTransaction struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type CreditTransaction struct, ID CreditTransactionID `json:"id"`
-pkg openrails/billing, type CreditTransaction struct, Invoker *string `json:"invoker"`
-pkg openrails/billing, type CreditTransaction struct, Resource *string `json:"resource"`
-pkg openrails/billing, type CreditTransaction struct, Source string `json:"source"`
-pkg openrails/billing, type CreditTransaction struct, SourceID string `json:"source_id"`
-pkg openrails/billing, type CreditTransaction struct, Type CreditTransactionType `json:"type"`
-pkg openrails/billing, type CreditTransactionID [16]byte
-pkg openrails/billing, type CreditTransactionListParams struct
-pkg openrails/billing, type CreditTransactionListParams struct, Currency string `form:"currency"`
-pkg openrails/billing, type CreditTransactionListParams struct, IDs []CreditTransactionID `form:"-"`
-pkg openrails/billing, type CreditTransactionListParams struct, embedded PageRequest
-pkg openrails/billing, type CreditTransactionType string
 pkg openrails/billing, type CurrencyUnits struct
 pkg openrails/billing, type CurrencyUnits struct, Code string `json:"code"`
 pkg openrails/billing, type CurrencyUnits struct, Decimals int `json:"decimals"`
@@ -3306,8 +3306,8 @@ pkg openrails/billing, type Usage struct, Rows []UsageRow `json:"rows"`
 pkg openrails/billing, type Usage struct, To time.Time `json:"to"`
 pkg openrails/billing, type UsageEvent struct
 pkg openrails/billing, type UsageEvent struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageEvent struct, BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 pkg openrails/billing, type UsageEvent struct, CreatedAt time.Time `json:"created_at"`
-pkg openrails/billing, type UsageEvent struct, CreditTransactionID *CreditTransactionID `json:"credit_transaction_id"`
 pkg openrails/billing, type UsageEvent struct, Currency string `json:"currency"`
 pkg openrails/billing, type UsageEvent struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type UsageEvent struct, Dimensions map[string]int64 `json:"dimensions"`

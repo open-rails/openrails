@@ -80,31 +80,31 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 	}
 }
 
-// creditTransactionFromTransfer is a customer's view of one ledger transfer:
+// balanceTransactionFromTransfer is a customer's view of one ledger transfer:
 // its type, and its amount signed as the change to the balance (to what is
 // owed, for owed_ types).
-func creditTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.CreditTransaction {
-	txType, amount := billing.CreditTransactionType(r.TransferType), r.Amount
+func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.BalanceTransaction {
+	txType, amount := billing.BalanceTransactionType(r.TransferType), r.Amount
 	switch r.TransferType {
 	case "deposit_bonus":
-		txType = billing.CreditDeposit
+		txType = billing.BalanceTransactionDeposit
 	case "credit_refund":
-		txType, amount = billing.CreditRevoke, -amount
+		txType, amount = billing.BalanceTransactionRevoke, -amount
 	case "credit_refund_restore":
-		txType = billing.CreditReinstate
+		txType = billing.BalanceTransactionReinstate
 	case "credit_spend":
-		txType, amount = billing.CreditSpend, -amount
+		txType, amount = billing.BalanceTransactionSpend, -amount
 	case "credit_expire":
-		txType, amount = billing.CreditExpire, -amount
+		txType, amount = billing.BalanceTransactionExpire, -amount
 	case "credit_revoke":
-		txType, amount = billing.CreditRevoke, -amount
+		txType, amount = billing.BalanceTransactionRevoke, -amount
 	case "credit_reinstate":
-		txType = billing.CreditReinstate
+		txType = billing.BalanceTransactionReinstate
 	case "owed_payment", "owed_writeoff", "owed_repayment":
 		amount = -amount
 	}
-	out := billing.CreditTransaction{
-		ID: billing.CreditTransactionID(r.ID), Currency: r.Currency, Type: txType, Amount: amount,
+	out := billing.BalanceTransaction{
+		ID: billing.BalanceTransactionID(r.ID), Currency: r.Currency, Type: txType, Amount: amount,
 		Invoker: r.InvokerID, Resource: r.Resource, Source: r.Source, SourceID: r.SourceID, CreatedAt: r.CreatedAt,
 	}
 	if r.CustomerID != nil {

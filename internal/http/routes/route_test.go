@@ -232,7 +232,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	RegisterUserRoutes(recorder{base: "/v1", seen: seen}, nil, Options{ProviderRoutes: &none})
 	require.NotContains(t, seen, "GET /v1/solana/tokens")
 	require.NotContains(t, seen, "GET /v1/captcha/status")
-	require.Contains(t, seen, "GET /v1/products")
+	require.Contains(t, seen, "GET /v1/catalog/products")
 
 	staff, configuration := map[string]int{}, map[string]int{}
 	RegisterMerchantRoutes(recorder{base: "/v1", seen: staff}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Guard: levelGuard(t)}, Merchant)

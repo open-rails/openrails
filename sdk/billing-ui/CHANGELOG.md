@@ -1,5 +1,9 @@
 # Changelog
 
+## The public catalog is under /catalog
+
+- `listProducts()` reads `GET /catalog/products` (was `GET /products`).
+
 ## One public configuration
 
 - `getConfig()` reads `GET /config`: the mount's `capabilities`, the currency

@@ -67,7 +67,7 @@ describe("catalog", () => {
     )
     const page = await client.listProducts()
     expect(request()).toMatchObject({
-      url: "/billing/v1/products?limit=100",
+      url: "/billing/v1/catalog/products?limit=100",
       method: "GET",
     })
     expect(page.next_cursor).toBe("next")
@@ -89,7 +89,7 @@ describe("catalog", () => {
     expect(page.data[1].prices).toEqual([])
 
     await client.listProducts({ limit: 5, cursor: "next" })
-    expect(request(1).url).toBe("/billing/v1/products?limit=5&cursor=next")
+    expect(request(1).url).toBe("/billing/v1/catalog/products?limit=5&cursor=next")
   })
 
   it("rejects a price whose amount is not an exact string", async () => {

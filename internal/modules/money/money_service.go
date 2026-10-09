@@ -323,10 +323,10 @@ func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity
 	}
 }
 
-// ListCreditTransactions lists a customer's ledger movements in one currency,
+// ListBalanceTransactions lists a customer's ledger movements in one currency,
 // newest first.
-func (s *MoneyService) ListCreditTransactions(ctx context.Context, payer identity.CustomerID, params billing.CreditTransactionListParams) (billing.ListPage[billing.CreditTransaction], error) {
-	var page billing.ListPage[billing.CreditTransaction]
+func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identity.CustomerID, params billing.BalanceTransactionListParams) (billing.ListPage[billing.BalanceTransaction], error) {
+	var page billing.ListPage[billing.BalanceTransaction]
 	if s == nil || s.db == nil {
 		return page, fmt.Errorf("money service not initialized")
 	}
@@ -340,7 +340,7 @@ func (s *MoneyService) ListCreditTransactions(ctx context.Context, payer identit
 			return page, err
 		}
 		for _, r := range rows {
-			page.Items = append(page.Items, creditTransactionFromTransfer(r))
+			page.Items = append(page.Items, balanceTransactionFromTransfer(r))
 		}
 		return page, nil
 	}
@@ -367,11 +367,11 @@ func (s *MoneyService) ListCreditTransactions(ctx context.Context, payer identit
 	if err != nil {
 		return page, err
 	}
-	items := make([]billing.CreditTransaction, 0, len(rows))
+	items := make([]billing.BalanceTransaction, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, creditTransactionFromTransfer(r))
+		items = append(items, balanceTransactionFromTransfer(r))
 	}
-	return pagination.Cut(items, limit, func(t billing.CreditTransaction) any {
+	return pagination.Cut(items, limit, func(t billing.BalanceTransaction) any {
 		return pagination.TimeID{At: t.CreatedAt, ID: t.ID.UUID()}
 	}), nil
 }

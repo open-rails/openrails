@@ -177,7 +177,7 @@ describe("plan change", () => {
       id: "price_plus",
       unit_amount: "19990000",
     })
-    expect(server.calls).toEqual(["GET /products"])
+    expect(server.calls).toEqual(["GET /catalog/products"])
   })
 
   it("changes tier, refetches the list and notifies the host", async () => {

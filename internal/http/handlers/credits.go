@@ -215,21 +215,21 @@ func RevokeCreditGrant(r *httprequest.Request) {
 	r.SuccessJSON(grant)
 }
 
-// ListCreditTransactions lists a customer's ledger in one currency.
-func ListCreditTransactions(r *httprequest.Request) {
+// ListBalanceTransactions lists a customer's ledger in one currency.
+func ListBalanceTransactions(r *httprequest.Request) {
 	customer, ok := customerParam(r)
 	if !ok {
 		return
 	}
-	ids, ok := listIDs(r, billing.ParseCreditTransactionID)
+	ids, ok := listIDs(r, billing.ParseBalanceTransactionID)
 	if !ok {
 		return
 	}
-	listCreditTransactions(r, customer, ids)
+	listBalanceTransactions(r, customer, ids)
 }
 
-func listCreditTransactions(r *httprequest.Request, customer billing.CustomerID, ids []billing.CreditTransactionID) {
-	var params billing.CreditTransactionListParams
+func listBalanceTransactions(r *httprequest.Request, customer billing.CustomerID, ids []billing.BalanceTransactionID) {
+	var params billing.BalanceTransactionListParams
 	if !r.BindQuery(&params) {
 		return
 	}
@@ -242,9 +242,9 @@ func listCreditTransactions(r *httprequest.Request, customer billing.CustomerID,
 	if !ok {
 		return
 	}
-	page, err := svc.ListCreditTransactions(r.Request.Context(), customer, params)
+	page, err := svc.ListBalanceTransactions(r.Request.Context(), customer, params)
 	if err != nil {
-		writeMoneyError(r, err, "credit transaction list failed")
+		writeMoneyError(r, err, "balance transaction list failed")
 		return
 	}
 	r.SuccessJSON(page)

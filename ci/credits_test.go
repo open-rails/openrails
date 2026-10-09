@@ -89,7 +89,7 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	receipt, err := client.CaptureAdmission(ctx, requestID, capture)
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, receipt.Amount)
-	require.NotNil(t, receipt.CreditTransactionID)
+	require.NotNil(t, receipt.BalanceTransactionID)
 	again, err := client.CaptureAdmission(ctx, requestID, capture)
 	require.NoError(t, err)
 	require.True(t, again.Replayed)
@@ -115,13 +115,13 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	})
 	require.ErrorIs(t, err, billing.ErrInvalid, "a key longer than the table holds is invalid input")
 
-	ledger, err := client.ListCreditTransactions(ctx, customer, billing.CreditTransactionListParams{Currency: "USD"})
+	ledger, err := client.ListBalanceTransactions(ctx, customer, billing.BalanceTransactionListParams{Currency: "USD"})
 	require.NoError(t, err)
-	types := map[billing.CreditTransactionType]int64{}
+	types := map[billing.BalanceTransactionType]int64{}
 	for _, tx := range ledger.Items {
 		types[tx.Type] += tx.Amount
 	}
-	require.Equal(t, map[billing.CreditTransactionType]int64{billing.CreditDeposit: 1_000_000, billing.CreditSpend: -300_000}, types)
+	require.Equal(t, map[billing.BalanceTransactionType]int64{billing.BalanceTransactionDeposit: 1_000_000, billing.BalanceTransactionSpend: -300_000}, types)
 
 	usage, err := client.GetUsage(ctx, customer, billing.GetUsageParams{Currency: "USD", From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour)})
 	require.NoError(t, err)

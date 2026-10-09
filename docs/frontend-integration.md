@@ -56,7 +56,7 @@ can only ever act on itself. In embedded mode, prepend the mount prefix to every
 
 ```
 GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
-GET  /v1/me/transactions?currency=USD     credit ledger, newest first
+GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/{id}]               itemized statements (cursor page)
@@ -75,7 +75,7 @@ POST /v1/me/billing-portal                → {"url": ...} (Stripe-portal deploy
 GET  /v1/me/notifications[.../unread-count]   billing notifications
 ```
 
-The public catalog needs no auth: `GET /v1/products` returns each product on sale with
+The public catalog needs no auth: `GET /v1/catalog/products` returns each product on sale with
 its current prices, which is everything your pricing page needs.
 
 ### Public configuration: `GET /v1/config`

@@ -16,6 +16,20 @@ export type Balance = {
   owed_amount: string
 }
 
+export type BalanceTransaction = {
+  id: string
+  customer_id: string
+  currency: string
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
+  amount: string
+  credit_grant_id: string | null
+  invoker: string | null
+  resource: string | null
+  source: string
+  source_id: string
+  created_at: string
+}
+
 export type BillingAddress = {
   line1: string | null
   line2: string | null
@@ -153,20 +167,6 @@ export type CreditGrantSpec = {
   amount?: string
   from_payment?: boolean
   expires_after_days?: number
-}
-
-export type CreditTransaction = {
-  id: string
-  customer_id: string
-  currency: string
-  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
-  amount: string
-  credit_grant_id: string | null
-  invoker: string | null
-  resource: string | null
-  source: string
-  source_id: string
-  created_at: string
 }
 
 export type CurrencyUnits = {

@@ -123,7 +123,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	archived := true
 	_, err = c.UpdateProduct(t.Context(), products[2].ID, billing.UpdateProductParams{Archived: catalog.Value(archived)})
 	require.NoError(t, err)
-	listed := w.public("/v1/products")
+	listed := w.public("/v1/catalog/products")
 	keys := map[string]bool{}
 	for _, item := range listed["data"].([]any) {
 		product := item.(map[string]any)

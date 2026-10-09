@@ -133,20 +133,20 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, customer identity.Custo
 	return s.moneyService().RevokeCreditGrant(ctx, customer, id.UUID(), reason)
 }
 
-// ListCreditTransactions lists a customer's ledger in one currency, newest
+// ListBalanceTransactions lists a customer's ledger in one currency, newest
 // first.
-func (s *Service) ListCreditTransactions(ctx context.Context, customer identity.CustomerID, params billing.CreditTransactionListParams) (billing.ListPage[billing.CreditTransaction], error) {
+func (s *Service) ListBalanceTransactions(ctx context.Context, customer identity.CustomerID, params billing.BalanceTransactionListParams) (billing.ListPage[billing.BalanceTransaction], error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return billing.ListPage[billing.CreditTransaction]{}, err
+		return billing.ListPage[billing.BalanceTransaction]{}, err
 	}
 	defer release()
 	if params.IDs == nil {
 		currency, err := requireCurrency(params.Currency)
 		if err != nil {
-			return billing.ListPage[billing.CreditTransaction]{}, err
+			return billing.ListPage[billing.BalanceTransaction]{}, err
 		}
 		params.Currency = currency
 	}
-	return s.moneyService().ListCreditTransactions(ctx, customer, params)
+	return s.moneyService().ListBalanceTransactions(ctx, customer, params)
 }

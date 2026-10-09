@@ -291,7 +291,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/merchant/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants`, `/v1/merchant/customers/{customer_id}/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/merchant/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `/v1/merchant/customers/settings` |
-| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/transactions` |
+| `/v1/merchant/customers/{id}/credit-transactions` | `/v1/merchant/customers/{customer_id}/balance/transactions` |
 | `PUT …/spend-delegations:upsert` | `PUT /v1/merchant/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
 | `/v1/merchant/admissions/{id}/…` | `/v1/merchant/admissions/{request_id}`, `POST /v1/merchant/admissions/release`, `POST /v1/merchant/admissions/extend` |
 | `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/merchant/usage-events`, `GET /v1/merchant/customers/{customer_id}/usage` |

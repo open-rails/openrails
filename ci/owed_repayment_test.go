@@ -83,12 +83,12 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.NoError(t, err)
 		return p, params
 	}
-	repayments := func(customer billing.CustomerID) []billing.CreditTransaction {
-		page, err := client.ListCreditTransactions(ctx, customer, billing.CreditTransactionListParams{Currency: "USD"})
+	repayments := func(customer billing.CustomerID) []billing.BalanceTransaction {
+		page, err := client.ListBalanceTransactions(ctx, customer, billing.BalanceTransactionListParams{Currency: "USD"})
 		require.NoError(t, err)
-		var out []billing.CreditTransaction
+		var out []billing.BalanceTransaction
 		for _, tx := range page.Items {
-			if tx.Type == billing.CreditOwedRepayment {
+			if tx.Type == billing.BalanceTransactionOwedRepayment {
 				out = append(out, tx)
 			}
 		}

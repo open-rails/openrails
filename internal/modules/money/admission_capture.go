@@ -92,8 +92,8 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				return err
 			}
 			ledgerTransferID = &transaction.ID
-			txn := billing.CreditTransactionID(transaction.ID)
-			receipt.CreditTransactionID = &txn
+			txn := billing.BalanceTransactionID(transaction.ID)
+			receipt.BalanceTransactionID = &txn
 		}
 		if !replayed && u.EventType != "" {
 			dimensions, err := toJSONBC(u.Dimensions)

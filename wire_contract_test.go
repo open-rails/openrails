@@ -14,32 +14,32 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-func TestCreditTransactionWireContract(t *testing.T) {
+func TestBalanceTransactionWireContract(t *testing.T) {
 	when, err := time.Parse(time.RFC3339Nano, "2026-09-16T00:00:00.123456789Z")
 	if err != nil {
 		t.Fatal(err)
 	}
 	invoker, grant := "host", billing.CreditGrantID(uuid.MustParse("44444444-4444-4444-8444-444444444444"))
-	value := billing.CreditTransaction{ID: billing.CreditTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")),
-		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Currency: "USD", Type: billing.CreditDeposit,
+	value := billing.BalanceTransaction{ID: billing.BalanceTransactionID(uuid.MustParse("11111111-1111-1111-1111-111111111111")),
+		CustomerID: billing.CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Currency: "USD", Type: billing.BalanceTransactionDeposit,
 		Amount: math.MaxInt64, CreditGrantID: &grant, Invoker: &invoker, Source: "bank", SourceID: "deposit-1", CreatedAt: when}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture, err := os.ReadFile("testdata/wire/credit_transaction.json")
+	fixture, err := os.ReadFile("testdata/wire/balance_transaction.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(raw) != strings.TrimSpace(string(fixture)) {
-		t.Fatalf("credit transaction wire changed:\n%s", raw)
+		t.Fatalf("balance transaction wire changed:\n%s", raw)
 	}
-	var got billing.CreditTransaction
+	var got billing.BalanceTransaction
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(value, got) {
-		t.Fatalf("credit transaction lost precision or null/time semantics: %#v", got)
+		t.Fatalf("balance transaction lost precision or null/time semantics: %#v", got)
 	}
 	// The ordinary JSON/JavaScript representation is a string, so consumers do
 	// not need a custom JSON parser to avoid the IEEE-754 integer boundary.

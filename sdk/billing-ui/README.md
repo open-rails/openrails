@@ -148,7 +148,7 @@ routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts()` (each product embeds its prices on sale)                                           | `GET /products`                                                 |
+| `listProducts()` (each product embeds its prices on sale)                                           | `GET /catalog/products`                                         |
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewTierChange(id, priceId)`                                                                    | `POST /me/subscriptions/{id}/change-tier/preview`               |
 | `changeTier(id, { priceId, idempotencyKey, signature? })`                                         | `POST /me/subscriptions/{id}/change-tier`                       |

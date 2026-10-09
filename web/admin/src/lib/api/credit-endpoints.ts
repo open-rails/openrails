@@ -2,7 +2,7 @@ import { api } from "@/lib/api/client"
 import type {
   CreditGrant,
   CreditGrantInput,
-  CreditTransaction,
+  BalanceTransaction,
   ListPage,
 } from "./credit-types"
 
@@ -43,14 +43,14 @@ export const revokeCreditGrant = (
     { method: "POST", body: { reason } }
   )
 
-export const listCreditTransactions = (
+export const listBalanceTransactions = (
   customer: string,
   currency: string,
   limit: number,
   cursor: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<CreditTransaction>>(`${customerPath(customer)}/transactions`, {
+  api<ListPage<BalanceTransaction>>(`${customerPath(customer)}/balance/transactions`, {
     query: { currency, limit, cursor },
     signal,
   })

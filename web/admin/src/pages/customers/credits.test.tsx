@@ -36,7 +36,7 @@ describe("credit support requests", () => {
     await queries.fetchQuery(creditQueries.transactions("alpha", "cus_a", "USD", 20, ""))
     expect(calls(requests)).toEqual([
       "GET /merchant/customers/cus_a/credit-grants",
-      "GET /merchant/customers/cus_a/transactions",
+      "GET /merchant/customers/cus_a/balance/transactions",
     ])
     expect(requests.map((request) => request.query)).toEqual([
       "currency=EUR&limit=20&cursor=c2",

@@ -44,7 +44,7 @@ another kind's prefix is `400 invalid_param`.
 | `psp_` | PSP | `chk_` | checkout attempt |
 | `ocs_` | checkout session | `att_` | payment attempt |
 | `cyc_` | rebill cycle | | |
-| `cgr_` | credit grant | `txn_` | credit transaction |
+| `cgr_` | credit grant | `txn_` | balance transaction |
 | `ent_` | entitlement | `pa_` | product access |
 | `rep_` | reprice | `rpb_` | reprice batch |
 | `uev_` | usage event | `hev_` | host event |

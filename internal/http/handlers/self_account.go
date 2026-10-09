@@ -37,11 +37,11 @@ func GetMyBalance(r *httprequest.Request) {
 	getBalance(r, payer)
 }
 
-// GetMyCreditTransactions lists the customer's own ledger in one currency.
-func GetMyCreditTransactions(r *httprequest.Request) {
+// ListMyBalanceTransactions lists the customer's own ledger in one currency.
+func ListMyBalanceTransactions(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	listCreditTransactions(r, payer, nil)
+	listBalanceTransactions(r, payer, nil)
 }

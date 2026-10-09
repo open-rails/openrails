@@ -843,7 +843,7 @@
         ]
       }
     },
-    "/v1/products": {
+    "/v1/catalog/products": {
       "get": {
         "tags": [
           "checkout"
@@ -6290,7 +6290,7 @@
         ]
       }
     },
-    "/v1/merchant/customers/{customer_id}/transactions": {
+    "/v1/merchant/customers/{customer_id}/balance/transactions": {
       "get": {
         "tags": [
           "merchant"
@@ -6351,7 +6351,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/CreditTransaction"
+                        "$ref": "#/components/schemas/BalanceTransaction"
                       }
                     },
                     "next_cursor": {
@@ -6380,7 +6380,7 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-guards": [
-          "ListCreditTransactions",
+          "ListBalanceTransactions",
           "Credits",
           "StaffReads"
         ],
@@ -6751,7 +6751,7 @@
         ]
       }
     },
-    "/v1/me/transactions": {
+    "/v1/me/balance/transactions": {
       "get": {
         "tags": [
           "customer"
@@ -6790,7 +6790,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/CreditTransaction"
+                        "$ref": "#/components/schemas/BalanceTransaction"
                       }
                     },
                     "next_cursor": {
@@ -15015,6 +15015,91 @@
           "owed_amount"
         ]
       },
+      "BalanceTransaction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "expire",
+              "owed_accrual",
+              "owed_payment",
+              "owed_repayment",
+              "owed_writeoff",
+              "reinstate",
+              "revoke",
+              "spend"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "credit_grant_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "invoker": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "currency",
+          "type",
+          "amount",
+          "credit_grant_id",
+          "invoker",
+          "resource",
+          "source",
+          "source_id",
+          "created_at"
+        ]
+      },
       "BillingAddress": {
         "type": "object",
         "properties": {
@@ -15423,7 +15508,7 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
-          "credit_transaction_id": {
+          "balance_transaction_id": {
             "oneOf": [
               {
                 "type": "string"
@@ -15442,7 +15527,7 @@
           "customer_id",
           "currency",
           "amount",
-          "credit_transaction_id",
+          "balance_transaction_id",
           "replayed"
         ]
       },
@@ -17158,91 +17243,6 @@
         "required": [
           "currency",
           "amount"
-        ]
-      },
-      "CreditTransaction": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "deposit",
-              "expire",
-              "owed_accrual",
-              "owed_payment",
-              "owed_repayment",
-              "owed_writeoff",
-              "reinstate",
-              "revoke",
-              "spend"
-            ]
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "credit_grant_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "invoker": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resource": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "customer_id",
-          "currency",
-          "type",
-          "amount",
-          "credit_grant_id",
-          "invoker",
-          "resource",
-          "source",
-          "source_id",
-          "created_at"
         ]
       },
       "CurrencyUnits": {
@@ -25412,7 +25412,7 @@
           "source_id": {
             "type": "string"
           },
-          "credit_transaction_id": {
+          "balance_transaction_id": {
             "oneOf": [
               {
                 "type": "string"
@@ -25446,7 +25446,7 @@
           "metadata",
           "source",
           "source_id",
-          "credit_transaction_id",
+          "balance_transaction_id",
           "occurred_at",
           "created_at",
           "replayed"

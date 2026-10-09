@@ -101,7 +101,7 @@ func TestNewRoutes(t *testing.T) {
 		key := e.Method + " " + e.Path
 		keys = append(keys, key)
 		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/checkout") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
-			slices.Contains([]string{"/billing/v1/products", "/billing/v1/config"}, e.Path), e.Browser, key)
+			slices.Contains([]string{"/billing/v1/catalog/products", "/billing/v1/config"}, e.Path), e.Browser, key)
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/config")

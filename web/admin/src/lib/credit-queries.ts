@@ -7,7 +7,7 @@ import { selectedMerchant } from "@/lib/api/client"
 import {
   createCreditGrant,
   listCreditGrants,
-  listCreditTransactions,
+  listBalanceTransactions,
   revokeCreditGrant,
 } from "@/lib/api/credit-endpoints"
 import type { CreditGrantInput } from "@/lib/api/credit-types"
@@ -62,7 +62,7 @@ export const creditQueries = {
       enabled: Boolean(merchant && customer && currency),
       queryFn: ({ signal }) => {
         assertMerchant(merchant)
-        return listCreditTransactions(customer, currency, limit, cursor, signal)
+        return listBalanceTransactions(customer, currency, limit, cursor, signal)
       },
     }),
 }

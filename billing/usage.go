@@ -64,11 +64,11 @@ type UsageEvent struct {
 	Metadata   map[string]any   `json:"metadata"`
 	Source     string           `json:"source"`
 	SourceID   string           `json:"source_id"`
-	// CreditTransactionID is the ledger debit a priced event made.
-	CreditTransactionID *CreditTransactionID `json:"credit_transaction_id"`
-	OccurredAt          time.Time            `json:"occurred_at"`
-	CreatedAt           time.Time            `json:"created_at"`
-	Replayed            bool                 `json:"replayed"`
+	// BalanceTransactionID is the ledger debit a priced event made.
+	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
+	OccurredAt           time.Time             `json:"occurred_at"`
+	CreatedAt            time.Time             `json:"created_at"`
+	Replayed             bool                  `json:"replayed"`
 }
 
 // MaxUsageBatchItems bounds one RecordUsage call.

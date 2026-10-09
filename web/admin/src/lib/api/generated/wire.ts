@@ -199,6 +199,20 @@ export type Balance = {
   owed_amount: string
 }
 
+export type BalanceTransaction = {
+  id: string
+  customer_id: string
+  currency: string
+  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
+  amount: string
+  credit_grant_id: string | null
+  invoker: string | null
+  resource: string | null
+  source: string
+  source_id: string
+  created_at: string
+}
+
 export type BillingAddress = {
   line1: string | null
   line2: string | null
@@ -291,7 +305,7 @@ export type CaptureReceipt = {
   customer_id: string
   currency: string
   amount: string
-  credit_transaction_id: string | null
+  balance_transaction_id: string | null
   replayed: boolean
 }
 
@@ -713,20 +727,6 @@ export type CreditGrantSpec = {
 export type CreditLimit = {
   currency: string
   amount: string
-}
-
-export type CreditTransaction = {
-  id: string
-  customer_id: string
-  currency: string
-  type: "deposit" | "expire" | "owed_accrual" | "owed_payment" | "owed_repayment" | "owed_writeoff" | "reinstate" | "revoke" | "spend"
-  amount: string
-  credit_grant_id: string | null
-  invoker: string | null
-  resource: string | null
-  source: string
-  source_id: string
-  created_at: string
 }
 
 export type CurrencyUnits = {
@@ -2569,7 +2569,7 @@ export type UsageEvent = {
   metadata: Record<string, unknown> | null
   source: string
   source_id: string
-  credit_transaction_id: string | null
+  balance_transaction_id: string | null
   occurred_at: string
   created_at: string
   replayed: boolean

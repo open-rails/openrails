@@ -123,9 +123,9 @@ func (c *Client) RevokeCreditGrant(ctx context.Context, customer billing.Custome
 	return &out, nil
 }
 
-// ListCreditTransactions lists a customer's credit ledger in one currency,
+// ListBalanceTransactions lists a customer's balance transactions in one currency,
 // newest first, or the transactions params.IDs names.
-func (c *Client) ListCreditTransactions(ctx context.Context, customer billing.CustomerID, params billing.CreditTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditTransaction], error) {
+func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error) {
 	path, err := customerIDPath(customer)
 	if err != nil {
 		return nil, err
@@ -137,8 +137,8 @@ func (c *Client) ListCreditTransactions(ctx context.Context, customer billing.Cu
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}
-	var out billing.ListPage[billing.CreditTransaction]
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/transactions", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
+	var out billing.ListPage[billing.BalanceTransaction]
+	if err := c.do(ctx, http.MethodGet, withQuery(path+"/balance/transactions", pageValues(q, params.PageRequest)), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

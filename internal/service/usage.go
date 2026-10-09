@@ -108,8 +108,8 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		Source: ev.Source, SourceID: ev.SourceID, OccurredAt: ev.OccurredAt, CreatedAt: ev.CreatedAt, Replayed: ev.Replayed,
 	}
 	if ev.LedgerTransferID != nil {
-		txn := billing.CreditTransactionID(*ev.LedgerTransferID)
-		out.CreditTransactionID = &txn
+		txn := billing.BalanceTransactionID(*ev.LedgerTransferID)
+		out.BalanceTransactionID = &txn
 	}
 	return out, nil
 }
