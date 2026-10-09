@@ -234,6 +234,11 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		id := billing.PaymentID(*a.PaymentID)
 		out.PaymentID = &id
 	}
+	if a.MandateID != nil {
+		id := billing.MandateID(*a.MandateID)
+		out.MandateID = &id
+	}
+	out.SentInitialTransactionID = normalize.FromPtr(a.SentInitialTransactionID)
 	return out
 }
 

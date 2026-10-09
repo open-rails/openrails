@@ -30,7 +30,9 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -151,6 +153,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// existing instrument is reusable only by the same customer and rail; the
 		// assertion lives in this transaction so hosts do not need a racy precheck.
 		pmIDs := map[string]uuid.UUID{}
+		// declaredAgreements: a card's declared recurring agreement (the storing
+		// transaction of its NMI schedules), which their mandates cite.
+		declaredAgreements := map[uuid.UUID]string{}
 		pmKey := func(psp uuid.UUID, rail, custRef, methodRef string) string {
 			return psp.String() + "\x1f" + rail + "\x1f" + custRef + "\x1f" + methodRef
 		}
@@ -213,19 +218,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return apperr.Conflictf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
 			}
 			if pm.RecurringTransactionID != "" {
-				_, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
-					MerchantID: merchantID.UUID(), ID: id, Agreement: "recurring", Ref: pm.RecurringTransactionID,
-				})
-				if err != nil {
-					return fmt.Errorf("import recurring agreement: %w", err)
-				}
-				stored, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID.UUID(), ID: id})
-				if err != nil {
-					return err
-				}
-				if models.DerefStr(stored.StoredCredentialRecurringRef) != pm.RecurringTransactionID {
-					return apperr.Conflictf("payment method already has a different recurring agreement")
-				}
+				declaredAgreements[id] = pm.RecurringTransactionID
 			}
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
@@ -266,6 +259,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		}
 
 		facts := make([]reconcile.DeclaredSubscriptionFact, 0, len(opts.Book.Subscriptions))
+		anchors := map[string]string{}
 		for _, s := range opts.Book.Subscriptions {
 			subPSP, err := psps.resolve(s.PSP, s.Rail, fmt.Sprintf("subscription %s", s.SourceID))
 			if err != nil {
@@ -317,8 +311,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 					f.PaymentMethodUnresolved = true
 				}
 			}
-			if err := dunNMISchedule(ctx, q, merchantID.UUID(), &f, firstScheduleSale); err != nil {
+			anchor, err := dunNMISchedule(ctx, q, merchantID.UUID(), &f, declaredAgreements, firstScheduleSale)
+			if err != nil {
 				return err
+			}
+			if anchor != "" {
+				anchors[f.SourceID] = anchor
 			}
 			facts = append(facts, f)
 		}
@@ -329,6 +327,14 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		}, asOf)
 		if err != nil {
 			return err
+		}
+		for _, f := range facts {
+			o := outcomes[f.SourceID]
+			if anchor := anchors[f.SourceID]; anchor != "" && (o.Code == reconcile.DeclaredImported || o.Code == reconcile.DeclaredAlreadyPresent) {
+				if err := importRecurringMandate(ctx, q, merchantID.UUID(), f, anchor, asOf); err != nil {
+					return err
+				}
+			}
 		}
 		for src, o := range outcomes {
 			switch o.Code {
@@ -442,28 +448,37 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 // its card has no recurring stored-credential anchor.
 const FindingNoRecurringAnchor = "life.import.no_recurring_anchor"
 
-// dunNMISchedule records the recurring anchor OpenRails dunning charges an
-// imported NMI schedule's retries against (NMI never retries). A card without
-// one takes the schedule's first approved sale (its recurring signup); without
-// that an operator finding names the schedule OpenRails cannot retry.
-func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f *reconcile.DeclaredSubscriptionFact, firstSale map[string]reconcile.RemoteTransaction) error {
+// dunNMISchedule finds the recurring anchor OpenRails dunning charges an
+// imported NMI schedule's retries against (NMI never retries): the card's
+// declared agreement, else the one the schedule's mandate already holds, else
+// the schedule's first approved sale (its recurring signup), else the card's
+// recurring lineage on the schedule's account. Without one an operator
+// finding names the schedule OpenRails cannot retry.
+func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f *reconcile.DeclaredSubscriptionFact, declared map[uuid.UUID]string, firstSale map[string]reconcile.RemoteTransaction) (string, error) {
 	if !strings.EqualFold(f.Rail, "nmi") || f.RailSubscriptionID == "" || f.CancelKind != reconcile.DeclaredCancelNone {
-		return nil
+		return "", nil
 	}
 	if f.PaymentMethodID != nil {
-		method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: *f.PaymentMethodID})
-		if err != nil {
-			return fmt.Errorf("load payment method for %s: %w", f.SourceID, err)
+		if anchor := declared[*f.PaymentMethodID]; anchor != "" {
+			return anchor, nil
 		}
-		anchor := models.DerefStr(method.StoredCredentialRecurringRef)
-		if sale, ok := firstSale[f.RailSubscriptionID]; anchor == "" && ok {
-			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: merchantID, ID: method.ID, Agreement: "recurring", Ref: sale.TransactionID}); err != nil {
-				return fmt.Errorf("import recurring anchor for %s: %w", f.SourceID, err)
+		sub, err := q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID, PspID: f.PspID, Rail: f.Rail, RailSubscriptionID: f.RailSubscriptionID})
+		if err == nil && sub.PaymentMethodID != nil && *sub.PaymentMethodID == *f.PaymentMethodID {
+			if lineage, err := mandates.ForSubscription(ctx, q, merchantID, f.Customer, sub.ID, *f.PaymentMethodID, f.PspID); err == nil {
+				return lineage.InitialTransactionID, nil
 			}
-			anchor = sale.TransactionID
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("load imported schedule %s: %w", f.SourceID, err)
 		}
-		if anchor != "" {
-			return nil
+		if sale, ok := firstSale[f.RailSubscriptionID]; ok {
+			return sale.TransactionID, nil
+		}
+		lineage, err := mandates.Citable(ctx, q, merchantID, f.Customer, *f.PaymentMethodID, f.PspID, f.Rail, charge.AgreementRecurring)
+		if err != nil {
+			return "", fmt.Errorf("load recurring lineage for %s: %w", f.SourceID, err)
+		}
+		if lineage != nil {
+			return lineage.InitialTransactionID, nil
 		}
 	}
 	evidence, _ := json.Marshal(map[string]any{"source_id": f.SourceID, "rail_subscription_id": f.RailSubscriptionID})
@@ -472,5 +487,33 @@ func dunNMISchedule(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f
 		MerchantID: merchantID, FindingType: FindingNoRecurringAnchor, SubjectKey: f.RailSubscriptionID,
 		Severity: "high", Status: "requires_review", RecommendedAction: &action, Evidence: evidence,
 	})
+	return "", err
+}
+
+// importRecurringMandate gives an imported schedule the recurring mandate that
+// cites its anchor. A reimport never replaces an accepted agreement.
+func importRecurringMandate(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, f reconcile.DeclaredSubscriptionFact, anchor string, at time.Time) error {
+	sub, err := q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID, PspID: f.PspID, Rail: f.Rail, RailSubscriptionID: f.RailSubscriptionID})
+	if err != nil {
+		return fmt.Errorf("load imported schedule %s: %w", f.SourceID, err)
+	}
+	if sub.PaymentMethodID == nil || f.PaymentMethodID == nil || *sub.PaymentMethodID != *f.PaymentMethodID {
+		return nil
+	}
+	live, err := q.GetLiveRecurringMandateForShare(ctx, gen.GetLiveRecurringMandateForShareParams{MerchantID: merchantID, SubscriptionID: sub.ID})
+	switch {
+	case err == nil:
+		if live.InitialTransactionID == nil {
+			return mandates.SetLineage(ctx, q, merchantID, live.ID, charge.Mandate{InitialTransactionID: anchor})
+		}
+		if *live.InitialTransactionID != anchor {
+			return apperr.Conflictf("schedule %s already has a different recurring agreement", f.SourceID)
+		}
+		return nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	_, err = mandates.Create(ctx, q, mandates.Agreement{MerchantID: merchantID, CustomerID: sub.CustomerID, PaymentMethodID: *sub.PaymentMethodID, PSPID: sub.PspID, Rail: sub.Rail,
+		Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: &charge.Mandate{InitialTransactionID: anchor}, AcceptedAt: at})
 	return err
 }

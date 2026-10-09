@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -162,7 +163,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 			}
 			binding = &frozen
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, accepted.PSPID), binding, false); err != nil {
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, accepted.PSPID), binding); err != nil {
 			return err
 		}
 		price, err := d.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: accepted.PriceID})
@@ -188,8 +189,12 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 				return errors.New("new membership custodian is archived")
 			}
 		}
+		instrument, err := enrollmentInstrument(ctx, d.Gen(ctx), method, accepted.PSPID)
+		if err != nil {
+			return err
+		}
 		label := psp.Key
-		payload := subscriptions.InitialMembershipPayload{CheckoutAttemptID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method, accepted.PSPID), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
+		payload := subscriptions.InitialMembershipPayload{CheckoutAttemptID: sessionID, Terms: accepted, Instrument: instrument, RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
 	})
@@ -203,4 +208,18 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		return nil, err
 	}
 	return initialMembershipResponseFromIntent(current)
+}
+
+// enrollmentInstrument freezes a new subscription's card and the recurring
+// lineage its enrollment cites: the card's on the account, or none when the
+// enrollment charge stores it. On Stripe every enrollment's PaymentIntent
+// stores its own agreement (setup_future_usage), and Stripe links the rest.
+func enrollmentInstrument(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID) (charge.FrozenInstrument, error) {
+	instrument := charge.FreezeInstrument(method, psp)
+	if method.Rail == string(models.RailStripe) {
+		return instrument, nil
+	}
+	var err error
+	instrument.Mandate, err = mandates.Citable(ctx, q, method.MerchantID, method.CustomerID, method.ID, psp, method.Rail, charge.AgreementRecurring)
+	return instrument, err
 }

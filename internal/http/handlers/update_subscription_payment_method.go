@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -12,10 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/writeposture"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -80,7 +86,31 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
-		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, paymentMethodID); err != nil {
+		origin := intents.OriginUser
+		if !enforceOwnership {
+			origin = intents.OriginAdmin
+		}
+		verify := func(ctx context.Context, vault, billingID, order string) (string, error) {
+			if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: r.State.Config, DB: r.State.DB}, subscription.MerchantID, origin); blocked {
+				return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
+			}
+			client, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.CollectionResolver, subscription)
+			if err != nil || !ok {
+				return "", fmt.Errorf("resolve the subscription's NMI account: %w", err)
+			}
+			ref, err := client.VerifyStoredCredential(ctx, vault, billingID, order, true)
+			var refusal *nmi.CustomerVaultError
+			if errors.As(err, &refusal) && !nmi.UncertainResponseCode(refusal.ResponseCode) {
+				return "", &paymentmethods.PaymentMethodError{Err: err, LocalizationID: nmidirect.FailureCode(refusal), Rail: "nmi"}
+			}
+			return ref, err
+		}
+		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, paymentMethodID, verify); err != nil {
+			var refused *paymentmethods.PaymentMethodError
+			if errors.As(err, &refused) {
+				writePaymentMethodError(r, refused)
+				return
+			}
 			writeRefusal(r, err, "Failed to select payment method")
 			return
 		}

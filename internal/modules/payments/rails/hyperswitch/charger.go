@@ -26,7 +26,7 @@ type Charger struct {
 var _ charge.Charger = (*Charger)(nil)
 
 func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result, error) {
-	if req.Context.Agreement != charge.AgreementUnscheduled {
+	if req.Context.Agreement.Sequence() != charge.AgreementUnscheduled {
 		return charge.Result{}, errors.Join(charge.ErrNotDispatched, errors.New("HyperSwitch charge requires an established unscheduled initiation"))
 	}
 	result, _, err := c.charge(ctx, req)
@@ -55,13 +55,20 @@ func (c *Charger) ChargeRecurringMIT(ctx context.Context, req charge.Request) (c
 }
 
 func recurringCustomerContext(c charge.Context) bool {
-	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorCustomer &&
-		((c.FirstUse && c.PriorRef == "") || (!c.FirstUse && strings.TrimSpace(c.PriorRef) != "" && strings.TrimSpace(c.PriorRef) == c.PriorRef))
+	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorCustomer && exactCitation(c)
 }
 
 func recurringMerchantContext(c charge.Context) bool {
-	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorMerchant && !c.FirstUse &&
-		strings.TrimSpace(c.PriorRef) != "" && strings.TrimSpace(c.PriorRef) == c.PriorRef
+	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorMerchant && c.Cites != nil && exactCitation(c)
+}
+
+// exactCitation: a cited lineage carries an exact, nonempty reference.
+func exactCitation(c charge.Context) bool {
+	if c.Cites == nil {
+		return true
+	}
+	ref := c.Cites.InitialTransactionID
+	return ref != "" && strings.TrimSpace(ref) == ref
 }
 
 func (c *Charger) charge(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
@@ -104,7 +111,7 @@ func (c *Charger) charge(ctx context.Context, req charge.Request) (charge.Result
 		return charge.Result{TokenType: charge.TokenTypePANViaProxy, Declined: true, FailureCode: &code, FailureMessage: &message}, refusal, nil
 	}
 	result := charge.Result{TransactionID: response.TransactionID, TokenType: charge.TokenTypePANViaProxy}
-	if req.Context.FirstUse {
+	if req.Context.Storing() {
 		result.CapturedRef = response.TransactionID
 	}
 	return result, nil, nil
@@ -116,13 +123,11 @@ func saleForm(req charge.Request, key provider.Secret) (map[string]provider.Secr
 	}
 	// Unscheduled invoices and explicitly accepted recurring customer enrollment
 	// share the same proxy transport with explicitly selected recurring renewals.
-	if !recurringCustomerContext(req.Context) && !recurringMerchantContext(req.Context) && (req.Context.Agreement != charge.AgreementUnscheduled ||
-		(req.Context.Initiator != charge.InitiatorCustomer && req.Context.Initiator != charge.InitiatorMerchant) ||
-		(req.Context.FirstUse && req.Context.Initiator != charge.InitiatorCustomer)) {
+	if !recurringCustomerContext(req.Context) && !recurringMerchantContext(req.Context) && (req.Context.Agreement.Sequence() != charge.AgreementUnscheduled || !exactCitation(req.Context)) {
 		return nil, errors.New("HyperSwitch charge requires an established unscheduled initiation")
 	}
-	sc := nmidirect.StoredCredentialFor(req.Context)
-	if err := sc.Validate(); err != nil {
+	sc, err := nmidirect.StoredCredentialFor(req.Context)
+	if err != nil {
 		return nil, err
 	}
 	amount, err := nmi.WireAmount(req.AmountMinor, req.Currency)

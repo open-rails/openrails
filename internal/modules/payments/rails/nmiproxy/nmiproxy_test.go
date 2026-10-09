@@ -33,7 +33,7 @@ func saleRequest(ctx charge.Context) charge.Request {
 // Money wall: the exact urlencoded body BT forwards to NMI, expressions byte-exact.
 func TestSaleFormWire(t *testing.T) {
 	t.Parallel()
-	form, err := SaleForm(saleRequest(charge.RecurringMIT("9001")), Source{TokenID: tokenID}, gw, nil)
+	form, err := SaleForm(saleRequest(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "9001"))), Source{TokenID: tokenID}, gw, nil)
 	require.NoError(t, err)
 	require.Equal(t, url.Values{
 		"type": {"sale"}, "security_key": {"sk_test_123"}, "amount": {"1.99"}, "currency": {"USD"},
@@ -51,22 +51,22 @@ func TestSaleFormWire(t *testing.T) {
 		want map[string]string
 		none []string
 	}{
-		{"initial recurring CIT from intent", charge.InitialRecurring(), Source{TokenIntentID: intentID}, nil, map[string]string{
+		{"initial recurring CIT from intent", charge.Customer(charge.AgreementRecurring, nil), Source{TokenIntentID: intentID}, nil, map[string]string{
 			"ccnumber":     `{{ token_intent: ` + intentID + ` | json: "$.data.number" }}`,
 			"ccexp":        `{{ token_intent: ` + intentID + ` | json: "$.data" | card_exp: "MMYY" }}`,
 			"cvv":          `{{ token_intent: ` + intentID + ` | json: "$.data.cvc" }}`,
 			"initiated_by": "customer", "stored_credential_indicator": "stored", "billing_method": "recurring",
 		}, []string{"initial_transaction_id"}},
-		{"initial unscheduled CIT", charge.InitialOneTime(), Source{TokenIntentID: intentID}, nil,
+		{"initial unscheduled CIT", charge.Customer(charge.AgreementCardOnFile, nil), Source{TokenIntentID: intentID}, nil,
 			map[string]string{"stored_credential_indicator": "stored", "initiated_by": "customer"}, []string{"billing_method"}},
-		{"unscheduled MIT", charge.UnscheduledMIT("7777"), Source{TokenID: tokenID}, nil,
+		{"unscheduled MIT", charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "7777")), Source{TokenID: tokenID}, nil,
 			map[string]string{"initiated_by": "merchant", "stored_credential_indicator": "used", "initial_transaction_id": "7777"}, []string{"billing_method", "cvv"}},
-		{"network token CIT", charge.InitialRecurring(), Source{TokenID: tokenID, Via: ViaNetworkToken, NetworkTokenID: ntID}, &basistheory.Cryptogram{Cryptogram: "2z8pd6WGPUi/BBesvjJcyw==", ECI: "07"}, map[string]string{
+		{"network token CIT", charge.Customer(charge.AgreementRecurring, nil), Source{TokenID: tokenID, Via: ViaNetworkToken, NetworkTokenID: ntID}, &basistheory.Cryptogram{Cryptogram: "2z8pd6WGPUi/BBesvjJcyw==", ECI: "07"}, map[string]string{
 			"ccnumber": `{{ network_token: ` + ntID + ` | json: "$.data.number" }}`,
 			"ccexp":    `{{ network_token: ` + ntID + ` | json: "$.data" | card_exp: "MMYY" }}`,
 			"cavv":     "2z8pd6WGPUi/BBesvjJcyw==", "eci": "07",
 		}, nil},
-		{"network token MIT rides the anchor", charge.RecurringMIT("9001"), Source{Via: ViaNetworkToken, NetworkTokenID: ntID}, nil,
+		{"network token MIT rides the anchor", charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "9001")), Source{Via: ViaNetworkToken, NetworkTokenID: ntID}, nil,
 			map[string]string{"initial_transaction_id": "9001"}, []string{"cavv", "eci"}},
 	} {
 		form, err := SaleForm(saleRequest(tc.ctx), tc.src, gw, tc.cg)
@@ -80,7 +80,7 @@ func TestSaleFormWire(t *testing.T) {
 	}
 
 	for cents, want := range map[moneyutil.Cents]string{199: "1.99", 100: "1.00", 1: "0.01", 123456: "1234.56"} {
-		form, err := SaleForm(charge.Request{AmountMinor: cents, Currency: "USD", Context: charge.InitialOneTime()}, Source{TokenID: tokenID}, gw, nil)
+		form, err := SaleForm(charge.Request{AmountMinor: cents, Currency: "USD", Context: charge.Customer(charge.AgreementCardOnFile, nil)}, Source{TokenID: tokenID}, gw, nil)
 		require.NoError(t, err)
 		require.Equal(t, want, form.Get("amount"))
 	}
@@ -90,7 +90,7 @@ func TestSaleFormWire(t *testing.T) {
 func TestSaleFormRefusals(t *testing.T) {
 	t.Parallel()
 	req := func(mut func(*charge.Request)) charge.Request {
-		r := saleRequest(charge.InitialOneTime())
+		r := saleRequest(charge.Customer(charge.AgreementCardOnFile, nil))
 		mut(&r)
 		return r
 	}
@@ -99,17 +99,17 @@ func TestSaleFormRefusals(t *testing.T) {
 		src Source
 		gw  GatewayConfig
 	}{
-		"no security key":            {saleRequest(charge.InitialOneTime()), Source{TokenID: tokenID}, GatewayConfig{}},
+		"no security key":            {saleRequest(charge.Customer(charge.AgreementCardOnFile, nil)), Source{TokenID: tokenID}, GatewayConfig{}},
 		"no currency":                {req(func(r *charge.Request) { r.Currency = " " }), Source{TokenID: tokenID}, gw},
 		"zero amount":                {req(func(r *charge.Request) { r.AmountMinor = 0 }), Source{TokenID: tokenID}, gw},
-		"no source":                  {saleRequest(charge.InitialOneTime()), Source{}, gw},
-		"MIT from token intent":      {saleRequest(charge.RecurringMIT("1")), Source{TokenIntentID: intentID}, gw},
-		"reference-less recurring":   {saleRequest(charge.RecurringMIT("")), Source{TokenID: tokenID}, gw},
-		"reference-less unscheduled": {saleRequest(charge.UnscheduledMIT("")), Source{TokenID: tokenID}, gw},
-		"reference-less reuse CIT":   {saleRequest(charge.OneTimeReuse("")), Source{TokenID: tokenID}, gw},
-		"NT CIT without cryptogram":  {saleRequest(charge.InitialRecurring()), Source{Via: ViaNetworkToken, NetworkTokenID: ntID}, gw},
-		"NT without id":              {saleRequest(charge.RecurringMIT("1")), Source{Via: ViaNetworkToken}, gw},
-		"unknown via":                {saleRequest(charge.RecurringMIT("1")), Source{TokenID: tokenID, Via: "carrier_pigeon"}, gw},
+		"no source":                  {saleRequest(charge.Customer(charge.AgreementCardOnFile, nil)), Source{}, gw},
+		"MIT from token intent":      {saleRequest(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "1"))), Source{TokenIntentID: intentID}, gw},
+		"reference-less recurring":   {saleRequest(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, ""))), Source{TokenID: tokenID}, gw},
+		"reference-less unscheduled": {saleRequest(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, ""))), Source{TokenID: tokenID}, gw},
+		"reference-less reuse CIT":   {saleRequest(charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, ""))), Source{TokenID: tokenID}, gw},
+		"NT CIT without cryptogram":  {saleRequest(charge.Customer(charge.AgreementRecurring, nil)), Source{Via: ViaNetworkToken, NetworkTokenID: ntID}, gw},
+		"NT without id":              {saleRequest(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "1"))), Source{Via: ViaNetworkToken}, gw},
+		"unknown via":                {saleRequest(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "1"))), Source{TokenID: tokenID, Via: "carrier_pigeon"}, gw},
 		"51-char order id":           {req(func(r *charge.Request) { r.OrderRef = strings.Repeat("x", 51) }), Source{TokenID: tokenID}, gw},
 		"unregistered currency":      {req(func(r *charge.Request) { r.Currency = "XYZ" }), Source{TokenID: tokenID}, gw},
 	} {
@@ -147,9 +147,9 @@ func gatewayReply(body string) func(http.ResponseWriter, *http.Request) {
 // Three-way outcome: approval, parsed hard decline (a Result), or error for the verify machinery.
 func TestChargerOutcomes(t *testing.T) {
 	t.Parallel()
-	mit := charge.Request{Instrument: charge.Instrument{Rail: Rail, MethodRef: tokenID}, AmountMinor: 199, Currency: "USD", OrderRef: "ord-1", Context: charge.RecurringMIT("9001")}
+	mit := charge.Request{Instrument: charge.Instrument{Rail: Rail, MethodRef: tokenID}, AmountMinor: 199, Currency: "USD", OrderRef: "ord-1", Context: charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "9001"))}
 	initial := mit
-	initial.Context = charge.InitialRecurring()
+	initial.Context = charge.Customer(charge.AgreementRecurring, nil)
 
 	p := &fakeProxy{serve: gatewayReply("response=1&responsetext=SUCCESS&transactionid=424242&response_code=100")}
 	res, err := newProxyCharger(t, p).Charge(context.Background(), mit)
@@ -186,7 +186,7 @@ func TestChargerOutcomes(t *testing.T) {
 	}
 
 	invalid := mit
-	invalid.Context = charge.RecurringMIT("")
+	invalid.Context = charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, ""))
 	p = &fakeProxy{serve: func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) }}
 	_, err = newProxyCharger(t, p).Charge(context.Background(), invalid)
 	require.Error(t, err)
@@ -222,11 +222,16 @@ func TestNetworkTokenFallsBackToPAN(t *testing.T) {
 		}
 		gatewayReply("response=1&transactionid=606")(w, r)
 	}
-	req := charge.Request{Instrument: charge.Instrument{Rail: Rail}, AmountMinor: 199, Currency: "USD", OrderRef: "ord-1", Context: charge.InitialRecurring()}
+	req := charge.Request{Instrument: charge.Instrument{Rail: Rail}, AmountMinor: 199, Currency: "USD", OrderRef: "ord-1", Context: charge.Customer(charge.AgreementRecurring, nil)}
 	res, err := newProxyCharger(t, p).WithSource(Source{TokenID: tokenID, Via: ViaNetworkToken, NetworkTokenID: ntID}).Charge(context.Background(), req)
 	require.NoError(t, err)
 	require.Equal(t, "606", res.TransactionID)
 	require.Equal(t, charge.TokenTypePANViaProxy, res.TokenType)
 	require.Equal(t, 2, p.calls, "cryptogram call, then one PAN proxy call")
 	require.Nil(t, (*Charger)(nil).WithSource(Source{}))
+}
+
+// cites is a mandate's lineage as a charge cites it.
+func cites(kind charge.Agreement, ref string) *charge.Mandate {
+	return &charge.Mandate{ID: uuid.New(), Kind: kind, InitialTransactionID: ref}
 }

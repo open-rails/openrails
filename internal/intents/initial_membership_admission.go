@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -118,7 +119,10 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
 			return apperr.Conflictf("initial enrollment instrument changed before admission")
 		}
-		if err := terms.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+		if err := terms.Instrument.Matches(method); err != nil {
+			return err
+		}
+		if err := mandates.Recheck(ctx, d.Gen(ctx), p.MerchantID, terms.Instrument.Mandate); err != nil {
 			return err
 		}
 		if terms.Terms.CollectionPolicy == models.CollectionPolicyEngine && terms.HyperSwitch != nil {

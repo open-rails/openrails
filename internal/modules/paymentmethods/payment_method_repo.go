@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/pagination"
 )
 
@@ -30,6 +33,20 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 	if (m.Custodian != "" && m.Custodian != models.CustodianPSP) || !strings.EqualFold(strings.TrimSpace(string(m.Rail)), "nmi") {
 		return r.create(ctx, m)
 	}
+	return r.createNMI(ctx, m, nil)
+}
+
+// CreateStored saves an NMI card its storing verification approved, with the
+// card_on_file mandate that verification established, in one transaction.
+func (r *PaymentMethodRepo) CreateStored(ctx context.Context, m *models.PaymentMethod, storing charge.Mandate, at time.Time) error {
+	return r.createNMI(ctx, m, func(ctx context.Context, q *gen.Queries, merchantID uuid.UUID) error {
+		_, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: merchantID, CustomerID: m.CustomerID, PaymentMethodID: m.ID, PSPID: *m.PspID,
+			Rail: string(m.Rail), Kind: charge.AgreementCardOnFile, Lineage: &storing, AcceptedAt: at})
+		return err
+	})
+}
+
+func (r *PaymentMethodRepo) createNMI(ctx context.Context, m *models.PaymentMethod, stored func(context.Context, *gen.Queries, uuid.UUID) error) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -53,7 +70,10 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		if err := RequireNativeVaultAvailable(ctx, q, mid.UUID(), psp, m.RailCustomerRef, m.RailMethodRef); err != nil {
 			return err
 		}
-		return NewPaymentMethodRepo(d).create(ctx, m)
+		if err := NewPaymentMethodRepo(d).create(ctx, m); err != nil || stored == nil {
+			return err
+		}
+		return stored(ctx, q, mid.UUID())
 	})
 }
 
@@ -123,8 +143,6 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 		NetworkTokenStatus: m.NetworkTokenStatus,
 		NetworkTokenPar:    m.NetworkTokenPAR,
 		ChargeVia:          m.ChargeVia, // "" -> DB default 'pan_proxy'
-
-		StoredCredentialRecurringRef: m.StoredCredentialRecurringRef,
 	})
 	if err != nil {
 		return err
@@ -226,14 +244,21 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 		return queryScopeErr
 	}
 
-	rows, err := r.db.Gen(ctx).DeletePaymentMethod(ctx, gen.DeletePaymentMethodParams{MerchantID: queryMerchant.UUID(), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return ErrPaymentMethodNotFound
-	}
-	return nil
+	// The card's agreements end with it; the mandates stay as evidence.
+	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if _, err := mandates.EndForPaymentMethod(ctx, q, queryMerchant.UUID(), id, mandates.EndPaymentMethodRemoved, time.Time{}); err != nil {
+			return err
+		}
+		rows, err := q.DeletePaymentMethod(ctx, gen.DeletePaymentMethodParams{MerchantID: queryMerchant.UUID(), ID: id})
+		if err != nil {
+			return err
+		}
+		if rows < 1 {
+			return ErrPaymentMethodNotFound
+		}
+		return nil
+	})
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/failpoint"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -116,9 +117,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	if err := hitFailpoint(ctx, in, failpoint.AfterFence); err != nil {
 		return Ambiguous(err.Error())
 	}
-	posture := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
-	if p.Initiator == charge.InitiatorCustomer {
-		posture = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+	credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(p.Initiator, charge.AgreementRecurring))
+	if err != nil {
+		return h.finalizeNotExecuted(ctx, in, p, err.Error())
 	}
 	if err := hitFailpoint(ctx, in, failpoint.BeforeProvider); err != nil {
 		return Ambiguous(err.Error())
@@ -129,7 +130,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.BillingProvide
 	response, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
 		VaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
 		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
-		StoredCredential: nmidirect.StoredCredentialFor(posture),
+		StoredCredential: credential,
 	})
 	if hitErr := hitFailpoint(ctx, in, failpoint.AfterProvider); hitErr != nil {
 		return Ambiguous(hitErr.Error())
@@ -204,11 +205,14 @@ func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.Billi
 		if err != nil {
 			return err
 		}
-		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+		if err := p.Instrument.Matches(method); err != nil {
 			return err
 		}
 		if method.CustomerID != p.Renewal.CustomerID {
 			return errRebillSuperseded
+		}
+		if err := mandates.Recheck(ctx, d.Gen(ctx), in.MerchantID, p.Instrument.Mandate); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		if fence {
 			first, err = NewStore(d).RecordProgressIfAbsent(ctx, in.ID, rebillSubmittedAt, h.now().Format(time.RFC3339Nano))

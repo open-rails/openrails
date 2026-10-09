@@ -1,28 +1,23 @@
-// Package charge is the narrow, rail-agnostic charge seam (#297 Phase A):
-// "charge instrument, amount, CIT/MIT context". It models card-network
-// stored-credential compliance once, in the engine, so every card rail —
-// the direct NMI transport today, a custodian-proxied one later (#297 Phase B) —
-// implements ONE interface and the vault lands as a rail, not a rewrite.
+// Package charge is the narrow, rail-agnostic charge seam (#297): "charge an
+// instrument, an amount, under a flow". Callers state the flow (who initiates
+// and which agreement the charge runs under); each rail derives its network
+// and stored-credential flags from it (nmidirect.StoredCredentialFor, the
+// Stripe engine's flags) and never takes them from callers.
 //
-// Network model (verified against the NMI integration portal + docs.nmi.com,
-// 2026-07-06):
-//   - Every charge on a stored credential declares WHO initiated it
-//     (customer = CIT, merchant = MIT) and whether this is the INITIAL
-//     transaction of a credential-on-file sequence or a subsequent use.
-//   - The networks track a SEPARATE sequence per agreement type (recurring vs
-//     unscheduled); the initial transaction's reference anchors that sequence
-//     and is replayed on every subsequent MIT of the SAME type only.
-//   - The replay reference is RAIL-SCOPED: NMI uses its own gateway
-//     transactionid (mapped to the network transaction identifier inside the
-//     gateway); a vault rail forwards its vault-native reference. The engine
-//     persists whatever the rail hands back (payment_methods.
-//     stored_credential_{recurring,unscheduled}_ref) and never interprets it.
+// Network model (NMI integration portal + docs.nmi.com, 2026-07-06):
+//   - A charge on a stored credential declares who initiated it (customer =
+//     CIT, merchant = MIT) and whether it is the storing transaction of an
+//     agreement or a later use.
+//   - An agreement is a mandate (internal/modules/mandates): recurring for one
+//     subscription, unscheduled for collection in one currency, card_on_file
+//     for one-click reuse. Its storing transaction's references are its
+//     lineage, scoped to the gateway account that ran it; later charges send
+//     them. The networks keep the recurring and unscheduled sequences apart,
+//     and card_on_file rides the unscheduled one.
 //
-// Sites that cannot ride the generic seam still share this vocabulary: the
-// NMI subscription-engine lanes (add_subscription, rebill_subscription) charge
-// against NMI's own schedule objects rather than (instrument, amount), so they
-// derive their wire fields from a Context via the nmidirect mapping instead of
-// calling Charger.
+// The NMI schedule lanes (add_subscription, rebill_subscription) charge NMI's
+// own schedule objects rather than (instrument, amount), so they derive their
+// wire fields from a Context through nmidirect instead of calling Charger.
 package charge
 
 import (
@@ -40,74 +35,79 @@ const (
 	// InitiatorCustomer: the cardholder is present and acting (CIT).
 	InitiatorCustomer Initiator = "customer"
 	// InitiatorMerchant: the engine charges off-session (MIT) — renewals,
-	// dunning retries and arrears collection.
+	// dunning retries and collection.
 	InitiatorMerchant Initiator = "merchant"
 )
 
-// Agreement is the card-network credential-on-file agreement type. The
-// networks keep independent stored-credential sequences per agreement, so a
-// reference captured under one type must never be replayed under the other.
+// Agreement is the kind of mandate a charge runs under.
 type Agreement string
 
 const (
-	// AgreementRecurring: fixed-cadence subscription charges and their dunning
-	// retries.
+	// AgreementNone: a purchase that keeps nothing for reuse; no stored-
+	// credential indicator.
+	AgreementNone Agreement = ""
+	// AgreementRecurring: one subscription's fixed-cadence charges.
 	AgreementRecurring Agreement = "recurring"
-	// AgreementUnscheduled: no fixed cadence — one-time checkout on a stored
-	// card and arrears/invoice collection.
+	// AgreementUnscheduled: collection in one currency (invoices, top-ups).
 	AgreementUnscheduled Agreement = "unscheduled"
+	// AgreementCardOnFile: the customer's own one-click reuse; never
+	// merchant-initiated.
+	AgreementCardOnFile Agreement = "card_on_file"
 )
 
-// Context is the CIT/MIT stored-credential posture of one charge.
+// Sequence is the network credential-on-file sequence an agreement's
+// references belong to: recurring, or unscheduled for the other two.
+func (a Agreement) Sequence() Agreement {
+	if a == AgreementCardOnFile {
+		return AgreementUnscheduled
+	}
+	return a
+}
+
+// Mandate is an agreement's lineage as a charge cites it.
+type Mandate struct {
+	ID   uuid.UUID `json:"id"`
+	Kind Agreement `json:"kind"`
+	// InitialTransactionID is the provider's id of the storing transaction.
+	InitialTransactionID string `json:"initial_transaction_id"`
+	NetworkTransactionID string `json:"network_transaction_id,omitempty"`
+	TransactionLinkID    string `json:"transaction_link_id,omitempty"`
+}
+
+// Context is the flow of one charge.
 type Context struct {
 	Initiator Initiator
 	Agreement Agreement
-
-	// FirstUse: this customer-present charge is the initial transaction of the
-	// credential's agreement sequence (the anchor later transactions reference).
-	FirstUse bool
-
-	// PriorRef is the rail-scoped replay reference captured from the
-	// sequence's initial transaction. It is required for a compliant subsequent
-	// CIT or MIT; subsequent use must replay the agreement-scoped reference.
-	PriorRef string
+	// Cites is the lineage a later charge references; nil when the charge is
+	// its agreement's storing transaction.
+	Cites *Mandate
 }
 
-// InitialOneTime: cardholder-present charge anchoring the unscheduled
-// sequence (first checkout charge on a newly stored or never-anchored card).
-func InitialOneTime() Context {
-	return Context{Initiator: InitiatorCustomer, Agreement: AgreementUnscheduled, FirstUse: true}
+// Purchase is a customer-present charge that stores nothing.
+func Purchase() Context { return Context{Initiator: InitiatorCustomer} }
+
+// Customer is a customer-present charge under an agreement: the storing
+// transaction when cites is nil, else a use of the cited lineage.
+func Customer(a Agreement, cites *Mandate) Context {
+	return Context{Initiator: InitiatorCustomer, Agreement: a, Cites: cites}
 }
 
-// OneTimeReuse: cardholder-present charge on an already-anchored stored
-// credential (returning customer, saved-card checkout, upgrade proration).
-func OneTimeReuse(priorRef string) Context {
-	return Context{Initiator: InitiatorCustomer, Agreement: AgreementUnscheduled, PriorRef: priorRef}
+// Merchant is a merchant-initiated charge under its mandate.
+func Merchant(a Agreement, mandate *Mandate) Context {
+	return Context{Initiator: InitiatorMerchant, Agreement: a, Cites: mandate}
 }
 
-// InitialRecurring: cardholder-present enrollment charge anchoring the
-// recurring sequence (subscription signup / upgrade successor).
-func InitialRecurring() Context {
-	return Context{Initiator: InitiatorCustomer, Agreement: AgreementRecurring, FirstUse: true}
+// Storing reports whether the charge establishes its agreement's lineage.
+func (c Context) Storing() bool {
+	return c.Initiator == InitiatorCustomer && c.Agreement != AgreementNone && c.Cites == nil
 }
 
-// RecurringReuse: cardholder-present recurring enrollment on a card whose
-// recurring sequence is already anchored (second subscription on one card).
-func RecurringReuse(priorRef string) Context {
-	return Context{Initiator: InitiatorCustomer, Agreement: AgreementRecurring, PriorRef: priorRef}
-}
-
-// RecurringMIT: merchant-initiated recurring charge (renewal, dunning retry).
-// priorRef must identify the approved initial recurring CIT. Refuse the charge when no scoped reference exists.
-func RecurringMIT(priorRef string) Context {
-	return Context{Initiator: InitiatorMerchant, Agreement: AgreementRecurring, PriorRef: priorRef}
-}
-
-// UnscheduledMIT is a merchant-initiated invoice collection charge.
-// priorRef must identify the approved initial
-// unscheduled CIT. Refuse the charge when no scoped reference exists.
-func UnscheduledMIT(priorRef string) Context {
-	return Context{Initiator: InitiatorMerchant, Agreement: AgreementUnscheduled, PriorRef: priorRef}
+// SentInitialTransactionID is the reference the charge sends, if any.
+func (c Context) SentInitialTransactionID() string {
+	if c.Cites == nil {
+		return ""
+	}
+	return c.Cites.InitialTransactionID
 }
 
 // Instrument identifies the stored payment credential to charge, by its
@@ -163,10 +163,9 @@ type Result struct {
 	// the instrumentation.
 	TokenType string
 
-	// CapturedRef is the rail-scoped stored-credential replay reference an
-	// approved initial customer-present charge established for the request's
-	// agreement type. The caller persists it on the instrument (write-once).
-	// "" = nothing to persist.
+	// CapturedRef is the initial transaction id an approved storing charge
+	// established; the caller records it on the agreement's mandate. "" =
+	// nothing to record.
 	CapturedRef string
 
 	// Declined: parsed hard decline — do not retry with the same instrument.
@@ -175,8 +174,8 @@ type Result struct {
 	FailureMessage *string
 }
 
-// Charger is the seam: one interface per card rail. Implementations translate
-// Context into the rail's stored-credential wire fields and normalize the
+// Charger is the seam: one interface per card rail. Implementations derive
+// the rail's stored-credential wire fields from Context and normalize the
 // outcome.
 type Charger interface {
 	Charge(ctx context.Context, req Request) (Result, error)

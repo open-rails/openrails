@@ -76,24 +76,44 @@ func request(ctx charge.Context) charge.Request {
 	}
 }
 
+// cites is a mandate's lineage as a charge cites it.
+func cites(kind charge.Agreement, ref string) *charge.Mandate {
+	return &charge.Mandate{ID: uuid.New(), Kind: kind, InitialTransactionID: ref}
+}
+
+// The flags derive from the flow: who initiates, which agreement, and whether
+// the charge stores the card or cites a lineage.
 func TestStoredCredentialFor(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		ctx   charge.Context
-		want  nmi.StoredCredential
-		valid bool
+	for name, tc := range map[string]struct {
+		ctx  charge.Context
+		want *nmi.StoredCredential
 	}{
-		{charge.InitialOneTime(), nmi.StoredCredential{InitiatedBy: "customer", Indicator: "stored"}, true},
-		{charge.OneTimeReuse("ref-1"), nmi.StoredCredential{InitiatedBy: "customer", Indicator: "used", InitialTransactionID: "ref-1"}, true},
-		{charge.InitialRecurring(), nmi.StoredCredential{InitiatedBy: "customer", Indicator: "stored", Recurring: true}, true},
-		{charge.RecurringReuse("ref-2"), nmi.StoredCredential{InitiatedBy: "customer", Indicator: "used", InitialTransactionID: "ref-2", Recurring: true}, true},
-		{charge.RecurringMIT(" ref-3 "), nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", InitialTransactionID: "ref-3", Recurring: true}, true},
-		{charge.UnscheduledMIT("ref-4"), nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", InitialTransactionID: "ref-4"}, true},
-		{charge.UnscheduledMIT(""), nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used"}, false},
+		"purchase stores nothing":     {charge.Purchase(), nil},
+		"storing card on file":        {charge.Customer(charge.AgreementCardOnFile, nil), &nmi.StoredCredential{InitiatedBy: "customer", Indicator: "stored"}},
+		"one-click":                   {charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, "ref-1")), &nmi.StoredCredential{InitiatedBy: "customer", Indicator: "used", InitialTransactionID: "ref-1"}},
+		"one-click on collection":     {charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementUnscheduled, "ref-5")), &nmi.StoredCredential{InitiatedBy: "customer", Indicator: "used", InitialTransactionID: "ref-5"}},
+		"storing recurring":           {charge.Customer(charge.AgreementRecurring, nil), &nmi.StoredCredential{InitiatedBy: "customer", Indicator: "stored", Recurring: true}},
+		"second subscription on card": {charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "ref-2")), &nmi.StoredCredential{InitiatedBy: "customer", Indicator: "used", InitialTransactionID: "ref-2", Recurring: true}},
+		"renewal":                     {charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, " ref-3 ")), &nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", InitialTransactionID: "ref-3", Recurring: true}},
+		"collection":                  {charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "ref-4")), &nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", InitialTransactionID: "ref-4"}},
 	} {
-		got := StoredCredentialFor(tc.ctx)
-		require.Equal(t, tc.want, *got, "%+v", tc.ctx)
-		require.Equal(t, tc.valid, got.Validate() == nil, "%+v", tc.ctx)
+		got, err := StoredCredentialFor(tc.ctx)
+		require.NoError(t, err, name)
+		require.Equal(t, tc.want, got, name)
+	}
+	for name, ctx := range map[string]charge.Context{
+		"merchant without mandate":    charge.Merchant(charge.AgreementUnscheduled, nil),
+		"mandate without reference":   charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "")),
+		"card on file is never MIT":   charge.Merchant(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, "ref")),
+		"recurring cites unscheduled": charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementUnscheduled, "ref")),
+		"unscheduled cites recurring": charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementRecurring, "ref")),
+		"merchant purchase":           {Initiator: charge.InitiatorMerchant},
+		"purchase citing a lineage":   {Initiator: charge.InitiatorCustomer, Cites: cites(charge.AgreementCardOnFile, "ref")},
+		"unknown initiator":           {Agreement: charge.AgreementRecurring},
+	} {
+		_, err := StoredCredentialFor(ctx)
+		require.Error(t, err, name)
 	}
 }
 
@@ -113,22 +133,30 @@ func TestChargeCapturesAnchorAndReplaysIt(t *testing.T) {
 	g := &fakeGateway{sale: "response=1&transactionid=txn-99&authcode=OK&response_code=100"}
 	c := newCharger(t, g)
 
-	res, err := c.Charge(context.Background(), request(charge.InitialOneTime()))
+	res, err := c.Charge(context.Background(), request(charge.Customer(charge.AgreementCardOnFile, nil)))
 	require.NoError(t, err)
 	require.Equal(t, charge.Result{TransactionID: "txn-99", TokenType: charge.TokenTypePSPToken, CapturedRef: "txn-99"}, res)
 	require.Equal(t, "customer", g.Forms()[0].Get("initiated_by"))
 	require.Equal(t, "stored", g.Forms()[0].Get("stored_credential_indicator"))
 
-	res, err = c.Charge(context.Background(), request(charge.UnscheduledMIT("anchor-1")))
+	res, err = c.Charge(context.Background(), request(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "anchor-1"))))
 	require.NoError(t, err)
 	require.Empty(t, res.CapturedRef, "only the initial CIT anchors the sequence")
 	require.Equal(t, "anchor-1", g.Forms()[1].Get("initial_transaction_id"))
 	require.Equal(t, "merchant", g.Forms()[1].Get("initiated_by"))
 
 	for name, req := range map[string]charge.Request{
-		"reference-less MIT": request(charge.UnscheduledMIT("")),
-		"no vault":           func() charge.Request { r := request(charge.InitialOneTime()); r.Instrument.CustomerRef = " "; return r }(),
-		"zero amount":        func() charge.Request { r := request(charge.InitialOneTime()); r.AmountMinor = 0; return r }(),
+		"reference-less MIT": request(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, ""))),
+		"no vault": func() charge.Request {
+			r := request(charge.Customer(charge.AgreementCardOnFile, nil))
+			r.Instrument.CustomerRef = " "
+			return r
+		}(),
+		"zero amount": func() charge.Request {
+			r := request(charge.Customer(charge.AgreementCardOnFile, nil))
+			r.AmountMinor = 0
+			return r
+		}(),
 	} {
 		_, err := c.Charge(context.Background(), req)
 		require.Error(t, err, name)
@@ -151,7 +179,7 @@ func TestChargeOutcomeClassification(t *testing.T) {
 		{"response=2", false, ""},
 	} {
 		g := &fakeGateway{sale: tc.body}
-		res, err := newCharger(t, g).Charge(context.Background(), request(charge.UnscheduledMIT("anchor-1")))
+		res, err := newCharger(t, g).Charge(context.Background(), request(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "anchor-1"))))
 		require.Len(t, g.Forms(), 1, tc.body)
 		if tc.declined {
 			require.NoError(t, err, tc.body)
@@ -173,9 +201,9 @@ func TestRecurringSaleWire(t *testing.T) {
 		initial  bool
 		captured string
 	}{
-		{charge.InitialRecurring(), true, "txn"},
-		{charge.RecurringReuse("anchor"), true, ""},
-		{charge.RecurringMIT("anchor"), false, ""},
+		{charge.Customer(charge.AgreementRecurring, nil), true, "txn"},
+		{charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor")), true, ""},
+		{charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor")), false, ""},
 	} {
 		g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: "response=1&response_code=100&transactionid=txn"}
 		c := newCharger(t, g)
@@ -192,7 +220,7 @@ func TestRecurringSaleWire(t *testing.T) {
 		w := g.Forms()[0]
 		for field, want := range map[string]string{
 			"type": "sale", "recurring": "", "subscription_id": "", "plan_id": "", "billing_method": "recurring",
-			"initiated_by": string(tc.ctx.Initiator), "initial_transaction_id": tc.ctx.PriorRef,
+			"initiated_by": string(tc.ctx.Initiator), "initial_transaction_id": tc.ctx.SentInitialTransactionID(),
 			"customer_vault_id": "v1", "billing_id": "b1", "security_key": "account-key", "amount": "5.00", "currency": "USD", "orderid": "order-1",
 		} {
 			require.Equal(t, want, w.Get(field), field)
@@ -203,9 +231,15 @@ func TestRecurringSaleWire(t *testing.T) {
 func TestRecurringInvalidTermsNeverDispatch(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*charge.Request, *Charger){
-		"missing anchor":         func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringMIT("") },
-		"unscheduled":            func(r *charge.Request, _ *Charger) { r.Context = charge.UnscheduledMIT("anchor") },
-		"customer initiated":     func(r *charge.Request, _ *Charger) { r.Context = charge.RecurringReuse("anchor") },
+		"missing anchor": func(r *charge.Request, _ *Charger) {
+			r.Context = charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, ""))
+		},
+		"unscheduled": func(r *charge.Request, _ *Charger) {
+			r.Context = charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "anchor"))
+		},
+		"customer initiated": func(r *charge.Request, _ *Charger) {
+			r.Context = charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor"))
+		},
 		"wrong rail":             func(r *charge.Request, _ *Charger) { r.Instrument.Rail = "stripe" },
 		"empty billing":          func(r *charge.Request, _ *Charger) { r.Instrument.MethodRef = "" },
 		"whitespace vault":       func(r *charge.Request, _ *Charger) { r.Instrument.CustomerRef = " v1" },
@@ -219,7 +253,7 @@ func TestRecurringInvalidTermsNeverDispatch(t *testing.T) {
 	} {
 		g := &fakeGateway{billing: `[{"id":"b1"}]`}
 		c := newCharger(t, g)
-		req := request(charge.RecurringMIT("anchor"))
+		req := request(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor")))
 		change(&req, c)
 		_, refusal, err := c.ChargeRecurringMIT(context.Background(), req)
 		require.ErrorIs(t, err, charge.ErrNotDispatched, name)
@@ -228,7 +262,7 @@ func TestRecurringInvalidTermsNeverDispatch(t *testing.T) {
 	}
 	for _, billing := range []string{`[]`, `[{"id":"other"}]`, `[{"id":"b1"},{"id":"b2"}]`} {
 		g := &fakeGateway{billing: billing}
-		_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
+		_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor"))))
 		require.ErrorIs(t, err, charge.ErrNotDispatched, billing)
 		require.Equal(t, 1, g.Reads(), billing)
 		require.Empty(t, g.Forms(), "a vault mismatch never sends money: %s", billing)
@@ -252,7 +286,7 @@ func TestRecurringRefusalVersusUnknown(t *testing.T) {
 		{"lost response", "disconnect", false},
 	} {
 		g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: tc.response}
-		res, refusal, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
+		res, refusal, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor"))))
 		require.Len(t, g.Forms(), 1, tc.name)
 		if tc.hard {
 			require.NoError(t, err, tc.name)
@@ -272,10 +306,10 @@ func TestRecurringRefusalVersusUnknown(t *testing.T) {
 	// period, so a renewal stays unknown; a customer-present request did not execute.
 	dup := "response=3&response_code=300&responsetext=Duplicate+transaction+REFID:1"
 	g := &fakeGateway{billing: `[{"id":"b1"}]`, sale: dup}
-	_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.RecurringMIT("anchor")))
+	_, _, err := newCharger(t, g).ChargeRecurringMIT(context.Background(), request(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor"))))
 	require.Error(t, err)
 	require.NotErrorIs(t, err, charge.ErrNotDispatched, "a duplicate renewal is unknown, never released")
 	g = &fakeGateway{billing: `[{"id":"b1"}]`, sale: dup}
-	_, _, err = newCharger(t, g).ChargeInitialRecurring(context.Background(), request(charge.RecurringReuse("anchor")))
+	_, _, err = newCharger(t, g).ChargeInitialRecurring(context.Background(), request(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "anchor"))))
 	require.ErrorIs(t, err, charge.ErrNotDispatched)
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -199,13 +200,17 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == nil || methodRow.ParkReason != nil {
 		return nil, ErrPaymentMethodStale
 	}
+	instrument := charge.FreezeInstrument(methodRow, sub.PspID)
+	if instrument.Mandate, err = mandates.Citable(ctx, database.Gen(ctx), mid.UUID(), customerID, methodRow.ID, sub.PspID, methodRow.Rail, charge.AgreementCardOnFile); err != nil {
+		return nil, err
+	}
 	email := ""
 	if user.Email != nil {
 		email = strings.TrimSpace(*user.Email)
 	}
 	payload := subscriptions.NMIUpgradePayload{Action: action, RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: email,
 		OldSubscriptionID: sub.ID, OldPriceID: sub.PriceID, OldProviderSubscriptionID: sub.RailSubscriptionID, NewPaymentID: uuidutil.NewV7(),
-		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: charge.FreezeInstrument(methodRow, sub.PspID), PaymentMethodID: methodRow.ID,
+		PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, Instrument: instrument, PaymentMethodID: methodRow.ID,
 		RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		AccessDurationHours: newPrice.AccessDurationHours, TargetPlanID: targetPlan}
 	reason := "customer tier upgrade"

@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -142,7 +143,14 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP || method.StoredCredentialRecurringRef == nil {
+	if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP {
+		out.BlockedReason = "customer_payment_unsupported"
+		return out, nil
+	}
+	if _, err := mandates.ForSubscription(ctx, s.rt.DB.Gen(ctx), mid.UUID(), sub.CustomerID, sub.ID, method.ID, sub.PspID); err != nil {
+		if !errors.Is(err, mandates.ErrMissing) && !errors.Is(err, mandates.ErrNotActive) {
+			return nil, err
+		}
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}

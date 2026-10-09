@@ -15,34 +15,46 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// StoredCredentialFor maps the rail-agnostic CIT/MIT context onto NMI's
-// credential-on-file wire fields (see nmi.StoredCredential for the verified
-// combinations). It is shared by the seam Charger and by the NMI
-// subscription-engine lanes (add_subscription enrollments, rebill_subscription
-// dunning) that charge NMI schedule objects instead of (instrument, amount).
-func StoredCredentialFor(c charge.Context) *nmi.StoredCredential {
-	sc := &nmi.StoredCredential{
-		Recurring: c.Agreement == charge.AgreementRecurring,
+// StoredCredentialFor derives NMI's credential-on-file fields from a charge's
+// flow (see nmi.StoredCredential for the verified combinations). It is the one
+// NMI mapping: the direct seam, the NMI schedule lanes (add_subscription,
+// rebill_subscription) and the custodian transports that post NMI's form all
+// use it. A purchase that stores nothing gets no fields (nil). References
+// never cross the recurring and unscheduled sequences, and a merchant-
+// initiated charge needs its mandate's initial reference.
+func StoredCredentialFor(c charge.Context) (*nmi.StoredCredential, error) {
+	switch c.Agreement {
+	case charge.AgreementNone:
+		if c.Initiator != charge.InitiatorCustomer || c.Cites != nil {
+			return nil, errors.New("only a customer-present purchase runs without an agreement")
+		}
+		return nil, nil
+	case charge.AgreementRecurring, charge.AgreementUnscheduled, charge.AgreementCardOnFile:
+	default:
+		return nil, fmt.Errorf("unknown agreement %q", c.Agreement)
 	}
+	sc := &nmi.StoredCredential{Recurring: c.Agreement == charge.AgreementRecurring}
 	switch c.Initiator {
+	case charge.InitiatorCustomer:
+		sc.InitiatedBy = nmi.InitiatedByCustomer
 	case charge.InitiatorMerchant:
+		if c.Agreement == charge.AgreementCardOnFile {
+			return nil, errors.New("card-on-file consent never covers a merchant-initiated charge")
+		}
 		sc.InitiatedBy = nmi.InitiatedByMerchant
 	default:
-		sc.InitiatedBy = nmi.InitiatedByCustomer
+		return nil, errors.New("charge initiation is not established")
 	}
-	// The sequence's initial customer-present transaction sends
-	// indicator=stored; everything after sends used with the initial reference.
-	// A merchant-initiated legacy fallback may lack the reference; it remains
-	// merchant+used and is made observable before the request reaches NMI.
-	if c.FirstUse && c.Initiator == charge.InitiatorCustomer {
+	if c.Cites == nil {
 		sc.Indicator = nmi.IndicatorStored
-	} else {
-		sc.Indicator = nmi.IndicatorUsed
+		return sc, sc.Validate()
 	}
-	if ref := strings.TrimSpace(c.PriorRef); ref != "" {
-		sc.InitialTransactionID = ref
+	if c.Cites.Kind.Sequence() != c.Agreement.Sequence() {
+		return nil, errors.New("stored-credential references do not cross the recurring and unscheduled sequences")
 	}
-	return sc
+	sc.Indicator = nmi.IndicatorUsed
+	sc.InitialTransactionID = strings.TrimSpace(c.Cites.InitialTransactionID)
+	return sc, sc.Validate()
 }
 
 // Charger charges stored NMI instruments through the seam. Declines that the
@@ -69,7 +81,10 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	if req.AmountMinor <= 0 {
 		return charge.Result{}, errors.New("charge amount must be positive")
 	}
-	storedCredential := StoredCredentialFor(req.Context)
+	storedCredential, err := StoredCredentialFor(req.Context)
+	if err != nil {
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+	}
 
 	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  railCustomerRef,
@@ -99,9 +114,9 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 		TokenType:     charge.TokenTypePSPToken,
 	}
-	// Only an approved initial CIT establishes the agreement sequence anchor:
-	// NMI's reference is its gateway transactionid.
-	if req.Context.FirstUse && req.Context.Initiator == charge.InitiatorCustomer {
+	// An approved storing transaction is its agreement's lineage: NMI's
+	// reference is its gateway transactionid.
+	if req.Context.Storing() {
 		res.CapturedRef = res.TransactionID
 	}
 	return res, nil

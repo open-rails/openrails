@@ -81,7 +81,7 @@ func fakeHyperSwitch(t *testing.T, mode, body string, status int, req charge.Req
 			require.Equal(t, want, got, key)
 		}
 		indicator, billing := "used", ""
-		if req.Context.FirstUse {
+		if req.Context.Storing() {
 			indicator = "stored"
 		}
 		if req.Context.Agreement == charge.AgreementRecurring {
@@ -91,7 +91,7 @@ func fakeHyperSwitch(t *testing.T, mode, body string, status int, req charge.Req
 			"ccnumber": "{{$card_number}}", "ccexp": "{{$card_expiry_mmyy}}", "security_key": gatewayKey,
 			"order_description": req.Description, "orderid": req.OrderRef, "currency": req.Currency,
 			"initiated_by": string(req.Context.Initiator), "stored_credential_indicator": indicator,
-			"billing_method": billing, "initial_transaction_id": req.Context.PriorRef,
+			"billing_method": billing, "initial_transaction_id": req.Context.SentInitialTransactionID(),
 			// The custodian charge never creates or addresses a provider schedule or vault.
 			"recurring": "", "subscription_id": "", "plan_id": "", "start_date": "", "customer_vault_id": "", "billing_id": "",
 		} {
@@ -124,7 +124,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 	base := charge.Request{
 		Instrument:  charge.Instrument{Rail: "nmi", CustomerRef: "customer_A", MethodRef: "method_A"},
 		AmountMinor: 1234, Currency: "USD", OrderRef: "operation_A", Description: "A&B=+50% café",
-		Context: charge.InitialOneTime(),
+		Context: charge.Customer(charge.AgreementCardOnFile, nil),
 	}
 	jpy := func(r *charge.Request) { r.Currency, r.AmountMinor = "JPY", 100 }
 	ctx := func(c charge.Context) func(*charge.Request) { return func(r *charge.Request) { r.Context = c } }
@@ -143,8 +143,8 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		{name: "initial USD", amount: "12.34", posted: true},
 		{name: "JPY native units", request: jpy, amount: "100.00", posted: true},
 		{name: "full int64 exact", request: func(r *charge.Request) { r.AmountMinor = moneyutil.Cents(math.MaxInt64) }, amount: "92233720368547758.07", posted: true},
-		{name: "subsequent customer", request: ctx(charge.OneTimeReuse("txn_initial")), posted: true},
-		{name: "unscheduled merchant", request: ctx(charge.UnscheduledMIT("txn_initial")), posted: true},
+		{name: "subsequent customer", request: ctx(charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, "txn_initial"))), posted: true},
+		{name: "unscheduled merchant", request: ctx(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "txn_initial"))), posted: true},
 		{name: "declined", body: declined, declined: true, posted: true},
 		{name: "430 is uncertain", body: gateway430, wantErr: provider.ErrUnknown, posted: true},
 		{name: "unqualified error cannot decline", body: `{"response":{"response":"3","response_code":"400","responsetext":"RAW_PROVIDER_SENTINEL"},"status_code":200,"response_headers":{}}`, wantErr: provider.ErrUnknown, posted: true},
@@ -167,35 +167,35 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		{name: "foreign merchant", mode: "foreign merchant", wantErr: provider.ErrBinding},
 		{name: "retargeted method", mode: "retargeted method", wantErr: provider.ErrBinding},
 		{name: "readonly", mode: "readonly", wantErr: provider.ErrReadOnly},
-		{name: "invoice rejects recurring initial", request: ctx(charge.InitialRecurring()), wantErr: charge.ErrNotDispatched},
-		{name: "invoice rejects recurring merchant", request: ctx(charge.RecurringMIT("recurring")), wantErr: charge.ErrNotDispatched},
+		{name: "invoice rejects recurring initial", request: ctx(charge.Customer(charge.AgreementRecurring, nil)), wantErr: charge.ErrNotDispatched},
+		{name: "invoice rejects recurring merchant", request: ctx(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "recurring"))), wantErr: charge.ErrNotDispatched},
 
 		{name: "enrollment USD", entry: enrollment, amount: "12.34", posted: true},
 		{name: "enrollment JPY", entry: enrollment, request: jpy, amount: "100.00", posted: true},
-		{name: "enrollment reuse", entry: enrollment, request: ctx(charge.RecurringReuse("original_recurring")), posted: true},
+		{name: "enrollment reuse", entry: enrollment, request: ctx(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "original_recurring"))), posted: true},
 		{name: "enrollment decline", entry: enrollment, body: declined, declined: true, posted: true},
 		{name: "enrollment 430", entry: enrollment, body: gateway430, wantErr: provider.ErrUnknown, posted: true},
 		{name: "enrollment lost reply", entry: enrollment, mode: "lost", wantErr: provider.ErrUnknown, posted: true},
 		{name: "enrollment foreign customer", entry: enrollment, mode: "foreign customer", wantErr: provider.ErrBinding},
 		{name: "enrollment readonly", entry: enrollment, mode: "readonly", wantErr: provider.ErrReadOnly},
 		{name: "enrollment wrong rail", entry: enrollment, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects unscheduled initial", entry: enrollment, request: ctx(charge.InitialOneTime()), wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects unscheduled reuse", entry: enrollment, request: ctx(charge.OneTimeReuse("unscheduled")), wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects merchant", entry: enrollment, request: ctx(charge.RecurringMIT("recurring")), wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects missing anchor", entry: enrollment, request: ctx(charge.RecurringReuse("")), wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects padded anchor", entry: enrollment, request: ctx(charge.RecurringReuse(" padded ")), wantErr: charge.ErrNotDispatched},
-		{name: "enrollment rejects first-use anchor", entry: enrollment, request: func(r *charge.Request) { r.Context.PriorRef = "contradiction" }, wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects unscheduled initial", entry: enrollment, request: ctx(charge.Customer(charge.AgreementCardOnFile, nil)), wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects unscheduled reuse", entry: enrollment, request: ctx(charge.Customer(charge.AgreementCardOnFile, cites(charge.AgreementCardOnFile, "unscheduled"))), wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects merchant", entry: enrollment, request: ctx(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "recurring"))), wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects missing anchor", entry: enrollment, request: ctx(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, ""))), wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects padded anchor", entry: enrollment, request: ctx(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, " padded "))), wantErr: charge.ErrNotDispatched},
+		{name: "enrollment rejects another sequence's lineage", entry: enrollment, request: ctx(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementCardOnFile, "unscheduled"))), wantErr: charge.ErrNotDispatched},
 
 		{name: "renewal USD", entry: renewal, amount: "12.34", posted: true},
 		{name: "renewal JPY", entry: renewal, request: jpy, amount: "100.00", posted: true},
 		{name: "renewal decline", entry: renewal, body: declined, declined: true, posted: true},
 		{name: "renewal lost reply", entry: renewal, mode: "lost", wantErr: provider.ErrUnknown, posted: true},
-		{name: "renewal rejects customer initial", entry: renewal, request: ctx(charge.InitialRecurring()), wantErr: charge.ErrNotDispatched},
-		{name: "renewal rejects customer reuse", entry: renewal, request: ctx(charge.RecurringReuse("original_recurring")), wantErr: charge.ErrNotDispatched},
-		{name: "renewal rejects unscheduled merchant", entry: renewal, request: ctx(charge.UnscheduledMIT("unscheduled")), wantErr: charge.ErrNotDispatched},
-		{name: "renewal rejects missing anchor", entry: renewal, request: ctx(charge.RecurringMIT("")), wantErr: charge.ErrNotDispatched},
-		{name: "renewal rejects padded anchor", entry: renewal, request: ctx(charge.RecurringMIT(" padded ")), wantErr: charge.ErrNotDispatched},
-		{name: "renewal rejects first use", entry: renewal, request: func(r *charge.Request) { r.Context.FirstUse = true }, wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects customer initial", entry: renewal, request: ctx(charge.Customer(charge.AgreementRecurring, nil)), wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects customer reuse", entry: renewal, request: ctx(charge.Customer(charge.AgreementRecurring, cites(charge.AgreementRecurring, "original_recurring"))), wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects unscheduled merchant", entry: renewal, request: ctx(charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, "unscheduled"))), wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects missing anchor", entry: renewal, request: ctx(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, ""))), wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects padded anchor", entry: renewal, request: ctx(charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, " padded "))), wantErr: charge.ErrNotDispatched},
+		{name: "renewal rejects a missing mandate", entry: renewal, request: ctx(charge.Merchant(charge.AgreementRecurring, nil)), wantErr: charge.ErrNotDispatched},
 		{name: "renewal wrong rail", entry: renewal, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantErr: charge.ErrNotDispatched},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -203,9 +203,9 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			req := base
 			switch tc.entry {
 			case enrollment:
-				req.Context = charge.InitialRecurring()
+				req.Context = charge.Customer(charge.AgreementRecurring, nil)
 			case renewal:
-				req.Context = charge.RecurringMIT("original_recurring")
+				req.Context = charge.Merchant(charge.AgreementRecurring, cites(charge.AgreementRecurring, "original_recurring"))
 			}
 			if tc.request != nil {
 				tc.request(&req)
@@ -256,7 +256,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			if tc.declined {
 				require.Equal(t, "transaction_was_declined_by_processor", *result.FailureCode)
 			}
-			if !tc.declined && req.Context.FirstUse {
+			if !tc.declined && req.Context.Storing() {
 				require.Equal(t, "txn_initial", result.CapturedRef)
 			} else {
 				require.Empty(t, result.CapturedRef)
@@ -265,7 +265,9 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 	}
 
 	for name, mutate := range map[string]func(*charge.Request){
-		"reference-less MIT": func(r *charge.Request) { r.Context = charge.UnscheduledMIT("") },
+		"reference-less MIT": func(r *charge.Request) {
+			r.Context = charge.Merchant(charge.AgreementUnscheduled, cites(charge.AgreementUnscheduled, ""))
+		},
 		"no initiator":       func(r *charge.Request) { r.Context.Initiator = "" },
 		"merchant first use": func(r *charge.Request) { r.Context.Initiator = charge.InitiatorMerchant },
 		"zero amount":        func(r *charge.Request) { r.AmountMinor = 0 },
@@ -277,4 +279,9 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		_, err := saleForm(req, gatewayKey)
 		require.Error(t, err, name)
 	}
+}
+
+// cites is a mandate's lineage as a charge cites it.
+func cites(kind charge.Agreement, ref string) *charge.Mandate {
+	return &charge.Mandate{ID: uuid.New(), Kind: kind, InitialTransactionID: ref}
 }

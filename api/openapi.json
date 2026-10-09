@@ -3372,10 +3372,12 @@
         "x-openrails-permission": "AdminWrite",
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
+          "card_declined",
           "invalid_param",
           "payment_method_not_psp_vaulted",
           "payment_method_psp_mismatch",
           "payment_method_same_vault",
+          "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
           "resource_not_found",
@@ -4139,10 +4141,12 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "authentication_required",
+          "card_declined",
           "invalid_param",
           "payment_method_not_psp_vaulted",
           "payment_method_psp_mismatch",
           "payment_method_same_vault",
+          "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
           "resource_not_found",
@@ -9546,6 +9550,99 @@
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
+        ]
+      }
+    },
+    "/v1/admin/customers/{customer_id}/mandates": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "name": "customer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Mandate"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "AdminRead",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
         ]
       }
     },
@@ -18723,6 +18820,173 @@
           "memo"
         ]
       },
+      "Mandate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "card_on_file",
+              "recurring",
+              "unscheduled"
+            ]
+          },
+          "subscription_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ended",
+              "requires_reconsent",
+              "revoked"
+            ]
+          },
+          "end_reason": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "brand_changed",
+                  "closed",
+                  "customer_revoked",
+                  "payment_method_removed",
+                  "replaced",
+                  "subscription_ended"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ended_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card_brand": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "initial_transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "network_transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transaction_link_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "storing_attempt_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "customer_id",
+          "payment_method_id",
+          "psp_id",
+          "kind",
+          "subscription_id",
+          "currency",
+          "status",
+          "end_reason",
+          "ended_at",
+          "card_brand",
+          "initial_transaction_id",
+          "network_transaction_id",
+          "transaction_link_id",
+          "storing_attempt_id",
+          "accepted_at",
+          "created_at"
+        ]
+      },
       "MarkNotificationsReadParams": {
         "type": "object",
         "properties": {
@@ -20922,6 +21186,19 @@
                 "type": "null"
               }
             ]
+          },
+          "mandate_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sent_initial_transaction_id": {
+            "type": "string"
           }
         },
         "required": [
@@ -20956,7 +21233,9 @@
           "subscription_id",
           "payment_method_id",
           "payment_id",
-          "enriched_at"
+          "enriched_at",
+          "mandate_id",
+          "sent_initial_transaction_id"
         ]
       },
       "PaymentConfig": {

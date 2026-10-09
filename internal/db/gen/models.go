@@ -720,6 +720,43 @@ type BillingMaintenanceRun struct {
 	RunClass string
 }
 
+// A customer's consent to stored-credential use of one saved card, and the network lineage its storing transaction established: recurring for one subscription, unscheduled for collection in one currency, card_on_file for one-click reuse. Merchant-initiated charges run only under an active mandate and send its references. Retention: permanent, never pruned.
+type BillingMandate struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	// The card the agreement is on. NULL only after an ended or revoked mandate's card was deleted.
+	PaymentMethodID *uuid.UUID
+	// The gateway account its provider references belong to; a charge through another account never cites them.
+	PspID uuid.UUID
+	Rail  string
+	// recurring (one subscription), unscheduled (collection in one currency) or card_on_file (reuse for one-click buys).
+	Kind string
+	// The subscription a recurring mandate covers.
+	SubscriptionID *uuid.UUID
+	// The collection currency an unscheduled mandate covers.
+	Currency *string
+	// active; requires_reconsent (merchant-initiated charges wait for fresh consent); revoked (the customer withdrew); ended.
+	Status string
+	// Why a revoked or ended mandate stopped: replaced, brand_changed, closed, customer_revoked, subscription_ended or payment_method_removed.
+	EndReason *string
+	EndedAt   *time.Time
+	// The card brand the agreement was established on.
+	CardBrand *string
+	// The provider's id of the storing transaction (NMI transactionid, Stripe pi_ or seti_). NULL until one is approved; written once.
+	InitialTransactionID *string
+	// The scheme transaction id (Visa TID, Mastercard Trace ID) of the storing transaction, where the provider returns it; written once.
+	NetworkTransactionID *string
+	// The Mastercard Transaction Link ID of the storing transaction, where the provider returns it; written once.
+	TransactionLinkID *string
+	// The payment attempt of the storing transaction, while it is retained.
+	StoringAttemptID *uuid.UUID
+	// When the customer gave the consent.
+	AcceptedAt time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // Merchant directory: whose books a row goes on. Global by design; every other table is scoped by merchant_id. Carries billing state only, no authorization. Merchants are registered explicitly; there is no default merchant.
 type BillingMerchant struct {
 	ID uuid.UUID
@@ -1041,6 +1078,10 @@ type BillingPaymentAttempt struct {
 	IssuerText *string
 	// When the row was filled from the PSP's transaction read; NULL rows are read by the enrichment pass.
 	EnrichedAt *time.Time
+	// The mandate whose references the attempt sent: a merchant-initiated charge, or a customer-present one on a stored credential.
+	MandateID *uuid.UUID
+	// The initial transaction id the attempt sent the provider, verbatim.
+	SentInitialTransactionID *string
 }
 
 // A customer's stored payment instrument.
@@ -1059,10 +1100,6 @@ type BillingPaymentMethod struct {
 	RailCustomerRef *string
 	// Instrument-scope handle: NMI billing_id, Stripe pm_, or the custodian token.
 	RailMethodRef *string
-	// Replay reference of the recurring card-network agreement (NMI: the transactionid of its initial customer-initiated charge). Empty until captured; written once.
-	StoredCredentialRecurringRef *string
-	// Replay reference of the unscheduled card-network agreement. Empty until captured; written once.
-	StoredCredentialUnscheduledRef *string
 	// Card brand as the provider or custodian reports it.
 	CardBrand *string
 	// Last four digits of the card number.

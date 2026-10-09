@@ -89,7 +89,7 @@ func (p StripeEnginePaymentParams) validate() error {
 	if err := moneyutil.RequireFiatCurrency(p.Currency); err != nil {
 		return err
 	}
-	if !p.Initial && !p.OneTime && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {
+	if !p.Initial && !p.OneTime && !StripeAgreementRef(p.Instrument.Mandate) {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
 	}
 	if p.Renewal != nil {
@@ -105,6 +105,43 @@ func (p StripeEnginePaymentParams) validate() error {
 	}
 	return nil
 }
+
+// StripeAgreementRef reports whether a cited mandate's storing transaction is
+// a Stripe PaymentIntent or SetupIntent that saved the card off session.
+func StripeAgreementRef(m *charge.Mandate) bool {
+	return m != nil && (stripeEngineID(m.InitialTransactionID, "pi_") || stripeEngineID(m.InitialTransactionID, "seti_"))
+}
+
+// flow is the accepted operation's charge flow.
+func (p StripeEnginePaymentParams) flow() charge.Context {
+	switch {
+	case p.Initial:
+		return charge.Customer(charge.AgreementRecurring, p.Instrument.Mandate)
+	case p.OneTime && p.Instrument.Mandate == nil:
+		// A saved card Stripe stored before OpenRails tracked it.
+		return charge.Purchase()
+	case p.OneTime:
+		return charge.Customer(charge.AgreementCardOnFile, p.Instrument.Mandate)
+	case p.CustomerInitiated:
+		return charge.Customer(charge.AgreementRecurring, p.Instrument.Mandate)
+	}
+	return charge.Merchant(charge.AgreementRecurring, p.Instrument.Mandate)
+}
+
+// StripeFlags derives a PaymentIntent's session and future-usage flags from
+// a charge's flow; callers never set them. Stripe sends the network
+// references of a card it saved itself.
+func StripeFlags(c charge.Context) map[string]string {
+	flags := map[string]string{"off_session": strconv.FormatBool(c.Initiator == charge.InitiatorMerchant)}
+	if c.Storing() {
+		flags["setup_future_usage"] = "off_session"
+		if c.Agreement == charge.AgreementCardOnFile {
+			flags["setup_future_usage"] = "on_session"
+		}
+	}
+	return flags
+}
+
 func stripeEngineID(id, prefix string) bool {
 	if !strings.HasPrefix(id, prefix) || len(id) <= len(prefix) || len(id) > 255 {
 		return false
@@ -128,7 +165,10 @@ func (s *StripeService) engineScoped(p StripeEnginePaymentParams) (*StripeServic
 	return &scoped, nil
 }
 func (p StripeEnginePaymentParams) metadata() map[string]string {
-	values := map[string]string{"openrails_engine_operation": p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial), "openrails_agreement": p.Instrument.StoredCredentialRecurringRef}
+	values := map[string]string{"openrails_engine_operation": p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial)}
+	if m := p.Instrument.Mandate; m != nil {
+		values["openrails_agreement"], values["openrails_mandate"] = m.InitialTransactionID, m.ID.String()
+	}
 	if p.CustomerInitiated {
 		values["openrails_customer_retry"] = "true"
 	}
@@ -151,9 +191,9 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	if err != nil {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}
-	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}, "off_session": {strconv.FormatBool(!p.Initial && !p.CustomerInitiated && !p.OneTime)}}
-	if p.Initial {
-		v.Set("setup_future_usage", "off_session")
+	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}}
+	for key, value := range StripeFlags(p.flow()) {
+		v.Set(key, value)
 	}
 	for key, value := range p.metadata() {
 		v.Set("metadata["+key+"]", value)

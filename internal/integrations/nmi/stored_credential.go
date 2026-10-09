@@ -46,9 +46,9 @@ const (
 	IndicatorUsed       = "used"
 )
 
-// Validate rejects absent or malformed CIT/MIT field combinations. Every NMI
-// charge in this package uses a stored credential, so nil is never a valid
-// money-moving request. Exported for sibling rails composing the same form.
+// Validate rejects absent or malformed CIT/MIT field combinations. Lanes that
+// always run on a stored credential (schedules, rebills, verifications) refuse
+// nil. Exported for sibling rails composing the same form.
 func (sc *StoredCredential) Validate() error {
 	if sc == nil {
 		return errors.New("stored credential indicators are required")

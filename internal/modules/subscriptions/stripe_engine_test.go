@@ -81,13 +81,13 @@ func TestStripeEnginePaymentWire(t *testing.T) {
 	}{
 		{"initial enrollment", func(*StripeEnginePaymentParams) {}, "false", true, nil},
 		{"merchant renewal", func(p *StripeEnginePaymentParams) {
-			p.Initial, p.Instrument.StoredCredentialRecurringRef = false, "pi_initial"
+			p.Initial, p.Instrument.Mandate = false, &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementRecurring, InitialTransactionID: "pi_initial"}
 		}, "true", false, map[string]string{"openrails_agreement": "pi_initial"}},
 		{"renewal on replacement card", func(p *StripeEnginePaymentParams) {
-			p.Initial, p.Instrument.StoredCredentialRecurringRef = false, "seti_replacement"
+			p.Initial, p.Instrument.Mandate = false, &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementRecurring, InitialTransactionID: "seti_replacement"}
 		}, "true", false, map[string]string{"openrails_agreement": "seti_replacement"}},
 		{"customer retry", func(p *StripeEnginePaymentParams) {
-			p.Initial, p.CustomerInitiated, p.Instrument.StoredCredentialRecurringRef = false, true, "pi_original"
+			p.Initial, p.CustomerInitiated, p.Instrument.Mandate = false, true, &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementRecurring, InitialTransactionID: "pi_original"}
 		}, "false", false, map[string]string{"openrails_customer_retry": "true", "openrails_agreement": "pi_original"}},
 		{"one-time purchase", func(p *StripeEnginePaymentParams) { p.Initial, p.OneTime = false, true }, "false", false, map[string]string{"openrails_one_time": "true"}},
 	} {

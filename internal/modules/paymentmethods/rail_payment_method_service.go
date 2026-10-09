@@ -62,6 +62,7 @@ type subscriptionReader interface {
 
 type paymentMethodStore interface {
 	Create(ctx context.Context, method *models.PaymentMethod) error
+	CreateStored(ctx context.Context, method *models.PaymentMethod, storing charge.Mandate, at time.Time) error
 	Update(ctx context.Context, method *models.PaymentMethod) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error)
@@ -298,11 +299,11 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		return nil, fmt.Errorf("failed to create payment method: %w", err)
 	}
 
-	// The card is saved for recurring use: establish its recurring
-	// credential-on-file agreement now, so an engine membership can move onto
-	// it and renew as merchant-initiated. A refused or unproven verification
-	// leaves nothing saved; a retry verifies a new vault entry.
-	agreementRef, err := client.EstablishRecurringAgreement(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String())
+	// A saved card is kept for reuse: its storing verification establishes
+	// the card_on_file agreement. A refused or unproven verification leaves
+	// nothing saved; a retry verifies a new vault entry. A subscription that
+	// later moves onto the card verifies its own recurring agreement.
+	agreementRef, err := client.VerifyStoredCredential(ctx, nmiResponse.CustomerVaultID, nmiResponse.BillingID, "pmv-"+methodID.String(), false)
 	if err != nil {
 		_ = client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: nmiResponse.CustomerVaultID})
 		if errors.Is(err, nmi.ErrDuplicateTransaction) {
@@ -337,16 +338,15 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		RailCustomerRef: nmiResponse.CustomerVaultID,
 		RailMethodRef:   nmiResponse.BillingID,
 
-		StoredCredentialRecurringRef: agreementRef,
-		CreatedAt:                    s.now(),
-		UpdatedAt:                    s.now(),
-		Card:                         vaultedCard(nmiResponse.Card, req.Card),
-		Metadata:                     metadata,
-		PspID:                        pspID,
+		CreatedAt: s.now(),
+		UpdatedAt: s.now(),
+		Card:      vaultedCard(nmiResponse.Card, req.Card),
+		Metadata:  metadata,
+		PspID:     pspID,
 	}
 
 	databaseStartedAt := time.Now()
-	if err := s.PaymentMethodService.Create(ctx, pm); err != nil {
+	if err := s.PaymentMethodService.CreateStored(ctx, pm, charge.Mandate{Kind: charge.AgreementCardOnFile, InitialTransactionID: agreementRef}, s.now()); err != nil {
 		databaseDuration = time.Since(databaseStartedAt)
 		log.WithError(err).WithFields(log.Fields{"user_id": userID, "vault_id": nmiResponse.CustomerVaultID}).Error("Failed to store payment method locally")
 		// Best-effort direct remote cleanup — deliberately NOT intent-routed

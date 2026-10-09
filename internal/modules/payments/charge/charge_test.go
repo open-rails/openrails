@@ -14,7 +14,7 @@ import (
 
 func TestEngineExecutionBindings(t *testing.T) {
 	t.Parallel()
-	provider := FrozenInstrument{PSPID: uuid.New(), Custodian: models.CustodianPSP, RailCustomerRef: "customer", RailMethodRef: "method", StoredCredentialRecurringRef: "initial-payment"}
+	provider := FrozenInstrument{PSPID: uuid.New(), Custodian: models.CustodianPSP, RailCustomerRef: "customer", RailMethodRef: "method", Mandate: &Mandate{ID: uuid.New(), Kind: AgreementRecurring, InitialTransactionID: "initial-payment"}}
 	custodyID := uuid.New()
 	proxied := provider
 	proxied.Custodian, proxied.CustodianID = models.CustodianHyperSwitch, &custodyID
@@ -29,14 +29,18 @@ func TestEngineExecutionBindings(t *testing.T) {
 		{"stripe", "stripe", provider, nil},
 		{"proxied_nmi", "nmi", proxied, binding},
 	} {
-		require.NoError(t, ValidateEngineInstrument(tc.rail, tc.instrument, tc.binding, true), tc.name)
+		require.NoError(t, ValidateEngineInstrument(tc.rail, tc.instrument, tc.binding), tc.name)
+		require.NoError(t, ValidateRenewalMandate(tc.instrument), tc.name)
 		noAgreement := tc.instrument
-		noAgreement.StoredCredentialRecurringRef = ""
-		require.Error(t, ValidateEngineInstrument(tc.rail, noAgreement, tc.binding, true), "%s: renewal without an established agreement", tc.name)
-		require.NoError(t, ValidateEngineInstrument(tc.rail, noAgreement, tc.binding, false), "%s: the initial payment establishes it", tc.name)
+		noAgreement.Mandate = nil
+		require.ErrorIs(t, ValidateRenewalMandate(noAgreement), ErrNoRecurringMandate, "%s: renewal without its mandate", tc.name)
+		require.NoError(t, ValidateEngineInstrument(tc.rail, noAgreement, tc.binding), "%s: the initial payment establishes it", tc.name)
+		onFile := tc.instrument
+		onFile.Mandate = &Mandate{ID: uuid.New(), Kind: AgreementCardOnFile, InitialTransactionID: "save"}
+		require.ErrorIs(t, ValidateRenewalMandate(onFile), ErrNoRecurringMandate, "%s: card-on-file consent never renews", tc.name)
 		noMethod := tc.instrument
 		noMethod.RailMethodRef = " "
-		require.Error(t, ValidateEngineInstrument(tc.rail, noMethod, tc.binding, false), "%s: provider default method is never charged", tc.name)
+		require.Error(t, ValidateEngineInstrument(tc.rail, noMethod, tc.binding), "%s: provider default method is never charged", tc.name)
 	}
 
 	basisID := uuid.New()
@@ -55,9 +59,9 @@ func TestEngineExecutionBindings(t *testing.T) {
 		{"proxy_requires_frozen_profile", "nmi", proxied, nil},
 		{"proxy_binding_must_be_canonical", "nmi", proxied, &badBinding},
 		{"basis_theory_has_no_engine_transport", "nmi", basis, nil},
-		{"no_provider_account", "nmi", FrozenInstrument{Custodian: models.CustodianPSP, RailCustomerRef: "c", RailMethodRef: "m", StoredCredentialRecurringRef: "r"}, nil},
+		{"no_provider_account", "nmi", FrozenInstrument{Custodian: models.CustodianPSP, RailCustomerRef: "c", RailMethodRef: "m"}, nil},
 	} {
-		require.Error(t, ValidateEngineInstrument(tc.rail, tc.instrument, tc.binding, true), tc.name)
+		require.Error(t, ValidateEngineInstrument(tc.rail, tc.instrument, tc.binding), tc.name)
 	}
 }
 
@@ -79,20 +83,12 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		require.Equal(t, tc.ok, tc.in.Validate() == nil, tc.name)
 	}
 
-	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: &psp, Custodian: models.CustodianPSP, RailCustomerRef: new(" vault "), RailMethodRef: new("billing"), StoredCredentialRecurringRef: new(" rec "), StoredCredentialUnscheduledRef: new("unsch")}
+	method := gen.BillingPaymentMethod{ID: uuid.New(), PspID: &psp, Custodian: models.CustodianPSP, RailCustomerRef: new(" vault "), RailMethodRef: new("billing")}
 	frozen := FreezeInstrument(method, psp)
 	require.Equal(t, "vault", frozen.RailCustomerRef)
-	require.Equal(t, "rec", frozen.StoredCredentialRecurringRef)
+	require.Nil(t, frozen.Mandate, "a card's agreements live on its mandates")
 	require.False(t, frozen.CustodianHeld())
-	require.NoError(t, frozen.Matches(method, AgreementRecurring))
-	require.NoError(t, frozen.Matches(method, AgreementUnscheduled))
-	require.Error(t, frozen.Matches(method, Agreement("")))
-
-	// Agreements keep independent credential sequences: only the charged one must match.
-	changed := method
-	changed.StoredCredentialUnscheduledRef = new("other")
-	require.NoError(t, frozen.Matches(changed, AgreementRecurring))
-	require.ErrorIs(t, frozen.Matches(changed, AgreementUnscheduled), ErrInstrumentChanged)
+	require.NoError(t, frozen.Matches(method))
 
 	for name, mutate := range map[string]func(*gen.BillingPaymentMethod){
 		"account":  func(m *gen.BillingPaymentMethod) { other := uuid.New(); m.PspID = &other },
@@ -101,11 +97,10 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 		"custody": func(m *gen.BillingPaymentMethod) {
 			m.Custodian, m.CustodianID = models.CustodianBasisTheory, &custodian
 		},
-		"recurring": func(m *gen.BillingPaymentMethod) { m.StoredCredentialRecurringRef = new("rec2") },
 	} {
 		m := method
 		mutate(&m)
-		require.True(t, errors.Is(frozen.Matches(m, AgreementRecurring), ErrInstrumentChanged), name)
+		require.True(t, errors.Is(frozen.Matches(m), ErrInstrumentChanged), name)
 	}
 
 	// A card a custodian holds names no PSP: any PSP routing picks charges it,
@@ -113,10 +108,10 @@ func TestFrozenInstrumentCustodyAndMatching(t *testing.T) {
 	custodial := method
 	custodial.PspID, custodial.Custodian, custodial.CustodianID = nil, models.CustodianBasisTheory, &custodian
 	require.True(t, ChargeableOn(custodial, uuid.New()))
-	require.NoError(t, FreezeInstrument(custodial, psp).Matches(custodial, AgreementRecurring))
+	require.NoError(t, FreezeInstrument(custodial, psp).Matches(custodial))
 	require.True(t, ChargeableOn(method, psp))
 	require.False(t, ChargeableOn(method, uuid.New()))
-	require.ErrorIs(t, FreezeInstrument(method, uuid.New()).Matches(method, AgreementRecurring), ErrInstrumentChanged)
+	require.ErrorIs(t, FreezeInstrument(method, uuid.New()).Matches(method), ErrInstrumentChanged)
 }
 
 func TestHyperSwitchBindingIsCanonical(t *testing.T) {
@@ -155,24 +150,4 @@ func TestCustomerPaymentKeyIsScoped(t *testing.T) {
 	require.False(t, CustomerPaymentKeyValid("checkout", payer, strings.ToUpper(key)))
 	require.False(t, CustomerPaymentKeyValid("checkout", payer, "checkout:customer:"+payer.String()+":abcd"), "short digest")
 	require.False(t, CustomerPaymentKeyValid("checkout", payer, "client-key"), "an unscoped raw key")
-}
-
-func TestStoredCredentialContexts(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		got       Context
-		initiator Initiator
-		agreement Agreement
-		first     bool
-		prior     string
-	}{
-		{InitialOneTime(), InitiatorCustomer, AgreementUnscheduled, true, ""},
-		{OneTimeReuse("r1"), InitiatorCustomer, AgreementUnscheduled, false, "r1"},
-		{InitialRecurring(), InitiatorCustomer, AgreementRecurring, true, ""},
-		{RecurringReuse("r2"), InitiatorCustomer, AgreementRecurring, false, "r2"},
-		{RecurringMIT("r3"), InitiatorMerchant, AgreementRecurring, false, "r3"},
-		{UnscheduledMIT("r4"), InitiatorMerchant, AgreementUnscheduled, false, "r4"},
-	} {
-		require.Equal(t, Context{Initiator: tc.initiator, Agreement: tc.agreement, FirstUse: tc.first, PriorRef: tc.prior}, tc.got)
-	}
 }

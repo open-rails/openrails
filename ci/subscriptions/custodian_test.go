@@ -159,13 +159,14 @@ func (f *btFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // custodianMethod is a customer's Basis Theory card: its token and its
-// unscheduled agreement.
+// card-on-file agreement.
 type custodianMethod struct{ Token, Unscheduled string }
 
 func (w *world) custodianMethods(c *customer) []custodianMethod {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT rail_method_ref, COALESCE(stored_credential_unscheduled_ref, '') FROM billing.payment_methods
-		WHERE customer_id = $1 AND custodian = 'basis_theory' ORDER BY created_at, id`), c.id)
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT pm.rail_method_ref, COALESCE((SELECT m.initial_transaction_id FROM billing.mandates m
+		WHERE m.merchant_id = pm.merchant_id AND m.payment_method_id = pm.id AND m.kind = 'card_on_file' AND m.status = 'active'), '')
+		FROM billing.payment_methods pm WHERE pm.customer_id = $1 AND pm.custodian = 'basis_theory' ORDER BY pm.created_at, pm.id`), c.id)
 	require.NoError(w.t, err)
 	defer rows.Close()
 	var out []custodianMethod

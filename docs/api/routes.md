@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (218), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`.
 
@@ -181,6 +181,7 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/rebill-cycles/{id}` | merchant | `AdminRead` | — | 200 `RebillCycle` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `AdminRead` | — | 200 `ListPage<PaymentMethod>` |  |
 | DELETE | `/v1/admin/customers/{customer_id}/payment-methods/{id}` | merchant | `AdminWrite` | — | 202 —<br>204 — | sensitive; limit `destructive` |
+| GET | `/v1/admin/customers/{customer_id}/mandates` | merchant | `AdminRead` | — | 200 `ListPage<Mandate>` |  |
 | GET | `/v1/admin/host-events` | merchant | `AdminRead` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/admin/host-events/acknowledge` | merchant | `AdminWrite` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
 | POST | `/v1/admin/metrics/query` | merchant | `AdminRead` | `MetricsQuery` | 200 `MetricsResult` |  |

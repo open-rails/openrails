@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/billing"
 	"strings"
+	"time"
+
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 type PaymentMethodService struct {
@@ -50,6 +53,12 @@ func RailPaymentMethodsUnsupported(rail string) error {
 
 func (s *PaymentMethodService) Create(ctx context.Context, method *models.PaymentMethod) error {
 	return s.repo.Create(ctx, method)
+}
+
+// CreateStored saves an NMI card with the card_on_file mandate its storing
+// verification established.
+func (s *PaymentMethodService) CreateStored(ctx context.Context, method *models.PaymentMethod, storing charge.Mandate, at time.Time) error {
+	return s.repo.CreateStored(ctx, method, storing, at)
 }
 
 func (s *PaymentMethodService) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {

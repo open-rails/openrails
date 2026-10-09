@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -108,7 +109,7 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 				if paymentmethods.BrandChanged(models.DerefStr(prior.CardBrand), card.Brand) {
 					// #1166: another brand needs the customer's agreement again.
 					recorded = paymentmethods.CardBrandChanged
-					if _, err := q.VoidStoredCredentialRefs(ctx, gen.VoidStoredCredentialRefsParams{MerchantID: mid.UUID(), ID: m.ID, UpdatedAt: now}); err != nil {
+					if err := mandates.RequireReconsent(ctx, q, mid.UUID(), m.ID, now); err != nil {
 						return err
 					}
 					asked, err := askForNewCard(ctx, s.SubscriptionLifecycleService, d, m.ID, now)

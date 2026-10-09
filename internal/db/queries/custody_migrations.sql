@@ -53,9 +53,9 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 --   * rail_customer_ref — the old PSP vault handle stays on the row. It is
 --     dead as an address the moment custody changes, and it is the only
 --     forensic link to charges that settled before the flip;
---   * stored_credential_*_ref — the network's credential-on-file sequence
---     anchors are gateway-scoped, not custody-scoped. Clearing them would
---     restart every stored-credential sequence for no reason.
+--   * the card's mandates — their references belong to the gateway account
+--     that ran the storing transaction, and a charge cites them only through
+--     that same account.
 --
 -- Guarded on the CURRENT custody so a concurrent second flip cannot apply
 -- twice: the WHERE clause is the compare-and-swap.

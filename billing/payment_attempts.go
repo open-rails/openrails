@@ -52,6 +52,11 @@ type PaymentAttempt struct {
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 	PaymentID       *PaymentID       `json:"payment_id"`
 	EnrichedAt      *time.Time       `json:"enriched_at"`
+	// MandateID is the mandate whose references the attempt sent, and
+	// SentInitialTransactionID the initial transaction id it sent verbatim
+	// (empty where the provider links its own, as Stripe does).
+	MandateID                *MandateID `json:"mandate_id"`
+	SentInitialTransactionID string     `json:"sent_initial_transaction_id"`
 }
 
 // PaymentAttemptListParams selects attempts, newest first; every field is

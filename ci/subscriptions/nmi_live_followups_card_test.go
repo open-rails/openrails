@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -27,11 +28,11 @@ func (f *nmiFake) billingIDs(vault string) []string {
 }
 
 // An in-place card replacement verifies the new card as a recurring
-// credential-on-file agreement before the method uses it: the card and its
-// agreement change together, the replaced card is retired at NMI, and the
-// next merchant-initiated renewal cites the new card's agreement. A card the
-// issuer refuses to verify is not adopted: typed decline, and the previous
-// card and agreement keep billing.
+// credential-on-file agreement before the method uses it: the card and the
+// subscription's mandate change together, the replaced card is retired at
+// NMI, and the next merchant-initiated renewal cites the new card's agreement.
+// A card the issuer refuses to verify is not adopted: typed decline, and the
+// previous card and mandate keep billing.
 func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -40,7 +41,8 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 			w := newWorld(t)
 			e := enroll(t, w, "nmi", tp)
 			before := w.storedCard(e.method)
-			require.NotEmpty(t, before.recurringRef)
+			agreement := w.subscriptionMandate(tp, e.c.cid(), e.sub)
+			require.NotNil(t, agreement.InitialTransactionID)
 			verified := len(w.nmi.Validations(before.vault))
 
 			// Refused: nothing changes, at NMI or locally.
@@ -49,7 +51,8 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 			require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
 			require.Equal(t, "card_declined", errorCode(body))
 			w.settle()
-			require.Equal(t, before, w.storedCard(e.method), "a refused replacement leaves the card and its agreement")
+			require.Equal(t, before, w.storedCard(e.method), "a refused replacement leaves the card")
+			require.Equal(t, agreement, w.subscriptionMandate(tp, e.c.cid(), e.sub), "and the subscription's mandate")
 			require.Equal(t, []string{before.billing}, w.nmi.billingIDs(before.vault), "the refused card is removed from the vault")
 			require.Len(t, w.nmi.Validations(before.vault), verified+1, "one verification for the refused card")
 
@@ -68,7 +71,10 @@ func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 			require.True(t, strings.HasPrefix(latest.Form.Get("orderid"), "pmu-"))
 			require.Equal(t, before.vault, after.vault, "the method keeps its vault")
 			require.Equal(t, latest.BillingID, after.billing, "the method moves onto the verified card")
-			require.Equal(t, latest.TransactionID, after.recurringRef, "the agreement is the new card's verification")
+			moved := w.subscriptionMandate(tp, e.c.cid(), e.sub)
+			require.NotEqual(t, agreement.ID, moved.ID, "the replaced card's mandate ended")
+			require.Equal(t, latest.TransactionID, str(moved.InitialTransactionID), "the agreement is the new card's verification")
+			require.Equal(t, billing.MandateEndReplaced, *w.mandate(tp, e.c.cid(), agreement.ID).EndReason)
 			require.Equal(t, mastercard.Last4, after.lastFour)
 			require.Equal(t, "mastercard", after.cardType)
 			require.Equal(t, []string{after.billing}, w.nmi.billingIDs(before.vault), "the replaced card is retired at NMI")

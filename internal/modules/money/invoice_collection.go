@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/pagination"
 
@@ -172,10 +173,19 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if !descriptor.SupportsChargeSavedMethod {
 			return fmt.Errorf("%w: rail %q does not support invoice collection", ErrCollectionPaymentMethodInvalid, method.Rail)
 		}
-		if err := requireCollectionAgreement(ctx, q, method); errors.Is(err, charge.ErrAgreementRequired) {
-			return fmt.Errorf("%w: automatic collection: %w", ErrCollectionPaymentMethodInvalid, err)
-		} else if err != nil {
+		psp, err := charge.RoutePSP(ctx, q, method)
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrCollectionPaymentMethodInvalid, err)
+		}
+		// The default carries the customer's consent to collection in this
+		// currency: its unscheduled mandate cites the card's own lineage on
+		// the account that charges it.
+		lineage, err := mandates.Citable(ctx, q, tid.UUID(), payer.UUID(), method.ID, psp, method.Rail, charge.AgreementUnscheduled)
+		if err != nil {
 			return err
+		}
+		if lineage == nil {
+			return fmt.Errorf("%w: automatic collection: %w", ErrCollectionPaymentMethodInvalid, charge.ErrAgreementRequired)
 		}
 		if err := s.ensureSettingsRowTx(ctx, q, tid.UUID(), payer.UUID(), currency, BillingModePrepaid, now); err != nil {
 			return fmt.Errorf("ensure money account settings: %w", err)
@@ -192,6 +202,10 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		}
 		if n != 1 {
 			return fmt.Errorf("set collection payment method: settings row not found")
+		}
+		if _, err := mandates.Replace(ctx, q, mandates.Agreement{MerchantID: tid.UUID(), CustomerID: payer.UUID(), PaymentMethodID: method.ID, PSPID: psp, Rail: method.Rail,
+			Kind: charge.AgreementUnscheduled, Currency: currency, Lineage: lineage, AcceptedAt: now}, now); err != nil {
+			return err
 		}
 		// or#828 bucket-2 resume. Designating a collection payment method is
 		// exactly the action the "update your payment method" notice asked for,
@@ -536,6 +550,10 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			}
 			custody = &binding
 		}
+		instrument, err := collectionInstrument(ctx, q, *method, psp, invoice.Currency, opts.initiator)
+		if err != nil {
+			return err
+		}
 		amountMinor, err := moneyutil.NativeToRailMinor(invoice.Currency, invoice.AmountDue)
 		if err != nil {
 			return fmt.Errorf("invoice %s amount is not representable on rail %s: %w", invoice.ID, method.Rail, err)
@@ -567,7 +585,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeInvoiceCollection,
 			Payload: intents.InvoiceCollectionPayload{
 				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID, Initiator: opts.initiator,
-				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method, psp),
+				Rail: normalizeRail(method.Rail), Instrument: instrument,
 				HyperSwitch: custody,
 				Currency:    invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
 				ProviderCustomerRef: providerCustomerRef,
@@ -663,7 +681,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		return nil, ErrCustomerPaymentUnsupported
 	}
 	if opts.initiator == charge.InitiatorMerchant {
-		if err := requireCollectionAgreement(ctx, q, method); err != nil {
+		if err := requireCollectionAgreement(ctx, q, method, invoice.Currency); err != nil {
 			if opts.manual && errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", ErrCollectionPaymentMethodInvalid, err)
 			}
@@ -673,26 +691,17 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	return &method, nil
 }
 
-// requireCollectionAgreement refuses a merchant-initiated collection on a
-// card without its customer's agreement (#1166): an NMI card needs its
-// unscheduled agreement, and a card reissued under another brand needs a
-// customer-initiated charge to anchor one again.
-func requireCollectionAgreement(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod) error {
-	unscheduled := strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef))
-	if rails.IsNMI(models.Rail(method.Rail)) && unscheduled == "" {
-		return charge.ErrAgreementRequired
-	}
-	if unscheduled != "" || strings.TrimSpace(models.DerefStr(method.StoredCredentialRecurringRef)) != "" {
-		return nil
-	}
-	changed, err := q.PaymentMethodBrandChanged(ctx, gen.PaymentMethodBrandChangedParams{MerchantID: method.MerchantID, PaymentMethodID: method.ID})
+// requireCollectionAgreement refuses a merchant-initiated collection in
+// currency on a card without the customer's active unscheduled mandate for it
+// on the account that charges it (#1166): never given, or waiting for consent
+// after the card was reissued under another brand.
+func requireCollectionAgreement(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, currency string) error {
+	psp, err := charge.RoutePSP(ctx, q, method)
 	if err != nil {
-		return fmt.Errorf("read card brand changes: %w", err)
+		return err
 	}
-	if changed {
-		return charge.ErrAgreementRequired
-	}
-	return nil
+	_, err = mandates.ForCollection(ctx, q, method.MerchantID, method.CustomerID, currency, method.ID, psp)
+	return err
 }
 
 // stopCollectionForAgreement stops collecting an invoice whose collection
@@ -711,4 +720,19 @@ func stopCollectionForAgreement(ctx context.Context, d *db.DB, invoice *models.I
 	}
 	action := collection.Action{Decline: decline.Result{Action: decline.FixPaymentMethod}}
 	return queueInvoiceCollectionOutcome(ctx, d, invoice, action, charge.AgreementRequiredCode, now)
+}
+
+// collectionInstrument freezes an invoice charge's card and the mandate it
+// cites: a merchant-initiated collection runs under the currency's active
+// unscheduled mandate; a customer-present payment cites the card's
+// unscheduled lineage, or stores it.
+func collectionInstrument(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, currency string, initiator charge.Initiator) (charge.FrozenInstrument, error) {
+	instrument := charge.FreezeInstrument(method, psp)
+	var err error
+	if initiator == charge.InitiatorMerchant {
+		instrument.Mandate, err = mandates.ForCollection(ctx, q, method.MerchantID, method.CustomerID, currency, method.ID, psp)
+		return instrument, err
+	}
+	instrument.Mandate, err = mandates.Citable(ctx, q, method.MerchantID, method.CustomerID, method.ID, psp, method.Rail, charge.AgreementCardOnFile)
+	return instrument, err
 }

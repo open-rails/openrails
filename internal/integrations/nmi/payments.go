@@ -24,10 +24,9 @@ type SaleParams struct {
 	Currency         string
 	OrderDescription string
 	OrderID          string
-	// StoredCredential carries the CIT/MIT credential-on-file fields (#297).
-	// It is required and is sent through classic Direct Post, the lane on which
-	// NMI documents initiated_by, stored_credential_indicator, and the sequence
-	// reference.
+	// StoredCredential carries the CIT/MIT credential-on-file fields (#297),
+	// sent through classic Direct Post, the lane on which NMI documents them.
+	// nil is a customer-present purchase that stores nothing: no fields.
 	StoredCredential *StoredCredential
 }
 
@@ -51,10 +50,9 @@ type RefundResponse struct {
 	ResponseText  string
 }
 
-// RunSale charges a vaulted customer through classic Direct Post. All sales
-// in this package use a stored credential, and this is the NMI lane whose wire
-// contract exposes the required credential-on-file fields. It also supports
-// billing_id so a shared vault can target one exact card.
+// RunSale charges a vaulted customer through classic Direct Post, the NMI
+// lane whose wire contract exposes the credential-on-file fields. It also
+// supports billing_id so a shared vault can target one exact card.
 func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -80,8 +78,10 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 	if len(params.OrderID) > 50 {
 		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
 	}
-	if err := params.StoredCredential.Validate(); err != nil {
-		return nil, err
+	if params.StoredCredential != nil {
+		if err := params.StoredCredential.Validate(); err != nil {
+			return nil, err
+		}
 	}
 
 	return c.runClassicSale(ctx, params, currency, orderDesc, strings.TrimSpace(params.BillingID))

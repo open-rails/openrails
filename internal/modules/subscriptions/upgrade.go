@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
@@ -83,6 +84,9 @@ func (s *SubscriptionLifecycleService) SupersedeForUpgradeTx(ctx context.Context
 	old.ClearRetrySchedule()
 	old.MarkLifecycleDecision("tier_change_superseded")
 	if err := NewSubscriptionRepo(txDB).UpdateAt(ctx, old, s.now()); err != nil {
+		return err
+	}
+	if err := mandates.EndForSubscription(ctx, txDB.Gen(ctx), old.MerchantID, old.ID, mandates.EndSubscriptionEnded, s.now()); err != nil {
 		return err
 	}
 	return s.newLifecycleEntitlementService(txDB).RevokeSourcesForSubscriptionAsOf(ctx, old.CustomerID.String(), old.ID, at, models.AccessRevokeSuperseded, models.AccessSourceSubscription, models.AccessSourceGrace)

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -253,10 +254,9 @@ func UpsertStripeCardForCustomer(
 			pm.Fingerprint = method.Fingerprint
 		}
 		if brandChanged {
-			if _, err := q.VoidStoredCredentialRefs(ctx, gen.VoidStoredCredentialRefsParams{MerchantID: mid.UUID(), ID: pm.ID, UpdatedAt: now}); err != nil {
+			if err := mandates.RequireReconsent(ctx, q, mid.UUID(), pm.ID, now); err != nil {
 				return nil, false, err
 			}
-			pm.StoredCredentialRecurringRef, pm.StoredCredentialUnscheduledRef = "", ""
 			ref := strings.TrimSpace(eventRef)
 			if ref == "" {
 				ref = "refresh:" + now.UTC().Format(time.RFC3339Nano)

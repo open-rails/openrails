@@ -42,7 +42,10 @@ var acceptedRenewalJSON = object(map[string]jsonRule{
 	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
 	"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
 })
-var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue})
+
+// mandateJSON is the mandate lineage an operation cites; it is not card data.
+var mandateJSON = object(map[string]jsonRule{"id": uuidValue, "kind": textValue, "initial_transaction_id": textValue, "network_transaction_id": textValue, "transaction_link_id": textValue})
+var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON})
 
 type jsonRule func(any) bool
 
@@ -196,7 +199,7 @@ var receiptBindingJSON = object(map[string]jsonRule{"operation_id": uuidValue, "
 var instrumentJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue,
 	"rail_customer_ref": textValue, "rail_method_ref": textValue,
-	"stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue,
+	"mandate": mandateJSON,
 })
 
 // Temporary encrypted capture secrets are deliberately absent. Only terminal
@@ -227,7 +230,7 @@ var jsonRules = map[string]jsonRule{
 		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
-		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON}),
 	}),
 	"provider_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON,
@@ -294,7 +297,7 @@ var jsonRules = map[string]jsonRule{
 	"provider_intents.initial_membership.payload": object(map[string]jsonRule{
 		"checkout_attempt_id": uuidValue,
 		"terms":               initialMembershipTermsJSON,
-		"instrument":          object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"instrument":          object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON}),
 		"native_schedule":     object(map[string]jsonRule{"plan_id": textValue, "start_date": textValue, "day_frequency": integerValue, "plan_payments": integerValue, "card": object(map[string]jsonRule{"FirstName": textValue, "LastName": textValue, "Address1": textValue, "City": textValue, "State": textValue, "Zip": textValue, "Country": textValue})}),
 		"hyperswitch":         object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"request_fingerprint": sha256Value, "checkout_idempotency_key": textValue, "psp": textValue, "email": textValue, "e2e_run_id": textValue, "requested_price": textValue,

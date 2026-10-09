@@ -32,6 +32,7 @@ migration 0028_before_image_after_revision.up.sql sha256:53df4c851e6a42062f3cb5d
 migration 0029_subscription_quantity.up.sql sha256:9750b50c9056f763fd9cb3f20c60eb81facc38fd491ce996134115a22558352b
 migration 0030_card_brand_changes.up.sql sha256:f5d63b5b32aabcbdd80d7dc757f2280f5ac82a45163fcbca69b5a1d677fe5a2f
 migration 0031_write_posture.up.sql sha256:37d271c1cae114b18051d36cd73e3355cbd3791b64574179be0e99e087799948
+migration 0032_mandates.up.sql sha256:944db393b19078e1d44d1c0c7816189152d23c04ee4c2571b64472bbbe972ad9
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1048,6 +1049,52 @@ table billing.maintenance_runs
   trigger CREATE CONSTRAINT TRIGGER require_finished_billing_restore AFTER INSERT OR UPDATE ON billing.maintenance_runs DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_finished_billing_restore()
   trigger CREATE TRIGGER retained_reconciliation_runs BEFORE DELETE ON billing.maintenance_runs FOR EACH ROW WHEN ((old.kind = 'reconciliation'::text)) EXECUTE FUNCTION billing.guard_retention_delete('started_at', '366 days')
 
+table billing.mandates
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column payment_method_id uuid
+  column psp_id uuid NOT NULL
+  column rail text NOT NULL
+  column kind text NOT NULL
+  column subscription_id uuid
+  column currency text
+  column status text NOT NULL
+  column end_reason text
+  column ended_at timestamp with time zone
+  column card_brand text
+  column initial_transaction_id text
+  column network_transaction_id text
+  column transaction_link_id text
+  column storing_attempt_id uuid
+  column accepted_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint mandates_card_brand_check CHECK ((card_brand <> ''::text))
+  constraint mandates_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint mandates_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint mandates_end_check CHECK ((((status = ANY (ARRAY['revoked'::text, 'ended'::text])) = (end_reason IS NOT NULL)) AND ((end_reason IS NULL) = (ended_at IS NULL))))
+  constraint mandates_end_reason_check CHECK (((end_reason = ANY (ARRAY['replaced'::text, 'brand_changed'::text, 'closed'::text, 'customer_revoked'::text, 'subscription_ended'::text, 'payment_method_removed'::text])) AND ((status = 'revoked'::text) = (end_reason = 'customer_revoked'::text))))
+  constraint mandates_initial_transaction_id_check CHECK ((initial_transaction_id <> ''::text))
+  constraint mandates_kind_check CHECK ((kind = ANY (ARRAY['recurring'::text, 'unscheduled'::text, 'card_on_file'::text])))
+  constraint mandates_live_method_check CHECK (((status = ANY (ARRAY['revoked'::text, 'ended'::text])) OR (payment_method_id IS NOT NULL)))
+  constraint mandates_network_transaction_id_check CHECK ((network_transaction_id <> ''::text))
+  constraint mandates_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id)
+  constraint mandates_pkey PRIMARY KEY (merchant_id, id)
+  constraint mandates_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint mandates_scope_check CHECK ((((kind = 'recurring'::text) = (subscription_id IS NOT NULL)) AND ((kind = 'unscheduled'::text) = (currency IS NOT NULL))))
+  constraint mandates_status_check CHECK ((status = ANY (ARRAY['active'::text, 'requires_reconsent'::text, 'revoked'::text, 'ended'::text])))
+  constraint mandates_storing_attempt_id_fkey FOREIGN KEY (merchant_id, storing_attempt_id) REFERENCES billing.payment_attempts(merchant_id, id) ON DELETE SET NULL (storing_attempt_id)
+  constraint mandates_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, customer_id, id)
+  constraint mandates_transaction_link_id_check CHECK ((length(transaction_link_id) = 22))
+  index CREATE UNIQUE INDEX mandates_card_on_file_live_key ON billing.mandates USING btree (merchant_id, payment_method_id, psp_id) WHERE ((kind = 'card_on_file'::text) AND (status = ANY (ARRAY['active'::text, 'requires_reconsent'::text])))
+  index CREATE INDEX mandates_customer_id_created_at_id_idx ON billing.mandates USING btree (merchant_id, customer_id, created_at DESC, id DESC)
+  index CREATE INDEX mandates_payment_method_id_idx ON billing.mandates USING btree (merchant_id, payment_method_id, psp_id) WHERE (payment_method_id IS NOT NULL)
+  index CREATE UNIQUE INDEX mandates_pkey ON billing.mandates USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX mandates_recurring_live_key ON billing.mandates USING btree (merchant_id, subscription_id) WHERE ((kind = 'recurring'::text) AND (status = ANY (ARRAY['active'::text, 'requires_reconsent'::text])))
+  index CREATE UNIQUE INDEX mandates_unscheduled_live_key ON billing.mandates USING btree (merchant_id, customer_id, currency) WHERE ((kind = 'unscheduled'::text) AND (status = ANY (ARRAY['active'::text, 'requires_reconsent'::text])))
+  trigger CREATE TRIGGER guard_mandate_update BEFORE UPDATE ON billing.mandates FOR EACH ROW EXECUTE FUNCTION billing.guard_mandate_update()
+
 table billing.merchant_api_host_claims
   column merchant_id uuid NOT NULL
   column api_host text NOT NULL
@@ -1386,6 +1433,8 @@ table billing.payment_attempts
   column issuer_code text
   column issuer_text text
   column enriched_at timestamp with time zone
+  column mandate_id uuid
+  column sent_initial_transaction_id text
   constraint payment_attempts_action_check CHECK (((action IS NULL) OR (action = ANY (ARRAY['retry'::text, 'fix_payment_method'::text, 'non_recoverable'::text]))))
   constraint payment_attempts_amount_check CHECK ((amount >= 0))
   constraint payment_attempts_card_bin_check CHECK ((card_bin ~ '^[0-9]{6,8}$'::text))
@@ -1399,6 +1448,7 @@ table billing.payment_attempts
   constraint payment_attempts_issuer_check CHECK (((length(issuer_code) <= 32) AND (length(issuer_text) <= 128)))
   constraint payment_attempts_kind_check CHECK ((kind = ANY (ARRAY['verify'::text, 'initial'::text, 'upgrade'::text, 'rebill'::text, 'dunning_retry'::text, 'customer_retry'::text, 'invoice'::text])))
   constraint payment_attempts_last4_check CHECK ((card_last4 ~ '^[0-9]{4}$'::text))
+  constraint payment_attempts_mandate_id_fkey FOREIGN KEY (merchant_id, mandate_id) REFERENCES billing.mandates(merchant_id, id) ON DELETE SET NULL (mandate_id)
   constraint payment_attempts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint payment_attempts_observed_via_check CHECK ((observed_via = ANY (ARRAY['response'::text, 'webhook'::text, 'pull'::text])))
   constraint payment_attempts_outcome_check CHECK (((category = 'approved'::text) = ((reason IS NULL) AND (action IS NULL))))
@@ -1408,6 +1458,7 @@ table billing.payment_attempts
   constraint payment_attempts_pkey PRIMARY KEY (merchant_id, id)
   constraint payment_attempts_provider_intent_id_fkey FOREIGN KEY (merchant_id, provider_intent_id) REFERENCES billing.provider_intents(merchant_id, id) ON DELETE SET NULL (provider_intent_id)
   constraint payment_attempts_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint payment_attempts_sent_initial_transaction_id_check CHECK ((sent_initial_transaction_id <> ''::text))
   constraint payment_attempts_source_check CHECK ((source = ANY (ARRAY['openrails'::text, 'provider_schedule'::text, 'external'::text])))
   constraint payment_attempts_text_check CHECK ((length(response_text) <= 128))
   constraint payment_attempts_token_type_check CHECK ((token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))
@@ -1457,8 +1508,6 @@ table billing.payment_methods
   column custodian_id uuid
   column rail_customer_ref text
   column rail_method_ref text
-  column stored_credential_recurring_ref text
-  column stored_credential_unscheduled_ref text
   column card_brand text
   column card_last4 text
   column card_exp_month smallint
@@ -1495,8 +1544,6 @@ table billing.payment_methods
   constraint payment_methods_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint payment_methods_rail_customer_ref_check CHECK ((rail_customer_ref <> ''::text))
   constraint payment_methods_rail_method_ref_check CHECK ((rail_method_ref <> ''::text))
-  constraint payment_methods_stored_credential_recurring_ref_check CHECK ((stored_credential_recurring_ref <> ''::text))
-  constraint payment_methods_stored_credential_unscheduled_ref_check CHECK ((stored_credential_unscheduled_ref <> ''::text))
   index CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text)
@@ -2952,6 +2999,7 @@ function billing.guard_billing_restore_receipt()
                     'ledger_accounts',
                     'ledger_transfers',
                     'maintenance_runs',
+                    'mandates',
                     'merchant_configuration_applications',
                     'merchant_configurations',
                     'merchant_deks',
@@ -3047,6 +3095,26 @@ function billing.guard_ledger_account_facts()
          OR (to_jsonb(NEW)-ARRAY['debits_posted','credits_posted']) IS DISTINCT FROM
             (to_jsonb(OLD)-ARRAY['debits_posted','credits_posted']) THEN
           RAISE EXCEPTION 'ledger account facts are immutable; counters are maintained by transfer insertion' USING ERRCODE='23514';
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_mandate_update()
+  CREATE OR REPLACE FUNCTION billing.guard_mandate_update()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF (to_jsonb(NEW) - ARRAY['payment_method_id', 'status', 'end_reason', 'ended_at', 'initial_transaction_id', 'network_transaction_id', 'transaction_link_id', 'storing_attempt_id', 'updated_at'])
+         IS DISTINCT FROM (to_jsonb(OLD) - ARRAY['payment_method_id', 'status', 'end_reason', 'ended_at', 'initial_transaction_id', 'network_transaction_id', 'transaction_link_id', 'storing_attempt_id', 'updated_at'])
+         OR (OLD.payment_method_id IS NOT NULL AND NEW.payment_method_id IS NOT NULL AND NEW.payment_method_id <> OLD.payment_method_id)
+         OR (OLD.initial_transaction_id IS NOT NULL AND NEW.initial_transaction_id IS DISTINCT FROM OLD.initial_transaction_id)
+         OR (OLD.network_transaction_id IS NOT NULL AND NEW.network_transaction_id IS DISTINCT FROM OLD.network_transaction_id)
+         OR (OLD.transaction_link_id IS NOT NULL AND NEW.transaction_link_id IS DISTINCT FROM OLD.transaction_link_id)
+         OR (OLD.status IN ('revoked', 'ended') AND (NEW.status, NEW.end_reason, NEW.ended_at) IS DISTINCT FROM (OLD.status, OLD.end_reason, OLD.ended_at)) THEN
+          RAISE EXCEPTION 'mandate % changes what it recorded', OLD.id USING ERRCODE = '23514';
       END IF;
       RETURN NEW;
   END;

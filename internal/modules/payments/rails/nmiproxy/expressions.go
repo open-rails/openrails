@@ -98,8 +98,8 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 	if len(req.OrderRef) > 50 {
 		return nil, fmt.Errorf("nmiproxy: order id %q exceeds NMI's 50-character limit", req.OrderRef)
 	}
-	sc := nmidirect.StoredCredentialFor(req.Context)
-	if err := sc.Validate(); err != nil {
+	sc, err := nmidirect.StoredCredentialFor(req.Context)
+	if err != nil {
 		return nil, err
 	}
 

@@ -19,7 +19,7 @@ func TestStripeRenewalKeepsExistingOperationIdentity(t *testing.T) {
 	p := subscriptions.SubscriptionCollectionPayload{
 		Initiator: charge.InitiatorMerchant, PreviousPeriodEnd: boundary, AcceptedAt: boundary, PaymentMethodID: uuid.New(), AmountMinor: 100,
 		OrderReference: subscriptions.ObligationOrderReference(sub, boundary),
-		Instrument:     charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "cus_saved", RailMethodRef: "pm_saved", StoredCredentialRecurringRef: "pi_initial"},
+		Instrument:     charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "cus_saved", RailMethodRef: "pm_saved", Mandate: &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementRecurring, InitialTransactionID: "pi_initial"}},
 		Renewal: subscriptions.RenewalTerms{PSPID: psp, SubscriptionID: sub, CustomerID: customer, FromPriceID: price, FromProductID: product,
 			PriceID: price, ProductID: product, Amount: 1_000_000, Currency: "USD", PeriodStart: boundary, PeriodEnd: boundary.Add(24 * time.Hour)},
 	}

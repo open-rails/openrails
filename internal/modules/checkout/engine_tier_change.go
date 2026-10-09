@@ -121,7 +121,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 			}
 			binding = &frozen
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, terms.PSPID), binding, false); err != nil {
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, terms.PSPID), binding); err != nil {
 			return err
 		}
 		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: terms.PSPID})
@@ -131,12 +131,16 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *TierCha
 		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return &TierChangeError{Code: billing.CodeTierChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
+		instrument, err := enrollmentInstrument(ctx, d.Gen(ctx), method, terms.PSPID)
+		if err != nil {
+			return err
+		}
 		label := psp.Key
 		email := ""
 		if user.Email != nil {
 			email = strings.TrimSpace(*user.Email)
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(method, terms.PSPID), RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: email, RequestedPrice: requested}
+		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: email, RequestedPrice: requested}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &existingSub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: "customer tier upgrade"})
 		return err
 	})

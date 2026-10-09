@@ -35,7 +35,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // below (#334: each table has a STATIC generated count/purge query — no runtime
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
-	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "notifications", "catalog_drift_events", "payment_attempts", "rebill_cycles", "payment_method_updates", "nmi_history_months",
+	"customer_entitlement_cache", "customer_entitlement_cache_stamps", "notifications", "catalog_drift_events", "payment_attempts", "rebill_cycles", "payment_method_updates", "mandates", "nmi_history_months",
 	"solana_pay_receipts", "solana_pay_references",
 	"provider_mutation_logs", "provider_intents",
 	"checkout_attempts", "product_access", "payments", "subscriptions",
@@ -71,6 +71,8 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsRebillCycles(ctx, id)
 	case "payment_method_updates":
 		return q.CountMerchantRowsPaymentMethodUpdates(ctx, id)
+	case "mandates":
+		return q.CountMerchantRowsMandates(ctx, id)
 	case "nmi_history_months":
 		return q.CountMerchantRowsNMIHistoryMonths(ctx, id)
 	case "solana_pay_receipts":
@@ -117,6 +119,8 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsRebillCycles(ctx, id)
 	case "payment_method_updates":
 		return q.PurgeMerchantRowsPaymentMethodUpdates(ctx, id)
+	case "mandates":
+		return q.PurgeMerchantRowsMandates(ctx, id)
 	case "nmi_history_months":
 		return q.PurgeMerchantRowsNMIHistoryMonths(ctx, id)
 	case "solana_pay_receipts":

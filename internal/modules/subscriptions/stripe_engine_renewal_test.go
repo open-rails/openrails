@@ -10,12 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 func renewalFixture() (*StripeService, StripeEnginePaymentParams) {
 	s, p := engineFixture()
 	p.Initial = false
-	p.Instrument.StoredCredentialRecurringRef = "pi_original"
+	p.Instrument.Mandate = &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementRecurring, InitialTransactionID: "pi_original"}
 	p.Renewal = &StripeRenewal{Obligation: uuid.NewString(), Attempt: 1, TermsSHA256: strings.Repeat("a", 64)}
 	p.OperationID = renewalOperationID(p.MerchantID, p.PSPID, p.Renewal.Obligation, p.Renewal.Attempt)
 	return s, p

@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -167,10 +168,9 @@ func (h *SubscriptionCollectionHandler) submissionHeld(ctx context.Context, in g
 // dispatchNMI sends the accepted charge under its order reference. Only the
 // writer of the original submission fence calls it.
 func (h *SubscriptionCollectionHandler) dispatchNMI(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.SubscriptionCollectionPayload, charger recurringNMICharger, proof intents.CollectionNonexecutionProof) intents.Outcome {
-	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
+	chargeContext := p.Instrument.Cites(p.Initiator, charge.AgreementRecurring)
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
-		chargeContext = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		execute = charger.ChargeInitialRecurring
 	}
 	if err := h.hit(ctx, in, failpoint.BeforeProvider); err != nil {
@@ -278,8 +278,11 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if method.CustomerID != p.Renewal.CustomerID || method.ParkReason != nil || method.ChargeVia != "pan_proxy" {
 			return charge.ErrInstrumentChanged
 		}
-		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+		if err := p.Instrument.Matches(method); err != nil {
 			return err
+		}
+		if err := mandates.Recheck(ctx, q, in.MerchantID, p.Instrument.Mandate); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		binding, err := engineCollectionBinding(ctx, q, method, p.Instrument.PSPID, p.HyperSwitch.APIBaseURL)
 		if err != nil {
@@ -543,6 +546,7 @@ func recordEngineAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
 	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.PreviousPeriodEnd}
 	a.TokenType = payments.DefaultTokenType(in.Rail, p.Instrument.Custodian)
+	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)
 }
 

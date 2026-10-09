@@ -10,8 +10,8 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -93,7 +93,10 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
 			return apperr.Conflictf("sale instrument changed before admission")
 		}
-		if err := terms.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
+		if err := terms.Instrument.Matches(method); err != nil {
+			return err
+		}
+		if err := mandates.Recheck(ctx, d.Gen(ctx), p.MerchantID, terms.Instrument.Mandate); err != nil {
 			return err
 		}
 		row, err = store.enqueue(ctx, p)

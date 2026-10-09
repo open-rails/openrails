@@ -62,7 +62,7 @@ var providerWriteSurface = map[string]string{
 	"AddRecurringPlan":                "write", // creates a remote plan
 	"EditRecurringPlan":               "write", // mutates a remote plan
 	"CreateCustomerVault":             "write", // stores a card at the provider
-	"EstablishRecurringAgreement":     "write", // records a credential-on-file verification (no funds move)
+	"VerifyStoredCredential":          "write", // records a credential-on-file verification (no funds move)
 	"UpdateCustomerVault":             "write", // mutates a stored card
 	"DeleteCustomerVault":             "write", // IRREVERSIBLE: destroys the stored card
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
@@ -159,9 +159,10 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/subscriptions/admin_service.go:cancelWithNMI": "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
 
 	// --- vault lifecycle -------------------------------------------------
-	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":       "the create half of the vault lifecycle: no durable intent exists until a vault does",
-	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect": "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
-	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":    "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":           "the create half of the vault lifecycle: no durable intent exists until a vault does",
+	"internal/http/handlers/update_subscription_payment_method.go:updateSubscriptionPaymentMethod": "a $0 recurring verification the customer is present for, before the move commits; it moves no funds and a lost answer is resent under a new order (#1168)",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect":     "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
+	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":        "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 
 	// --- catalog push + plan migration ----------------------------------
 	"internal/service/catalog_provider_nmi.go:createPlan":                 "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",

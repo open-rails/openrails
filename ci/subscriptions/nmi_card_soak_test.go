@@ -16,18 +16,24 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// storedCard is a saved method's local row, read as the engine sees it.
+// storedCard is a saved method's local row, read as the engine sees it, and
+// the storing transaction of its live card-on-file mandate.
 type storedCard struct {
-	vault, billing, lastFour, cardType, recurringRef string
+	vault, billing, lastFour, cardType, onFileRef string
 }
 
 func (w *world) storedCard(methodID string) storedCard {
 	w.t.Helper()
 	id := strings.TrimPrefix(methodID, "pm_")
 	var c storedCard
-	var last, brand *string
-	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT rail_customer_ref, rail_method_ref, card_last4, card_brand, stored_credential_recurring_ref
-		FROM billing.payment_methods WHERE id = $1::uuid`), id).Scan(&c.vault, &c.billing, &last, &brand, &c.recurringRef))
+	var last, brand, onFile *string
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT pm.rail_customer_ref, pm.rail_method_ref, pm.card_last4, pm.card_brand,
+		(SELECT m.initial_transaction_id FROM billing.mandates m WHERE m.merchant_id = pm.merchant_id AND m.payment_method_id = pm.id
+		   AND m.kind = 'card_on_file' AND m.status = 'active')
+		FROM billing.payment_methods pm WHERE pm.id = $1::uuid`), id).Scan(&c.vault, &c.billing, &last, &brand, &onFile))
+	if onFile != nil {
+		c.onFileRef = *onFile
+	}
 	if last != nil {
 		c.lastFour = *last
 	}
@@ -37,10 +43,11 @@ func (w *world) storedCard(methodID string) storedCard {
 	return c
 }
 
-// A card saved at NMI is verified as the initial customer-initiated
-// transaction of a recurring agreement (type=validate, no funds), so an
-// engine membership can move onto it: the next renewal is a merchant-
-// initiated charge of the new card referencing that verification.
+// A card saved at NMI is verified as the storing transaction of its
+// card-on-file agreement (type=validate, no funds, no recurring billing). An
+// engine membership moving onto it verifies its own recurring agreement
+// first, and the next renewal is a merchant-initiated charge of the new card
+// referencing that verification through the subscription's mandate.
 func TestNMISavedCardRecurringAgreement(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -53,10 +60,10 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			verifications := w.nmi.Validations(saved.vault)
 			require.NotEmpty(t, verifications, "the saved card was verified at NMI")
 			verification := verifications[0]
-			require.Equal(t, verification.TransactionID, saved.recurringRef, "the verification is the card's recurring agreement")
+			require.Equal(t, verification.TransactionID, saved.onFileRef, "the verification stores the card for reuse")
 			require.Equal(t, "customer", verification.Form.Get("initiated_by"))
 			require.Equal(t, "stored", verification.Form.Get("stored_credential_indicator"))
-			require.Equal(t, "recurring", verification.Form.Get("billing_method"))
+			require.Empty(t, verification.Form.Get("billing_method"), "saving a card declares no recurring agreement")
 			require.Empty(t, verification.Form.Get("initial_transaction_id"))
 			require.Empty(t, verification.Form.Get("amount"), "a verification moves no funds")
 			require.Equal(t, "mastercard", saved.cardType)
@@ -65,6 +72,16 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			require.NoError(t, err)
 			_, err = w.client[tp].SetSubscriptionPaymentMethod(t.Context(), e.sub, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: id})
 			require.NoError(t, err)
+			verifications = w.nmi.Validations(saved.vault)
+			require.Len(t, verifications, 2, "the move verifies the subscription's recurring agreement on the card")
+			agreement := verifications[1]
+			require.True(t, agreement.Approved)
+			require.Equal(t, "recurring", agreement.Form.Get("billing_method"))
+			require.Equal(t, "stored", agreement.Form.Get("stored_credential_indicator"))
+			require.True(t, strings.HasPrefix(agreement.Form.Get("orderid"), "pmr-"))
+			mandate := w.subscriptionMandate(tp, e.c.cid(), e.sub)
+			require.Equal(t, agreement.TransactionID, str(mandate.InitialTransactionID))
+			require.Equal(t, id, *mandate.PaymentMethodID)
 			sales := len(w.nmi.ledger(""))
 			end := e.periodEnd()
 			e.toFreshPeriodEnd()
@@ -76,7 +93,7 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 			require.Equal(t, mastercard.Last4, renewal.Card.Last4)
 			require.Equal(t, "merchant", renewal.InitiatedBy)
 			require.Equal(t, "used", renewal.Indicator)
-			require.Equal(t, verification.TransactionID, renewal.Initial, "the MIT references the new card's agreement")
+			require.Equal(t, agreement.TransactionID, renewal.Initial, "the MIT references the subscription's agreement on the new card")
 			require.Empty(t, w.nmi.Unexpected())
 		})
 	}
@@ -100,7 +117,7 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 	require.Zero(t, n)
 
 	funds := c.saveCard("nmi", card{Brand: "visa", Last4: "0002", Decline: "202"})
-	require.NotEmpty(t, w.storedCard(funds).recurringRef, "insufficient funds does not fail a verification")
+	require.NotEmpty(t, w.storedCard(funds).onFileRef, "insufficient funds does not fail a verification")
 	require.Zero(t, len(w.nmi.Attempts()))
 	require.Empty(t, w.nmi.Unexpected())
 }

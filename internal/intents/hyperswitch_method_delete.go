@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -174,8 +175,11 @@ func (h *HyperSwitchMethodDeleteHandler) complete(ctx context.Context, in gen.Bi
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != p.CustomerID || models.DerefStr(method.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(method, charge.AgreementUnscheduled) != nil {
+		if method.CustomerID != p.CustomerID || models.DerefStr(method.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(method) != nil {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		if _, err := mandates.EndForPaymentMethod(ctx, q, in.MerchantID, p.PaymentMethodID, mandates.EndPaymentMethodRemoved, h.Clock.Now()); err != nil {
+			return err
 		}
 		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
 		if err != nil {

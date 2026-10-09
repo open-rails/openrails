@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -31,20 +32,21 @@ var ErrEngineMethodUnusable = errors.New("the subscription's payment method cann
 // engineCollectionMethod checks the local instrument and account facts shared
 // by admission and recovery readback. Call with the customer/subscription locked;
 // the handle lock precedes the method lock, as it does in method retirement.
-func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub *models.Subscription) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
+func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub *models.Subscription) (gen.BillingPaymentMethod, charge.FrozenInstrument, charge.HyperSwitchBinding, error) {
 	var method gen.BillingPaymentMethod
+	var instrument charge.FrozenInstrument
 	var binding charge.HyperSwitchBinding
-	unsupported := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
-		return method, binding, fmt.Errorf("%w: %w", intents.ErrRebillUnsupported, err)
+	unsupported := func(err error) (gen.BillingPaymentMethod, charge.FrozenInstrument, charge.HyperSwitchBinding, error) {
+		return method, instrument, binding, fmt.Errorf("%w: %w", intents.ErrRebillUnsupported, err)
 	}
-	unusable := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
-		return method, binding, fmt.Errorf("%w: %w: %w", intents.ErrRebillUnsupported, ErrEngineMethodUnusable, err)
+	unusable := func(err error) (gen.BillingPaymentMethod, charge.FrozenInstrument, charge.HyperSwitchBinding, error) {
+		return method, instrument, binding, fmt.Errorf("%w: %w: %w", intents.ErrRebillUnsupported, ErrEngineMethodUnusable, err)
 	}
-	readFailure := func(err error) (gen.BillingPaymentMethod, charge.HyperSwitchBinding, error) {
+	readFailure := func(err error) (gen.BillingPaymentMethod, charge.FrozenInstrument, charge.HyperSwitchBinding, error) {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unusable(err)
 		}
-		return method, binding, err
+		return method, instrument, binding, err
 	}
 	if sub.PaymentMethodID == nil {
 		return unusable(ErrSubscriptionPaymentMethodMissing)
@@ -70,7 +72,7 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if err != nil {
 		return readFailure(err)
 	}
-	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method, charge.AgreementRecurring); err != nil {
+	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method); err != nil {
 		return unusable(err)
 	}
 	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != nil {
@@ -96,10 +98,19 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if err != nil {
 		return unsupported(err)
 	}
-	if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, sub.PspID), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
+	instrument = charge.FreezeInstrument(method, sub.PspID)
+	if err := charge.ValidateEngineInstrument(method.Rail, instrument, engineHyperSwitchPointer(method.Custodian, binding)); err != nil {
 		return unusable(err)
 	}
-	return method, binding, nil
+	// A renewal runs only under the subscription's active recurring mandate on
+	// this card and account; anything else waits for the member.
+	if instrument.Mandate, err = mandates.ForSubscription(ctx, q, sub.MerchantID, sub.CustomerID, sub.ID, method.ID, sub.PspID); err != nil {
+		if errors.Is(err, mandates.ErrMissing) || errors.Is(err, mandates.ErrNotActive) {
+			return unusable(err)
+		}
+		return readFailure(err)
+	}
+	return method, instrument, binding, nil
 }
 
 // EngineCustomerRetryEligibility performs no writes or provider calls. Its short
@@ -118,7 +129,7 @@ func (s *MoneyService) EngineCustomerRetryEligibility(ctx context.Context, obser
 		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.RailSubscriptionID != "" || !subscriptions.EngineCollectionDue(sub, s.now(), true) {
 			return intents.ErrRebillNotRetryable
 		}
-		if _, _, err := s.engineCollectionMethod(ctx, d, sub); err != nil {
+		if _, _, _, err := s.engineCollectionMethod(ctx, d, sub); err != nil {
 			return err
 		}
 		_, err = intents.PrepareEngineRenewalTerms(ctx, d, sub, s.now())

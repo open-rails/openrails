@@ -71,6 +71,17 @@ func (q *Queries) CountMerchantRowsExternalProviderMutationLogs(ctx context.Cont
 	return count, err
 }
 
+const countMerchantRowsMandates = `-- name: CountMerchantRowsMandates :one
+SELECT count(*) FROM billing.mandates WHERE merchant_id = $1
+`
+
+func (q *Queries) CountMerchantRowsMandates(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsMandates, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countMerchantRowsMoneyAccounts = `-- name: CountMerchantRowsMoneyAccounts :one
 SELECT count(*) FROM billing.money_settings WHERE merchant_id = $1
 `
@@ -267,6 +278,15 @@ DELETE FROM billing.provider_mutation_logs WHERE merchant_id = $1
 
 func (q *Queries) PurgeMerchantRowsExternalProviderMutationLogs(ctx context.Context, merchantID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, purgeMerchantRowsExternalProviderMutationLogs, merchantID)
+	return err
+}
+
+const purgeMerchantRowsMandates = `-- name: PurgeMerchantRowsMandates :exec
+DELETE FROM billing.mandates WHERE merchant_id = $1
+`
+
+func (q *Queries) PurgeMerchantRowsMandates(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsMandates, merchantID)
 	return err
 }
 

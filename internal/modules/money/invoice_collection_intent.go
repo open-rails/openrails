@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
@@ -453,22 +454,15 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		case "failed":
 			return fmt.Errorf("attempt %s already failed; a confirmed charge %s needs repair", attempt.ID, transactionID)
 		}
-		// An approved initial customer-present charge establishes the agreement
-		// only from retained provider custody and in the settlement transaction.
-		if p.Initiator == charge.InitiatorCustomer && p.Instrument.StoredCredentialUnscheduledRef == "" {
+		// An approved storing charge establishes the card's agreements only from
+		// retained provider custody and in the settlement transaction.
+		storing := p.Initiator == charge.InitiatorCustomer && p.Instrument.Mandate == nil
+		if storing {
 			method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID})
 			if err != nil {
 				return err
 			}
-			// Another already-submitted initial CIT on this same instrument may
-			// have settled first. Its write-once agreement does not invalidate
-			// this operation's qualified payment. Compare the frozen instrument
-			// without that newly established anchor; capture below preserves it.
-			method.StoredCredentialUnscheduledRef = nil
-			if err := p.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
-				return err
-			}
-			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID, Agreement: string(charge.AgreementUnscheduled), Ref: transactionID}); err != nil {
+			if err := p.Instrument.Matches(method); err != nil {
 				return err
 			}
 		}
@@ -529,6 +523,14 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		}
 		if err := recordInvoiceAttempt(ctx, q, intent, p, rail, attempts.Attempt{Approved: true, TransactionID: transactionID}, now); err != nil {
 			return err
+		}
+		if storing {
+			// Another storing charge on this card may have settled first; its
+			// lineage stands and this payment still counts.
+			if err := mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, PaymentMethodID: p.PaymentMethodID, PSPID: p.Instrument.PSPID,
+				Rail: rail, Currency: currency, Lineage: charge.Mandate{InitialTransactionID: transactionID}, AcceptedAt: now}); err != nil {
+				return err
+			}
 		}
 		released, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, Now: now})
 		if err != nil {
@@ -781,5 +783,6 @@ func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.BillingPro
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail, a.Kind, a.At, a.Step = in.MerchantID, p.CustomerID, p.Instrument.PSPID, rail, attempts.Invoice, at, "charge"
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = payments.DefaultTokenType(rail, p.Instrument.Custodian)
+	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, q, a)
 }

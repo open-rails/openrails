@@ -17,7 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -239,8 +241,9 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 	if !found || setup.Status != "succeeded" {
 		return PaymentMethodSetup{}, apperr.Conflictf("card setup has not completed")
 	}
-	// The confirmed off-session SetupIntent is the customer's recurring
-	// consent for this card: it anchors later merchant-initiated renewals.
+	// The confirmed off-session SetupIntent stores the card: it is the
+	// card-on-file agreement's storing transaction, which a subscription moved
+	// onto the card later cites.
 	d := s.SubscriptionService.Database()
 	err = d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		td := d.NewWithPgxTx(tx)
@@ -263,7 +266,6 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 		}
 		existing, err := q.GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{MerchantID: p.MerchantID, Rail: "stripe", PspID: p.PSPID, RailMethodRef: setup.MethodRef})
 		methodID := uuid.NewSHA1(id, []byte(setup.MethodRef))
-		anchor := true
 		if err == nil {
 			// ReadEngineSetup already verified both the exact SetupIntent and
 			// attached PaymentMethod against this accepted customer/account.
@@ -283,7 +285,6 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 				return ErrCheckoutAttemptConflict
 			}
 			methodID = existing.ID
-			anchor = existing.StoredCredentialRecurringRef == nil
 		} else if db.IsNotFound(err) {
 			now := s.now().UTC()
 			card := models.ParseCard(setup.Brand, setup.LastFour, "")
@@ -297,10 +298,9 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 		} else {
 			return err
 		}
-		if anchor {
-			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: p.MerchantID, ID: methodID, Agreement: "recurring", Ref: setup.ID}); err != nil {
-				return err
-			}
+		if err := mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: p.MerchantID, CustomerID: p.CustomerID, PaymentMethodID: methodID, PSPID: p.PSPID,
+			Rail: string(models.RailStripe), Lineage: charge.Mandate{InitialTransactionID: setup.ID}, AcceptedAt: s.now()}); err != nil {
+			return err
 		}
 		rows, err := q.CompleteStripeMethodSetup(ctx, gen.CompleteStripeMethodSetupParams{MerchantID: p.MerchantID, ID: id, Reference: &setup.ID, PaymentMethodID: methodID, Now: s.now().UTC()})
 		if err != nil {

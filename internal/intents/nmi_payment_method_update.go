@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -368,7 +369,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 			}
 			// A verification moves no funds; one lost before NMI recorded it
 			// is sent again under the same order reference.
-			ref, err = client.EstablishRecurringAgreement(ctx, vault, staged, order)
+			ref, err = client.VerifyStoredCredential(ctx, vault, staged, order, true)
 			var rejection *nmi.CustomerVaultError
 			switch {
 			case errors.Is(err, nmi.ErrProviderReadOnly):
@@ -470,7 +471,7 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		d := h.DB.NewWithPgxTx(tx)
 		n, err := d.Gen(ctx).ReplacePaymentMethodCard(ctx, gen.ReplacePaymentMethodCardParams{
 			NewRailMethodRef: staged, CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year,
-			Metadata: raw, RecurringRef: ref, UpdatedAt: now, MerchantID: intent.MerchantID, ID: pm.ID, OldRailMethodRef: oldBilling,
+			Metadata: raw, UpdatedAt: now, MerchantID: intent.MerchantID, ID: pm.ID, OldRailMethodRef: oldBilling,
 		})
 		if err != nil {
 			return err
@@ -488,12 +489,50 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, Answer: decline.Evidence{CardBrand: card.CardType, CardLast4: card.LastFour}}); err != nil {
 			return err
 		}
+		if err := moveMandatesToReplacementCard(ctx, d.Gen(ctx), intent.MerchantID, pm, ref, now); err != nil {
+			return err
+		}
 		return subscriptions.WakeForReplacedMethod(ctx, d, intent.MerchantID, pm.ID, now)
 	})
 	if err != nil {
 		return Ambiguous("replacement card verified, but local finalize failed: " + err.Error())
 	}
 	return Succeeded(nil)
+}
+
+// moveMandatesToReplacementCard ends every agreement on the replaced card and
+// gives each subscription it pays a recurring mandate citing the replacement
+// card's verification. Its unscheduled and card-on-file agreements wait for
+// the next customer-present charge on the new card.
+func moveMandatesToReplacementCard(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, pm *models.PaymentMethod, ref string, now time.Time) error {
+	if pm.PspID == nil {
+		return errors.New("an in-place card replacement needs the PSP that holds the card")
+	}
+	ended, err := mandates.EndForPaymentMethod(ctx, q, merchantID, pm.ID, mandates.EndReplaced, now)
+	if err != nil {
+		return err
+	}
+	live, err := q.ListLiveSubscriptionsOnMethod(ctx, gen.ListLiveSubscriptionsOnMethodParams{MerchantID: merchantID, PaymentMethodID: pm.ID})
+	if err != nil {
+		return err
+	}
+	subs := map[uuid.UUID]bool{}
+	for _, id := range live {
+		subs[id] = true
+	}
+	for _, m := range ended {
+		if m.SubscriptionID != nil {
+			subs[*m.SubscriptionID] = true
+		}
+	}
+	lineage := &charge.Mandate{Kind: charge.AgreementRecurring, InitialTransactionID: ref}
+	for id := range subs {
+		if _, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: merchantID, CustomerID: pm.CustomerID, PaymentMethodID: pm.ID, PSPID: *pm.PspID,
+			Rail: string(pm.Rail), Kind: charge.AgreementRecurring, SubscriptionID: &id, Lineage: lineage, AcceptedAt: now}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // billingEntry finds a vault billing entry by id.

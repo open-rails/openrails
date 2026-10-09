@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -336,6 +337,9 @@ func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.Bil
 		}
 		if method.CustomerID != customer || !charge.ChargeableOn(method, *current.PspID) || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || models.DerefStr(method.RailCustomerRef) != p.RailCustomerRef || models.DerefStr(method.RailMethodRef) != p.RailMethodRef {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		if _, err := mandates.EndForPaymentMethod(ctx, q, in.MerchantID, p.PaymentMethodID, mandates.EndPaymentMethodRemoved, h.Clock.Now()); err != nil {
+			return err
 		}
 		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
 		if err != nil {

@@ -25,12 +25,12 @@ func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	ctx := context.Background()
 	method := gen.BillingPaymentMethod{
 		ID: uuid.New(), Rail: "nmi", RailCustomerRef: new("vault-123"), RailMethodRef: new("bt-token-123"),
-		StoredCredentialUnscheduledRef: new("approved-unscheduled"),
 	}
 	request := func(currency string) ChargeRequest {
 		return ChargeRequest{
 			Initiator: charge.InitiatorMerchant, MerchantID: uuid.New(), Payer: identity.CustomerID(uuid.New()),
 			PaymentMethodID: uuid.New(), AmountCents: 1999, Currency: currency, IdempotencyKey: "test-key",
+			Instrument: charge.FrozenInstrument{Mandate: &charge.Mandate{ID: uuid.New(), Kind: charge.AgreementUnscheduled, InitialTransactionID: "approved-unscheduled"}},
 		}
 	}
 	nmiAdapter := &NMICollectionAdapter{Charger: nmidirect.New(&nmi.NMIClient{})}

@@ -383,6 +383,10 @@ func exportQuery(p contract.Profile) string {
 		switch p.Name + "." + c.Name {
 		case "psps.settings":
 			expr = "t.settings - 'rpc_api_key'"
+		case "mandates.storing_attempt_id":
+			// Payment attempts are analytics the archive leaves behind; the
+			// mandate keeps its references.
+			expr = "NULL::uuid"
 		}
 		cols[i] = "(" + expr + ")::text"
 	}

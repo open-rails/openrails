@@ -70,7 +70,7 @@ func (q *Queries) CountUnresolvedOperationsNamingPaymentMethod(ctx context.Conte
 }
 
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid
   AND custodian_id = $2::uuid
   AND custodian = $3::text
@@ -107,8 +107,6 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 		&i.CustodianID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
-		&i.StoredCredentialRecurringRef,
-		&i.StoredCredentialUnscheduledRef,
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.CardExpMonth,
@@ -130,7 +128,7 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 
 const lockPaymentMethodForCustodyRemap = `-- name: LockPaymentMethodForCustodyRemap :one
 
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
 FOR UPDATE
@@ -158,8 +156,6 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 		&i.CustodianID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
-		&i.StoredCredentialRecurringRef,
-		&i.StoredCredentialUnscheduledRef,
 		&i.CardBrand,
 		&i.CardLast4,
 		&i.CardExpMonth,
@@ -309,9 +305,9 @@ type RemapPaymentMethodCustodyParams struct {
 //   - rail_customer_ref — the old PSP vault handle stays on the row. It is
 //     dead as an address the moment custody changes, and it is the only
 //     forensic link to charges that settled before the flip;
-//   - stored_credential_*_ref — the network's credential-on-file sequence
-//     anchors are gateway-scoped, not custody-scoped. Clearing them would
-//     restart every stored-credential sequence for no reason.
+//   - the card's mandates — their references belong to the gateway account
+//     that ran the storing transaction, and a charge cites them only through
+//     that same account.
 //
 // Guarded on the CURRENT custody so a concurrent second flip cannot apply
 // twice: the WHERE clause is the compare-and-swap.

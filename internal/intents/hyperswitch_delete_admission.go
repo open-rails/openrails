@@ -142,7 +142,7 @@ func (h *HyperSwitchMethodDeleteHandler) checkFence(ctx context.Context, in gen.
 		if err != nil {
 			return err
 		}
-		if row.CustomerID != p.CustomerID || models.DerefStr(row.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(row, charge.AgreementUnscheduled) != nil {
+		if row.CustomerID != p.CustomerID || models.DerefStr(row.ParkReason) != "delete:"+in.ID.String() || p.Instrument.Matches(row) != nil {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		aliases, err := q.CountCustodianMethodAliases(ctx, gen.CountCustodianMethodAliasesParams{MerchantID: in.MerchantID, CustodianID: *in.CustodianID, MethodRef: p.Instrument.RailMethodRef, CustomerID: p.CustomerID})

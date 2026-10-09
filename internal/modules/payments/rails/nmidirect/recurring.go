@@ -24,8 +24,8 @@ func (c *Charger) ChargeInitialRecurring(ctx context.Context, req charge.Request
 // ChargeRecurringMIT charges one accepted engine period against its recurring
 // anchor. It never invokes rebill_subscription and never retries a sale.
 func (c *Charger) ChargeRecurringMIT(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
-	if req.Context.Initiator != charge.InitiatorMerchant || req.Context.FirstUse {
-		return recurringNotDispatched(errors.New("native recurring renewal requires anchored merchant initiation"))
+	if req.Context.Initiator != charge.InitiatorMerchant || req.Context.Cites == nil {
+		return recurringNotDispatched(errors.New("native recurring renewal requires its mandate's merchant initiation"))
 	}
 	return c.chargeRecurring(ctx, req)
 }
@@ -39,12 +39,12 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 		return recurringNotDispatched(errors.New("native recurring transport unavailable"))
 	}
 	if req.Instrument.Rail != "nmi" || req.Context.Agreement != charge.AgreementRecurring ||
-		strings.TrimSpace(req.Context.PriorRef) != req.Context.PriorRef ||
+		(req.Context.Cites != nil && strings.TrimSpace(req.Context.Cites.InitialTransactionID) != req.Context.Cites.InitialTransactionID) ||
 		req.OrderRef == "" || len(req.OrderRef) > 50 || strings.TrimSpace(req.OrderRef) != req.OrderRef || req.AmountMinor <= 0 {
 		return recurringNotDispatched(errors.New("native recurring sale requires exact accepted recurring terms"))
 	}
-	sc := StoredCredentialFor(req.Context)
-	if err := sc.Validate(); err != nil {
+	sc, err := StoredCredentialFor(req.Context)
+	if err != nil {
 		return recurringNotDispatched(err)
 	}
 	if _, err := nmi.WireAmount(req.AmountMinor, req.Currency); err != nil {
@@ -99,7 +99,7 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 		return charge.Result{}, nil, errors.New("native recurring sale has no exact transaction reference; verification required")
 	}
 	result := charge.Result{TransactionID: sale.TransactionID, TokenType: charge.TokenTypePSPToken}
-	if req.Context.FirstUse {
+	if req.Context.Storing() {
 		result.CapturedRef = result.TransactionID
 	}
 	return result, nil, nil

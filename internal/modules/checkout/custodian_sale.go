@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -375,12 +376,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Bil
 		}
 		return intents.Parked("bt token intent read failed before submission: " + err.Error())
 	}
-	priorRef, _ := h.priorAnchor(ctx, intent.MerchantID, p.UserID, tokenIntent.Fingerprint)
-
-	citContext := charge.InitialOneTime()
-	if priorRef != "" {
-		citContext = charge.OneTimeReuse(priorRef)
-	}
+	citContext := charge.Customer(charge.AgreementCardOnFile, h.priorAnchor(ctx, intent.MerchantID, p.UserID, cfg.Scope.ID, tokenIntent.Fingerprint))
 	res, err := charger.WithSource(nmiproxy.Source{TokenIntentID: p.TokenIntentID}).Charge(ctx, charge.Request{
 		Instrument:  charge.Instrument{Rail: nmiproxy.Rail},
 		AmountMinor: moneyutil.Cents(amountCents),
@@ -495,14 +491,12 @@ func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.Bil
 	return intents.TerminalWithEvidence("NMI declined the custodian sale; nothing was charged", evidence), nil
 }
 
-// priorAnchor finds the paying customer's instrument by the custodian's PAN
-// fingerprint and returns its unscheduled stored-credential anchor (+ the
-// instrument row). Another customer's card with the same number is never
-// found: a charge chains only to its own customer's agreement.
-func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, userID, fingerprint string) (string, *gen.BillingPaymentMethod) {
+// heldCard is the paying customer's card with the custodian's PAN
+// fingerprint. Another customer's card with the same number is never found.
+func (h *CustodianSaleIntentHandler) heldCard(ctx context.Context, merchantID uuid.UUID, userID, fingerprint string) *gen.BillingPaymentMethod {
 	customerID, err := customerIDFromUser(userID)
 	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" || err != nil {
-		return "", nil
+		return nil
 	}
 	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{CustodianID: db.CustodianIDFromContext(ctx),
 		MerchantID:  merchantID,
@@ -514,9 +508,25 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 		if !db.IsNotFound(err) {
 			log.WithContext(ctx).WithError(err).Warn("custodian sale: fingerprint dedup lookup failed")
 		}
-		return "", nil
+		return nil
 	}
-	return strings.TrimSpace(models.DerefStr(row.StoredCredentialUnscheduledRef)), &row
+	return &row
+}
+
+// priorAnchor is the card-on-file lineage of the paying customer's held card
+// on the charging account: a returning card is a one-click use of it.
+// Mandates are their customer's own.
+func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, userID string, psp uuid.UUID, fingerprint string) *charge.Mandate {
+	held := h.heldCard(ctx, merchantID, userID, fingerprint)
+	if held == nil || psp == uuid.Nil {
+		return nil
+	}
+	lineage, err := mandates.Citable(ctx, h.Sale.DB.Gen(ctx), merchantID, held.CustomerID, held.ID, psp, held.Rail, charge.AgreementCardOnFile)
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("custodian sale: card-on-file lineage lookup failed")
+		return nil
+	}
+	return lineage
 }
 
 // finalize is the verified-existing leg (no fresh charge result): the charge
@@ -544,7 +554,7 @@ func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, intent gen.Bi
 }
 
 // finalizeApproved converts the intent to a durable token, writes/reuses the
-// instrument row, persists the stored-credential anchor write-once, provisions
+// instrument row, records the card's card-on-file mandate, provisions
 // an NT when armed (never load-bearing), and registers the purchase.
 func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, intent gen.BillingProviderIntent, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) (outcome intents.Outcome) {
 	merchantID := intent.MerchantID
@@ -563,7 +573,7 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 	// with another customer's instrument and agreements.
 	var held *gen.BillingPaymentMethod
 	if tokenIntent != nil {
-		if _, prior := h.priorAnchor(ctx, merchantID, p.UserID, tokenIntent.Fingerprint); prior != nil && prior.ParkReason == nil {
+		if prior := h.heldCard(ctx, merchantID, p.UserID, tokenIntent.Fingerprint); prior != nil && prior.ParkReason == nil {
 			held = prior
 		}
 	}
@@ -600,15 +610,12 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		instrumentID = id
 	}
 	if instrumentID != nil {
-		// Anchor the unscheduled sequence write-once (identical to nmidirect).
-		if ref := strings.TrimSpace(res.CapturedRef); ref != "" && h.Sale.DB != nil {
-			if _, cerr := h.Sale.DB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
-				MerchantID: merchantID,
-				ID:         *instrumentID,
-				Agreement:  string(charge.AgreementUnscheduled),
-				Ref:        ref,
-			}); cerr != nil {
-				log.WithContext(ctx).WithError(cerr).Warn("custodian sale: failed to persist stored-credential anchor (#297); next charge re-captures")
+		// The card is kept for reuse: a storing charge establishes its
+		// card-on-file agreement; one that cited it leaves it standing.
+		if customerID, perr := customerIDFromUser(p.UserID); perr == nil && h.Sale.DB != nil && cfg.Scope.ID != uuid.Nil && strings.TrimSpace(res.TransactionID) != "" {
+			if merr := mandates.RecordStored(ctx, h.Sale.DB.Gen(ctx), mandates.Stored{MerchantID: merchantID, CustomerID: customerID, PaymentMethodID: *instrumentID, PSPID: cfg.Scope.ID,
+				Rail: nmiproxy.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: res.TransactionID}, AcceptedAt: h.Sale.PurchaseService.now()}); merr != nil {
+				log.WithContext(ctx).WithError(merr).Warn("custodian sale: failed to record the card's mandate; the next customer-present charge stores it")
 			}
 		}
 		// NT provisioning (B8): armed by config, idempotent per PAN, and never

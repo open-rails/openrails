@@ -44,6 +44,7 @@ var ownedTables = []string{
 	"ledger_accounts",
 	"ledger_transfers",
 	"maintenance_runs",
+	"mandates",
 	"merchant_api_host_claims",
 	"merchant_configuration_applications",
 	"merchant_configurations",

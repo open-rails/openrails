@@ -18,18 +18,15 @@ func prepareUnscheduledCollection(method gen.BillingPaymentMethod, req ChargeReq
 	if err := moneyutil.RequireFiatCurrency(currency); err != nil {
 		return nil, fmt.Errorf("collection: refusing to charge without an established currency: %w", err)
 	}
-	anchor := strings.TrimSpace(models.DerefStr(method.StoredCredentialUnscheduledRef))
-	posture := charge.UnscheduledMIT(anchor)
+	var posture charge.Context
 	switch req.Initiator {
 	case charge.InitiatorCustomer:
-		posture = charge.OneTimeReuse(anchor)
-		if anchor == "" {
-			posture = charge.InitialOneTime()
-		}
+		posture = req.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementCardOnFile)
 	case charge.InitiatorMerchant:
-		if anchor == "" {
-			return nil, fmt.Errorf("payment method missing approved unscheduled credential reference")
+		if m := req.Instrument.Mandate; m == nil || m.Kind != charge.AgreementUnscheduled {
+			return nil, fmt.Errorf("collection requires the currency's active unscheduled mandate")
 		}
+		posture = req.Instrument.Cites(charge.InitiatorMerchant, charge.AgreementUnscheduled)
 	default:
 		return nil, fmt.Errorf("collection initiation is not established")
 	}

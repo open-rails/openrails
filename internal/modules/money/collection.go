@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -101,13 +102,13 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if err := req.Instrument.Validate(); err != nil {
 		return nil, err
 	}
-	if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
+	if err := req.Instrument.Matches(method); err != nil {
 		return nil, err
 	}
 	if req.Initiator == charge.InitiatorMerchant {
 		// The card lost its agreement after enqueue: nothing is sent, and the
 		// next attempt stops for the customer.
-		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), method); err != nil {
+		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), method, req.Currency); err != nil {
 			if errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", charge.ErrInstrumentChanged, err)
 			}
@@ -180,8 +181,11 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 		if method.CustomerID != req.Payer.UUID() || method.ParkReason != nil || normalizeRail(method.Rail) != rail {
 			return charge.ErrInstrumentChanged
 		}
-		if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
+		if err := req.Instrument.Matches(method); err != nil {
 			return err
+		}
+		if err := mandates.Recheck(ctx, q, req.MerchantID, req.Instrument.Mandate); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		if method.Custodian == models.CustodianHyperSwitch {
 			if req.HyperSwitch == nil {

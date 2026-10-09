@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 
 	"github.com/google/uuid"
@@ -153,9 +154,6 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if method.CustomerID != sub.CustomerID || !method.ChargeableOn(sub.PspID) || method.Rail != sub.Rail {
 			return errors.New("rebill method is not owned by this customer and provider account")
 		}
-		if strings.TrimSpace(method.StoredCredentialRecurringRef) == "" {
-			return fmt.Errorf("rebill: %w", charge.ErrAgreementRequired)
-		}
 		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyNMISchedule || method.Custodian != models.CustodianPSP) {
 			return ErrRebillUnsupported
 		}
@@ -163,7 +161,11 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if err != nil {
 			return err
 		}
-		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow, sub.PspID), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
+		instrument := charge.FreezeInstrument(methodRow, sub.PspID)
+		if instrument.Mandate, err = mandates.ForSubscription(ctx, d.Gen(ctx), mid.UUID(), sub.CustomerID, sub.ID, method.ID, sub.PspID); err != nil {
+			return fmt.Errorf("rebill: %w", err)
+		}
+		p := subscriptions.ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: instrument, Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.ObligationOrderReference(sub.ID, terms.PeriodStart), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
 		policy, err := subscriptions.CasePolicy(ctx, d, sub)
 		if err != nil {
 			return err

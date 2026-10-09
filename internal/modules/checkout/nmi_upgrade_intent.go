@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	paymentattempts "github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -197,11 +198,11 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.BillingPro
 		if !claimed {
 			return intents.Ambiguous("proration submission already owned; reconcile receipt")
 		}
-		credential := charge.InitialOneTime()
-		if p.Instrument.StoredCredentialUnscheduledRef != "" {
-			credential = charge.OneTimeReuse(p.Instrument.StoredCredentialUnscheduledRef)
+		credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementCardOnFile))
+		if err != nil {
+			return intents.Ambiguous("proration flow: " + err.Error())
 		}
-		sale, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: moneyutil.Cents(proration), Currency: p.Currency, OrderID: in.ID.String(), OrderDescription: "Upgrade: " + p.ProductName, StoredCredential: nmidirect.StoredCredentialFor(credential)})
+		sale, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: moneyutil.Cents(proration), Currency: p.Currency, OrderID: in.ID.String(), OrderDescription: "Upgrade: " + p.ProductName, StoredCredential: credential})
 		if callErr != nil {
 			if errors.Is(callErr, nmi.ErrDuplicateTransaction) {
 				// NMI's duplicate check refused this unique order unprocessed.
@@ -620,10 +621,14 @@ func (h *NMIUpgradeIntentHandler) recordPaidProration(ctx context.Context, in ge
 		if stored.CustomerID != customer || stored.PriceID != p.PriceID || stored.SubscriptionID == nil || *stored.SubscriptionID != p.OldSubscriptionID || stored.PspID == nil || *stored.PspID != *in.PspID || stored.Rail != models.RailNMI || stored.TransactionID != receipt.TransactionID() || stored.Amount != p.ProrationAmount || stored.ListAmount != p.RecurringAmount || stored.Currency != p.Currency || stored.Status != "completed" || stored.MoneyMovement != models.MoneyMovementRail || stored.RefundedPaymentID != nil || !stored.PurchasedAt.Equal(p.PeriodStart) || stored.Metadata["upgrade_intent_id"] != in.ID.String() {
 			return errors.New("recorded proration contradicts the accepted tier change")
 		}
-		if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: payment.TransactionID}); err != nil {
+		if err := recordProrationAttempt(ctx, d, in, p, customer, paymentattempts.Attempt{Approved: true, TransactionID: payment.TransactionID, PaymentID: &payment.ID}, h.Checkout.now()); err != nil {
 			return err
 		}
-		return recordProrationAttempt(ctx, d, in, p, customer, paymentattempts.Attempt{Approved: true, TransactionID: payment.TransactionID, PaymentID: &payment.ID}, h.Checkout.now())
+		if p.Instrument.Mandate != nil {
+			return nil
+		}
+		return mandates.RecordStored(ctx, d.Gen(ctx), mandates.Stored{MerchantID: in.MerchantID, CustomerID: customer, PaymentMethodID: p.PaymentMethodID, PSPID: *in.PspID,
+			Rail: in.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: payment.TransactionID}, AcceptedAt: h.Checkout.now()})
 	})
 }
 
@@ -698,5 +703,6 @@ func recordProrationAttempt(ctx context.Context, d *db.DB, in gen.BillingProvide
 	a.Kind, a.Owner, a.At, a.Target, a.Step = paymentattempts.Upgrade, paymentattempts.OwnerNMISchedule, at, p.PriceID.String(), "proration"
 	a.Amount, a.Currency, a.TokenType = p.ProrationAmount, p.Currency, charge.TokenTypePSPToken
 	a.SubscriptionID, a.PaymentMethodID, a.ProviderIntentID = &p.OldSubscriptionID, &p.PaymentMethodID, &in.ID
+	a.Sent = p.Instrument.Mandate
 	return paymentattempts.Record(ctx, d.Gen(ctx), a)
 }

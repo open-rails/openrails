@@ -259,9 +259,6 @@ func PaymentMethodFromGen(p gen.BillingPaymentMethod) (*PaymentMethod, error) {
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
 
-		StoredCredentialRecurringRef:   DerefStr(p.StoredCredentialRecurringRef),
-		StoredCredentialUnscheduledRef: DerefStr(p.StoredCredentialUnscheduledRef),
-
 		Custodian:          p.Custodian,
 		CustodianID:        p.CustodianID,
 		Fingerprint:        DerefStr(p.Fingerprint),

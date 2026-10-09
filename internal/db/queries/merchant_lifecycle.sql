@@ -9,6 +9,12 @@ SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND 
 -- name: PurgeMerchantRowsCatalogDriftEvents :exec
 DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
 
+-- name: CountMerchantRowsMandates :one
+SELECT count(*) FROM billing.mandates WHERE merchant_id = $1;
+
+-- name: PurgeMerchantRowsMandates :exec
+DELETE FROM billing.mandates WHERE merchant_id = $1;
+
 -- name: CountMerchantRowsPaymentMethods :one
 SELECT count(*) FROM billing.payment_methods WHERE merchant_id = $1;
 

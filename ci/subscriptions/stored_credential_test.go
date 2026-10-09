@@ -3,6 +3,7 @@
 package subscriptions_test
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -24,9 +26,23 @@ import (
 
 const agreementRequired = "stored_credential_required"
 
-// agreements is a stored card's recurring and unscheduled agreement.
+// agreements is the lineage of a stored card's active recurring mandate and
+// of its active unscheduled one (the collection mandate, else its card-on-file
+// consent): "" when the card has none that can be charged under.
 func (w *world) agreements(method string) (recurring, unscheduled string) {
-	return w.methodRow(method, "COALESCE(stored_credential_recurring_ref, '')"), w.methodRow(method, "COALESCE(stored_credential_unscheduled_ref, '')")
+	w.t.Helper()
+	lineage := func(kinds string) string {
+		var ref *string
+		err := w.pool.QueryRow(w.t.Context(), w.q(`SELECT initial_transaction_id FROM billing.mandates
+			WHERE payment_method_id = $1::uuid AND status = 'active' AND kind = ANY (string_to_array($2, ','))
+			ORDER BY array_position(string_to_array($2, ','), kind), created_at LIMIT 1`), strings.TrimPrefix(method, "pm_"), kinds).Scan(&ref)
+		if errors.Is(err, pgx.ErrNoRows) || ref == nil {
+			return ""
+		}
+		require.NoError(w.t, err)
+		return *ref
+	}
+	return lineage("recurring"), lineage("unscheduled,card_on_file")
 }
 
 // methodUpdates is a stored card's recorded updates, as source/kind.
@@ -114,30 +130,34 @@ func credentialFields(s *nmimock.Sale) []string {
 	return []string{s.InitiatedBy, s.Indicator, s.Initial}
 }
 
-// A card replaced in place keeps only the recurring agreement its
-// verification anchored. Invoice collection stops for the customer rather
-// than name the old card's unscheduled agreement; the customer's own payment
-// anchors the new card's, and later collections name it.
+// A card replaced in place ends the replaced card's agreements: its
+// verification declares a recurring one, which no subscription of this
+// customer takes. Invoice collection stops for the customer rather than name
+// the old card's unscheduled agreement; the customer's own payment anchors the
+// new card's, and later collections name it.
 func TestReplacedCardDropsUnscheduledAgreement(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
 	method := c.saveCard("nmi", visa)
+	saved := w.nmi.Validations(w.vaultOf(method))[0]
 	first := w.arrearsInvoice(c)
 	w.refreshProviders()
 	w.settleCollectionScans()
 	c.must(http.MethodPost, "/invoices/"+first.String()+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": method})
 	w.settle()
 	_, old := w.agreements(method)
-	require.Equal(t, w.nmi.LastSale().TransactionID, old)
+	require.Equal(t, saved.TransactionID, old, "saving the card stored it for reuse")
+	require.Equal(t, []string{"customer", "used", old}, credentialFields(w.nmi.LastSale()), "the customer's payment uses it")
 	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": method, "currency": "USD"})
 
 	c.must(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})
 	w.settle()
 	recurring, unscheduled := w.agreements(method)
 	require.Empty(t, unscheduled, "the replaced card's unscheduled agreement goes with it")
+	require.Empty(t, recurring, "no subscription takes the replacement's recurring verification")
 	verified := w.nmi.Validations(w.vaultOf(method))
-	require.Equal(t, verified[len(verified)-1].TransactionID, recurring, "the replacement's verification anchors its recurring agreement")
+	require.Equal(t, "recurring", verified[len(verified)-1].Form.Get("billing_method"))
 
 	second := w.arrearsInvoice(c)
 	sent := len(w.nmi.Attempts())

@@ -136,11 +136,22 @@ func TestDirectPostWireShapes(t *testing.T) {
 		}, map[string]string{"recurring": "edit_plan", "current_plan_id": "plan-1", "plan_amount": "19.99", "plan_name": "New"},
 			[]string{"plan_id", "day_frequency", "plan_payments"}},
 		{"recurring agreement verification moves no funds", func(t *testing.T, c *NMIClient) {
-			id, err := c.EstablishRecurringAgreement(t.Context(), " v1 ", "b1", "ord")
+			id, err := c.VerifyStoredCredential(t.Context(), " v1 ", "b1", "ord", true)
 			require.NoError(t, err)
 			require.Equal(t, "txn-1", id)
 		}, map[string]string{"type": "validate", "customer_vault_id": "v1", "billing_id": "b1", "orderid": "ord", "billing_method": "recurring", "initiated_by": "customer", "stored_credential_indicator": "stored"},
 			[]string{"amount", "initial_transaction_id"}},
+		{"card-on-file verification declares no recurring billing", func(t *testing.T, c *NMIClient) {
+			id, err := c.VerifyStoredCredential(t.Context(), "v1", "b1", "ord", false)
+			require.NoError(t, err)
+			require.Equal(t, "txn-1", id)
+		}, map[string]string{"type": "validate", "customer_vault_id": "v1", "initiated_by": "customer", "stored_credential_indicator": "stored"},
+			[]string{"amount", "initial_transaction_id", "billing_method"}},
+		{"a purchase that stores nothing sends no stored-credential fields", func(t *testing.T, c *NMIClient) {
+			_, err := c.RunSale(t.Context(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "ord"})
+			require.NoError(t, err)
+		}, map[string]string{"type": "sale", "customer_vault_id": "v1", "amount": "1.00"},
+			[]string{"initiated_by", "stored_credential_indicator", "initial_transaction_id", "billing_method"}},
 		{"subscription payment source", func(t *testing.T, c *NMIClient) {
 			require.NoError(t, c.UpdateSubscriptionPaymentSource(t.Context(), "s1", "v2"))
 		}, map[string]string{"recurring": "update_subscription", "subscription_id": "s1", "customer_vault_id": "v2"}, []string{"plan_amount"}},
@@ -254,7 +265,6 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 	unaccounted := *c
 	unaccounted.SecurityKey = "rotated-under-it"
 	for name, err := range map[string]error{
-		"sale without credential": sale(func(p *SaleParams) { p.StoredCredential = nil }),
 		"sale with invalid credential": sale(func(p *SaleParams) {
 			p.StoredCredential = &StoredCredential{InitiatedBy: InitiatedByMerchant, Indicator: IndicatorStored}
 		}),
@@ -280,7 +290,7 @@ func TestRequestsRefusedBeforeTheGateway(t *testing.T) {
 		"plan without name":      c.AddRecurringPlan(ctx, "p", "", 100, "USD", 30, 0),
 		"plan edit without id":   c.EditRecurringPlan(ctx, "", "n", 100, "USD"),
 		"agreement order id over 50": func() error {
-			_, err := c.EstablishRecurringAgreement(ctx, "v", "", strings.Repeat("o", 51))
+			_, err := c.VerifyStoredCredential(ctx, "v", "", strings.Repeat("o", 51), true)
 			return err
 		}(),
 		"native sale with rotated key": unaccounted.PrepareRecurringSale(ctx, "v", "b"),

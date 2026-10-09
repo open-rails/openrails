@@ -174,9 +174,9 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 		TokenType:     tokenType,
 	}
-	// Only an approved initial CIT establishes the agreement sequence anchor
-	// (identical to nmidirect: the replay ref is NMI's transactionid).
-	if req.Context.FirstUse && req.Context.Initiator == charge.InitiatorCustomer {
+	// An approved storing transaction is its agreement's lineage (as in
+	// nmidirect: NMI's transactionid).
+	if req.Context.Storing() {
 		res.CapturedRef = res.TransactionID
 	}
 	return res, nil

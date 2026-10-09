@@ -8,7 +8,7 @@ INSERT INTO billing.payment_methods (
     card_brand, card_last4, card_exp_month, card_exp_year,
     metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
-    network_token_par, charge_via, stored_credential_recurring_ref
+    network_token_par, charge_via
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, NULLIF(sqlc.arg(rail_customer_ref)::text, ''), NULLIF(sqlc.arg(rail_method_ref)::text, ''),
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(card_exp_month)::smallint, sqlc.narg(card_exp_year)::smallint,
@@ -20,8 +20,7 @@ INSERT INTO billing.payment_methods (
     sqlc.narg(custodian_id)::uuid,
     NULLIF(sqlc.arg(fingerprint)::text, ''), NULLIF(sqlc.arg(network_token_id)::text, ''),
     NULLIF(sqlc.arg(network_token_status)::text, ''), NULLIF(sqlc.arg(network_token_par)::text, ''),
-    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
-    NULLIF(sqlc.arg(stored_credential_recurring_ref)::text, '')
+    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy')
 );
 
 -- name: GetPaymentMethodByID :one
@@ -173,44 +172,6 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id) AND pm.psp_id = sqlc.arg(psp_id)::u
 ORDER BY pm.created_at
 LIMIT 1;
 
--- name: CaptureStoredCredentialRef :execrows
--- #297: persist the rail-scoped stored-credential replay reference captured by
--- a successful charge, WRITE-ONCE per agreement type — an existing non-empty
--- reference is never overwritten (the sequence anchors on its first capture).
-UPDATE billing.payment_methods SET
-    stored_credential_recurring_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'recurring' THEN NULLIF(sqlc.arg(ref)::text, '')
-        ELSE stored_credential_recurring_ref END,
-    stored_credential_unscheduled_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN NULLIF(sqlc.arg(ref)::text, '')
-        ELSE stored_credential_unscheduled_ref END,
-    updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND id = sqlc.arg(id)
-  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
-    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL));
-
--- name: CaptureStoredCredentialRefByRailInstrument :execrows
--- #297: instrument-handle variant of CaptureStoredCredentialRef for charge
--- sites that never load the local row (checkout sale/subscription intents).
--- Same write-once semantics.
-UPDATE billing.payment_methods SET
-    stored_credential_recurring_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'recurring' THEN NULLIF(sqlc.arg(ref)::text, '')
-        ELSE stored_credential_recurring_ref END,
-    stored_credential_unscheduled_ref = CASE
-        WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN NULLIF(sqlc.arg(ref)::text, '')
-        ELSE stored_credential_unscheduled_ref END,
-    updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
-  AND rail = sqlc.arg(rail)
-  AND rail_customer_ref = sqlc.arg(rail_customer_ref)::text
-  AND (rail_method_ref = sqlc.arg(rail_method_ref)::text
-       OR sqlc.arg(rail_method_ref)::text = ''
-       OR rail_method_ref IS NULL)
-  AND ((sqlc.arg(agreement)::text = 'recurring' AND stored_credential_recurring_ref IS NULL)
-    OR (sqlc.arg(agreement)::text = 'unscheduled' AND stored_credential_unscheduled_ref IS NULL));
-
 -- name: GetPaymentMethodByFingerprint :one
 -- #795: dedup lookup — an intent whose fingerprint matches a stored instrument
 -- reuses that instrument instead of minting a duplicate. Scoped by the
@@ -321,9 +282,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: ReplacePaymentMethodCard :execrows
 -- An in-place card replacement moves the method onto the verified billing
--- entry: card metadata and its recurring agreement change together. The
--- verification anchors only the recurring agreement, so the replaced card's
--- unscheduled agreement goes; the next customer-initiated charge anchors one.
+-- entry; its agreements are replaced in the same transaction.
 UPDATE billing.payment_methods SET
     rail_method_ref = sqlc.arg(new_rail_method_ref)::text,
     card_brand = sqlc.narg(card_brand)::text,
@@ -331,8 +290,6 @@ UPDATE billing.payment_methods SET
     card_exp_month = sqlc.narg(card_exp_month)::smallint,
     card_exp_year = sqlc.narg(card_exp_year)::smallint,
     metadata = sqlc.narg(metadata),
-    stored_credential_recurring_ref = NULLIF(sqlc.arg(recurring_ref)::text, ''),
-    stored_credential_unscheduled_ref = NULL,
     park_reason = NULL,
     parked_at = NULL,
     updated_at = sqlc.arg(updated_at)::timestamptz
@@ -365,16 +322,6 @@ SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 FOR UPDATE;
 
--- name: VoidStoredCredentialRefs :execrows
--- #1166: a card reissued under another brand carries none of its customer's
--- agreements. No merchant-initiated charge until a customer-initiated one
--- anchors them again.
-UPDATE billing.payment_methods SET
-    stored_credential_recurring_ref = NULL,
-    stored_credential_unscheduled_ref = NULL,
-    updated_at = sqlc.arg(updated_at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
-
 -- name: RefreshStripePaymentMethodCard :execrows
 -- Stripe's current card for a mirrored method: brand, last four, expiry and
 -- fingerprint.
@@ -386,15 +333,6 @@ UPDATE billing.payment_methods SET
     fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND rail = 'stripe';
-
--- name: PaymentMethodBrandChanged :one
--- #1166: whether an account updater ever reissued the card under another
--- brand.
-SELECT EXISTS (
-    SELECT 1 FROM billing.payment_method_updates
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-      AND kind = 'brand_changed'
-);
 
 -- name: ParkPaymentMethod :execrows
 -- #1115: an account updater reported the card's account closed. The first

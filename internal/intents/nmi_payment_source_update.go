@@ -18,7 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/idguard"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -387,9 +389,13 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 // finalize points the local subscription at the new payment method — only
 // ever called AFTER the provider side is confirmed. Idempotent; a subscription
 // row gone out-of-band leaves nothing to finalize.
-// A subscription waiting for a new card resumes dunning on it.
+// A subscription waiting for a new card resumes dunning on it. Its recurring
+// mandate moves with it, citing the new card's recurring lineage; without one,
+// OpenRails' own recovery charges wait for a storing transaction (NMI keeps
+// billing its schedule).
 func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.BillingProviderIntent, p NMIPaymentSourceUpdatePayload) error {
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
 		repo := subscriptions.NewSubscriptionRepo(h.DB.NewWithPgxTx(tx))
 		sub, err := repo.GetByIDForUpdate(ctx, *intent.SubscriptionID)
 		if err != nil {
@@ -403,6 +409,14 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 		}
 		now := h.now()
 		newID := p.NewPaymentMethodID
+		lineage, err := mandates.Citable(ctx, q, intent.MerchantID, sub.CustomerID, newID, sub.PspID, string(sub.Rail), charge.AgreementRecurring)
+		if err != nil {
+			return err
+		}
+		if _, err := mandates.Replace(ctx, q, mandates.Agreement{MerchantID: intent.MerchantID, CustomerID: sub.CustomerID, PaymentMethodID: newID, PSPID: sub.PspID,
+			Rail: string(sub.Rail), Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: lineage, AcceptedAt: now}, now); err != nil {
+			return err
+		}
 		sub.PaymentMethodID = &newID
 		if err := subscriptions.ReplaceMethod(sub, now); err != nil {
 			return err

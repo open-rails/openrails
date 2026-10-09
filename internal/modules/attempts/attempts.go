@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -101,6 +102,9 @@ type Attempt struct {
 	EnrichedAt time.Time
 	// Cycle is the rebill a rebill, dunning or customer retry belongs to.
 	Cycle *Cycle
+	// Sent is the mandate whose lineage the attempt referenced, nil for a
+	// storing transaction or a purchase.
+	Sent *charge.Mandate
 }
 
 // Cycle is one expected rebill: the subscription's paid period that came due
@@ -167,6 +171,13 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 	}
 	if a.Owner != "" {
 		row.Owner = string(a.Owner)
+	}
+	if a.Sent != nil {
+		row.MandateID = &a.Sent.ID
+		// Stripe sends the network references of cards it stored itself.
+		if rail != "stripe" {
+			row.SentInitialTransactionID = optional(a.Sent.InitialTransactionID)
+		}
 	}
 	if a.NewCard {
 		row.CardEntry = "new"

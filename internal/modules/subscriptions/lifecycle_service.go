@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -1156,8 +1157,11 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || method.ParkReason != nil || method.StoredCredentialRecurringRef == nil || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method, charge.AgreementRecurring) != nil {
+			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || method.ParkReason != nil || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
+			}
+			if _, err := mandates.ForSubscription(ctx, q, subscription.MerchantID, subscription.CustomerID, subscription.ID, method.ID, subscription.PspID); err != nil {
+				return fmt.Errorf("resume engine: %w", err)
 			}
 		}
 		if _, err := Transition(subscription, lifecycle.Resume{At: now}, now); err != nil {

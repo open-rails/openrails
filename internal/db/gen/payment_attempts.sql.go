@@ -123,7 +123,7 @@ func (q *Queries) EnrichPaymentAttempt(ctx context.Context, arg EnrichPaymentAtt
 }
 
 const getPaymentAttempt = `-- name: GetPaymentAttempt :one
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -173,6 +173,8 @@ func (q *Queries) GetPaymentAttempt(ctx context.Context, arg GetPaymentAttemptPa
 		&i.IssuerCode,
 		&i.IssuerText,
 		&i.EnrichedAt,
+		&i.MandateID,
+		&i.SentInitialTransactionID,
 	)
 	return i, err
 }
@@ -183,7 +185,7 @@ INSERT INTO billing.payment_attempts (
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
     card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target,
     subscription_id, payment_method_id, payment_id, provider_intent_id, step, cycle_id,
-    card_bin, issuer_code, issuer_text, enriched_at
+    card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
     $5::text, $6::text, $7::text, $8::text,
@@ -196,48 +198,50 @@ INSERT INTO billing.payment_attempts (
     $28::uuid, $29::uuid, $30::uuid,
     $31::text, $32::uuid,
     $33::text, $34::text, $35::text,
-    $36::timestamptz
+    $36::timestamptz, $37::uuid, $38::text
 )
 ON CONFLICT DO NOTHING
 `
 
 type InsertPaymentAttemptParams struct {
-	ID               uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	PspID            uuid.UUID
-	Rail             string
-	Kind             string
-	Owner            string
-	CardEntry        string
-	Source           string
-	ObservedVia      string
-	Category         string
-	Reason           *string
-	Action           *string
-	ResponseCode     *string
-	ResponseText     *string
-	TransactionID    *string
-	AvsResult        *string
-	CvvResult        *string
-	CardBrand        *string
-	CardLast4        *string
-	TokenType        *string
-	Amount           int64
-	Currency         *string
-	AttemptedAt      time.Time
-	CheckoutID       *uuid.UUID
-	CheckoutTarget   *string
-	SubscriptionID   *uuid.UUID
-	PaymentMethodID  *uuid.UUID
-	PaymentID        *uuid.UUID
-	ProviderIntentID *uuid.UUID
-	Step             string
-	CycleID          *uuid.UUID
-	CardBin          *string
-	IssuerCode       *string
-	IssuerText       *string
-	EnrichedAt       *time.Time
+	ID                       uuid.UUID
+	MerchantID               uuid.UUID
+	CustomerID               uuid.UUID
+	PspID                    uuid.UUID
+	Rail                     string
+	Kind                     string
+	Owner                    string
+	CardEntry                string
+	Source                   string
+	ObservedVia              string
+	Category                 string
+	Reason                   *string
+	Action                   *string
+	ResponseCode             *string
+	ResponseText             *string
+	TransactionID            *string
+	AvsResult                *string
+	CvvResult                *string
+	CardBrand                *string
+	CardLast4                *string
+	TokenType                *string
+	Amount                   int64
+	Currency                 *string
+	AttemptedAt              time.Time
+	CheckoutID               *uuid.UUID
+	CheckoutTarget           *string
+	SubscriptionID           *uuid.UUID
+	PaymentMethodID          *uuid.UUID
+	PaymentID                *uuid.UUID
+	ProviderIntentID         *uuid.UUID
+	Step                     string
+	CycleID                  *uuid.UUID
+	CardBin                  *string
+	IssuerCode               *string
+	IssuerText               *string
+	EnrichedAt               *time.Time
+	MandateID                *uuid.UUID
+	SentInitialTransactionID *string
 }
 
 // #1110: idempotent on the gateway transaction id, else on the operation step.
@@ -279,6 +283,8 @@ func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAtt
 		arg.IssuerCode,
 		arg.IssuerText,
 		arg.EnrichedAt,
+		arg.MandateID,
+		arg.SentInitialTransactionID,
 	)
 	if err != nil {
 		return 0, err
@@ -324,7 +330,7 @@ func (q *Queries) LatestPaymentCheckoutAttempt(ctx context.Context, arg LatestPa
 }
 
 const listCycleAttempts = `-- name: ListCycleAttempts :many
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND cycle_id = $2::uuid
 ORDER BY attempted_at, id
 `
@@ -382,6 +388,8 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 			&i.IssuerCode,
 			&i.IssuerText,
 			&i.EnrichedAt,
+			&i.MandateID,
+			&i.SentInitialTransactionID,
 		); err != nil {
 			return nil, err
 		}
@@ -394,7 +402,7 @@ func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsPa
 }
 
 const listPaymentAttempts = `-- name: ListPaymentAttempts :many
-SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.provider_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at
+SELECT a.id, a.merchant_id, a.customer_id, a.psp_id, a.rail, a.kind, a.owner, a.card_entry, a.source, a.observed_via, a.category, a.reason, a.action, a.response_code, a.response_text, a.transaction_id, a.avs_result, a.cvv_result, a.card_brand, a.card_last4, a.token_type, a.amount, a.currency, a.attempted_at, a.checkout_id, a.checkout_target, a.subscription_id, a.payment_method_id, a.payment_id, a.provider_intent_id, a.step, a.created_at, a.cycle_id, a.card_bin, a.issuer_code, a.issuer_text, a.enriched_at, a.mandate_id, a.sent_initial_transaction_id
 FROM billing.payment_attempts a
 WHERE a.merchant_id = $1::uuid
   AND ($2::text[] IS NULL OR a.kind = ANY($2::text[]))
@@ -516,6 +524,8 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 			&i.IssuerCode,
 			&i.IssuerText,
 			&i.EnrichedAt,
+			&i.MandateID,
+			&i.SentInitialTransactionID,
 		); err != nil {
 			return nil, err
 		}
@@ -528,7 +538,7 @@ func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemp
 }
 
 const listPaymentAttemptsByIDs = `-- name: ListPaymentAttemptsByIDs :many
-SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at FROM billing.payment_attempts
+SELECT id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via, category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result, card_brand, card_last4, token_type, amount, currency, attempted_at, checkout_id, checkout_target, subscription_id, payment_method_id, payment_id, provider_intent_id, step, created_at, cycle_id, card_bin, issuer_code, issuer_text, enriched_at, mandate_id, sent_initial_transaction_id FROM billing.payment_attempts
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY attempted_at DESC, id DESC
 `
@@ -585,6 +595,8 @@ func (q *Queries) ListPaymentAttemptsByIDs(ctx context.Context, arg ListPaymentA
 			&i.IssuerCode,
 			&i.IssuerText,
 			&i.EnrichedAt,
+			&i.MandateID,
+			&i.SentInitialTransactionID,
 		); err != nil {
 			return nil, err
 		}

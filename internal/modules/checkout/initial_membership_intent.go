@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -154,11 +155,8 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	mode := p.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementRecurring)
 	if proxy != nil {
-		mode := charge.InitialRecurring()
-		if p.Instrument.StoredCredentialRecurringRef != "" {
-			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
-		}
 		result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
 		if errors.Is(err, charge.ErrNotDispatched) {
 			return h.completeInitialNonexecution(ctx, in, proof)
@@ -181,10 +179,6 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 		return h.Verify(ctx, in)
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-		mode := charge.InitialRecurring()
-		if p.Instrument.StoredCredentialRecurringRef != "" {
-			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
-		}
 		result, refusal, err := nmidirect.New(client).ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
 		if errors.Is(err, charge.ErrNotDispatched) {
 			return h.completeInitialNonexecution(ctx, in, proof)
@@ -208,11 +202,9 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 	}
 	var credential *nmi.StoredCredential
 	if p.Terms.Amount > 0 {
-		mode := charge.InitialRecurring()
-		if p.Instrument.StoredCredentialRecurringRef != "" {
-			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+		if credential, err = nmidirect.StoredCredentialFor(mode); err != nil {
+			return h.completeInitialNonexecution(ctx, in, proof)
 		}
-		credential = nmidirect.StoredCredentialFor(mode)
 	}
 	order := intents.NMIEnrollmentOrder(in)
 	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.Terms.Amount == 0, PlanID: p.NativeSchedule.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Terms.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.NativeSchedule.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.NativeSchedule.Card.FirstName, LastName: p.NativeSchedule.Card.LastName, Address1: p.NativeSchedule.Card.Address1, City: p.NativeSchedule.Card.City, State: p.NativeSchedule.Card.State, Zip: p.NativeSchedule.Card.Zip, Country: p.NativeSchedule.Card.Country}})
@@ -524,13 +516,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: transaction, PaymentID: &p.Terms.PaymentID}, h.Checkout.now()); err != nil {
 					return err
 				}
-				agreementRef := transaction
-				if in.Rail == "stripe" {
-					agreementRef = receipt.StripeEnginePaymentIntentID()
-				}
-				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID, Agreement: "recurring", Ref: agreementRef}); err != nil {
-					return err
-				}
+			}
+			if err := recordEnrollmentMandate(ctx, d.Gen(ctx), in, p, receipt, paid, transaction); err != nil {
+				return err
 			}
 			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"], evidence["message"] = p.Terms.SubscriptionID.String(), providerSub, transaction, "success", "Subscription created successfully"
 			if p.Upgrade() {
@@ -682,8 +670,11 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != nil {
 			return charge.ErrInstrumentChanged
 		}
-		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+		if err = p.Instrument.Matches(method); err != nil {
 			return err
+		}
+		if err = mandates.Recheck(ctx, d.Gen(ctx), in.MerchantID, p.Instrument.Mandate); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		if p.HyperSwitch != nil {
 			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, p.Instrument.PSPID, h.Checkout.Config.HyperSwitch.APIBaseURL)
@@ -753,5 +744,24 @@ func recordInitialAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderI
 	if p.Instrument.CustodianHeld() {
 		a.TokenType = charge.TokenTypePANViaProxy
 	}
+	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)
+}
+
+// recordEnrollmentMandate records the new subscription's recurring mandate.
+// It cites the card's lineage the enrollment charge used, or that charge when
+// it stored the card; without a charge (a trial or a later start) it waits for
+// its first storing transaction.
+func recordEnrollmentMandate(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p InitialMembershipPayload, receipt intents.CollectedReceipt, paid bool, transaction string) error {
+	lineage := p.Instrument.Mandate
+	if lineage == nil && paid {
+		ref := transaction
+		if in.Rail == "stripe" {
+			ref = receipt.StripeEnginePaymentIntentID()
+		}
+		lineage = &charge.Mandate{InitialTransactionID: ref}
+	}
+	_, err := mandates.Create(ctx, q, mandates.Agreement{MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PaymentMethodID: p.Terms.PaymentMethodID, PSPID: *in.PspID,
+		Rail: in.Rail, Kind: charge.AgreementRecurring, SubscriptionID: &p.Terms.SubscriptionID, Lineage: lineage, AcceptedAt: p.Terms.AcceptedAt})
+	return err
 }

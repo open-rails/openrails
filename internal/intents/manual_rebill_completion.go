@@ -285,5 +285,6 @@ func recordRebillAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIn
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Renewal.Amount, p.Renewal.Currency, &p.PaymentMethodID, &in.ID
 	a.Cycle = &attempts.Cycle{SubscriptionID: p.Renewal.SubscriptionID, DueAt: p.Renewal.PeriodStart}
 	a.TokenType = payments.DefaultTokenType(p.Rail, p.Instrument.Custodian)
+	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)
 }

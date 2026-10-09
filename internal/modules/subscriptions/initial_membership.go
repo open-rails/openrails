@@ -99,7 +99,7 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !p.Upgrade()) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")
 		}
-		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch, false)
+		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch)
 	}
 	schedule := p.NativeSchedule
 	if in.Rail != "nmi" || schedule == nil || p.HyperSwitch != nil || in.CustodianID != nil || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || strings.TrimSpace(schedule.PlanID) == "" || schedule.DayFrequency <= 0 || schedule.PlanPayments < 0 {

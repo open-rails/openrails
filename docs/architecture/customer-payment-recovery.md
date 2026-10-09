@@ -20,12 +20,12 @@ credential to in person, and a merchant credential never becomes
 customer-present by naming a payment method. The default runtime Client is the
 merchant-owner client and is not a customer credential.
 
-For NMI invoice pay, a customer action freezes initial or subsequent unscheduled
-stored-credential posture. An initial approved reference is captured only from
-the qualified provider receipt, atomically with invoice settlement and operation
-completion. Local rollback retains custody and recovery commits it without
-charging again. Future off-session invoice collection requires that approved
-reference. Rounded provider collection settles the exact invoice liability and
+For NMI invoice pay, a customer action freezes the card's lineage it cites, or
+none when the charge stores the card. A storing charge's reference is recorded
+on the card's mandates only from the qualified provider receipt, atomically
+with invoice settlement and operation completion. Local rollback retains
+custody and recovery commits it without charging again. Future off-session
+invoice collection requires the currency's active unscheduled mandate. Rounded provider collection settles the exact invoice liability and
 credits the excess through the existing spendable credit ledger.
 
 Subscription retry uses the same immutable admission and completion as the

@@ -35,16 +35,6 @@ type PaymentMethod struct {
 	RailCustomerRef string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see psp_customers)
 	RailMethodRef   string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only; Stripe pm_, Spreedly/HyperSwitch token)
 
-	// Stored-credential (CIT/MIT) replay references (#297), one per card-network
-	// agreement type — the networks track separate credential-on-file sequences
-	// for recurring vs unscheduled charges and the references are not
-	// interchangeable. Rail-scoped value (NMI: the gateway transactionid of the
-	// sequence's initial CIT, replayed as initial_transaction_id on MITs).
-	// "" = not captured yet (legacy instrument, or no charge on that agreement
-	// type); captures are write-once (CaptureStoredCredentialRef).
-	StoredCredentialRecurringRef   string `json:"-"`
-	StoredCredentialUnscheduledRef string `json:"-"`
-
 	// Custodian (or#880) is WHO HOLDS this instrument — the axis orthogonal to
 	// who charges it (Rail + PspID). Always stated, never empty; see the
 	// Custodian* constants. "No stored instrument" (CCBill, Solana) is the

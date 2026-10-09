@@ -18,7 +18,7 @@ until cutover is complete. SQL checks every merchant table is empty before the
 first import; it cannot inspect manifest credentials or other runtime processes.
 Merchant directory/authority settings are never copied over the destination.
 
-The fixed profiles in `contract/profiles.go` cover 42 retained tables, including
+The fixed profiles in `contract/profiles.go` cover 47 retained tables, including mandates,
 ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
 rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is

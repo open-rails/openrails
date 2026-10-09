@@ -245,19 +245,25 @@ doesn't surprise you:
 - **Classic Direct Post survivors.** Subscription enrollment stays on
   `recurring=add_subscription` (atomic first-charge + enroll + delayed start;
   v5 has no equivalent). Stored-card sales and manual rebills also use Classic
-  so every authorization carries NMI's `initiated_by` and
-  `stored_credential_indicator`; every subsequent CIT/MIT additionally carries
-  its agreement's initial NMI transaction ID whenever OpenRails captured it.
-  Implicit incomplete combinations fail before network I/O. Subscription updates stay on Classic because the
+  so every authorization on a stored card carries NMI's `initiated_by` and
+  `stored_credential_indicator`, derived from the flow, never from callers;
+  every later CIT/MIT additionally carries its mandate's initial NMI
+  transaction ID. A purchase that keeps nothing for reuse sends none of these
+  fields. Incomplete combinations fail before network I/O. Subscription updates stay on Classic because the
   documented `PATCH /v5/subscriptions/{id}` returns `E_ROUTE_NOT_FOUND` on the
   live gateway. Transaction search stays on `query.php` (v5 has no list/search).
-- **Every later charge names its first.** A merchant-initiated charge carries
-  the agreement's initial NMI transaction id; a card with no recorded anchor is
-  not charged off-session (an import raises `life.import.no_recurring_anchor`).
-  A renewal stops for the member and an invoice's collection stops with failure
-  code `stored_credential_required` until a customer-initiated charge anchors
-  one. Replacing a card keeps only the recurring agreement its verification
-  anchored.
+- **Every later charge names its first.** Each agreement on a card is a
+  mandate (`ListMandates`): `card_on_file` from the card's save, `recurring`
+  per subscription, `unscheduled` per collection currency. Its storing
+  transaction's id is sent by every later charge under it, and only through
+  the PSP account that ran it. A merchant-initiated charge runs only under an
+  active mandate; without one the card is not charged off-session (an import
+  raises `life.import.no_recurring_anchor`): a renewal stops for the member
+  and an invoice's collection stops with failure code
+  `stored_credential_required`. Saving a card verifies it for reuse without
+  `billing_method`; moving a subscription onto a card without a recurring
+  agreement verifies one first. Replacing a card ends its mandates; the
+  subscriptions it pays take the replacement's recurring verification.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference

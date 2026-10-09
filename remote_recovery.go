@@ -174,3 +174,22 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID billing.Cus
 		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", billing.ErrUnreachable, response.status)
 	}
 }
+
+// ListMandates is one page of a customer's mandates, newest first: the
+// stored-credential agreements on their saved cards, with the network
+// references each storing transaction established.
+func (c *Client) ListMandates(ctx context.Context, customerID billing.CustomerID, params billing.MandateListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Mandate], error) {
+	path, err := customerIDPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	q := pageValues(nil, params.PageRequest)
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
+	var out billing.ListPage[billing.Mandate]
+	if err := c.do(ctx, http.MethodGet, path+"/mandates?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

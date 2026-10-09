@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -185,7 +186,10 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != nil {
 				return errors.New("engine admission payment method changed")
 			}
-			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+			if err := payload.Instrument.Matches(method); err != nil {
+				return err
+			}
+			if err := mandates.Recheck(ctx, d.Gen(ctx), p.MerchantID, payload.Instrument.Mandate); err != nil {
 				return err
 			}
 			if !subscriptions.EngineCollectionDue(sub, payload.AcceptedAt, p.Origin == OriginUser) || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) {
@@ -281,10 +285,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || method.ParkReason != nil {
 			return apperr.Conflictf("payment method changed before upgrade admission")
 		}
-		for _, agreement := range []charge.Agreement{charge.AgreementRecurring, charge.AgreementUnscheduled} {
-			if err := accepted.Instrument.Matches(method, agreement); err != nil {
-				return apperr.Conflictf("payment method changed before upgrade admission")
-			}
+		if accepted.Instrument.Matches(method) != nil || mandates.Recheck(ctx, d.Gen(ctx), row.MerchantID, accepted.Instrument.Mandate) != nil {
+			return apperr.Conflictf("payment method changed before upgrade admission")
 		}
 		return nil
 	})

@@ -75,7 +75,10 @@ func DecodeSubscriptionCollectionPayload(in gen.BillingProviderIntent) (Subscrip
 	if p.HyperSwitch != (charge.HyperSwitchBinding{}) {
 		binding = &p.HyperSwitch
 	}
-	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding, true); err != nil {
+	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding); err != nil {
+		return p, err
+	}
+	if err := charge.ValidateRenewalMandate(p.Instrument); err != nil {
 		return p, err
 	}
 	sameCustodian := (in.CustodianID == nil && p.Instrument.CustodianID == nil) ||

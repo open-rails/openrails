@@ -62,11 +62,11 @@ matches them, and every receipt read (verifier, `--receipt`, `--not-executed`)
 uses the frozen account and the frozen custody's rule, never the method's
 current row. An unresolved operation therefore blocks a custody remap
 of the instrument it names (`operation_unresolved`) until it resolves.
-Automatic NMI collection requires an approved unscheduled stored-credential
-reference. Creating a vault record alone does not establish that agreement:
-designating an unanchored card as the collection method is refused. A prior
-customer-present charge can establish the scoped reference; an unscoped initial
-transaction id is not a fallback.
+Automatic NMI collection runs only under the currency's active unscheduled
+mandate. Naming a card the collection method creates that mandate from the
+card's own lineage on the charging account (its save, or an earlier
+customer-present charge); a card with none is refused, and another card's or
+another account's reference is never a fallback.
 
 A pre-submission failure (unarmed account, missing secret, parked instrument)
 parks the operation without consuming an attempt. After the write-ahead fence every adapter error is a possible

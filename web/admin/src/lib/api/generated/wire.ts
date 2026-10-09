@@ -1194,6 +1194,26 @@ export type InvoiceProfile = {
   memo: string
 }
 
+export type Mandate = {
+  id: string
+  customer_id: string
+  payment_method_id: string | null
+  psp_id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  subscription_id: string | null
+  currency: string | null
+  status: "active" | "ended" | "requires_reconsent" | "revoked"
+  end_reason: "brand_changed" | "closed" | "customer_revoked" | "payment_method_removed" | "replaced" | "subscription_ended" | null
+  ended_at: string | null
+  card_brand: string | null
+  initial_transaction_id: string | null
+  network_transaction_id: string | null
+  transaction_link_id: string | null
+  storing_attempt_id: string | null
+  accepted_at: string
+  created_at: string
+}
+
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
 }
@@ -1682,6 +1702,8 @@ export type PaymentAttempt = {
   payment_method_id: string | null
   payment_id: string | null
   enriched_at: string | null
+  mandate_id: string | null
+  sent_initial_transaction_id: string
 }
 
 export type PaymentConfig = {

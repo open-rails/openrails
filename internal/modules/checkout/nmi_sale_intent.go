@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -102,6 +103,12 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 	if client.ReadOnly {
 		return intents.Parked("nmi client is read-only")
 	}
+	// A one-off buy on a saved card is a one-click use of its card-on-file
+	// lineage, or stores it.
+	credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementCardOnFile))
+	if err != nil {
+		return h.complete(ctx, in, nil, intents.TerminalWithEvidence(err.Error(), map[string]any{"not_executed": true}))
+	}
 	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
 		return outcome
 	}
@@ -109,11 +116,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	credential := charge.InitialOneTime()
-	if p.Instrument.StoredCredentialUnscheduledRef != "" {
-		credential = charge.OneTimeReuse(p.Instrument.StoredCredentialUnscheduledRef)
-	}
-	response, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: nmidirect.StoredCredentialFor(credential)})
+	response, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: credential})
 	if callErr != nil {
 		duplicate := errors.Is(callErr, nmi.ErrDuplicateTransaction)
 		if !duplicate && nmi.RequiresVerification(callErr) {
@@ -153,7 +156,10 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 		if method.CustomerID.String() != p.UserID || method.ParkReason != nil {
 			return errors.New("sale method changed before submission")
 		}
-		return p.Instrument.Matches(method, charge.AgreementUnscheduled)
+		if err := p.Instrument.Matches(method); err != nil {
+			return err
+		}
+		return mandates.Recheck(ctx, h.database().NewWithPgxTx(tx).Gen(ctx), in.MerchantID, p.Instrument.Mandate)
 	})
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true})), false
@@ -352,13 +358,14 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			if err != nil {
 				return err
 			}
-			if in.Rail != string(models.RailStripe) {
-				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: receipt.TransactionID()}); err != nil {
-					return err
-				}
-			}
 			if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
 				return err
+			}
+			if in.Rail != string(models.RailStripe) && p.Instrument.Mandate == nil {
+				if err := mandates.RecordStored(ctx, d.Gen(ctx), mandates.Stored{MerchantID: in.MerchantID, CustomerID: customer, PaymentMethodID: p.PaymentMethodID, PSPID: *in.PspID,
+					Rail: in.Rail, Currency: p.Currency, Lineage: charge.Mandate{InitialTransactionID: receipt.TransactionID()}, AcceptedAt: now}); err != nil {
+					return err
+				}
 			}
 			evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), result.PaymentID.String()
 			if result.DelayedStart != nil {
@@ -438,5 +445,6 @@ func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderInte
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = charge.TokenTypePSPToken
+	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)
 }
