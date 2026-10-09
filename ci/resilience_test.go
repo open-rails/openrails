@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/signeridentity"
+	"github.com/open-rails/openrails/internal/solanafake"
 	"github.com/open-rails/openrails/internal/vaultfake"
 )
 
@@ -72,6 +73,8 @@ type resilientBoot struct {
 	slug   string
 	// redisDown hands the runtime an unreachable Redis.
 	redisDown bool
+	// chain is the Solana node the rail reads; nil is an unreachable one.
+	chain *solanafake.Node
 }
 
 func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Client {
@@ -92,6 +95,10 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 	cfg.ProviderWriteMode = openrails.ProviderWritesFull
 	cfg.Vault = &openrails.VaultConfig{Address: b.vault.URL(), Token: b.vault.Token}
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
+	if b.chain != nil {
+		cfg.ProviderSandbox.SolanaRPCURL = b.chain.URL()
+		psps["solana"] = openrails.SolanaPSP{TransitKey: transitKey, RPCProvider: "public", Tokens: map[string]openrails.SolanaToken{"SOL": {}, "DUSD": {}}}.PSPConfig()
+	}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
 	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
@@ -132,16 +139,19 @@ func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 	return engine.Graph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
-// solanaSession sells a new one-time or recurring price while the Solana rail
-// is armed.
-func solanaSession(t *testing.T, client *openrails.Client, recurring bool) *checkoutSession {
+// solanaSession sells a new one-time price, or a recurring one on the
+// merchant's plan published on chain, while the Solana rail is armed.
+func solanaSession(t *testing.T, client *openrails.Client, chain *solanafake.Node, signer solanago.PublicKey) *checkoutSession {
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
-	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"}
-	if recurring {
+	params := billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD", PSPs: []string{"solana"}}
+	if chain != nil {
 		hours := 720
+		plan, err := chain.Plan(signer, 1, solanafake.DevnetDUSDMint, 1_000_000, uint64(hours))
+		require.NoError(t, err)
 		params.AccessDurationHours, params.BillingIntervalHours = &hours, &hours
+		params.PSPLinks = map[string]map[string]string{"solana": {"plan_pda": plan.String(), "plan_id": "1"}}
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
@@ -290,8 +300,10 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	fake := vaultfake.New("e2e-root")
 	t.Cleanup(fake.Close)
 	slug := "rotate-" + uuid.NewString()[:8]
+	chain := solanafake.New()
+	t.Cleanup(chain.Close)
 	boot := func() (*openrails.Client, *openrails.Client) {
-		rt := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug})
+		rt := f.resilientRuntime(t, resilientBoot{vault: fake, stripe: &stripeCheckoutFake{t: t}, slug: slug, chain: chain})
 		client := rt
 		return rt, client
 	}
@@ -319,7 +331,8 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	first, client := boot()
 	require.Eventually(t, func() bool { _, ok := checkoutPSP(t, client, "solana"); return ok }, 30*time.Second, 50*time.Millisecond)
 	require.NoError(t, probe(t, first, "openrails_solana_signer_identity"))
-	once, monthly := solanaSession(t, client, false), solanaSession(t, client, true)
+	signerKey := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey))
+	once, monthly := solanaSession(t, client, nil, signerKey), solanaSession(t, client, chain, signerKey)
 	mid, _, err := hosttools.ResolveMerchant(t.Context(), engine.Graph(first), slug)
 	require.NoError(t, err)
 	require.NoError(t, first.Close(context.Background()))
@@ -340,8 +353,10 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	}
 	require.True(t, logged, "the key change is logged at ERROR with both public keys")
 	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "the Solana rail answers unavailable (503)")
-	require.Equal(t, http.StatusServiceUnavailable, solanaPayStatus(t, client, once), "a one-time Solana checkout answers 503")
-	require.Equal(t, http.StatusServiceUnavailable, solanaPayStatus(t, client, monthly), "a recurring Solana subscribe answers 503")
+	// A session minted before the change no longer sells on Solana: the
+	// unapproved rail drops out of routing before anything is signed.
+	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, client, once), "a one-time Solana checkout is refused")
+	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, client, monthly), "a recurring Solana subscribe is refused")
 	signer := func(rt *openrails.Client) solanaint.Signer {
 		r := engine.Graph(rt).Runtime
 		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.MerchantSecretBackend.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))

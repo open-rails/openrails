@@ -103,20 +103,25 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			require.True(t, errors.As(err, &status), "the dead replica's claim holds until its lease lapses: %v", err)
 			require.Equal(t, http.StatusConflict, status.Status)
 
+			// The page pays again while its session lives: once the dead
+			// replica's claim lapses, a survivor reclaims the key and resolves
+			// the sale. A session takes ten pays a minute.
 			f.lapseCheckoutClaims(victim.id)
-			f.recover()
+			f.any().rescue()
+			f.wake()
 			f.settle()
 			var retried *sessionPaid
-			require.Eventually(t, func() bool {
-				retried, err = session.payAt(t.Context(), b.server.URL, option, victim, pay)
-				if err == nil && retried.Status == "succeeded" {
-					return true
+			for range 8 {
+				if retried, err = session.payAt(t.Context(), b.server.URL, option, victim, pay); err == nil && retried.Status == "succeeded" {
+					break
 				}
+				t.Logf("retry: %v %+v", err, retried)
 				f.advance(time.Minute)
 				f.wake()
 				f.settle()
-				return false
-			}, 60*time.Second, 50*time.Millisecond, "a survivor reclaims the key and resolves the sale")
+			}
+			require.NoError(t, err, "a survivor reclaims the key and resolves the sale")
+			require.Equal(t, "succeeded", retried.Status, "%+v", retried.CheckoutSessionPayResult)
 			require.Equal(t, before+1, charges(), "the reclaimed request never charges again")
 			require.Equal(t, attempts+1, f.submissionCount(rail), "one provider submission")
 			owned, err := b.client[embedded].CheckEntitlements(t.Context(), victim.customerID(), billing.CheckEntitlementsParams{Entitlements: []string{"content:post"}})
@@ -223,7 +228,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	require.NoError(t, err)
 	refusal := order{token: f.base.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"})}
 	for _, r := range []*world{b, a, b} {
-		out, err := declined.payAt(t.Context(), r.server.URL, option, d, refusal)
+		out, err := declined.payAt(t.Context(), r.server.URL, declined.optionAt(r.server.URL, "nmi"), d, refusal)
 		require.NoError(t, err)
 		require.Equal(t, "failed", out.Status, "%+v", out.CheckoutSessionPayResult)
 		require.NotNil(t, out.Failure, "a decline explains itself")
