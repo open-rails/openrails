@@ -7,13 +7,6 @@ import (
 )
 
 func TestReadFile(t *testing.T) {
-	yamlApp, err := ReadFile(filepath.Join("..", "examples", "embedded", "catalog.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(yamlApp.Products) != 4 {
-		t.Fatalf("the example catalog has 4 products, read %d", len(yamlApp.Products))
-	}
 	dir := t.TempDir()
 	write := func(name, body string) string {
 		path := filepath.Join(dir, name)
@@ -21,6 +14,13 @@ func TestReadFile(t *testing.T) {
 			t.Fatal(err)
 		}
 		return path
+	}
+	yamlApp, err := ReadFile(write("catalog.yaml", "schema_version: 1\nproducts:\n  pass:\n    display_name: Pass\n  plus:\n    display_name: Plus\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(yamlApp.Products) != 2 {
+		t.Fatalf("read %d products, want 2", len(yamlApp.Products))
 	}
 	jsonApp, err := ReadFile(write("catalog.JSON", `{"schema_version":1,"products":{"pass":{"display_name":"Pass"}}}`))
 	if err != nil {

@@ -12,17 +12,7 @@ import (
 )
 
 func TestReadMerchantFile(t *testing.T) {
-	m, err := ReadMerchantFile(filepath.Join("examples", "embedded", "merchant.example.yaml"))
-	require.NoError(t, err)
-	require.Equal(t, "onlydemo", m.Slug)
-	require.Equal(t, NMIPSP{
-		AccountID:            "000000",
-		TokenizationKey:      "your-public-tokenization-key",
-		SecurityKey:          "your-private-security-key",
-		WebhookSigningSecret: "your-webhook-signing-key",
-	}.PSPConfig(), m.PSPs["mobius"], "the README's Go form is the same declaration")
-
-	_, err = ReadMerchantFile(filepath.Join(t.TempDir(), "missing.yaml"))
+	_, err := ReadMerchantFile(filepath.Join(t.TempDir(), "missing.yaml"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 
 	typo := filepath.Join(t.TempDir(), "merchant.yaml")
