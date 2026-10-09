@@ -142,14 +142,22 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	if !adminconsole.Present(a.ConsoleAssets) {
 		return nil, fmt.Errorf("openrails: Routes.AdminConsole needs a console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
+	cfg := a.Config
+	var rs *config.ResourceServerConfig
+	if cfg.ControlPlane != nil {
+		rs = cfg.ControlPlane.ResourceServer
+	}
+	issuer, err := adminconsole.ConsoleIssuer(sel.AdminConsole, rs)
+	if err != nil {
+		return nil, fmt.Errorf("openrails: Routes.AdminConsole: %w", err)
+	}
 	authBase := sel.AdminConsole.AuthBaseURL
-	if authBase == "" {
+	if authBase == "" && (cfg.ControlPlane == nil || cfg.ControlPlane.LocalSignIn) {
 		authBase = e.authAPIBase
 	}
-	if authBase == "" {
-		return nil, fmt.Errorf("openrails: set Routes.AdminConsole.AuthBaseURL, the AuthKit JSON API staff sign in through")
+	if authBase == "" && issuer == nil {
+		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.Issuer, ControlPlane.LocalSignIn or AdminConsole.AuthBaseURL")
 	}
-	cfg := a.Config
 	handler, err := adminconsole.Handler(path, adminconsole.Config{
 		AuthBaseURL:            authBase,
 		APIBaseURL:             sel.Prefix + "/v1",
@@ -158,6 +166,7 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
 		NewMerchantURL:         sel.AdminConsole.NewMerchantURL,
+		Issuer:                 issuer,
 	}, a.ConsoleAssets)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)

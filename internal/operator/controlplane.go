@@ -56,6 +56,9 @@ type AttachOptions struct {
 	// login requires an email or SMS sender.
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
+	// LocalSignIn serves sign-in to the control plane's own accounts; off,
+	// people arrive with trusted issuers' access tokens.
+	LocalSignIn bool
 
 	// EmailSender and SMSSender deliver AuthKit's messages and report their
 	// health (#738; adapters/twilio provides both). Open and invite-only
@@ -172,6 +175,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.PasswordlessLogin {
 		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))
 	}
+	if opts.LocalSignIn {
+		cpOpts = append(cpOpts, controlplane.WithLocalSignIn())
+	}
 	if opts.EmailSender != nil {
 		cpOpts = append(cpOpts, controlplane.WithEmailSender(opts.EmailSender))
 	}
@@ -244,6 +250,10 @@ func validateAttachOptions(opts AttachOptions) error {
 	if err := controlplane.ValidateRegistrationMode(opts.Registration); err != nil {
 		return err
 	}
+	registers := opts.Registration != "" && opts.Registration != iam.RegistrationModeClosed
+	if (registers || opts.PasswordlessLogin) && !opts.LocalSignIn {
+		return fmt.Errorf("control plane: registration and passwordless login need local sign-in")
+	}
 	if opts.PasswordlessAutoRegistration && !opts.PasswordlessLogin {
 		return fmt.Errorf("control plane: passwordless auto-registration requires passwordless login")
 	}
@@ -254,7 +264,6 @@ func validateAttachOptions(opts AttachOptions) error {
 	if opts.PasswordlessLogin && noSender {
 		return fmt.Errorf("control plane: passwordless login requires an email or SMS sender")
 	}
-	registers := opts.Registration != "" && opts.Registration != iam.RegistrationModeClosed
 	if registers && noSender && (opts.Auth == nil || !opts.Auth.AllowMissingSenders) {
 		return fmt.Errorf("control plane: registration %s requires an email or SMS sender", opts.Registration)
 	}

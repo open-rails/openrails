@@ -54,6 +54,7 @@ const BOOTSTRAP = {
   catalog_copilot_enabled: true,
   catalog_drafting_enabled: false,
   new_merchant_url: "",
+  issuer: null,
 }
 
 const memoryStorage = (): Storage => {

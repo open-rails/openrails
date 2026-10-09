@@ -43,7 +43,19 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(s.cfg.LLM),
 		NewMerchantURL:         s.adminConsole.NewMerchantURL,
 	}
-	if cfg.AuthBaseURL == "" {
+	var rs *config.ResourceServerConfig
+	if s.cfg.ControlPlane != nil {
+		rs = s.cfg.ControlPlane.ResourceServer
+	}
+	issuer, err := adminconsole.ConsoleIssuer(s.adminConsole, rs)
+	if err != nil {
+		return err
+	}
+	cfg.Issuer = issuer
+	if issuer == nil && !s.controlPlane.LocalSignIn() {
+		return fmt.Errorf("admin_console has no sign-in method: declare admin_console.issuer (a trusted issuer) or set local_sign_in")
+	}
+	if cfg.AuthBaseURL == "" && s.controlPlane.LocalSignIn() {
 		cfg.AuthBaseURL = s.controlPlane.AuthAPIBase()
 	}
 	console, err := adminconsole.Handler(path, cfg, s.consoleAssets)

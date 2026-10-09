@@ -280,6 +280,13 @@ resource_server:
   maps the roles in its tokens' `roles` claim to merchant roles with
   `group_roles` (`owner`, `support`, `viewer`).
 - A token with `sub` equal to its `client_id` is a machine acting for itself.
+- Your console signs staff in at the issuer: register a public client with the
+  redirect URI `<console URL>/callback` (authorization code and refresh, DPoP)
+  and set `admin_console.issuer` to the issuer and its `client_id`. OpenRails'
+  own sign-in is off unless you set `local_sign_in: true`.
+- A sensitive operation (one that moves money or grants access) needs the
+  token's `auth_time` within 15 minutes; otherwise `403 step_up_required`
+  (metadata `max_age: 0`) asks the client to re-authorize.
 - Staff your issuer grants nothing are invited by email:
   `POST /v1/merchant/federated-grants {"email","role"}` (owners). The invitee
   signs in at an issuer trusted for the merchant, lists

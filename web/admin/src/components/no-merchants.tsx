@@ -2,6 +2,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 
 import { LogoLockup } from "@/components/logo"
+import { PendingInvites } from "@/components/pending-invites"
 import { Button } from "@/components/ui/button"
 import { getBootstrap } from "@/lib/api/client"
 import { useAuth } from "@/lib/auth"
@@ -10,7 +11,7 @@ import { useAuth } from "@/lib/auth"
 // has no self-service creation, so it points at an operator; a host that
 // creates merchants (AdminConsoleConfig.NewMerchantURL) offers its own page.
 export function NoMerchants() {
-  const { me, logout } = useAuth()
+  const { me, logout, federated } = useAuth()
   const newMerchantURL = getBootstrap().new_merchant_url
 
   return (
@@ -36,6 +37,7 @@ export function NoMerchants() {
             Sign out
           </Button>
         </div>
+        {federated && <PendingInvites />}
         {me?.email && (
           <p className="mt-6 text-xs text-muted-foreground">
             Signed in as {me.email}

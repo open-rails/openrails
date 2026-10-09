@@ -31,7 +31,7 @@ func (f *fixture) attachControlPlane(t *testing.T, edit func(*openrails.Config, 
 	t.Helper()
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
 	cfg := f.config()
-	cfg.ControlPlane = &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
+	cfg.ControlPlane = &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 	}}

@@ -2,11 +2,7 @@
 // mount's config.json (served by the Go binary): standalone defaults are
 // auth=/auth/v1, api=/v1; embedded hosts point at their own bases. The
 // session is auth-ui's: it holds the bearer, refreshes it, and steps up.
-import {
-  AuthKitError,
-  isAuthKitError,
-  type AuthClient,
-} from "@openrails/auth-ui/client"
+import { AuthKitError, isAuthKitError } from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
 import type { OpenRailsErrorCode } from "./generated/error-codes"
@@ -30,6 +26,17 @@ export interface BootstrapConfig {
   // The host page behind "New merchant" (AdminConsoleConfig.NewMerchantURL);
   // empty hides the action, as on a standalone deployment.
   new_merchant_url: string
+  // The trusted issuer staff sign in at (AdminConsole.Issuer); null signs in
+  // to auth_base_url's accounts.
+  issuer: IssuerBootstrap | null
+}
+
+export interface IssuerBootstrap {
+  url: string
+  client_id: string
+  name: string
+  resource: string
+  scope: string
 }
 
 let bootstrapConfig: BootstrapConfig | null = null
@@ -85,12 +92,19 @@ export function takeMerchantFromHash(
   return slug || undefined
 }
 
+// ConsoleTransport is what requests need of a session: auth-ui's AuthKit
+// client or its issuer client.
+export interface ConsoleTransport {
+  authFetch: (input: string, init?: RequestInit) => Promise<Response>
+  signOut: () => Promise<void>
+}
+
 const unguarded: Guard = (action) => action()
-let session: AuthClient | null = null
+let session: ConsoleTransport | null = null
 let stepUp: Guard = unguarded
 
 // bindSession makes auth-ui's client the bearer of every request.
-export function bindSession(client: AuthClient) {
+export function bindSession(client: ConsoleTransport) {
   session = client
 }
 

@@ -40,6 +40,9 @@ type ServiceCredentialResolver interface {
 // and resolves its merchant and permissions (#1140).
 type ResourceTokenResolver interface {
 	ResolveResourceToken(r *http.Request) (*credential.ResolvedResourceAccess, error)
+	// RequireRecentResourceSignIn is nil when r's token says its user signed
+	// in at the issuer recently enough for a sensitive operation.
+	RequireRecentResourceSignIn(r *http.Request) error
 }
 
 // ResourceUserResolver verifies a trusted issuer's access token on a
@@ -216,6 +219,10 @@ func (g legacyGate) authorizeResourceToken(req *http.Request, perm string) (bill
 // RequireRecentSignIn implements billingauth.Gate with the control plane's
 // AuthKit Sensitive check.
 func (g legacyGate) RequireRecentSignIn(ctx context.Context, req *http.Request, p billingauth.Principal) error {
+	if req != nil && p.Kind == billingauth.Delegated && g.ResourceTokenResolver != nil &&
+		credential.LooksLikeResourceToken(authorizationToken(req.Header.Get("Authorization"))) {
+		return g.ResourceTokenResolver.RequireRecentResourceSignIn(req)
+	}
 	var check func(context.Context) error
 	if g.AdminPermissionChecker != nil {
 		check = func(ctx context.Context) error { return g.AdminPermissionChecker.CheckRecentSignIn(ctx, req) }

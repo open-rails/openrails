@@ -47,12 +47,14 @@ import {
 } from "@/lib/format"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
+import { useAuth } from "@/lib/auth"
 import { toastApiError } from "@/lib/toast"
 import { PSPPublicationAttempts } from "@/lib/psp-publication"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
+import { FederatedTeamTab } from "./federated-team"
 import { TeamTab } from "./team"
 
 const LINE_TAB =
@@ -63,6 +65,7 @@ export function SettingsPage() {
   // back button steps through tabs the way it looks like it should.
   const [params, setParams] = useSearchParams()
   const tab = params.get("tab") || "merchant"
+  const { federated } = useAuth()
 
   return (
     <Tabs
@@ -104,7 +107,7 @@ export function SettingsPage() {
         <MerchantSettingsTab />
       </TabsContent>
       <TabsContent value="team">
-        <TeamTab />
+        {federated ? <FederatedTeamTab /> : <TeamTab />}
       </TabsContent>
       <TabsContent value="notifications">
         <NotificationsTab />

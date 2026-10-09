@@ -81,6 +81,11 @@ auth:
 #       allowed_origins: [https://admin.example.com]
 #       # group_roles: {billing-admins: owner}  # only for issuers that cannot mint permissions
 
+# Sign-in to OpenRails' own accounts (password, passwordless, registration).
+# Off, the default: people sign in at a trusted issuer, and the console with it
+# (admin_console.issuer). Turn it on when you have no identity provider.
+# local_sign_in: true
+
 encryption:
   master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it
                     # Required for DB-backed alert webhook URLs and HyperSwitch SDK captures.
@@ -169,6 +174,11 @@ admin_console:
   enabled: false
   # path: /admin             # e.g. /billing/admin when /admin is taken
   # new_merchant_url: /merchants/new  # host page behind "New merchant"; unset hides it
+  # issuer:                  # staff sign in at a trusted issuer (one of resource_server's)
+  #   url: https://example.com/auth
+  #   client_id: openrails-console   # public client, redirect URI <console path>/callback
+  #   # name: Example        # sign-in button; default the trusted issuer's name
+  #   # scope: openid profile email offline_access openrails:merchant  # when the issuer needs offline_access
 
 # Server-side LLM for the dashboard natural-language widget generator (#741)
 # and metrics Q&A (#756). FAIL-CLOSED: no api_key = the generate/ask endpoints

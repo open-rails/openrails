@@ -79,7 +79,7 @@ func newRootCmd() *cobra.Command {
 
 			// The standalone server always runs the control plane (#469).
 			if cfg.Auth != nil {
-				cfg.Config.ControlPlane = &config.ControlPlaneConfig{Auth: *cfg.Auth, ResourceServer: cfg.ResourceServer}
+				cfg.Config.ControlPlane = &config.ControlPlaneConfig{Auth: *cfg.Auth, ResourceServer: cfg.ResourceServer, LocalSignIn: cfg.LocalSignIn}
 			}
 			cmd.SetContext(hostconfig.NewContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config), cfg))
 			return nil

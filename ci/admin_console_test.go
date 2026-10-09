@@ -88,7 +88,7 @@ func TestAdminConsoleFindsAuthKit(t *testing.T) {
 }
 
 func controlPlane(t *testing.T, issuer string) *openrails.ControlPlaneConfig {
-	return &openrails.ControlPlaneConfig{Auth: openrails.AuthConfig{
+	return &openrails.ControlPlaneConfig{LocalSignIn: true, Auth: openrails.AuthConfig{
 		Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true,
 		AllowMemory: true, AllowMissingSenders: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 	}}

@@ -83,19 +83,25 @@ func (c *ControlPlane) AuthAPIBase() string {
 }
 
 // AuthRoutes is the mounted AuthKit route catalog, each served by AuthHandler.
-// A GET route's pattern also serves HEAD.
+// A GET route's pattern also serves HEAD. Without local sign-in only the
+// issuer's JWKS is served.
 func (c *ControlPlane) AuthRoutes() []iam.Route {
 	if c == nil || c.client == nil {
 		return nil
 	}
 	var out []iam.Route
 	for _, route := range c.client.Routes() {
-		if route.Method != http.MethodHead {
-			out = append(out, route)
+		if route.Method == http.MethodHead || (!c.localSignIn && !strings.HasSuffix(route.Path, iam.JWKSPath)) {
+			continue
 		}
+		out = append(out, route)
 	}
 	return out
 }
+
+// LocalSignIn reports whether the control plane serves sign-in to its own
+// accounts.
+func (c *ControlPlane) LocalSignIn() bool { return c != nil && c.localSignIn }
 
 // AuthHandler serves AuthKit's mounted HTTP surface.
 func (c *ControlPlane) AuthHandler() http.Handler {

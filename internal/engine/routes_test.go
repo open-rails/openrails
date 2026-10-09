@@ -430,7 +430,7 @@ func TestAdminConsoleMountsWithTheMerchantAPI(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `<base href="/billing-admin/">host build`)
 	rec = serve(mux, http.MethodGet, "/billing-admin/config.json", "")
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"new_merchant_url":""}`, rec.Body.String())
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","nl_widgets_enabled":false,"ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"new_merchant_url":"","issuer":null}`, rec.Body.String())
 
 	// A host's merchant-creation page reaches the console only through config.json.
 	hosted := httpRuntime(true)

@@ -25,6 +25,12 @@ type ControlPlaneConfig struct {
 	// verified unknown contact (requires open registration and a sender).
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
+	// LocalSignIn serves sign-in to the control plane's own accounts
+	// (password, passwordless, registration). Off, the default, mounts none
+	// of AuthKit's sign-in surface: people arrive with a trusted issuer's
+	// access tokens. Hosted products and self-hosters without an identity
+	// provider turn it on.
+	LocalSignIn bool
 	// FrontendBaseURL is where emailed links point. Empty uses the issuer,
 	// which for a hosted product serves no pages.
 	FrontendBaseURL string
