@@ -46,7 +46,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## Money
 - All amounts are **micros** (millionths of a currency unit) for USD; every currency's
-  scale is in the registry (`GET /v1/currencies`). Not cents, not millicents.
+  scale is in the registry (`GET /v1/config`'s `currencies`). Not cents, not millicents.
 - In Go an `int64`, on the wire a decimal string named `amount` beside a `currency`;
   never a currency in a field name.
 - A double-entry ledger is the source of truth for money; a separate grant ledger tracks
