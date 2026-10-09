@@ -25,8 +25,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/server"
+	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // Exercise the operator's real CLI over separate databases, then resume through

@@ -10,8 +10,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/staffperm"
+	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // Control-plane operations, for hosted products: merchant provisioning and

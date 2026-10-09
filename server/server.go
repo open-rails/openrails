@@ -25,15 +25,15 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/hostconfig"
-	httpserver "github.com/open-rails/openrails/internal/http"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/server/internal/controlplane"
+	"github.com/open-rails/openrails/server/internal/hostconfig"
+	httpserver "github.com/open-rails/openrails/server/internal/http"
+	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // The configuration family of a standalone server, defined in internal/config
