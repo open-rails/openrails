@@ -22,8 +22,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
-// EmailSender is the config/host seam for outbound alert email. The SendGrid-
-// backed subscriptions.EmailService satisfies it; a host can inject its own.
+// EmailSender is the config/host seam for outbound alert email.
+// subscriptions.EmailService satisfies it; a host can inject its own.
 // A nil sender or one that IsEnabled()==false fails soft (the delivery record
 // notes the skip and the dev path logs loudly).
 type EmailSender interface {

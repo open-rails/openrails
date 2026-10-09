@@ -133,7 +133,7 @@ type Deps struct {
 	SMS authkit.SMSSender
 	// AuthEmail delivers AuthKit's email with the host's own templates. Nil
 	// renders it and sends it through the engine's sender (Engine.Email or
-	// SendGrid).
+	// Engine's Config.SMTP).
 	AuthEmail authkit.EmailSender
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.

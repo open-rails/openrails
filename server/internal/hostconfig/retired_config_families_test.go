@@ -25,6 +25,7 @@ func TestRetiredConfigFamiliesRefuseBoot(t *testing.T) {
 		{"RAILS_STRIPE_SECRET_KEY", "sk_test_x", "rails:\n  stripe:\n    secret_key: sk_test_x\n", "rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars"},
 		{"AUTH_CONTROL_PLANE_ISSUER", "http://cp.test", "auth:\n  control_plane:\n    issuer: http://cp.test\n", controlPlane},
 		{"AUTH_CONTROL_PLANE_PUBLIC_HOSTED", "true", "auth:\n  control_plane:\n    platform_admin_user_id: u\n", controlPlane},
+		{"SENDGRID_API_KEY", "SG.key", "sendgrid:\n  api_key: SG.key\n", "sendgrid config was removed (#1176): email goes through any SMTP server; set email_smtp (EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USERNAME, EMAIL_SMTP_PASSWORD, EMAIL_SMTP_FROM): SendGrid is host smtp.sendgrid.net, port 587, username apikey, password the API key; delete the sendgrid yaml key and SENDGRID_* env vars and secret files"},
 		{"PRIVATE_PORT", "9443", "private_port: 9443\n", "private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var"},
 	} {
 		t.Run(row.env, func(t *testing.T) {
@@ -56,6 +57,7 @@ func TestRetiredAndUnknownInputsRefuseBoot(t *testing.T) {
 		{"MODE", "full", []string{"mode was removed", "provider_write_mode"}},
 		{"BILLING_MODE", "full", []string{"mode was removed", "provider_write_mode"}},
 		{"TEST_ENV", "true", []string{"TEST_ENV was never consumed and is removed (or#915)"}},
+		{"EMAIL_SMTP_FROM", "not a mailbox", []string{"email_smtp.from (EMAIL_SMTP_FROM)"}},
 		{"OPENRAILS_CATALOG_RECONCILIATION_INTERVAL", "30m", []string{"renamed", "CATALOG_RECONCILIATION_INTERVAL"}},
 		{"OPENRAILS_SQL_TRACE", "1", []string{"renamed", "db.sql_trace"}},
 		{"ACTIVE_KEY_ID", "x", []string{"ACTIVE_KEY_ID was renamed", "AUTHKIT_ACTIVE_KEY_ID"}},

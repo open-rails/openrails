@@ -62,8 +62,8 @@ type (
 	RedisConfig = config.RedisConfig
 	// LoggerConfig is Config.Logger: the log level.
 	LoggerConfig = config.LoggerConfig
-	// SendGridConfig is Config.SendGrid: the built-in SendGrid sender.
-	SendGridConfig = config.SendGridConfig
+	// SMTPConfig is Config.SMTP: the built-in SMTP sender.
+	SMTPConfig = config.SMTPConfig
 	// RateLimitsConfig is Config.RateLimits: a limit per bucket name.
 	RateLimitsConfig = config.RateLimitsConfig
 	// RateLimit is one bucket's requests per minute.

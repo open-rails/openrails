@@ -254,16 +254,16 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return nil, err
 	}
 
-	// One sender for all of OpenRails' email: the host's, else Config.SendGrid.
+	// One sender for all of OpenRails' email: the host's, else Config.SMTP.
 	var sender config.EmailSender
 	if overrides != nil && overrides.EmailSender != nil {
 		sender = overrides.EmailSender
-	} else if cfg.SendGrid != nil {
-		sendgrid, err := email.NewSendGrid(*cfg.SendGrid)
+	} else if cfg.SMTP != nil {
+		smtp, err := email.NewSMTP(*cfg.SMTP)
 		if err != nil {
 			return nil, err
 		}
-		sender = sendgrid
+		sender = smtp
 	}
 	var emailService *subscriptions.EmailService
 	if sender != nil {

@@ -203,11 +203,11 @@ func validate(cfg *config.Config, deps config.Deps) error {
 			}
 		}
 	}
-	if deps.Email != nil && cfg.SendGrid != nil {
-		return fmt.Errorf("openrails: set Deps.Email or Config.SendGrid, not both")
+	if deps.Email != nil && cfg.SMTP != nil {
+		return fmt.Errorf("openrails: set Deps.Email or Config.SMTP, not both")
 	}
-	if cfg.SendGrid != nil && strings.TrimSpace(cfg.SendGrid.APIKey) == "" {
-		return fmt.Errorf("openrails: Config.SendGrid.APIKey is required")
+	if cfg.SMTP != nil && strings.TrimSpace(cfg.SMTP.Host) == "" {
+		return fmt.Errorf("openrails: Config.SMTP.Host is required")
 	}
 	if !cfg.RateLimitsDisabled {
 		if cfg.RateLimits == nil {

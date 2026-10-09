@@ -257,8 +257,8 @@ pkg openrails, type Config struct, RateLimits *config.RateLimitsConfig
 pkg openrails, type Config struct, RateLimitsDisabled bool
 pkg openrails, type Config struct, Redis *config.RedisConfig
 pkg openrails, type Config struct, ReturnOrigins []string
+pkg openrails, type Config struct, SMTP *config.SMTPConfig
 pkg openrails, type Config struct, SecretBackend string
-pkg openrails, type Config struct, SendGrid *config.SendGridConfig
 pkg openrails, type Config struct, TestMode config.CredentialPosture
 pkg openrails, type Config struct, TrustedProxies []string
 pkg openrails, type Config struct, Vault *config.VaultConfig
@@ -428,10 +428,13 @@ pkg openrails, type Routes struct, CustomerProfiles []config.CustomerRoutes
 pkg openrails, type Routes struct, Permissions config.Permissions
 pkg openrails, type Routes struct, Prefix string
 pkg openrails, type Routes struct, Provisioning bool
-pkg openrails, type SendGridConfig = config.SendGridConfig
-pkg openrails, type SendGridConfig struct
-pkg openrails, type SendGridConfig struct, APIKey string
-pkg openrails, type SendGridConfig struct, From config.EmailAddress
+pkg openrails, type SMTPConfig = config.SMTPConfig
+pkg openrails, type SMTPConfig struct
+pkg openrails, type SMTPConfig struct, From config.EmailAddress
+pkg openrails, type SMTPConfig struct, Host string
+pkg openrails, type SMTPConfig struct, Password string
+pkg openrails, type SMTPConfig struct, Port int
+pkg openrails, type SMTPConfig struct, Username string
 pkg openrails, type SolanaPSP struct
 pkg openrails, type SolanaPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type SolanaPSP struct, PrivateKey string `psp:"secrets.private_key"`

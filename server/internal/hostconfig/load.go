@@ -373,6 +373,15 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("clickhouse config was removed (#735): delete the clickhouse yaml key and CLICKHOUSE_* env vars; analytics/forensics read Postgres")
 	}
 
+	// HARD CUT (#1176): email goes through any SMTP server.
+	retiredSendGrid := k.Exists("sendgrid") || hasEnvPrefix("SENDGRID_")
+	for name := range secretFiles {
+		retiredSendGrid = retiredSendGrid || strings.HasPrefix(name, "SENDGRID_")
+	}
+	if retiredSendGrid {
+		return nil, fmt.Errorf("sendgrid config was removed (#1176): email goes through any SMTP server; set email_smtp (EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_USERNAME, EMAIL_SMTP_PASSWORD, EMAIL_SMTP_FROM): SendGrid is host smtp.sendgrid.net, port 587, username apikey, password the API key; delete the sendgrid yaml key and SENDGRID_* env vars and secret files")
+	}
+
 	// or#893 phase 3: the retired families below used to warn-and-boot. An
 	// operator who believed ignored security or tenant config was active had no
 	// way to find out. Every one of them now REFUSES boot with the error that

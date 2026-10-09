@@ -93,7 +93,7 @@ explicit:
 | `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
 | `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
-| `SendGrid` | no | The built-in email sender (`APIKey`, the deployment's `From`). Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
+| `SMTP` | no | The built-in email sender: any SMTP server (`Host`, `Port`: 465 implicit TLS, else STARTTLS, 0 is 587; `Username`, `Password`; the deployment's `From`). SendGrid is `smtp.sendgrid.net` with username `apikey` and an API key as the password. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
 
 | Deps field | Meaning |
 |---|---|
@@ -101,7 +101,7 @@ explicit:
 | `Redis` | Optional shared rate limits, FX rates and abuse statistics. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
-| `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SendGrid` (set one). An empty `From` is the deployment's own mail. |
+| `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `Contacts` | Your directory (`*authkit.Client`, or your own `openrails.Contacts`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 

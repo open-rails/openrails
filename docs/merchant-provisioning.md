@@ -89,7 +89,7 @@ A hosted product (openrails-saas shape) builds on the server package and wires
 everything through `server.Config.MerchantCreation`:
 
 ```go
-engine.SendGrid = &openrails.SendGridConfig{APIKey: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
+engine.SMTP = &openrails.SMTPConfig{Host: "smtp.sendgrid.net", Username: "apikey", Password: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
 cfg := server.Config{
     Engine:       engine,
     Auth:         server.AuthConfig{Issuer: "https://api.my-brand.example"},

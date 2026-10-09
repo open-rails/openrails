@@ -87,10 +87,9 @@ type Config struct {
 	Redis *RedisConfig
 	// Logger sets the log level.
 	Logger *LoggerConfig
-	// SendGrid selects the built-in SendGrid sender for billing and
-	// control-plane email when Deps.Email is nil; with neither, OpenRails
-	// sends no email.
-	SendGrid *SendGridConfig
+	// SMTP selects the built-in SMTP sender for billing and control-plane
+	// email when Deps.Email is nil; with neither, OpenRails sends no email.
+	SMTP *SMTPConfig
 	// RateLimits are the per-bucket request limits; nil takes the built-in
 	// defaults.
 	RateLimits *RateLimitsConfig
@@ -1005,12 +1004,17 @@ var ValidProviderWriteModes = map[string]bool{
 	ProviderWriteModeReadOnly: true,
 }
 
-// SendGridConfig is the SendGrid account OpenRails' email is sent through.
-// Billing email is sent from the merchant's profile from_email when it has
-// one; From is the deployment's own address, for everything else.
-type SendGridConfig struct {
-	APIKey string
-	From   EmailAddress
+// SMTPConfig is the SMTP server OpenRails' email is sent through, from any
+// provider: SendGrid is smtp.sendgrid.net with username "apikey" and an API
+// key as the password. Port 465 is implicit TLS, any other STARTTLS; 0 is
+// 587. Billing email is sent from the merchant's profile from_email when it
+// has one; From is the deployment's own address, for everything else.
+type SMTPConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     EmailAddress
 }
 
 // LoggerConfig sets the log level: debug, info, warn or error.

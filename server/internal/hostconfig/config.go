@@ -5,6 +5,7 @@ package hostconfig
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"strconv"
 	"strings"
 
@@ -70,7 +71,7 @@ type fileConfig struct {
 	DB                 *billing.DBConfig         `koanf:"db"`
 	Redis              *billing.RedisConfig      `koanf:"redis"`
 	Logger             *billing.LoggerConfig     `koanf:"logger"`
-	SendGrid           *sendGridFile             `koanf:"sendgrid"`
+	EmailSMTP          *smtpFile                 `koanf:"email_smtp"`
 	RateLimits         *billing.RateLimitsConfig `koanf:"rate_limits"`
 	RateLimitsDisabled bool                      `koanf:"rate_limits_disabled"`
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
@@ -126,19 +127,33 @@ func defaults() *fileConfig {
 	}
 }
 
-// sendGridFile is the sendgrid section: flat, so every key has an
-// environment variable (SENDGRID_FROM_ADDRESS).
-type sendGridFile struct {
-	APIKey      string `koanf:"api_key"`
-	FromAddress string `koanf:"from_address"`
-	FromName    string `koanf:"from_name"`
+// smtpFile is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
+// every app uses; an empty host sends no email. From is one RFC 5322 mailbox:
+// "Shop <noreply@shop.example>".
+type smtpFile struct {
+	Host     string `koanf:"host"`
+	Port     int    `koanf:"port"`
+	Username string `koanf:"username"`
+	Password string `koanf:"password"`
+	From     string `koanf:"from"`
 }
 
-func (s *sendGridFile) config() *billing.SendGridConfig {
+func (s *smtpFile) config() (*billing.SMTPConfig, error) {
 	if s == nil {
-		return nil
+		return nil, nil
 	}
-	return &billing.SendGridConfig{APIKey: s.APIKey, From: billing.EmailAddress{Address: s.FromAddress, Name: s.FromName}}
+	var from billing.EmailAddress
+	if raw := strings.TrimSpace(s.From); raw != "" {
+		a, err := mail.ParseAddress(raw)
+		if err != nil {
+			return nil, fmt.Errorf("email_smtp.from (EMAIL_SMTP_FROM) %q: %w", s.From, err)
+		}
+		from = billing.EmailAddress{Name: a.Name, Address: a.Address}
+	}
+	if strings.TrimSpace(s.Host) == "" {
+		return nil, nil
+	}
+	return &billing.SMTPConfig{Host: s.Host, Port: s.Port, Username: s.Username, Password: s.Password, From: from}, nil
 }
 
 // adminConsoleFile is the admin_console section: the server serves the
@@ -169,6 +184,10 @@ func (f *fileConfig) config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	smtp, err := f.EmailSMTP.config()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Config: &billing.Config{
 			ProviderWriteMode:                 f.ProviderWriteMode,
@@ -179,7 +198,7 @@ func (f *fileConfig) config() (*Config, error) {
 			DB:                                f.DB,
 			Redis:                             f.Redis,
 			Logger:                            f.Logger,
-			SendGrid:                          f.SendGrid.config(),
+			SMTP:                              smtp,
 			RateLimits:                        f.RateLimits,
 			RateLimitsDisabled:                f.RateLimitsDisabled,
 			Captcha:                           f.Captcha,

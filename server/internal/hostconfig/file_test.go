@@ -41,6 +41,7 @@ func TestFileReachesConfig(t *testing.T) {
 		}
 	}
 	f.AdminConsole.Enabled = true
+	f.EmailSMTP.Host = "smtp.example"
 	f.AdminConsole.Issuer = &ConsoleIssuer{}
 	cfg, err := f.config()
 	require.NoError(t, err)

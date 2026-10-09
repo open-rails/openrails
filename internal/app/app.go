@@ -47,7 +47,7 @@ type BootstrapOptions struct {
 	PGXPool     *pgxpool.Pool
 	Redis       *redis.Client
 	Clock       clockwork.Clock
-	// EmailSender replaces the sender Config.SendGrid selects.
+	// EmailSender replaces the sender Config.SMTP selects.
 	EmailSender config.EmailSender
 	// Contacts is the host's directory (Deps.Contacts); nil keeps a copy.
 	Contacts contacts.Source

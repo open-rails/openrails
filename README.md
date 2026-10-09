@@ -720,7 +720,7 @@ What you will set next:
 
 | To | Set |
 |---|---|
-| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
+| Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
 | Publish the admin routes | `Routes.Permissions`: your permissions for admin reads, admin writes, catalog edits and merchant config |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |

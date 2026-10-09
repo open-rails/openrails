@@ -51,7 +51,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	for key, value := range map[string]string{
 		"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DATABASE_SCHEMA": "  Custom_Billing  ", "DATABASE_RIVER_SCHEMA": "jobs",
 		"VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
-		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "SENDGRID_API_KEY": "SG.test-key", "SENDGRID_FROM_ADDRESS": "noreply@billing.example",
+		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "EMAIL_SMTP_HOST": "smtp.sendgrid.net", "EMAIL_SMTP_PORT": "587", "EMAIL_SMTP_USERNAME": "apikey", "EMAIL_SMTP_PASSWORD": "SG.test-key", "EMAIL_SMTP_FROM": "Billing <noreply@billing.example>",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
 		"TRUSTED_PROXIES":       `["10.0.0.0/8"]`,
 		"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"pem"}`,
@@ -69,8 +69,8 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NotNil(t, cfg.Vault, "a VAULT_* setting declares the connection")
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
 	require.Equal(t, billing.SecretBackendDB, billing.SecretStoreBackend(cfg.Config))
-	require.Equal(t, "SG.test-key", cfg.SendGrid.APIKey)
-	require.Equal(t, "noreply@billing.example", cfg.SendGrid.From.Address)
+	require.Equal(t, billing.SMTPConfig{Host: "smtp.sendgrid.net", Port: 587, Username: "apikey", Password: "SG.test-key",
+		From: billing.EmailAddress{Name: "Billing", Address: "noreply@billing.example"}}, *cfg.SMTP)
 	require.True(t, billing.IsLimitedMode(cfg.Config))
 	require.False(t, billing.IsProviderReadOnly(cfg.Config))
 	interval, enabled, err := billing.CatalogReconciliationSchedule(cfg.Config)
@@ -112,6 +112,8 @@ func TestEnvKeyRouting(t *testing.T) {
 		"AUTHKIT_KEYS_PATH":                 "auth.keys_path",
 		"AUTH_NAMING_FORMER_NAMES_DURATION": "auth.naming.former_names.duration",
 		"PROVIDER_SANDBOX_NMI_GATEWAY_URL":  "provider_sandbox.nmi_gateway_url",
+		"EMAIL_SMTP_PASSWORD":               "email_smtp.password",
+		"SENDGRID_API_KEY":                  "",
 		"CATALOG_SOURCE":                    "",
 		"MERCHANT_SOURCE":                   "",
 		"MERCHANT_CONFIG_SOURCE":            "",

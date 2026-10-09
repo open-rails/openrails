@@ -33,7 +33,7 @@ type Deps struct {
 	ConsoleAssets fs.FS
 
 	// Email delivers OpenRails' email: billing receipts and alerts. Nil uses
-	// Config.SendGrid.
+	// Config.SMTP.
 	Email EmailSender
 
 	// Contacts is the host's directory (helpers/contacts.Source, which

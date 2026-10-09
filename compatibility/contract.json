@@ -238,7 +238,7 @@
       "type RequestOption func(*requestOptions)",
       "type Route struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
       "type Routes = config.Routes",
-      "type SendGridConfig = config.SendGridConfig",
+      "type SMTPConfig = config.SMTPConfig",
       "type SolanaPSP struct {\n\tArchived bool `psp:\"archived\"`\n\n\tPrivateKey string `psp:\"secrets.private_key\"`\n\n\tTransitKey string `psp:\"signer.key\"`\n\n\tRPCProvider string `psp:\"settings.rpc_provider\"`\n\n\tRPCAPIKey string `psp:\"settings.rpc_api_key\"`\n\n\tTokens map[string]SolanaToken `psp:\"settings.tokens\"`\n\n\tRecipientWallet string `psp:\"settings.recipient_wallet\"`\n}",
       "type SolanaToken struct {\n\tMint string\n\tName string\n}",
       "type StartOption func(*startOptions)",
@@ -1107,7 +1107,7 @@
       "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
-      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSendGrid *SendGridConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
       "type Contact = contacts.Contact",
       "type Contacts = contacts.Source",
       "type CredentialPosture string",
@@ -1136,7 +1136,7 @@
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr     string\n\tPassword string\n\tDB       int\n}",
       "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tPermissions Permissions\n\n\tProvisioning bool\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
-      "type SendGridConfig struct {\n\tAPIKey string\n\tFrom   EmailAddress\n}",
+      "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
     "internal/nmimock": [
@@ -4807,6 +4807,7 @@
       "billing": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "fmt": "fmt",
+      "mail": "net/mail",
       "strconv": "strconv",
       "strings": "strings"
     },
