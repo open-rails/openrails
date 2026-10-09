@@ -345,6 +345,10 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&retainedPeriod, &retainedCompletion))
 			_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.river_leader SET expires_at=now()-interval '1 minute'`))
 			require.NoError(t, err)
+			// The day that pruning models also ages the queue: a monthly scan
+			// killed mid-run with the previous workers is then rescued, not
+			// left holding its uniqueness slot through the rescue silence.
+			ageRestartQueue(t, w, day)
 			third := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
 			// Startup may reuse the original monthly job, still waiting on its
 			// one-minute readonly snooze or recovery retry. Its ID need not be
@@ -355,6 +359,18 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&passes)
 				return err == nil && passes > 0
 			}, 90*time.Second, 50*time.Millisecond, "a post-GC monthly scan has checked retained cadence")
+			// Killed mid-run, its startup jobs (the rescue pass and the periodic
+			// monthly scan among them) would hold their uniqueness slots into the
+			// next startup. Jobs orphaned before the aged day are not its own.
+			busy := "unread"
+			deadline := time.Now().Add(30 * time.Second)
+			for busy != "" && time.Now().Before(deadline) {
+				if err := w.pool.QueryRow(t.Context(), w.q(`SELECT coalesce(string_agg(kind, ','), '') FROM billing.river_job WHERE state='running' AND attempted_at > now() - interval '1 hour'`)).Scan(&busy); err != nil {
+					busy = err.Error()
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+			require.Empty(t, busy, "the restarted worker is idle before shutdown")
 			third.kill(t)
 			var checkedPeriod, checkedCompletion time.Time
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT monthly_period_started_at, completed_at FROM billing.invoice_collection_cadence`)).Scan(&checkedPeriod, &checkedCompletion))
@@ -370,11 +386,20 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.river_job WHERE kind='openrails.invoice' AND state='completed'`))
 			require.NoError(t, err)
 			fourth := startRestartWorker(t, w, gateway.URL, openrails.ProviderWritesFull)
+			// A scan orphaned by an earlier stop waits for the next one-minute
+			// rescue pass, as the post-GC scan may.
 			require.Eventually(t, func() bool {
 				var status string
 				err := w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.invoices WHERE id=$1`), next.UUID()).Scan(&status)
 				return err == nil && status == "paid"
-			}, 30*time.Second, 50*time.Millisecond, "the next monthly period recovers the remaining small invoice")
+			}, 90*time.Second, 50*time.Millisecond, "the next monthly period recovers the remaining small invoice")
+			// The scan records its cadence after paying; killing the worker in
+			// between would leave the period for the next pass to close.
+			require.Eventually(t, func() bool {
+				var completed int
+				err := w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.river_job WHERE kind='openrails.invoice' AND args->>'use_monthly_floor'='true' AND state='completed'`)).Scan(&completed)
+				return err == nil && completed > 0
+			}, 15*time.Second, 50*time.Millisecond, "the next monthly scan completes before shutdown")
 			fourth.kill(t)
 			w.start()
 			requireInvoicePaidOnce(f, next, 3, 3, 10_000_000, 1)
