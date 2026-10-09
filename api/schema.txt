@@ -26,6 +26,7 @@ migration 0022_partition_race.up.sql sha256:6532f6a6254907507a3050ae4b42f05b7910
 migration 0023_statement_coverage.up.sql sha256:b23f0cefea13ef00bdfd6057af36e113aafea7bbda12e4ba04ff1e0a0601db02
 migration 0024_cost_resolutions.up.sql sha256:650fb1db36328c11d3171febc2f82f88e6bf4ff538612532653eb477bd69ae7a
 migration 0025_cost_refusals.up.sql sha256:49d6fba4a1ca3f5ed5a5f752d2483a74b8f334563e657a7cb4bdd9390a46ac5a
+migration 0026_provider_stop_holds_slot.up.sql sha256:1e938e7834d24d4335eae50bb09b04803023f1e259a64f05a281278880bab3de
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2253,6 +2254,7 @@ table billing.subscriptions
   constraint subscriptions_rail_subscription_id_check CHECK ((rail_subscription_id <> ''::text))
   constraint subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES billing.prices(merchant_id, id)
   constraint subscriptions_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
+  constraint subscriptions_stop_pending_canceled_check CHECK (((status = 'canceled'::text) OR (deletion_scheduled_at IS NULL)))
   constraint subscriptions_transient_retries_check CHECK ((transient_retries >= 0))
   constraint subscriptions_valid_period_check CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
   constraint trg_subscriptions_track_unverified TRIGGER DEFERRABLE INITIALLY DEFERRED
@@ -2264,8 +2266,8 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_current_period_ends_at_rebill_watch_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at) WHERE ((status = ANY (ARRAY['active'::text, 'unverified'::text, 'awaiting_method'::text])) AND (collection_policy = ANY (ARRAY['engine'::text, 'nmi_schedule'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_customer_id_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, customer_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE UNIQUE INDEX subscriptions_customer_id_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, id)
-  index CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text])) AND (deleted_at IS NULL))
-  index CREATE UNIQUE INDEX subscriptions_customer_id_tier_group_key ON billing.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL))
+  index CREATE UNIQUE INDEX subscriptions_customer_id_product_id_key ON billing.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))
+  index CREATE UNIQUE INDEX subscriptions_customer_id_tier_group_key ON billing.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((tier_group IS NOT NULL) AND (deleted_at IS NULL) AND ((status = ANY (ARRAY['active'::text, 'pending'::text, 'past_due'::text, 'awaiting_method'::text, 'unverified'::text])) OR (deletion_scheduled_at IS NOT NULL)))
   index CREATE INDEX subscriptions_destructive_run_id_idx ON billing.subscriptions USING btree (merchant_id, destructive_run_id) WHERE (destructive_run_id IS NOT NULL)
   index CREATE INDEX subscriptions_ended_at_idx ON billing.subscriptions USING btree (merchant_id, ended_at) WHERE (ended_at IS NOT NULL)
   index CREATE INDEX subscriptions_gateway_order_id_idx ON billing.subscriptions USING btree (merchant_id, rail, ((gateway_response ->> 'order_id'::text))) WHERE ((gateway_response ->> 'order_id'::text) IS NOT NULL)
