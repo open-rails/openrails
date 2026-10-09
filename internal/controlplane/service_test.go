@@ -50,25 +50,32 @@ func TestNewRefusesIncompleteConfiguration(t *testing.T) {
 	}
 }
 
-// Standalone is private by construction; hosted/passwordless are code-only opt-ins.
-func TestPostureIsCodeOnlyOptIn(t *testing.T) {
+// Standalone is private by construction: registration is closed unless the
+// host opens it, and the mounted AuthKit surface follows the mode.
+func TestRegistrationIsClosedUnlessOpened(t *testing.T) {
 	cp := &ControlPlane{}
-	require.True(t, cp.SelfHostedPosture())
+	require.Equal(t, iam.RegistrationModeClosed, cp.Registration())
 	groups := cp.MountedRouteGroups()
 	require.Equal(t, IntentionalRouteGroups, groups)
 	groups[0] = "mutated"
 	require.NotEqual(t, "mutated", string(IntentionalRouteGroups[0]), "callers get a copy")
-	hosted := (&ControlPlane{hosted: true}).MountedRouteGroups()
-	require.NotContains(t, hosted, iam.RouteBrowserOIDC, "hosted posture still mounts no browser OIDC")
-	require.Contains(t, hosted, iam.RouteRegistration)
+	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeOpen, iam.RegistrationModeInviteOnly} {
+		mounted := (&ControlPlane{registration: mode}).MountedRouteGroups()
+		require.NotContains(t, mounted, iam.RouteBrowserOIDC, "%s registration still mounts no browser OIDC", mode)
+		require.Contains(t, mounted, iam.RouteRegistration, mode)
+	}
+	require.NotContains(t, (&ControlPlane{registration: iam.RegistrationModeClosed}).MountedRouteGroups(), iam.RouteRegistration)
 
 	auth := &config.AuthConfig{}
 	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeClosed, Verification: iam.RegistrationVerificationNone}, registration(options{}, auth))
-	open := registration(newOptions([]Option{WithHostedPosture(), WithPasswordless(true)}), auth)
+	open := registration(newOptions([]Option{WithRegistration(iam.RegistrationModeOpen), WithPasswordless(true)}), auth)
 	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationRequired, PasswordlessLogin: true, PasswordlessAutoRegistration: true}, open)
+	invite := registration(newOptions([]Option{WithRegistration(iam.RegistrationModeInviteOnly)}), auth)
+	require.Equal(t, authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeInviteOnly, Verification: iam.RegistrationVerificationRequired}, invite)
+	require.ErrorContains(t, ValidateRegistrationMode("sometimes"), "open, invite_only, closed")
 
 	defaults := newOptions([]Option{nil})
-	require.False(t, defaults.hosted || defaults.passwordlessLogin || defaults.passwordlessAutoRegistration || defaults.merchantCreation != nil)
+	require.False(t, defaults.registration != "" || defaults.passwordlessLogin || defaults.passwordlessAutoRegistration || defaults.merchantCreation != nil)
 	login := newOptions([]Option{WithPasswordless(false)})
 	require.True(t, login.passwordlessLogin && !login.passwordlessAutoRegistration)
 }

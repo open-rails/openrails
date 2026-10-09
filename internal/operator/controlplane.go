@@ -43,23 +43,23 @@ type AttachOptions struct {
 	// NameAdmission is a side-effect-free username policy; merchant creation
 	// charges use MerchantCreation.Admission.
 	NameAdmission func(context.Context, iam.NameAdmissionRequest) error
-	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
-	// Leave false for private standalone-compatible embedded hosts.
-	HostedPosture bool
+	// Registration is AuthKit's native self-registration mode. Empty is
+	// closed, the right mode for private standalone-compatible embedded hosts.
+	Registration iam.RegistrationMode
 
 	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
 	// confirm routes. PasswordlessAutoRegistration additionally lets a verified
 	// unknown contact create a no-password user during confirmation. Both are off
-	// by default. Auto-registration requires login and HostedPosture; login
-	// requires an email or SMS sender.
+	// by default. Auto-registration requires login and open registration;
+	// login requires an email or SMS sender.
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
 
 	// EmailSender and SMSSender deliver AuthKit's messages and report their
-	// health (#738; adapters/twilio provides both). Hosted posture requires
-	// verified registration, so it needs at least one. Self-hosted posture
-	// registers nobody; a sender still powers the mounted verify and reset
-	// routes.
+	// health (#738; adapters/twilio provides both). Open and invite-only
+	// registration verify contacts, so they need at least one. Closed
+	// registration registers nobody; a sender still powers the mounted verify
+	// and reset routes.
 	EmailSender authkit.EmailSender
 	SMSSender   authkit.SMSSender
 
@@ -161,8 +161,8 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.NameAdmission != nil {
 		cpOpts = append(cpOpts, controlplane.WithNameAdmission(opts.NameAdmission))
 	}
-	if opts.HostedPosture {
-		cpOpts = append(cpOpts, controlplane.WithHostedPosture())
+	if opts.Registration != "" {
+		cpOpts = append(cpOpts, controlplane.WithRegistration(opts.Registration))
 	}
 	if opts.PasswordlessLogin {
 		cpOpts = append(cpOpts, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))
@@ -236,14 +236,22 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 }
 
 func validateAttachOptions(opts AttachOptions) error {
+	if err := controlplane.ValidateRegistrationMode(opts.Registration); err != nil {
+		return err
+	}
 	if opts.PasswordlessAutoRegistration && !opts.PasswordlessLogin {
 		return fmt.Errorf("control plane: passwordless auto-registration requires passwordless login")
 	}
-	if opts.PasswordlessAutoRegistration && !opts.HostedPosture {
-		return fmt.Errorf("control plane: passwordless auto-registration requires hosted posture")
+	if opts.PasswordlessAutoRegistration && opts.Registration != iam.RegistrationModeOpen {
+		return fmt.Errorf("control plane: passwordless auto-registration requires registration open")
 	}
-	if opts.PasswordlessLogin && opts.EmailSender == nil && opts.SMSSender == nil {
+	noSender := opts.EmailSender == nil && opts.SMSSender == nil
+	if opts.PasswordlessLogin && noSender {
 		return fmt.Errorf("control plane: passwordless login requires an email or SMS sender")
+	}
+	registers := opts.Registration != "" && opts.Registration != iam.RegistrationModeClosed
+	if registers && noSender && (opts.Auth == nil || !opts.Auth.AllowMissingSenders) {
+		return fmt.Errorf("control plane: registration %s requires an email or SMS sender", opts.Registration)
 	}
 	return nil
 }

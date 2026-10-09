@@ -314,10 +314,10 @@ pkg openrails, type ControlPlaneConfig struct, Auth config.AuthConfig
 pkg openrails, type ControlPlaneConfig struct, AuthRateLimits map[string]config.AuthRateLimit
 pkg openrails, type ControlPlaneConfig struct, CloudflareProxies []string
 pkg openrails, type ControlPlaneConfig struct, FrontendBaseURL string
-pkg openrails, type ControlPlaneConfig struct, HostedPosture bool
 pkg openrails, type ControlPlaneConfig struct, MerchantCreation *config.MerchantCreationConfig
 pkg openrails, type ControlPlaneConfig struct, PasswordlessAutoRegistration bool
 pkg openrails, type ControlPlaneConfig struct, PasswordlessLogin bool
+pkg openrails, type ControlPlaneConfig struct, Registration iam.RegistrationMode
 pkg openrails, type ControlPlaneConfig struct, TrustedProxies []string
 pkg openrails, type CredentialClass = billingauth.CredentialClass
 pkg openrails, type CredentialClass string

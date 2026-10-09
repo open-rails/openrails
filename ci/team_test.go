@@ -28,25 +28,22 @@ import (
 // that has not proved the address: anyone can register an address they do not
 // own. Only a live account that verified it joins directly; an unverified or
 // deleted account gets the answer an unregistered address gets (an invitation
-// where the posture mints one), and no role.
+// where registration mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 	f := newFixture(t)
 	require.NoError(t, standalonedb.ApplyAuthKit(t.Context(), f.pool))
-	for _, hosted := range []bool{false, true} {
-		name := "standalone"
-		if hosted {
-			name = "hosted"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeClosed, iam.RegistrationModeOpen} {
+		registers := mode != iam.RegistrationModeClosed
+		t.Run(string(mode), func(t *testing.T) {
 			ctx := t.Context()
 			slug := "team-" + uuid.NewString()[:8]
 			cfg := f.config()
-			cfg.ControlPlane = &openrails.ControlPlaneConfig{HostedPosture: hosted, Auth: openrails.AuthConfig{
+			cfg.ControlPlane = &openrails.ControlPlaneConfig{Registration: mode, Auth: openrails.AuthConfig{
 				Issuer: "http://127.0.0.1/" + slug, KeysPath: t.TempDir(), AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true,
 			}}
 			deps := openrails.Deps{Postgres: f.pool}
 			mail := &outbox{}
-			if hosted {
+			if registers {
 				deps.EmailSender = mail
 			}
 			cp, err := openrails.New(ctx, cfg, deps)
@@ -132,7 +129,7 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			require.NotNil(t, body["member"], "added at once: %v", body)
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")
 
-			if hosted {
+			if registers {
 				// The control plane's mail reaches the deployment's one sender,
 				// rendered, from the deployment's own address.
 				require.NoError(t, core.ResetAccountMFA(ctx, verified.ID))

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -27,10 +28,15 @@ func TestAttachOptionsPasswordlessPolicy(t *testing.T) {
 		"disabled":                        {AttachOptions{}, false},
 		"login with email":                {AttachOptions{PasswordlessLogin: true, EmailSender: emailSender}, false},
 		"login with sms only":             {AttachOptions{PasswordlessLogin: true, SMSSender: smsSender}, false},
-		"hosted auto-registration":        {AttachOptions{HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
-		"auto-registration without login": {AttachOptions{HostedPosture: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration not hosted":    {AttachOptions{PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"open auto-registration":          {AttachOptions{Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
+		"auto-registration without login": {AttachOptions{Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration closed":        {AttachOptions{PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
+		"auto-registration invite-only":   {AttachOptions{Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
 		"login without sender":            {AttachOptions{PasswordlessLogin: true}, true},
+		"open without sender":             {AttachOptions{Registration: iam.RegistrationModeOpen}, true},
+		"invite-only with sender":         {AttachOptions{Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
+		"closed without sender":           {AttachOptions{Registration: iam.RegistrationModeClosed}, false},
+		"unknown mode":                    {AttachOptions{Registration: "sometimes"}, true},
 	} {
 		err := validateAttachOptions(tc.opts)
 		require.Equal(t, tc.wantErr, err != nil, "%s: %v", name, err)

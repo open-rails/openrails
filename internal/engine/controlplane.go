@@ -18,7 +18,7 @@ func attachControlPlane(ctx context.Context, a *app.App, cp config.ControlPlaneC
 	auth := cp.Auth
 	opts := operator.AttachOptions{
 		Auth:                         &auth,
-		HostedPosture:                cp.HostedPosture,
+		Registration:                 cp.Registration,
 		PasswordlessLogin:            cp.PasswordlessLogin,
 		PasswordlessAutoRegistration: cp.PasswordlessAutoRegistration,
 		Frontend:                     authkit.FrontendConfig{BaseURL: cp.FrontendBaseURL},

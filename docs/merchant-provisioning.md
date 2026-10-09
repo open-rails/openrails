@@ -90,8 +90,8 @@ A hosted product (openrails-saas shape) wires everything through
 
 ```go
 cfg.ControlPlane = &openrails.ControlPlaneConfig{
-    Auth:          openrails.AuthConfig{Issuer: "https://api.my-brand.example"},
-    HostedPosture: true,
+    Auth:         openrails.AuthConfig{Issuer: "https://api.my-brand.example"},
+    Registration: iam.RegistrationModeOpen, // github.com/open-rails/authkit/iam
     MerchantCreation: &openrails.MerchantCreationConfig{
         ReservedSlugs: []string{"my-brand"}, // + billing.ReservedMerchantSlugs, always
         FreeAllowance: 2,                    // owned merchants before a card on file is required

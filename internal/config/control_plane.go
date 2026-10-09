@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/open-rails/authkit/iam"
 )
 
 // ControlPlaneConfig attaches the OpenRails-owned AuthKit control plane: user
@@ -13,11 +15,14 @@ import (
 type ControlPlaneConfig struct {
 	// Auth is the control plane's identity configuration (issuer, keys, naming).
 	Auth AuthConfig
-	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
-	HostedPosture bool
+	// Registration is AuthKit's native self-registration mode: open,
+	// invite_only or closed. Empty is closed, so a self-hosted deployment
+	// registers nobody; a hosted product opens it. Open and invite-only also
+	// mount AuthKit's self-service API and need an email or SMS sender.
+	Registration iam.RegistrationMode
 	// PasswordlessLogin exposes contact-based passwordless sign-in;
 	// PasswordlessAutoRegistration also creates a no-password user for a
-	// verified unknown contact (requires HostedPosture and a sender).
+	// verified unknown contact (requires open registration and a sender).
 	PasswordlessLogin            bool
 	PasswordlessAutoRegistration bool
 	// FrontendBaseURL is where emailed links point. Empty uses the issuer,

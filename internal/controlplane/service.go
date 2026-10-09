@@ -31,7 +31,9 @@ import (
 // fatal. Embedded hosts opt in with Config.ControlPlane.
 type ControlPlane struct {
 	client *authkit.Client
-	hosted bool
+	// registration is AuthKit's native self-registration mode; closed unless
+	// the host opens it (WithRegistration).
+	registration iam.RegistrationMode
 	// merchantCreation is the hosted policy for user-claimed merchant names
 	// (WithMerchantCreation, or#914); nil otherwise.
 	merchantCreation *MerchantCreationConfig
@@ -57,7 +59,7 @@ type ControlPlane struct {
 type options struct {
 	naming                       *config.NamingConfig
 	nameAdmission                func(context.Context, iam.NameAdmissionRequest) error
-	hosted                       bool
+	registration                 iam.RegistrationMode
 	passwordlessLogin            bool
 	passwordlessAutoRegistration bool
 	email                        authkit.EmailSender
@@ -74,11 +76,11 @@ type options struct {
 // Option configures the control plane for embedding hosts.
 type Option func(*options)
 
-// WithHostedPosture opens AuthKit registration and mounts the full AuthKit API.
-// Standalone never passes this; hosted products opt in through
-// Config.ControlPlane.
-func WithHostedPosture() Option {
-	return func(o *options) { o.hosted = true }
+// WithRegistration sets AuthKit's native self-registration mode. Empty is
+// closed: standalone registers nobody; hosted products opt in through
+// Config.ControlPlane.Registration.
+func WithRegistration(mode iam.RegistrationMode) Option {
+	return func(o *options) { o.registration = mode }
 }
 
 // WithMerchantCreation declares the hosted policy for merchant names claimed
@@ -99,8 +101,9 @@ func WithPasswordless(autoRegistration bool) Option {
 	}
 }
 
-// WithEmailSender wires the host's email delivery (#738). Hosted posture
-// requires verified registration, so it needs an email or SMS sender.
+// WithEmailSender wires the host's email delivery (#738). Open or
+// invite-only registration verifies contacts, so it needs an email or SMS
+// sender.
 func WithEmailSender(sender authkit.EmailSender) Option {
 	return func(o *options) { o.email = sender }
 }
@@ -189,21 +192,38 @@ func clientIPPosture(cfg *config.Config, auth *config.AuthConfig, options option
 	return authkit.HTTPConfig{TrustedProxies: proxies, CloudflareProxies: cloudflare, DirectPeerIP: directPeer}, nil
 }
 
-// Registration policy (#469): standalone is closed and verifies nothing;
-// hosted posture opens registration and requires verified contacts, so it
-// needs a sender.
+// Registration policy (#469): closed registers nobody and verifies nothing;
+// open and invite-only registration require verified contacts, so they need a
+// sender.
 func registration(options options, auth *config.AuthConfig) authkit.RegistrationConfig {
 	reg := authkit.RegistrationConfig{
-		NativeUserMode:               iam.RegistrationModeClosed,
+		NativeUserMode:               registrationMode(options.registration),
 		Verification:                 iam.RegistrationVerificationNone,
 		PasswordlessLogin:            options.passwordlessLogin,
 		PasswordlessAutoRegistration: options.passwordlessAutoRegistration,
 		AllowMissingSenders:          auth.AllowMissingSenders,
 	}
-	if options.hosted {
-		reg.NativeUserMode, reg.Verification = iam.RegistrationModeOpen, iam.RegistrationVerificationRequired
+	if reg.NativeUserMode != iam.RegistrationModeClosed {
+		reg.Verification = iam.RegistrationVerificationRequired
 	}
 	return reg
+}
+
+// registrationMode resolves the declared mode; empty is closed.
+func registrationMode(mode iam.RegistrationMode) iam.RegistrationMode {
+	if mode == "" {
+		return iam.RegistrationModeClosed
+	}
+	return mode
+}
+
+// ValidateRegistrationMode refuses anything but AuthKit's three modes.
+func ValidateRegistrationMode(mode iam.RegistrationMode) error {
+	switch mode {
+	case "", iam.RegistrationModeOpen, iam.RegistrationModeInviteOnly, iam.RegistrationModeClosed:
+		return nil
+	}
+	return fmt.Errorf("controlplane: registration %q is not one of open, invite_only, closed", mode)
 }
 
 // inlineKeySource is the signing key from inline PEM (AUTHKIT_ACTIVE_KEY_ID /
@@ -290,6 +310,9 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 		return nil, errors.New("controlplane: auth.issuer is required")
 	}
 	options := newOptions(opts)
+	if err := ValidateRegistrationMode(options.registration); err != nil {
+		return nil, err
+	}
 
 	var pattern *regexp.Regexp
 	if options.merchantCreation != nil {
@@ -317,7 +340,7 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 		return nil, err
 	}
 	cp := &ControlPlane{
-		hosted: options.hosted, merchantCreation: options.merchantCreation,
+		registration: registrationMode(options.registration), merchantCreation: options.merchantCreation,
 		merchantCreationPattern: pattern, naming: naming,
 		pool: db.WrapPool(pool, config.SchemaName(cfg)), authPrefix: authPrefix(auth.Issuer),
 	}
@@ -406,9 +429,17 @@ func (c *ControlPlane) Pool() *db.Pool {
 	return c.pool
 }
 
-// SelfHostedPosture reports whether this control plane mounts only the
-// intentional AuthKit route groups. Standalone never passes
-// WithHostedPosture, so private OpenRails is locked by default.
-func (c *ControlPlane) SelfHostedPosture() bool {
-	return c == nil || !c.hosted
+// Registration is AuthKit's native self-registration mode (closed by
+// default, so private OpenRails is locked down unless the host opens it).
+func (c *ControlPlane) Registration() iam.RegistrationMode {
+	if c == nil {
+		return iam.RegistrationModeClosed
+	}
+	return registrationMode(c.registration)
+}
+
+// registers reports whether people can create accounts themselves (open or
+// invite-only registration).
+func (c *ControlPlane) registers() bool {
+	return c.Registration() != iam.RegistrationModeClosed
 }

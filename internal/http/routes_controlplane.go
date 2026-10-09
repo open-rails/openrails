@@ -7,7 +7,7 @@ import (
 )
 
 // registerControlPlaneAuthRoutes mounts the AuthKit route groups OpenRails
-// intentionally exposes (#224 task 4): the posture's explicit group list
+// intentionally exposes (#224 task 4): the registration mode's explicit group list
 // (ControlPlane.MountedRouteGroups, never AuthKit's default surface or browser
 // OIDC), plus JWKS at the issuer.
 func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
@@ -20,8 +20,8 @@ func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 		s.handle(mux, route.Pattern(), cp.AuthHandler())
 	}
 	log.WithFields(log.Fields{
-		"routes":      len(routes),
-		"self_hosted": cp.SelfHostedPosture(),
+		"routes":       len(routes),
+		"registration": cp.Registration(),
 	}).Info("control plane: mounted selective AuthKit route groups")
 	return nil
 }
