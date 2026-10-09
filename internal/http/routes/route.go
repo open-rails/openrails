@@ -326,19 +326,24 @@ func TierErrors(tier Tier) []string {
 	var own []string
 	switch tier {
 	case AuthUser:
-		own = []string{billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired}
+		own = []string{
+			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
+			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
+			billing.CodeAuthenticationUnavailable,
+		}
 	case AuthCustomer:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
-			billing.CodeDelegatedTokenInvalid, billing.CodeDelegatedTokenExpired, billing.CodeDelegatedTokenRevoked, billing.CodeDelegatedPrincipalInvalid,
-			billing.CodeDelegatedMerchantUnresolved, billing.CodeDelegatedVerificationUnavailable, billing.CodeInvokerScopedPrincipal,
+			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired,
+			billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeAuthenticationUnavailable,
+			billing.CodeDelegatedPrincipalInvalid, billing.CodeInvokerScopedPrincipal,
 		}, selectorErrors...)
 	case AuthMerchant:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeCredentialIdentityMismatch,
 			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
-			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeDelegatedTokenInvalid, billing.CodeDelegatedPrincipalInvalid,
-			billing.CodeDelegatedVerificationUnavailable, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
+			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeDelegatedPrincipalInvalid,
+			billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
 			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch, billing.CodeStepUpRequired,
 			billing.CodeStepUpUnavailable, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
 			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,

@@ -94,9 +94,6 @@ func ValidateResourceServer(rs *ResourceServerConfig, allowLoopback bool) error 
 	if len(rs.DPoPNonceKey) < 32 {
 		return fmt.Errorf("resource_server.dpop_nonce_key must be at least 32 bytes")
 	}
-	if len(rs.TrustedIssuers) == 0 {
-		return fmt.Errorf("resource_server.trusted_issuers is empty")
-	}
 	seen := map[string]bool{}
 	for i, is := range rs.TrustedIssuers {
 		at := fmt.Sprintf("resource_server.trusted_issuers[%d]", i)

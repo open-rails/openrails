@@ -13,7 +13,6 @@ func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix 
 			ResourceTokenResolver:     s.controlPlane,
 			AdminPermissionChecker:    s.controlPlane,
 			ServiceCredentialResolver: s.controlPlane,
-			DelegatedResolver:         s.controlPlane,
 			DelegatedAuthenticator:    s.delegatedAuthenticator,
 		}),
 		AdminLimiter:  s.adminLimiter,

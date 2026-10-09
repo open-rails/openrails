@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/credential"
 )
 
 // Every refusal precedes AuthKit's construction, so none needs a database.
@@ -187,12 +187,12 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		require.Empty(t, cp.AuthAPIBase())
 		_, err := cp.ResolveAPIKey(ctx, APIKeyPrefix+"_st_key_secret")
 		require.ErrorIs(t, err, ErrNoControlPlane)
-		_, err = cp.ResolveServiceJWT(ctx, "a.b.c")
-		require.ErrorIs(t, err, ErrNoControlPlane)
-		_, err = cp.ResolveDelegated(r)
-		require.ErrorIs(t, err, ErrDelegatedNotConfigured)
-		_, err = cp.ResolveRemoteApplication(ctx, "a.b.c")
-		require.ErrorIs(t, err, ErrRemoteApplicationNotConfigured)
+		_, err = cp.ResolveResourceToken(r)
+		require.ErrorIs(t, err, credential.ErrResourceServerNotConfigured)
+		_, err = cp.ResolveResourceUser(r)
+		require.ErrorIs(t, err, credential.ErrResourceServerNotConfigured)
+		_, err = cp.ResolveResourceCustomer(r)
+		require.ErrorIs(t, err, credential.ErrResourceServerNotConfigured)
 		_, _, err = cp.MintMerchantAPIKey(ctx, mid, "k", MerchantViewer, iam.SystemActor())
 		require.ErrorIs(t, err, ErrNoControlPlane)
 		_, _, err = cp.ResolveAuthorizedMerchant(ctx, r, "acme", "merchant:catalog:read")
@@ -213,22 +213,6 @@ func TestUnconfiguredControlPlaneFailsClosed(t *testing.T) {
 		_, err := (&ControlPlane{}).TouchCustomer(ctx, bad.mid, "iss", bad.subject)
 		require.ErrorIs(t, err, ErrCustomerInvalid)
 	}
-}
-
-// Only a remote application's own access token takes the application path;
-// every other JWT falls through to the service-JWT and delegated resolvers.
-func TestRemoteApplicationTokenType(t *testing.T) {
-	header := func(typ string) string {
-		return base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"`+typ+`"}`)) + ".e30.sig"
-	}
-	require.Equal(t, remoteApplicationTokenType, joseType(header(remoteApplicationTokenType)))
-	require.Equal(t, "delegated-access+jwt", joseType(header("delegated-access+jwt")))
-	require.Empty(t, joseType("not a jwt"))
-	cp := &ControlPlane{delegatedVerifier: &authkit.Verifier{}}
-	_, err := cp.ResolveRemoteApplication(context.Background(), header("delegated-access+jwt"))
-	require.ErrorIs(t, err, ErrNotRemoteApplicationToken)
-	_, err = cp.ResolveRemoteApplication(context.Background(), "  ")
-	require.ErrorIs(t, err, ErrDelegatedInvalid)
 }
 
 // Fleet aggregates refuse an out-of-range window; they never substitute one.

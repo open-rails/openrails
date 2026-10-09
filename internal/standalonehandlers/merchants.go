@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -20,6 +21,10 @@ type MerchantLister interface {
 // user holds a role in, with its highest role in each (#1106).
 func MerchantListMine(svc MerchantLister) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
+		if user, ok := middleware.ResourceUserFromRequest(r); ok {
+			r.SuccessJSON(billing.ListPage[billing.UserMerchant]{Items: user.Merchants})
+			return
+		}
 		uc, ok := r.UserContext()
 		if !ok || strings.TrimSpace(uc.UserID) == "" {
 			r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")

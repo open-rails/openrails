@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -22,6 +23,10 @@ type Options struct {
 	// Authenticator is the framework-neutral auth boundary behind AuthUser and
 	// AuthOptional routes (issue #282/#285).
 	Authenticator billingauth.Authenticator
+
+	// ResourceUsers authenticates AuthUser routes with a trusted issuer's
+	// access token (#1140); nil leaves them to Authenticator alone.
+	ResourceUsers ResourceUserResolver
 
 	// Gate protects AuthMerchant routes. AuthKit/control-plane and embedded
 	// host auth are adapters behind this one interface.
@@ -256,6 +261,16 @@ func strictQueryMW(names []string) router.Middleware {
 func (opts Options) requiredMW() router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
+			if opts.ResourceUsers != nil && credential.LooksLikeResourceToken(authorizationToken(r.Request.Header.Get("Authorization"))) {
+				user, err := opts.ResourceUsers.ResolveResourceUser(r.Request)
+				if err != nil {
+					r.AbortGate(credential.ResourceTokenRefusal(err))
+					return
+				}
+				r.Set(middleware.ResourceUserContextKey, user)
+				next(r)
+				return
+			}
 			a := opts.Authenticator
 			if a == nil {
 				r.AbortCode(billing.CodeInternalError, "authentication disabled")

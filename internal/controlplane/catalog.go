@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/credential"
 )
 
 // Roles is OpenRails' permission model (#567): two flat personas beside root.
@@ -113,6 +114,18 @@ func merchantRoleGrants(name string) ([]string, bool) {
 		return viewerGrants, true
 	}
 	return nil, false
+}
+
+// merchantRoleFor names the merchant role whose grants are exactly perms;
+// any other set is "custom".
+func merchantRoleFor(perms []string) string {
+	for _, role := range []iam.Role{MerchantOwner, MerchantSupport, MerchantViewer} {
+		grants, _ := merchantRoleGrants(role.Name())
+		if credential.EquivalentPermissions(grants, perms) {
+			return role.Name()
+		}
+	}
+	return "custom"
 }
 
 func merchantRole(name string, perms ...string) iam.Role {

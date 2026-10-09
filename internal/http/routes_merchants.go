@@ -17,6 +17,7 @@ func (s *Server) registerMerchantAccountRoutes(mux router.Registrar) {
 	}
 	httproutes.RegisterControlPlaneRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix, s.runtime, s.recordRoute), s.runtime, httproutes.Options{
 		Authenticator: s.authenticator,
+		ResourceUsers: s.controlPlane,
 		External: httproutes.External{
 			ListMerchants:           router.Handler(standalonehandlers.MerchantListMine(s.controlPlane)),
 			CreateMerchant:          router.Handler(standalonehandlers.MerchantCreate(s.controlPlane)),

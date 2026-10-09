@@ -73,12 +73,7 @@ const (
 	CodeServiceCredentialMerchantUnresolved   = "service_credential_merchant_unresolved"
 	CodeServiceCredentialResourceScopeDenied  = "service_credential_resource_scope_denied"
 	CodeServiceCredentialCustomerScopeDenied  = "service_credential_customer_scope_denied"
-	CodeDelegatedTokenInvalid                 = "delegated_token_invalid"
-	CodeDelegatedTokenExpired                 = "delegated_token_expired"
-	CodeDelegatedTokenRevoked                 = "delegated_token_revoked"
 	CodeDelegatedPrincipalInvalid             = "delegated_principal_invalid"
-	CodeDelegatedMerchantUnresolved           = "delegated_merchant_unresolved"
-	CodeDelegatedVerificationUnavailable      = "delegated_verification_unavailable"
 	CodeAccessTokenInvalid                    = "access_token_invalid"
 	CodeAccessTokenIssuerUnknown              = "access_token_issuer_unknown"
 	CodeAccessTokenMerchantNotBound           = "access_token_merchant_not_bound"
@@ -152,13 +147,9 @@ var errorCodes = []ErrorCode{
 	{CodeCredentialIdentityMismatch, 401, authn, "The credential changed identity during the request."},
 	{CodeSenderProofRequired, 401, authn, "A sender-constrained token arrived without its DPoP proof."},
 	{CodeServiceCredentialInvalid, 401, authn, "The API key or service token is invalid."},
-	{CodeDelegatedTokenInvalid, 401, authn, "The delegated access token is invalid."},
-	{CodeDelegatedTokenExpired, 401, authn, "The delegated access token has expired."},
-	{CodeDelegatedTokenRevoked, 401, authn, "The delegated access token was revoked."},
 	{CodeDelegatedPrincipalInvalid, 401, authn, "The host's delegated principal names no usable merchant or subject."},
 	{CodeHostPrincipalInvalid, 401, authn, "The in-process host principal is bound to no merchant."},
 	{CodeAuthenticationUnavailable, 503, fault, "The credential could not be verified right now; retry."},
-	{CodeDelegatedVerificationUnavailable, 503, fault, "Delegated tokens cannot be verified right now; retry."},
 	{CodeAccessTokenInvalid, 401, authn, "The access token is invalid, expired or not issued for this deployment."},
 	{CodeAccessTokenIssuerUnknown, 401, authn, "The access token's issuer is not trusted by this deployment."},
 	{CodeDPoPNonceRequired, 401, authn, "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."},
@@ -171,7 +162,6 @@ var errorCodes = []ErrorCode{
 	{CodeServiceCredentialMerchantUnresolved, 403, authz, "The service credential's issuer owns no merchant."},
 	{CodeServiceCredentialResourceScopeDenied, 403, authz, "The service credential is scoped to other resources."},
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
-	{CodeDelegatedMerchantUnresolved, 403, authz, "The delegated token's issuer resolves to no merchant."},
 	{CodeAccessTokenMerchantNotBound, 403, authz, "The access token's issuer is not trusted for this merchant."},
 	{CodeInsufficientScope, 403, authz, "The access token was not granted the scope this surface requires."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},

@@ -69,12 +69,15 @@ type MerchantRef struct {
 	DisplayName string     `json:"display_name"`
 }
 
-// UserMerchant is a merchant a user holds a role in, with that role.
+// UserMerchant is a merchant a user may act on: the role they hold
+// (owner, support or viewer; custom for an issuer's permissions that match
+// no role) and its permissions.
 type UserMerchant struct {
 	ID          MerchantID `json:"id"`
 	Slug        string     `json:"slug"`
 	DisplayName string     `json:"display_name"`
 	Role        string     `json:"role"`
+	Permissions []string   `json:"permissions"`
 }
 
 // FleetMerchantFunnel counts merchants by lifecycle stage: provisioned, armed

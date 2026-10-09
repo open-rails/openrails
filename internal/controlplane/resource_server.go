@@ -16,9 +16,11 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
@@ -26,14 +28,23 @@ import (
 // resourceServer verifies the RFC 9068 access tokens trusted issuers mint
 // for this deployment (#1140).
 type resourceServer struct {
-	verifier *verify.Verifier
-	issuers  map[string]trustedIssuer
-	origins  map[string]bool
+	verifier   *verify.Verifier
+	identifier string
+	issuers    map[string]trustedIssuer
+	origins    map[string]bool
+
+	mu sync.Mutex
+	// registered is when each registry issuer's keys were last given to the
+	// verifier: its application's UpdatedAt.
+	registered map[string]time.Time
 }
 
+// trustedIssuer is a declared issuer (bound to merchants by name) or a
+// registry one (bound to its controlling group's merchant).
 type trustedIssuer struct {
 	name       string
 	merchants  []string
+	group      string
 	ceiling    []string
 	groupRoles map[string][]string
 }
@@ -59,8 +70,8 @@ func newResourceServer(cfg config.ResourceServerConfig, auth *config.AuthConfig,
 	if origin := dpopOrigin(auth); origin != "" {
 		opts = append(opts, verify.WithPublicURL(origin))
 	}
-	rs := &resourceServer{verifier: verify.NewVerifier(opts...), issuers: map[string]trustedIssuer{}, origins: map[string]bool{}}
 	identifier := strings.TrimSpace(cfg.Identifier)
+	rs := &resourceServer{verifier: verify.NewVerifier(opts...), identifier: identifier, issuers: map[string]trustedIssuer{}, origins: map[string]bool{}, registered: map[string]time.Time{}}
 	for _, is := range cfg.TrustedIssuers {
 		issuer := strings.TrimSpace(is.Issuer)
 		keys := verify.IssuerOptions{Keys: is.Keys}
@@ -161,10 +172,6 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 	if err != nil {
 		return nil, err
 	}
-	grants := append([]string(nil), cl.Permissions...)
-	for _, role := range cl.Roles {
-		grants = append(grants, is.groupRoles[strings.TrimSpace(role)]...)
-	}
 	return &credential.ResolvedResourceAccess{
 		Machine:       cl.Kind == iam.ActorOAuthClient,
 		Issuer:        strings.TrimSpace(cl.Issuer),
@@ -172,7 +179,7 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		ClientID:      cl.ClientID,
 		MerchantID:    mid,
 		MerchantSlug:  slug,
-		Permissions:   credential.IntersectPermissions(grants, is.ceiling),
+		Permissions:   is.permissions(cl),
 		Scopes:        append([]string(nil), cl.Scopes...),
 		SessionID:     cl.SessionID,
 		Email:         cl.Email,
@@ -181,11 +188,179 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 	}, nil
 }
 
+// ResolveResourceUser verifies r's access token for a signed-in user's own
+// routes: who acts, and each of the issuer's merchants the token grants
+// anything on.
+func (c *ControlPlane) ResolveResourceUser(r *http.Request) (*credential.ResourceUser, error) {
+	if c == nil || c.resource == nil {
+		return nil, credential.ErrResourceServerNotConfigured
+	}
+	if r == nil {
+		return nil, credential.ErrResourceTokenInvalid
+	}
+	cl, is, err := c.verifyResourceToken(r, billing.ScopeMerchant)
+	if err != nil {
+		return nil, err
+	}
+	refs, err := c.boundMerchants(r.Context(), is)
+	if err != nil {
+		return nil, err
+	}
+	user := &credential.ResourceUser{
+		Machine: cl.Kind == iam.ActorOAuthClient, Issuer: strings.TrimSpace(cl.Issuer), Subject: strings.TrimSpace(cl.Subject),
+		Email: cl.Email, EmailVerified: cl.EmailVerified, Username: cl.Username, Merchants: []billing.UserMerchant{},
+	}
+	perms := is.permissions(cl)
+	if len(perms) == 0 {
+		return user, nil
+	}
+	for _, ref := range refs {
+		user.Merchants = append(user.Merchants, billing.UserMerchant{ID: ref.ID, Slug: ref.Slug, DisplayName: ref.DisplayName, Role: merchantRoleFor(perms), Permissions: perms})
+	}
+	return user, nil
+}
+
+// ResolveResourceCustomer verifies r's access token for a customer's own
+// billing (/v1/me): a user of a trusted issuer, granted openrails:self and
+// bound to a browser key, is the customer of the merchant the request names
+// or the issuer's only one.
+func (c *ControlPlane) ResolveResourceCustomer(r *http.Request) (*credential.ResolvedDelegated, error) {
+	if c == nil || c.resource == nil {
+		return nil, credential.ErrResourceServerNotConfigured
+	}
+	if r == nil {
+		return nil, credential.ErrResourceTokenInvalid
+	}
+	ctx := r.Context()
+	cl, is, err := c.verifyResourceToken(r, billing.ScopeSelf)
+	if err != nil {
+		return nil, err
+	}
+	if cl.Kind == iam.ActorOAuthClient {
+		return nil, credential.ErrResourceTokenInvalid
+	}
+	if cl.JWKThumbprint == "" && cl.CertificateThumbprint == "" {
+		return nil, credential.ChallengeError{Code: billing.CodeSenderProofRequired, Headers: map[string]string{"WWW-Authenticate": `DPoP error="invalid_token", error_description="a customer token must be DPoP-bound"`}, Err: credential.ErrResourceTokenInvalid}
+	}
+	mid, slug, err := c.resourceMerchant(ctx, r, is)
+	if err != nil {
+		return nil, err
+	}
+	subject := strings.TrimSpace(cl.Subject)
+	customerID, err := c.TouchCustomer(ctx, mid, cl.Issuer, subject)
+	if errors.Is(err, ErrCustomerInvalid) {
+		return nil, credential.ErrResourceTokenInvalid
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	}
+	return &credential.ResolvedDelegated{
+		CredentialClass:  billingauth.CredentialClassUserSession,
+		Merchant:         slug,
+		MerchantID:       mid,
+		MerchantSlug:     slug,
+		CustomerID:       customerID,
+		DelegatedSubject: subject,
+		Issuer:           strings.TrimSpace(cl.Issuer),
+		Email:            cl.Email,
+		EmailVerified:    cl.EmailVerified,
+		Username:         cl.Username,
+	}, nil
+}
+
+// permissions is what the issuer lets cl do: its permissions and mapped
+// roles within the ceiling.
+func (is trustedIssuer) permissions(cl verify.Claims) []string {
+	grants := append([]string(nil), cl.Permissions...)
+	for _, role := range cl.Roles {
+		grants = append(grants, is.groupRoles[strings.TrimSpace(role)]...)
+	}
+	return credential.IntersectPermissions(grants, is.ceiling)
+}
+
+// registryIssuer trusts an enabled remote application of the merchant
+// registry as an issuer: bound to the merchant its controlling group backs,
+// within its stored authority, both read on every request.
+func (c *ControlPlane) registryIssuer(ctx context.Context, iss string) (trustedIssuer, bool, error) {
+	if iss == "" || c.client == nil {
+		return trustedIssuer{}, false, nil
+	}
+	app, err := c.client.RemoteApplication(ctx, iam.AppByIssuer(iss))
+	switch {
+	case errors.Is(err, iam.ErrRemoteApplicationNotFound):
+		return trustedIssuer{}, false, nil
+	case err != nil:
+		return trustedIssuer{}, false, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	case !app.Enabled || app.Issuer != iss:
+		return trustedIssuer{}, false, nil
+	}
+	if err := c.resource.register(app); err != nil {
+		return trustedIssuer{}, false, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	}
+	ceiling := make([]string, len(app.Permissions))
+	for i, p := range app.Permissions {
+		ceiling[i] = p.String()
+	}
+	return trustedIssuer{name: app.ID, group: app.GroupID, ceiling: ceiling}, true, nil
+}
+
+// register gives the verifier app's current keys.
+func (rs *resourceServer) register(app iam.RemoteApplication) error {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if at, ok := rs.registered[app.Issuer]; ok && at.Equal(app.UpdatedAt) {
+		return nil
+	}
+	keys := verify.IssuerOptions{Keys: app.PublicKeys}
+	if app.Mode == iam.RemoteApplicationModeJWKS || len(app.PublicKeys) == 0 {
+		keys = verify.IssuerOptions{JWKSURI: app.JWKSURI}
+	}
+	if err := rs.verifier.AddIssuer(app.Issuer, []string{rs.identifier}, keys); err != nil {
+		return err
+	}
+	rs.registered[app.Issuer] = app.UpdatedAt
+	return nil
+}
+
+// boundMerchants are the issuer's merchants that are live.
+func (c *ControlPlane) boundMerchants(ctx context.Context, is trustedIssuer) ([]merchants.DirectoryRef, error) {
+	directory, err := c.directory()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	}
+	groups := []string{}
+	if is.group != "" {
+		groups = append(groups, is.group)
+	}
+	for _, ref := range is.merchants {
+		group, err := c.merchantGroupByName(ctx, ref)
+		if errors.Is(err, billing.ErrMerchantUnresolved) {
+			continue // not provisioned (yet), or not active
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+		}
+		groups = append(groups, group)
+	}
+	refs, err := directory.ListByGroups(ctx, groups)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
+	}
+	return refs, nil
+}
+
 // verifyResourceToken verifies r's access token from a trusted issuer and
 // requires scope, which selects the surface it was minted for.
 func (c *ControlPlane) verifyResourceToken(r *http.Request, scope string) (verify.Claims, trustedIssuer, error) {
 	rs := c.resource
-	is, ok := rs.issuers[unverifiedIssuer(r)]
+	iss := unverifiedIssuer(r)
+	is, ok := rs.issuers[iss]
+	if !ok {
+		var err error
+		if is, ok, err = c.registryIssuer(r.Context(), iss); err != nil {
+			return verify.Claims{}, trustedIssuer{}, err
+		}
+	}
 	if !ok {
 		return verify.Claims{}, trustedIssuer{}, credential.ErrResourceTokenIssuerUnknown
 	}
@@ -213,20 +388,9 @@ func (c *ControlPlane) verifyResourceToken(r *http.Request, scope string) (verif
 // resourceMerchant is the merchant the token acts for: the one the request
 // names, which must be one the issuer is trusted for, else the issuer's only one.
 func (c *ControlPlane) resourceMerchant(ctx context.Context, r *http.Request, is trustedIssuer) (billing.MerchantID, string, error) {
-	type bound struct {
-		id   billing.MerchantID
-		slug string
-	}
-	var trusted []bound
-	for _, ref := range is.merchants {
-		mid, slug, err := c.MerchantScope(ctx, ref)
-		if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
-			continue // not provisioned (yet), or not active
-		}
-		if err != nil {
-			return billing.MerchantID{}, "", fmt.Errorf("%w: %w", credential.ErrResourceTokenUnavailable, err)
-		}
-		trusted = append(trusted, bound{mid, slug})
+	trusted, err := c.boundMerchants(ctx, is)
+	if err != nil {
+		return billing.MerchantID{}, "", err
 	}
 	requested, named, err := requestedMerchant(ctx, r, c)
 	if err != nil {
@@ -234,15 +398,15 @@ func (c *ControlPlane) resourceMerchant(ctx context.Context, r *http.Request, is
 	}
 	if named {
 		for _, b := range trusted {
-			if b.id == requested {
-				return b.id, b.slug, nil
+			if b.ID == requested {
+				return b.ID, b.Slug, nil
 			}
 		}
 		return billing.MerchantID{}, "", credential.ErrResourceTokenMerchantNotBound
 	}
 	switch len(trusted) {
 	case 1:
-		return trusted[0].id, trusted[0].slug, nil
+		return trusted[0].ID, trusted[0].Slug, nil
 	case 0:
 		return billing.MerchantID{}, "", credential.ErrResourceTokenMerchantNotBound
 	}

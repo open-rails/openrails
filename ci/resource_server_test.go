@@ -12,21 +12,29 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/authkit/keys"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/operator"
 )
 
 const resourceID = "https://openrails.e2e.test"
@@ -52,6 +60,11 @@ func (k issuerKey) pinned(t *testing.T) []iam.RemoteApplicationKey {
 
 // mint signs an RFC 9068 access token; edit adjusts its claims.
 func (k issuerKey) mint(t *testing.T, edit func(jwt.MapClaims)) string {
+	return k.mintAs(t, "at+jwt", edit)
+}
+
+// mintAs signs the same claims as another kind of token.
+func (k issuerKey) mintAs(t *testing.T, typ string, edit func(jwt.MapClaims)) string {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
@@ -62,7 +75,7 @@ func (k issuerKey) mint(t *testing.T, edit func(jwt.MapClaims)) string {
 		edit(claims)
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"], token.Header["kid"] = "at+jwt", k.kid
+	token.Header["typ"], token.Header["kid"] = typ, k.kid
 	signed, err := token.SignedString(k.key)
 	require.NoError(t, err)
 	return signed
@@ -236,6 +249,78 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, serve(handler, rsRequest{path: findings, authorization: "DPoP " + bound, dpop: elsewhere}).Code, "a proof names its request")
 	})
 
+	t.Run("merchants", func(t *testing.T) {
+		w := serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-viewers"} }))})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		list := merchantList(t, w)
+		require.Len(t, list, 1)
+		require.Equal(t, shop, list[0].Slug)
+		require.Equal(t, "custom", list[0].Role, "viewer grants capped by the ceiling are no named role")
+		require.ElementsMatch(t, []string{billing.MerchantOperationsRead, billing.MerchantPSPsRead}, list[0].Permissions)
+
+		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Empty(t, merchantList(t, w), "a token granting nothing lists nothing")
+
+		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(stranger.mint(t, nil))})
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		require.Equal(t, billing.CodeAccessTokenIssuerUnknown, errorCode(t, w))
+		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }))})
+		require.Equal(t, http.StatusForbidden, w.Code)
+		require.Equal(t, billing.CodeInsufficientScope, errorCode(t, w))
+	})
+
+	t.Run("customer", func(t *testing.T) {
+		const me = "/v1/me/entitlements"
+		browser := newBrowserKey(t)
+		customer := func(edit func(jwt.MapClaims)) string {
+			return host.mint(t, func(c jwt.MapClaims) {
+				c["sub"], c["scope"], c["cnf"] = uuid.NewString(), billing.ScopeSelf, map[string]string{"jkt": browser.jkt}
+				delete(c, "permissions")
+				if edit != nil {
+					edit(c)
+				}
+			})
+		}
+		token := customer(nil)
+		w := staticDPoPServe(t, handler, browser, token, rsRequest{path: me})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var customers int
+		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "customers"}.Sanitize()+" WHERE merchant_id = (SELECT id FROM "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" WHERE slug = $1)", shop).Scan(&customers))
+		require.Equal(t, 1, customers, "the token's user is the shop's customer")
+
+		for name, tc := range map[string]struct {
+			token, scheme string
+			status        int
+			code          string
+		}{
+			"unbound":          {customer(func(c jwt.MapClaims) { delete(c, "cnf") }), "Bearer", http.StatusUnauthorized, billing.CodeSenderProofRequired},
+			"merchant scope":   {customer(func(c jwt.MapClaims) { c["scope"] = billing.ScopeMerchant }), "DPoP", http.StatusForbidden, billing.CodeInsufficientScope},
+			"machine":          {customer(func(c jwt.MapClaims) { c["sub"], c["client_id"] = "billing-sync", "billing-sync" }), "DPoP", http.StatusUnauthorized, billing.CodeAccessTokenInvalid},
+			"no UUID subject":  {customer(func(c jwt.MapClaims) { c["sub"] = "user-7" }), "DPoP", http.StatusUnauthorized, billing.CodeAccessTokenInvalid},
+			"unknown issuer":   {stranger.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }), "Bearer", http.StatusUnauthorized, billing.CodeAccessTokenIssuerUnknown},
+			"merchant unbound": {customer(nil), "DPoP-rival", http.StatusForbidden, billing.CodeAccessTokenMerchantNotBound},
+		} {
+			q := rsRequest{path: me, authorization: "Bearer " + tc.token}
+			var w *httptest.ResponseRecorder
+			switch tc.scheme {
+			case "DPoP":
+				w = staticDPoPServe(t, handler, browser, tc.token, q)
+			case "DPoP-rival":
+				q.selector = rival
+				w = staticDPoPServe(t, handler, browser, tc.token, q)
+			default:
+				w = serve(handler, q)
+			}
+			require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
+			require.Equal(t, tc.code, errorCode(t, w), name)
+		}
+		legacy := host.mintAs(t, "delegated-access+jwt", func(c jwt.MapClaims) { c["delegated_sub"] = uuid.NewString(); delete(c, "sub") })
+		w = serve(handler, rsRequest{path: me, authorization: "Bearer " + legacy})
+		require.Equal(t, http.StatusUnauthorized, w.Code, "a delegated token is no customer credential")
+		require.Equal(t, billing.CodeAccessTokenInvalid, errorCode(t, w))
+	})
+
 	t.Run("cors", func(t *testing.T) {
 		w := serve(handler, rsRequest{method: http.MethodOptions, path: findings, origin: adminOrigin})
 		require.Equal(t, http.StatusNoContent, w.Code)
@@ -337,6 +422,17 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, w.Code, "a customer token is not a merchant token")
 		require.Equal(t, billing.CodeInsufficientScope, errorCode(t, w))
 		require.Contains(t, w.Header().Get("WWW-Authenticate"), `scope="openrails:merchant"`)
+		require.Equal(t, http.StatusOK, dpopServe(t, handler, self, rsRequest{path: "/v1/me/entitlements"}).Code, "the user's own billing")
+
+		w = dpopServe(t, handler, renewed, rsRequest{path: "/v1/merchants"})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		list := merchantList(t, w)
+		require.Len(t, list, 1)
+		require.Equal(t, shop, list[0].Slug)
+		require.Equal(t, "owner", list[0].Role)
+		w = dpopServe(t, handler, nobody, rsRequest{path: "/v1/merchants"})
+		require.Equal(t, http.StatusOK, w.Code)
+		require.Empty(t, merchantList(t, w))
 	})
 
 	t.Run("host admin UI", func(t *testing.T) {
@@ -360,6 +456,29 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 	})
 }
 
+// staticDPoPServe calls q with token bound to browser, retrying once with
+// the server's nonce.
+func staticDPoPServe(t *testing.T, handler http.Handler, browser browserKey, token string, q rsRequest) *httptest.ResponseRecorder {
+	t.Helper()
+	method := q.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	q.authorization, q.dpop = "DPoP "+token, browser.proof(t, method, q.path, token, "")
+	w := serve(handler, q)
+	if nonce := w.Header().Get("DPoP-Nonce"); w.Code == http.StatusUnauthorized && nonce != "" {
+		q.dpop = browser.proof(t, method, q.path, token, nonce)
+		w = serve(handler, q)
+	}
+	return w
+}
+
+func merchantList(t *testing.T, w *httptest.ResponseRecorder) []billing.UserMerchant {
+	var page billing.ListPage[billing.UserMerchant]
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page), w.Body.String())
+	return page.Items
+}
+
 // rsOrigin is the control plane's public origin, the URL DPoP proofs sign.
 const rsOrigin = "http://127.0.0.1"
 
@@ -380,4 +499,73 @@ func dpopServe(t *testing.T, handler http.Handler, tokens authtest.OAuthTokens, 
 		w = serve(handler, q)
 	}
 	return w
+}
+
+// A merchant's registered remote application (its manifest's
+// remote_application) is a trusted issuer bound to that merchant, within the
+// authority of its role there, read live. Its old token kinds are refused.
+func TestResourceServerTrustsRegisteredIssuers(t *testing.T) {
+	f := newFixture(t)
+	app := newIssuerKey(t, "https://"+strings.ReplaceAll(f.schema, "_", "-")+".merchant.e2e.test")
+	cp := f.attachControlPlane(t, func(cfg *openrails.Config, _ *openrails.Deps) {
+		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32)}
+	})
+	jwk := keys.PublicJWK(&app.key.PublicKey, app.kid, "")
+	shop := uniqueName("registered")
+	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
+	require.NoError(t, os.WriteFile(manifest, []byte(fmt.Sprintf(`version: 1
+merchants:
+  %s:
+    display_name: Registered
+    remote_application:
+      issuer: %s
+      jwks:
+        keys:
+          - {kty: "%s", kid: "%s", n: "%s", e: "%s"}
+`, shop, app.iss, jwk.Kty, jwk.Kid, jwk.N, jwk.E)), 0o600))
+	graph := engine.Graph(cp)
+	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), graph.Config, graph, manifest, nil, ""))
+	handler, err := standaloneHandler(cp)
+	require.NoError(t, err)
+	const findings = "/v1/merchant/findings"
+	call := func(token string) *httptest.ResponseRecorder {
+		return serve(handler, rsRequest{path: findings, authorization: "Bearer " + token})
+	}
+
+	require.Equal(t, http.StatusOK, call(app.mint(t, nil)).Code)
+	require.Equal(t, http.StatusOK, call(app.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })).Code, "an owner application")
+	w := call(app.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"root:*"} }))
+	require.Equal(t, http.StatusForbidden, w.Code, "nothing beyond its authority")
+	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
+	require.Equal(t, http.StatusOK, call(app.mint(t, func(c jwt.MapClaims) { c["sub"], c["client_id"] = "sync", "sync" })).Code, "the application acting for itself")
+
+	w = serve(handler, rsRequest{path: "/v1/merchants", authorization: "Bearer " + app.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	list := merchantList(t, w)
+	require.Len(t, list, 1)
+	require.Equal(t, shop, list[0].Slug)
+	require.Equal(t, "owner", list[0].Role)
+
+	for typ, edit := range map[string]func(jwt.MapClaims){
+		"delegated-access+jwt":          func(c jwt.MapClaims) { c["delegated_sub"] = uuid.NewString(); delete(c, "sub") },
+		"remote-application-access+jwt": func(c jwt.MapClaims) { delete(c, "sub") },
+		"access+jwt":                    nil,
+	} {
+		w := call(app.mintAs(t, typ, edit))
+		require.Equal(t, http.StatusUnauthorized, w.Code, "%s is refused: %s", typ, w.Body.String())
+	}
+
+	// Disabling the application out of band applies on the next request. A
+	// merchant keeps an owner: a person takes over before its only owner,
+	// the application, is disabled.
+	registered, err := cp.AuthKit().RemoteApplication(t.Context(), iam.AppByIssuer(app.iss))
+	require.NoError(t, err)
+	_, err = cp.AuthKit().SetGroupRole(t.Context(), iam.SystemActor(), iam.GroupByID(registered.GroupID), iam.UserSubject(newAccount(t, cp).ID), operator.MerchantType.OwnerRole())
+	require.NoError(t, err)
+	registered.Enabled = false
+	_, err = cp.AuthKit().UpsertRemoteApplication(t.Context(), iam.SystemActor(), iam.GroupByID(registered.GroupID), registered)
+	require.NoError(t, err)
+	w = call(app.mint(t, nil))
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Equal(t, billing.CodeAccessTokenIssuerUnknown, errorCode(t, w))
 }

@@ -65,7 +65,7 @@ type Server struct {
 	// the self-service surface (#339); see Dependencies.DelegatedAuthenticator.
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	controlPlane           *controlplane.ControlPlane
-	delegatedResolver      middleware.DelegatedResolver
+	customerResolver       middleware.ResourceCustomerResolver
 	captchaStore           *captcha.ChallengeStore
 	adminLimiter           *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).

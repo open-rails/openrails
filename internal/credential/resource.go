@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 )
 
 var (
@@ -53,6 +54,41 @@ func (r *ResolvedResourceAccess) HasPermission(perm string) bool {
 	return false
 }
 
+// ResourceUser is a trusted issuer's verified principal on a signed-in
+// user's own routes, and the merchants it may act on.
+type ResourceUser struct {
+	Machine       bool
+	Issuer        string
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Username      string
+	Merchants     []billing.UserMerchant
+}
+
+// EquivalentPermissions reports whether each grant set covers the other.
+func EquivalentPermissions(a, b []string) bool {
+	return coversAll(a, b) && coversAll(b, a)
+}
+
+func coversAll(grants, perms []string) bool {
+	for _, p := range perms {
+		if !covered(strings.TrimSpace(p), grants) {
+			return false
+		}
+	}
+	return true
+}
+
+func covered(p string, by []string) bool {
+	for _, g := range by {
+		if permissionMatches(strings.TrimSpace(g), p) {
+			return true
+		}
+	}
+	return false
+}
+
 // IntersectPermissions is what both grant sets allow: each grant of a that b
 // covers, and each of b that a covers.
 func IntersectPermissions(a, b []string) []string {
@@ -63,14 +99,6 @@ func IntersectPermissions(a, b []string) []string {
 			seen[p] = true
 			out = append(out, p)
 		}
-	}
-	covered := func(p string, by []string) bool {
-		for _, g := range by {
-			if permissionMatches(strings.TrimSpace(g), p) {
-				return true
-			}
-		}
-		return false
 	}
 	for _, p := range a {
 		if p = strings.TrimSpace(p); p != "" && covered(p, b) {
@@ -116,3 +144,34 @@ type ChallengeError struct {
 
 func (e ChallengeError) Error() string { return e.Code + ": " + e.Err.Error() }
 func (e ChallengeError) Unwrap() error { return e.Err }
+
+// ResourceTokenRefusal answers a refused access token, with the challenge
+// headers its client retries with.
+func ResourceTokenRefusal(err error) billingauth.GateError {
+	var challenge ChallengeError
+	switch {
+	case errors.As(err, &challenge):
+		refusal := billingauth.Refusal(billing.CodeAccessTokenInvalid)
+		switch challenge.Code {
+		case billing.CodeDPoPNonceRequired:
+			refusal = billingauth.Refusal(billing.CodeDPoPNonceRequired)
+		case billing.CodeSenderProofRequired:
+			refusal = billingauth.Refusal(billing.CodeSenderProofRequired)
+		case billing.CodeCredentialExpired:
+			refusal = billingauth.Refusal(billing.CodeCredentialExpired)
+		case billing.CodeInsufficientScope:
+			refusal = billingauth.Refusal(billing.CodeInsufficientScope)
+		}
+		refusal.Headers = challenge.Headers
+		return refusal
+	case errors.Is(err, ErrResourceTokenIssuerUnknown), errors.Is(err, ErrResourceServerNotConfigured):
+		return billingauth.Refusal(billing.CodeAccessTokenIssuerUnknown)
+	case errors.Is(err, ErrResourceTokenMerchantNotBound):
+		return billingauth.Refusal(billing.CodeAccessTokenMerchantNotBound)
+	case errors.Is(err, billing.ErrMerchantUnresolved):
+		return billingauth.Refusal(billing.CodeMerchantUnresolved)
+	case errors.Is(err, ErrResourceTokenUnavailable):
+		return billingauth.Refusal(billing.CodeAuthenticationUnavailable)
+	}
+	return billingauth.Refusal(billing.CodeAccessTokenInvalid)
+}

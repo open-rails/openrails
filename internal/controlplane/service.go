@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/keys"
-	"github.com/open-rails/authkit/verify"
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
@@ -50,10 +49,6 @@ type ControlPlane struct {
 	// users authenticates the control plane's own user tokens; the actor of
 	// a request-driven permission check comes from its verification.
 	users *userauth.Authenticator
-	// delegatedVerifier verifies the federated credentials of merchant
-	// issuers (remote applications): delegated tokens, application tokens
-	// and service JWTs, for the openrails audience.
-	delegatedVerifier *authkit.Verifier
 	// resource verifies trusted issuers' RFC 9068 access tokens (#1140); nil
 	// accepts none.
 	resource *resourceServer
@@ -379,16 +374,6 @@ func New(ctx context.Context, cfg *config.Config, auth *config.AuthConfig, pool 
 	}
 	cp.client = client
 	cp.users = userauth.NewAuthenticator(client)
-	// The DPoP origin is trusted configuration, never a Host or Forwarded
-	// header; without auth.request_origin it is the issuer's origin.
-	var verifierOpts []verify.VerifierOption
-	if origin := strings.TrimRight(strings.TrimSpace(auth.RequestOrigin), "/"); origin != "" {
-		verifierOpts = append(verifierOpts, verify.WithPublicURL(origin))
-	}
-	if cp.delegatedVerifier, err = client.NewVerifier([]string{billingauth.TokenAudience}, verifierOpts...); err != nil {
-		client.Close()
-		return nil, fmt.Errorf("controlplane: delegated verifier: %w", err)
-	}
 	if options.resourceServer != nil {
 		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
 			client.Close()
