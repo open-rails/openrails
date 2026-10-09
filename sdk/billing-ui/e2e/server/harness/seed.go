@@ -239,7 +239,7 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 	if err != nil {
 		return CustomerBilling{}, err
 	}
-	methods, err := r.Client.ListPaymentMethods(ctx, customer, billing.PageRequest{Limit: 100})
+	methods, err := r.Client.ListPaymentMethods(ctx, customer, billing.PaymentMethodListParams{PageRequest: billing.PageRequest{Limit: 100}})
 	if err != nil {
 		return CustomerBilling{}, err
 	}
