@@ -1,7 +1,10 @@
+# Base images are the Docker official images from ECR Public (same digests as
+# Docker Hub, without its anonymous pull rate limit).
+
 # Stage 1: admin console SPA into web/admin/dist, which web/admin/embed.go
 # go:embeds (#754). Node is a BUILD-time dependency only. Its output is static
 # files, so it runs once on the build platform for every target platform.
-FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
 
 WORKDIR /web/admin
 RUN npm install -g --ignore-scripts pnpm@11.0.0
@@ -15,7 +18,7 @@ RUN pnpm --config.verify-deps-before-run=false run build
 
 # Stage 2: build. Cross-compiles on the build platform (the binary needs no cgo),
 # so only the runtime stage runs as the target platform.
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
+FROM --platform=$BUILDPLATFORM public.ecr.aws/docker/library/golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
@@ -62,7 +65,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 
 # Stage 3: production
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM public.ecr.aws/docker/library/alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 LABEL org.opencontainers.image.source="https://github.com/open-rails/openrails"
 

@@ -42,6 +42,11 @@ env:
   IMAGE: docker.io/openrails/openrails
   GHCR_IMAGE: ghcr.io/open-rails/openrails
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Docker Hub rate-limits anonymous pulls, and pull requests get no secrets.
+  # Docker official images come from ECR Public (Dockerfile too); binfmt and
+  # BuildKit from Google's Docker Hub mirror. Same digests as Docker Hub.
+  BINFMT_IMAGE: mirror.gcr.io/tonistiigi/binfmt:latest
+  BUILDKIT_IMAGE: mirror.gcr.io/moby/buildkit:buildx-stable-1
 
 jobs:
   verify-source:
@@ -88,7 +93,7 @@ jobs:
     needs: verify-source
     services:
       postgres:
-        image: postgres:18-alpine
+        image: public.ecr.aws/docker/library/postgres:18-alpine
         env:
           POSTGRES_DB: openrails_db
           POSTGRES_USER: smoke
@@ -110,10 +115,13 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
+          image: ${{ env.BINFMT_IMAGE }}
           platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       # Both builds share one builder, so the per-arch caches they seed hold the
       # same build-platform layers.
@@ -240,10 +248,13 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
+          image: ${{ env.BINFMT_IMAGE }}
           platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        with:
+          driver-opts: image=${{ env.BUILDKIT_IMAGE }}
 
       # Each arch rebuilds from its own smoke-job cache, so it pushes what the
       # smoke test built. One cache per build: a build importing both caches
