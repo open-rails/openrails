@@ -140,7 +140,8 @@ const (
 	// selection only.
 	CustomerSubscriptionManagement = config.CustomerSubscriptionManagement
 	// CustomerBillingManagement adds billing history, purchased access, saved
-	// methods and payment recovery, without checkout or plan purchases.
+	// methods, payment recovery and paying a checkout session the merchant
+	// minted, without starting checkouts or changing plans.
 	CustomerBillingManagement = config.CustomerBillingManagement
 
 	// SubjectUser is a user: a customer, or staff.

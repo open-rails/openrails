@@ -738,10 +738,11 @@ func ClassifyBucket(path, method string) string {
 	}
 }
 
-// isCheckoutPath is a buyer paying: minting a checkout session, paying one,
-// or a wallet's Solana Pay request.
+// isCheckoutPath is a buyer paying: minting a checkout session, paying one
+// (by its id, or as its customer), or a wallet's Solana Pay request.
 func isCheckoutPath(path string) bool {
-	return path == "/v1/me/checkout-sessions" || strings.HasPrefix(path, "/v1/checkout-sessions/") || strings.HasPrefix(path, "/v1/checkout-attempts/")
+	return path == "/v1/me/checkout-sessions" || strings.HasPrefix(path, "/v1/me/checkout-sessions/") ||
+		strings.HasPrefix(path, "/v1/checkout-sessions/") || strings.HasPrefix(path, "/v1/checkout-attempts/")
 }
 
 // cardAttackMode reports whether the request's merchant is under a card-testing

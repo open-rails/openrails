@@ -98,7 +98,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"POST /me/checkout-sessions", "POST /me/billing-portal",
 		"POST /me/subscriptions/{id}/change-tier", "POST /me/subscriptions/{id}/change-tier/preview",
-	}, purchaseOnly, "management scope never purchases or changes plans")
+	}, purchaseOnly, "management scope never starts a purchase or changes plans")
 	require.Subset(t, management, []string{"GET /me/spend-limits"})
 
 	require.ElementsMatch(t, []string{

@@ -73,6 +73,17 @@ export interface BillingClientOptions {
   currencies?: CurrencyScales
 }
 
+export interface CheckoutSourceOptions {
+  /**
+   * A customer surface's base: its `/me` prefix, such as `/billing/v1/me` or
+   * a host's own `/api/v1/merchants/acme/billing/me`. The session is read and
+   * paid there with this client's credential, which proves the session's
+   * customer, so its saved cards pay. Default: the session id alone, at
+   * `{baseUrl}/checkout-sessions`.
+   */
+  customerBase?: string
+}
+
 export interface ListOptions {
   limit?: number
   offset?: number
@@ -149,6 +160,8 @@ interface RequestOptions {
   headers?: Record<string, string>
   /** Sends no bearer: the hosted checkout session id is the credential. */
   anonymous?: boolean
+  /** Replaces `baseUrl` for this request. */
+  root?: string
 }
 
 /** Total wait a GET may spend on its one retry. */
@@ -202,12 +215,12 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     ...options.currencies,
   })
 
-  function url(path: string, query?: Query): string {
+  function url(path: string, query?: Query, root = base): string {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(query ?? {}))
       if (v !== undefined && v !== "") qs.set(k, String(v))
     const q = qs.toString()
-    return `${base}${path}${q ? `?${q}` : ""}`
+    return `${root}${path}${q ? `?${q}` : ""}`
   }
 
   async function send(
@@ -234,7 +247,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     for (let attempt = 0; ; attempt++) {
       let res: Response
       try {
-        res = await doFetch(url(path, opts.query), init)
+        res = await doFetch(url(path, opts.query, opts.root), init)
       } catch (cause) {
         const delay = RETRY_DELAY_MS
         if (
@@ -602,22 +615,28 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Reads and pays one hosted checkout session. The id is the only
-     * credential: no bearer is sent. A refusal the buyer can answer (an
-     * invalid card form, too many attempts) resolves as `failed`; an expired
-     * or unknown session as `expired`.
+     * Reads and pays one hosted checkout session. By default the id is the
+     * only credential: no bearer is sent. With `customerBase` the session's
+     * customer reads and pays it on that customer surface, signed in. A
+     * refusal the buyer can answer (an invalid card form, too many attempts)
+     * resolves as `failed`; an expired or unknown session as `expired`.
      */
-    checkoutSource(sessionId: string): CheckoutSource {
+    checkoutSource(
+      sessionId: string,
+      opts: CheckoutSourceOptions = {}
+    ): CheckoutSource {
       const path = `/checkout-sessions/${id(sessionId)}`
+      const customer = opts.customerBase?.replace(/\/+$/, "")
+      const via: RequestOptions =
+        customer === undefined ? { anonymous: true } : { root: customer }
       return {
-        getSession: () =>
-          json(checkoutSessionSchema, path, { anonymous: true }),
+        getSession: () => json(checkoutSessionSchema, path, via),
         async pay(request: PayRequest): Promise<PayResult> {
           try {
             return await json(payResultSchema, `${path}/pay`, {
+              ...via,
               method: "POST",
               body: request satisfies Omit<wire.PayCheckoutSessionParams, "billing_details">,
-              anonymous: true,
             })
           } catch (err) {
             if (!isBillingError(err)) throw err

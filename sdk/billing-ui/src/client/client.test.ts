@@ -9,6 +9,7 @@ import {
   signWalletAction,
   WalletRejectedError,
 } from "./client"
+import { fixtureSession } from "../fixtures"
 import { BillingError, isServerError } from "./errors"
 import { priceSchema, productSchema, subscriptionSchema } from "./types"
 
@@ -312,6 +313,37 @@ describe("checkout sessions", () => {
     })
     expect(calls[1].url).toBe(`/billing/v1/checkout-sessions/${link.id}/pay`)
     expect(new Headers(calls[1].init.headers).get("Authorization")).toBeNull()
+  })
+
+  it("reads and pays as the customer on a customer surface", async () => {
+    const calls: { url: string; init: RequestInit }[] = []
+    const replies = [
+      Response.json(fixtureSession({ id: "ocs_1" })),
+      Response.json({ status: "succeeded", subscription_id: "sub_1" }),
+    ]
+    const client = createBillingClient({
+      getToken: () => "owner-token",
+      fetch: async (url, init) => {
+        calls.push({ url, init })
+        return replies.shift()!
+      },
+    })
+    const source = client.checkoutSource("ocs_1", {
+      customerBase: "/api/v1/merchants/acme/billing/me/",
+    })
+    expect((await source.getSession()).id).toBe("ocs_1")
+    await expect(
+      source.pay({ option_id: "option_1", payment_method_id: "pm_1" })
+    ).resolves.toMatchObject({ status: "succeeded" })
+    expect(calls.map((c) => c.url)).toEqual([
+      "/api/v1/merchants/acme/billing/me/checkout-sessions/ocs_1",
+      "/api/v1/merchants/acme/billing/me/checkout-sessions/ocs_1/pay",
+    ])
+    for (const call of calls)
+      expect(new Headers(call.init.headers).get("Authorization")).toBe(
+        "Bearer owner-token"
+      )
+    expect(calls[1].init.method).toBe("POST")
   })
 
   it("answers refusals the buyer can act on as results", async () => {

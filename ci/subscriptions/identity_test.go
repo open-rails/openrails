@@ -271,6 +271,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"GET /v1/me/payment-method-setups/{id}":                      {"/payment-method-setups/" + setup, nil},
 		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
 		"POST /v1/me/notifications/{id}/read":                        {"/notifications/" + notification + "/read", map[string]any{}},
+		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},
+		"POST /v1/me/checkout-sessions/{id}/pay":                     {"/checkout-sessions/" + session.id + "/pay", map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard}},
 	}
 	probed := 0
 	for _, route := range routes.Catalog() {

@@ -46,7 +46,7 @@ var documents = []string{"Application", "DeclaredBilling", "InvoiceProfile", "Me
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 224)
+	require.Len(t, Catalog(), 226)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -177,11 +177,13 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	RegisterCustomerBillingManagementRoutes(recorder{base: "/v1/me", seen: management}, rt, customers)
 	RegisterCustomerSubscriptionManagementRoutes(recorder{base: "/v1/me", seen: subscriptions}, rt, customers)
 	require.Len(t, subscriptions, 4)
-	require.Len(t, management, 29)
+	require.Len(t, management, 31)
 	for key := range subscriptions {
 		require.Contains(t, management, key, "each scope includes the narrower ones")
 	}
 	require.NotContains(t, management, "POST /v1/me/checkout-sessions")
+	require.Contains(t, management, "POST /v1/me/checkout-sessions/{id}/pay", "a customer pays a session the merchant minted")
+	require.NotContains(t, subscriptions, "POST /v1/me/checkout-sessions/{id}/pay")
 }
 
 func sorted(list []string) []string {

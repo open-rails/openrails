@@ -134,7 +134,8 @@ const (
 	// payment-method changes and invoice collection-method selection only.
 	CustomerSubscriptionManagement
 	// CustomerBillingManagement adds billing history, purchased access, saved
-	// methods and payment recovery, without checkout or plan purchases.
+	// methods, payment recovery and paying a checkout session the merchant
+	// minted, without starting checkouts or changing plans.
 	CustomerBillingManagement
 )
 

@@ -79,9 +79,17 @@ database share it, so one of them can serve the payment page for all.
 | POST | `/v1/me/checkout-sessions` | customer session | Mint: `{price_id \| product_key + price_key, auto_renew?, success_url?}` → `201 {id, url, expires_at}` |
 | GET | `/v1/checkout-sessions/{id}` | the id (saved cards: and its customer) | The session document |
 | POST | `/v1/checkout-sessions/{id}/pay` | the id (a saved card: and its customer) | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
+| GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
+| POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
 | GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind a merchant attempt's `solana_pay` link (`flow: transaction_request`) |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Mint for a customer server-side (`Client.CreateCheckoutSession`) |
 
+- A host whose customer surface defines who the customer is (its own
+  `CustomerRoutes` with an `Auth` that maps the signed-in user) has the
+  customer pay there: the surface serves `{prefix}/checkout-sessions/{id}` and
+  `{prefix}/checkout-sessions/{id}/pay`, and its `Auth` is the proof a saved
+  card needs. A session of another merchant than the surface's, or of another
+  customer, is `404 checkout_session_not_found`.
 - The id is `ocs_` + 256 random bits, stored as its SHA-256 and never logged.
   Hand it only to that customer's browser; put it in a URL fragment, not a
   query. It is payable for 30 minutes and readable for 24 hours more, so a

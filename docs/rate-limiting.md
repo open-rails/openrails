@@ -53,8 +53,8 @@ model/tool limits still apply. These are HTTP abuse limits on both standalone
 and embedded routes; trusted in-process Client operations follow the normal
 library boundary and do not consume HTTP counters.
 
-> The `checkout` bucket covers POSTs to `/v1/me/checkout-sessions` and under
-> `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs are not
+> The `checkout` bucket covers POSTs to and under `/v1/me/checkout-sessions`
+> and under `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs are not
 > limited. A checkout session is also limited per session id, whatever address
 > presents it: 120 reads and 10 pays a minute.
 

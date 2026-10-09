@@ -87,7 +87,8 @@ func mintCheckoutSession(r *httprequest.Request, req billing.CreateCheckoutSessi
 	r.JSON(http.StatusCreated, link)
 }
 
-// GetCheckoutSession handles GET /v1/checkout-sessions/{id}.
+// GetCheckoutSession handles GET /v1/checkout-sessions/{id} and, as the
+// session's customer, GET /v1/me/checkout-sessions/{id}.
 func GetCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	svc, err := billingservice.New(r.State)
@@ -131,8 +132,19 @@ func PayCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(result)
 }
 
+// SelfPayCheckoutSession handles POST /v1/me/checkout-sessions/{id}/pay: the
+// customer surface's Auth proves the session's customer, so its saved cards
+// pay. Only the customer in person starts the payment.
+func SelfPayCheckoutSession(r *httprequest.Request) {
+	if !customerInitiatedChargeAllowed(r) {
+		return
+	}
+	PayCheckoutSession(r)
+}
+
 // checkoutViewer is the customer presenting a checkout session, zero when
-// the capability is presented alone.
+// the capability is presented alone. On a customer route it is the route's
+// customer, and a session of another customer is not found.
 func checkoutViewer(r *httprequest.Request) billing.CustomerID {
 	if scope, ok := r.CustomerScope(); ok {
 		return scope.Customer()

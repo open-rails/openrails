@@ -11,6 +11,7 @@ export {
   WalletRejectedError,
   type BillingClient,
   type BillingClientOptions,
+  type CheckoutSourceOptions,
   type ListOptions,
   type SendSolanaTransaction,
 } from "./client"

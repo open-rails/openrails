@@ -319,7 +319,12 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 	seg := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
 	switch {
 	case p == "/v1/account":
-		return 200, obj{"object": "account", "id": stripeAcct, "charges_enabled": true}
+		// A key sk_test_acct_<name> is account acct_<name>'s; any other is acct_e2e's.
+		account := stripeAcct
+		if name, ok := strings.CutPrefix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), "sk_test_acct_"); ok {
+			account = "acct_" + name
+		}
+		return 200, obj{"object": "account", "id": account, "charges_enabled": true}
 	case p == "/v1/balance":
 		return 200, obj{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
 	case r.Method == http.MethodGet && p == "/v1/customers/search":

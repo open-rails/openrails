@@ -27,6 +27,9 @@ err = openrailsgin.Mount(router, client, openrails.Routes{ // on the host router
 ```
 
 `CustomerSelfService` is the full library self-service surface. The
+billing-management scope adds billing history, purchased access, saved
+methods, payment recovery and paying a checkout session the merchant minted,
+but starts no checkout and changes no plan. The
 subscription-management scope exposes exactly cancellation, resumption,
 subscription payment-method changes and invoice collection-method selection.
 Both profiles reuse the same route registration and customer ownership checks.
@@ -60,6 +63,18 @@ Fiber's root App, a root ServeMux or Chi Mux. `Routes.Prefix` places the
 embedded API (`/billing` serves `/billing/v1/*`); the admin console sits at its
 own path, and standalone bundles, with their issuer-anchored AuthKit and
 console URLs, sit at the root.
+
+A checkout session's id alone pays it with a new card; a saved card needs
+its customer's proof. On a customer surface the session's customer reads and
+pays it at `{prefix}/checkout-sessions/{id}` and `{prefix}/checkout-sessions/{id}/pay`
+(beside `{prefix}/checkout-sessions`, which mints one), and the surface's
+`Auth` is that proof. The session must be the surface's merchant's (its
+`Merchant`, or the one the request selected) and the identity's subject its
+customer; any other session is `checkout_session_not_found`, and only the
+customer acting in person pays (`customer_action_required`). billing-ui's
+`client.checkoutSource(id, { customerBase: prefix })` reads and pays there;
+without `customerBase` it uses the session id alone at
+`/v1/checkout-sessions/{id}`.
 
 For the SaaS platform-billing audience, `{slug}` selects the hosted merchant
 customer, not the billing merchant. Its `Auth` must check current hosted

@@ -1,5 +1,14 @@
 # Changelog
 
+## Paying on a customer surface
+
+- `client.checkoutSource(id, { customerBase })` reads and pays a checkout
+  session as its signed-in customer at a customer surface's
+  `/checkout-sessions/{id}` (for example a host's
+  `/api/v1/merchants/acme/billing/me`), so its saved cards pay. Without
+  `customerBase` the session id alone pays at `/checkout-sessions/{id}` as
+  before. `<CheckoutPage customerBase>` passes it through.
+
 ## 1.0.0
 
 Ships with OpenRails v1.0.0; use the two at the same version. Everything a host

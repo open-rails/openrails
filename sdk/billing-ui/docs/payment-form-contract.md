@@ -113,7 +113,11 @@ submission remain editable. Explicit `failed` results are definitive host
 responses; they must not represent an unknown provider result.
 
 `client.checkoutSource(id)` is the source of every checkout: it reads and pays
-the OpenRails session. `getSession` is a read, never another payment.
+the OpenRails session. `getSession` is a read, never another payment. With the
+session id alone it sends no bearer, so it pays with a new card only. A
+signed-in customer pays with a saved card through a customer surface:
+`client.checkoutSource(id, { customerBase: "/billing/v1/me" })` reads and pays
+at that surface's `/checkout-sessions/{id}` with the client's credential.
 
 ## Separate NMI card setup
 

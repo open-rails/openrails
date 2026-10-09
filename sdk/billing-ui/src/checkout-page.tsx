@@ -24,6 +24,11 @@ export interface CheckoutPageProps {
   baseUrl?: string
   /** Replaces the client built from `baseUrl`. */
   client?: BillingClient
+  /**
+   * Pay as the signed-in customer on this customer surface (its `/me`
+   * prefix) instead of with the session id alone; see `checkoutSource`.
+   */
+  customerBase?: string
   /** This host's branding; the framing app chooses the theme. */
   appearance?: CheckoutAppearance
   layout?: CheckoutLayout
@@ -36,6 +41,7 @@ const sessionIdFromHash = () => window.location.hash.replace(/^#/, "").trim()
 export function CheckoutPage({
   baseUrl,
   client,
+  customerBase,
   appearance,
   layout = "auto",
   defaultCountry,
@@ -59,7 +65,7 @@ export function CheckoutPage({
 
   const source = React.useMemo<CheckoutSource | null>(() => {
     if (!sessionId) return null
-    const inner = billing.checkoutSource(sessionId)
+    const inner = billing.checkoutSource(sessionId, { customerBase })
     return {
       async getSession() {
         const session = await inner.getSession()
@@ -68,7 +74,7 @@ export function CheckoutPage({
       },
       pay: inner.pay,
     }
-  }, [billing, sessionId])
+  }, [billing, sessionId, customerBase])
 
   const post = React.useCallback(
     (message: PageMessage) => {
