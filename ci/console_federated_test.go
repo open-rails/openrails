@@ -1,0 +1,117 @@
+//go:build e2e && integration
+
+package ci_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
+)
+
+// A self-hosted OpenRails without local sign-in: its console is the trusted
+// issuer's OAuth 2.0 public client, the token that flow mints is all the
+// merchant API needs, and the control plane serves no sign-in of its own.
+func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
+	f := newFixture(t)
+	roles := authkit.NewRoles()
+	merchant := roles.Persona("merchant")
+	merchant.Permission("operations", "read")
+	admin := roles.Root.Role("admin", merchant.All())
+	const console, callback = "openrails-console", "http://127.0.0.1/admin/callback"
+	as := authtest.NewAuthorizationServer(t,
+		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
+		authtest.WithConfig(func(c *authkit.Config) {
+			c.Roles = roles
+			c.AuthorizationServer = authkit.AuthorizationServerConfig{
+				Resources: []authkit.ResourceServerConfig{{ID: resourceID, Scopes: []string{billing.ScopeMerchant}, Permissions: []string{"merchant:*"}}},
+				Clients: []authkit.OAuthClientConfig{{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID},
+					GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode, authkit.GrantRefreshToken}}},
+			}
+		}))
+	res, err := as.HTTPClient().Get(as.URL + iam.JWKSPath)
+	require.NoError(t, err)
+	var set struct {
+		Keys []iam.JWK `json:"keys"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&set))
+	require.NoError(t, res.Body.Close())
+	var pinned []iam.RemoteApplicationKey
+	for _, k := range set.Keys {
+		pinned = append(pinned, iam.RemoteApplicationKey{KID: k.Kid, JWK: &k})
+	}
+
+	shop := uniqueName("console-idp")
+	cp := f.attachControlPlane(t, func(cfg *openrails.Config, deps *openrails.Deps) {
+		cfg.ControlPlane.LocalSignIn = false
+		cfg.ControlPlane.ResourceServer = &openrails.ResourceServerConfig{
+			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
+			TrustedIssuers: []openrails.TrustedIssuerConfig{{
+				Name: "Example ID", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
+			}},
+		}
+		deps.ConsoleAssets = consoleBuild("federated")
+	})
+	provision(t, cp, shop)
+	sel := openrails.Routes{AdminConsole: &openrails.AdminConsole{Issuer: &openrails.ConsoleIssuer{URL: as.URL, ClientID: console}}}
+	handler, err := standaloneHandler(cp, sel)
+	require.NoError(t, err)
+
+	var boot struct {
+		AuthBaseURL string `json:"auth_base_url"`
+		Issuer      *struct {
+			URL      string `json:"url"`
+			ClientID string `json:"client_id"`
+			Name     string `json:"name"`
+			Resource string `json:"resource"`
+			Scope    string `json:"scope"`
+		} `json:"issuer"`
+	}
+	w := get(handler, "/admin/config.json")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &boot))
+	require.Empty(t, boot.AuthBaseURL, "no local sign-in to point at")
+	require.NotNil(t, boot.Issuer)
+	require.Equal(t, as.URL, boot.Issuer.URL)
+	require.Equal(t, console, boot.Issuer.ClientID)
+	require.Equal(t, "Example ID", boot.Issuer.Name, "the trusted issuer's name")
+	require.Equal(t, resourceID, boot.Issuer.Resource)
+	require.Contains(t, strings.Fields(boot.Issuer.Scope), billing.ScopeMerchant)
+
+	require.Equal(t, http.StatusNotFound, get(handler, "/"+f.schema+"/v1/capabilities").Code, "no local sign-in surface")
+	require.Equal(t, http.StatusOK, get(handler, "/"+f.schema+iam.JWKSPath).Code, "the issuer's keys stay published")
+
+	owner := authtest.NewUser(t, as.Client)
+	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(owner.ID), admin)
+	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
+	tokens := as.Authorize(t, owner, flow)
+	w = dpopServe(t, handler, tokens, rsRequest{path: "/v1/merchants"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	list := merchantList(t, w)
+	require.Len(t, list, 1)
+	require.Equal(t, shop, list[0].Slug)
+	require.Equal(t, "owner", list[0].Role)
+	w = dpopServe(t, handler, tokens, rsRequest{method: http.MethodPost, path: "/v1/merchant/federated-grants", body: `{"email":"staff@example.test","role":"viewer"}`})
+	require.Equal(t, http.StatusCreated, w.Code, "a fresh sign-in may grant access: %s", w.Body.String())
+
+	renewed := as.Refresh(t, console, "", tokens)
+	require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: "/v1/merchant/findings"}).Code, "the console's refreshed token")
+
+	stranger := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
+	w = dpopServe(t, handler, stranger, rsRequest{path: "/v1/merchants"})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Empty(t, merchantList(t, w), "the console shows the empty state")
+
+	_, err = standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{}})
+	require.ErrorContains(t, err, "no sign-in method")
+	_, err = standaloneHandler(cp, openrails.Routes{AdminConsole: &openrails.AdminConsole{Issuer: &openrails.ConsoleIssuer{URL: "https://elsewhere.e2e.test", ClientID: console}}})
+	require.ErrorContains(t, err, "not one of resource_server.trusted_issuers")
+}

@@ -218,6 +218,7 @@
       "type Client struct {\n}",
       "type ClientOption func(*Client)",
       "type Config = config.Config",
+      "type ConsoleIssuer = config.ConsoleIssuer",
       "type ControlPlaneConfig = config.ControlPlaneConfig",
       "type CredentialClass = billingauth.CredentialClass",
       "type CredentialPosture = config.CredentialPosture",
@@ -1050,13 +1051,14 @@
       "type Card struct{}"
     ],
     "internal/config": [
-      "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tNewMerchantURL string\n}",
+      "type AdminConsole struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tNewMerchantURL string\n\n\tIssuer *ConsoleIssuer\n}",
       "type AuthConfig struct {\n\tAllowMemory              bool\n\tAllowPrivateNetworkJWKS  bool\n\tAllowMissingSenders      bool\n\tAllowEphemeralSigningKey bool\n\tAllowLoopbackHTTP        bool\n\n\tRequestOrigin string\n\n\tDirectPeerIP bool\n\n\tNaming NamingConfig\n\n\tIssuer string\n\n\tActiveKeyID         string\n\tActivePrivateKeyPEM string\n\n\tPublicKeysJSON string\n\n\tKeysPath string\n\n\tMintDisabled bool\n}",
       "type AuthRateLimit struct {\n\tLimit    int\n\tWindow   time.Duration\n\tCooldown time.Duration\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
       "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tSchema string\n\n\tSchemaOwner string\n\n\tRiverSchema string\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tControlPlane *ControlPlaneConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSendGrid *SendGridConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
-      "type ControlPlaneConfig struct {\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n}",
+      "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
+      "type ControlPlaneConfig struct {\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tLocalSignIn bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type CustomerHTTPScope uint8",
@@ -1169,7 +1171,8 @@
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
     ],
     "internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tNewMerchantURL string `json:\"new_merchant_url\"`\n}"
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tNLWidgetsEnabled bool `json:\"nl_widgets_enabled\"`\n\n\tAskEnabled bool `json:\"ask_enabled\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tNewMerchantURL string `json:\"new_merchant_url\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n}",
+      "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}"
     ],
     "internal/api": [
       "type ErrorResponse struct {\n\tError ErrorDetails `json:\"error\"`\n}"
@@ -1973,6 +1976,7 @@
     },
     "internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",
+      "config": "github.com/open-rails/openrails/internal/config",
       "fmt": "fmt",
       "fs": "io/fs",
       "html": "html",
@@ -2077,6 +2081,10 @@
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "v9": "github.com/redis/go-redis/v9",
       "vaultapi": "github.com/hashicorp/vault/api"
+    },
+    "internal/config/embedding.go": {
+      "fmt": "fmt",
+      "strings": "strings"
     },
     "internal/config/hyperswitch.go": {
       "fmt": "fmt",

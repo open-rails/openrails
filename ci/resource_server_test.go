@@ -111,7 +111,7 @@ func (b browserKey) proof(t *testing.T, method, path, token, nonce string) strin
 }
 
 type rsRequest struct {
-	method, path, authorization, dpop, selector, origin string
+	method, path, authorization, dpop, selector, origin, body string
 }
 
 func serve(handler http.Handler, q rsRequest) *httptest.ResponseRecorder {
@@ -119,7 +119,10 @@ func serve(handler http.Handler, q rsRequest) *httptest.ResponseRecorder {
 	if method == "" {
 		method = http.MethodGet
 	}
-	r := httptest.NewRequest(method, q.path, nil)
+	r := httptest.NewRequest(method, q.path, strings.NewReader(q.body))
+	if q.body != "" {
+		r.Header.Set("Content-Type", "application/json")
+	}
 	for name, value := range map[string]string{"Authorization": q.authorization, "DPoP": q.dpop, "OpenRails-Merchant": q.selector, "Origin": q.origin} {
 		if value != "" {
 			r.Header.Set(name, value)

@@ -74,7 +74,11 @@ func ConsoleIssuer(console *config.AdminConsole, rs *config.ResourceServerConfig
 	if err != nil {
 		return nil, err
 	}
-	return &Issuer{URL: url, ClientID: strings.TrimSpace(console.Issuer.ClientID), Name: name, Resource: resource, Scope: config.ConsoleScope}, nil
+	scope := strings.Join(strings.Fields(console.Issuer.Scope), " ")
+	if scope == "" {
+		scope = config.ConsoleScope
+	}
+	return &Issuer{URL: url, ClientID: strings.TrimSpace(console.Issuer.ClientID), Name: name, Resource: resource, Scope: scope}, nil
 }
 
 // Present reports whether assets hold a servable console build: a non-nil
@@ -102,7 +106,7 @@ var baseTag = regexp.MustCompile(`<base\s+href="/admin/"\s*/?>`)
 // logged. Callers should gate mounting on Present(assets); without a build
 // every request answers 503 naming the build step.
 func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
-	if cfg.AuthBaseURL == "" {
+	if cfg.AuthBaseURL == "" && cfg.Issuer == nil {
 		cfg.AuthBaseURL = "/auth/v1"
 	}
 	if cfg.APIBaseURL == "" {

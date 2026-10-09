@@ -72,10 +72,13 @@ type ConsoleIssuer struct {
 	ClientID string
 	// Name is shown on the sign-in button; empty is the trusted issuer's.
 	Name string
+	// Scope is what the console asks for; empty is ConsoleScope. An issuer
+	// that grants refresh tokens only for offline_access needs it added.
+	Scope string
 }
 
-// ConsoleScope is what the console asks a trusted issuer for.
-const ConsoleScope = "openid profile email offline_access openrails:merchant"
+// ConsoleScope is what the console asks a trusted issuer for by default.
+const ConsoleScope = "openid profile email openrails:merchant"
 
 // ResolveConsoleIssuer checks console against the resource server: its URL
 // must be a trusted issuer's, and it needs a client id.

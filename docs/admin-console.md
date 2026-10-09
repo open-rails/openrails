@@ -58,6 +58,16 @@ which navigates there. The value is a same-origin path or an https URL. The host
 sends the user back with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the
 console selects that merchant if the user belongs to it, and drops the fragment.
 
+**Where staff sign in.** At a trusted issuer when `AdminConsole.Issuer`
+(standalone: `admin_console.issuer`) names one of the resource server's trusted
+issuers and the console's public client there; otherwise at AuthKit. A
+standalone console needs one of the two: without `local_sign_in` the control
+plane serves no sign-in, and a console with neither refuses to boot. Register
+the console at your issuer as a public client with the redirect URI
+`<console URL>/callback`, the authorization-code and refresh grants and
+OpenRails' resource identifier; its tokens' permissions (within the ceiling)
+and accepted invitations decide what each person may do.
+
 **Where it finds the API.** The console reads `config.json` beneath its path:
 `api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
 `auth_base_url` is the AuthKit JSON API staff sign in through: `Deps.AuthKit`'s
@@ -156,7 +166,7 @@ permission; with other auth, `Deps.Authorize` decides.
 
 Browse to the console path, `https://<your-host>/admin/` by default (the bare
 path redirects). The SPA bootstraps from `config.json` beneath it:
-`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled}`.
+`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, new_merchant_url, issuer}`.
 
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers
@@ -170,6 +180,16 @@ asks the user to confirm it's them and the write is retried. Who can sign in
 and what they may do: standalone, the merchant team roster and fixed roles
 (`owner`/`support`/`viewer`, see the merchant guide); embedded, the host's
 authority (`Deps.AuthorityFor` or `Deps.Authorize`).
+
+**At a trusted issuer**, the console is that issuer's OAuth 2.0 client
+(auth-ui's issuer client): the login page redirects there, `/callback`
+completes the code flow with PKCE and DPoP, the access token stays in memory
+and the DPoP-bound rotating refresh token in IndexedDB beside its
+non-extractable key. A write OpenRails refuses with `step_up_required` (a
+sign-in older than 15 minutes) re-authorizes at the issuer with `max_age=0` in
+a popup and runs again. Sign-out revokes the refresh token and ends the
+issuer session. The team page lists the merchant's email invitations; a user
+the issuer grants nothing sees the invitations its verified email received.
 
 Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 `/admin/config.json` to `localhost:3053`).
