@@ -40,7 +40,18 @@ SELECT
         AND b.destructive_run_id = sqlc.arg(run_id)::uuid
         AND b.table_name = 'subscriptions'
         AND b.restored_at IS NULL
+        AND s.lifecycle_rev = b.after_lifecycle_rev
         AND s.deleted_at IS NULL)::bigint AS subscriptions,
+    (SELECT count(*)
+       FROM billing.destructive_run_before_images b
+       JOIN billing.subscriptions s
+         ON s.merchant_id = b.merchant_id AND s.id = b.row_id
+      WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
+        AND b.destructive_run_id = sqlc.arg(run_id)::uuid
+        AND b.table_name = 'subscriptions'
+        AND b.restored_at IS NULL
+        AND s.lifecycle_rev IS DISTINCT FROM b.after_lifecycle_rev
+        AND s.deleted_at IS NULL)::bigint AS subscriptions_changed,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
        JOIN billing.product_access e

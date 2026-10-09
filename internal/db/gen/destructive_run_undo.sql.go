@@ -21,7 +21,18 @@ SELECT
         AND b.destructive_run_id = $2::uuid
         AND b.table_name = 'subscriptions'
         AND b.restored_at IS NULL
+        AND s.lifecycle_rev = b.after_lifecycle_rev
         AND s.deleted_at IS NULL)::bigint AS subscriptions,
+    (SELECT count(*)
+       FROM billing.destructive_run_before_images b
+       JOIN billing.subscriptions s
+         ON s.merchant_id = b.merchant_id AND s.id = b.row_id
+      WHERE b.merchant_id = $1::uuid
+        AND b.destructive_run_id = $2::uuid
+        AND b.table_name = 'subscriptions'
+        AND b.restored_at IS NULL
+        AND s.lifecycle_rev IS DISTINCT FROM b.after_lifecycle_rev
+        AND s.deleted_at IS NULL)::bigint AS subscriptions_changed,
     (SELECT count(*)
        FROM billing.destructive_run_before_images b
        JOIN billing.product_access e
@@ -48,6 +59,7 @@ type CountConvergeRestorableForRunParams struct {
 
 type CountConvergeRestorableForRunRow struct {
 	Subscriptions           int64
+	SubscriptionsChanged    int64
 	AccessToInvalidate      int64
 	SubscriptionsTombstoned int64
 }
@@ -59,7 +71,12 @@ type CountConvergeRestorableForRunRow struct {
 func (q *Queries) CountConvergeRestorableForRun(ctx context.Context, arg CountConvergeRestorableForRunParams) (CountConvergeRestorableForRunRow, error) {
 	row := q.db.QueryRow(ctx, countConvergeRestorableForRun, arg.MerchantID, arg.RunID)
 	var i CountConvergeRestorableForRunRow
-	err := row.Scan(&i.Subscriptions, &i.AccessToInvalidate, &i.SubscriptionsTombstoned)
+	err := row.Scan(
+		&i.Subscriptions,
+		&i.SubscriptionsChanged,
+		&i.AccessToInvalidate,
+		&i.SubscriptionsTombstoned,
+	)
 	return i, err
 }
 

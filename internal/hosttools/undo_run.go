@@ -137,6 +137,9 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 		fmt.Fprintf(w, "  %-18s %d (INVALIDATED, not restored — Converge rebuilds them from the grant log)\n",
 			"product_access", plan.AccessToInvalidate)
 	}
+	if plan.SubscriptionsChanged > 0 {
+		fmt.Fprintf(w, "  %-18s %d (changed since the run; their newer state is kept)\n", "subscriptions kept", plan.SubscriptionsChanged)
+	}
 	if plan.SubscriptionsTombstoned > 0 {
 		fmt.Fprintf(w, "  %-18s %d before-image(s) whose row a LATER prune tombstoned — those belong to that run's undo, not this one\n",
 			"skipped", plan.SubscriptionsTombstoned)

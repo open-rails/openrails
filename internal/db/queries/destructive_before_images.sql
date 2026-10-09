@@ -97,8 +97,25 @@ ORDER BY created_at;
 
 -- --- restore ------------------------------------------------------------------
 
+-- name: StampSubscriptionAfterImage :execrows
+-- Right after the run's own write: the revision the reverse requires to find.
+UPDATE billing.destructive_run_before_images b
+SET after_lifecycle_rev = s.lifecycle_rev
+FROM billing.subscriptions s
+WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND b.destructive_run_id = sqlc.arg(run_id)::uuid
+  AND b.table_name = 'subscriptions'
+  AND b.row_id = sqlc.arg(subscription_id)::uuid
+  AND b.restored_at IS NULL
+  AND s.merchant_id = b.merchant_id
+  AND s.id = b.row_id
+  AND s.deleted_at IS NULL;
+
 -- name: RestoreSubscriptionsFromBeforeImages :execrows
--- Re-assert the columns a converge-enforce pass can move, and only those.
+-- Re-assert the columns a converge-enforce pass can move, and only those, on
+-- rows unchanged since the run's own write. A row a renewal, cancel or payment
+-- moved later keeps that newer state: restoring over it could make a paid
+-- period due again. Its image stays unrestored and the reverse reports it.
 --
 -- Upsert-shaped by necessity, not by preference: `grants` FK-pins the payments
 -- and products it justifies, so a rollback physically cannot delete-and-reinsert
@@ -111,6 +128,25 @@ ORDER BY created_at;
 -- pair, owned by prune — a converge run must never resurrect a pruned row), and
 -- psp_id / customer_id / product_id / price_id (identity, which no transition
 -- moves).
+WITH restorable AS (
+    SELECT b.id, b.row_id, b.before
+    FROM billing.destructive_run_before_images b
+    JOIN billing.subscriptions s ON s.merchant_id = b.merchant_id AND s.id = b.row_id
+    WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND b.destructive_run_id = sqlc.arg(run_id)::uuid
+      AND b.table_name = 'subscriptions'
+      AND b.restored_at IS NULL
+      AND s.lifecycle_rev = b.after_lifecycle_rev
+      -- deleted_at is prune's (or#858). A converge reverse must not rewrite the
+      -- state of a row prune has since tombstoned.
+      AND s.deleted_at IS NULL
+    FOR UPDATE OF s
+), marked AS (
+    UPDATE billing.destructive_run_before_images i
+    SET restored_at = sqlc.arg(now)::timestamptz
+    FROM restorable r
+    WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = r.id
+)
 UPDATE billing.subscriptions s
 SET lifecycle_rev            = s.lifecycle_rev + 1,
     status                   = (b.before->>'status'),
@@ -126,16 +162,9 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,
     updated_at               = sqlc.arg(now)::timestamptz
-FROM billing.destructive_run_before_images b
-WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND b.destructive_run_id = sqlc.arg(run_id)::uuid
-  AND b.table_name = 'subscriptions'
-  AND b.restored_at IS NULL
-  AND s.merchant_id = b.merchant_id
-  AND s.id = b.row_id
-  -- deleted_at is prune's (or#858). A converge reverse must not rewrite the
-  -- state of a row prune has since tombstoned.
-  AND s.deleted_at IS NULL;
+FROM restorable b
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND s.id = b.row_id;
 
 -- name: InvalidateAccessFromBeforeImages :execrows
 -- Class D is INVALIDATED, never restored (or#859 §3.3, §4).
@@ -166,20 +195,10 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.id = b.row_id
   AND e.deleted_at IS NULL;
 
--- name: MarkBeforeImagesRestored :execrows
--- Runs in the same transaction as the restore above. Access images are
--- deliberately excluded: leaving restored_at NULL on them is the durable record
--- that the reverse saw them and chose recomputation over restoration.
-UPDATE billing.destructive_run_before_images
-SET restored_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND destructive_run_id = sqlc.arg(run_id)::uuid
-  AND table_name = sqlc.arg(table_name)::text
-  AND restored_at IS NULL;
-
 -- name: CountBeforeImagesForRun :one
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
+    count(*) FILTER (WHERE table_name = 'subscriptions' AND restored_at IS NULL)::bigint AS subscriptions_unrestored,
     count(*) FILTER (WHERE table_name = 'product_access')::bigint AS product_access
 FROM billing.destructive_run_before_images
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

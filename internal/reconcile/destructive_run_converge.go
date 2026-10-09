@@ -40,9 +40,11 @@ type DestructiveRunRecorder interface {
 	// windows exactly as they stand, stamped with the run. Returns the capture
 	// instant, which bounds intent attribution for that subject.
 	CaptureSubscription(ctx context.Context, runID, subscriptionID uuid.UUID) (time.Time, error)
-	// StampIntents attributes provider writes queued for the subject since
-	// `since` to the run, so the reverse can supersede the unfired ones.
-	StampIntents(ctx context.Context, runID, subscriptionID uuid.UUID, since time.Time) (int, error)
+	// Seal runs right after the run's write to the subject: it records the
+	// revision the reverse requires to find, and attributes provider writes
+	// queued for the subject since `since` to the run, so the reverse can
+	// supersede the unfired ones.
+	Seal(ctx context.Context, runID, subscriptionID uuid.UUID, since time.Time) (int, error)
 	// Finish closes the run with its per-table actual counts.
 	Finish(ctx context.Context, runID uuid.UUID, status string, affected map[string]int) error
 }
@@ -117,10 +119,15 @@ func (r *PGDestructiveRunRecorder) CaptureSubscription(ctx context.Context, runI
 	return now, nil
 }
 
-func (r *PGDestructiveRunRecorder) StampIntents(ctx context.Context, runID, subscriptionID uuid.UUID, since time.Time) (int, error) {
+func (r *PGDestructiveRunRecorder) Seal(ctx context.Context, runID, subscriptionID uuid.UUID, since time.Time) (int, error) {
 	mid, err := requireMerchantUUID(ctx)
 	if err != nil {
 		return 0, err
+	}
+	if _, err := r.DB.Gen(ctx).StampSubscriptionAfterImage(ctx, gen.StampSubscriptionAfterImageParams{
+		MerchantID: mid, RunID: runID, SubscriptionID: subscriptionID,
+	}); err != nil {
+		return 0, fmt.Errorf("seal subscription after-image %s: %w", subscriptionID, err)
 	}
 	n, err := r.DB.Gen(ctx).StampProviderIntentsForRun(ctx, gen.StampProviderIntentsForRunParams{
 		RunID: runID, MerchantID: mid, SubscriptionID: subscriptionID, Since: since,
@@ -169,6 +176,9 @@ type ConvergeRollbackResult struct {
 	RunID uuid.UUID `json:"run_id"`
 	// SubscriptionsRestored is how many rows were re-asserted from before-images.
 	SubscriptionsRestored int64 `json:"subscriptions_restored"`
+	// SubscriptionsChanged were moved after the run (a renewal, cancel or
+	// payment) and keep that state; their images stay unrestored for review.
+	SubscriptionsChanged int64 `json:"subscriptions_changed"`
 	// AccessCaptured is how many product-access windows the run closed.
 	AccessCaptured int64 `json:"access_captured"`
 	// AccessInvalidated is how many of those the reverse soft-deleted so
@@ -290,16 +300,11 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 		}); e != nil {
 			return fmt.Errorf("restore subscriptions from before-images: %w", e)
 		}
-		if _, e = tq.MarkBeforeImagesRestored(ctx, gen.MarkBeforeImagesRestoredParams{
-			MerchantID: mid, RunID: runID, TableName: "subscriptions", Now: now,
-		}); e != nil {
-			return fmt.Errorf("mark before-images restored: %w", e)
-		}
 		counts, e := tq.CountBeforeImagesForRun(ctx, gen.CountBeforeImagesForRunParams{MerchantID: mid, RunID: runID})
 		if e != nil {
 			return fmt.Errorf("count before-images: %w", e)
 		}
-		res.AccessCaptured = counts.ProductAccess
+		res.SubscriptionsChanged, res.AccessCaptured = counts.SubscriptionsUnrestored, counts.ProductAccess
 		// Class D: invalidate, do not restore. The follow-up Converge rebuilds
 		// each window from the grant that justifies it.
 		if res.AccessInvalidated, e = tq.InvalidateAccessFromBeforeImages(ctx, gen.InvalidateAccessFromBeforeImagesParams{

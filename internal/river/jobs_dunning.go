@@ -342,9 +342,12 @@ func (w *DunningWorker) processSubscription(
 	materialize bool,
 ) (dunningOutcome, error) {
 	if sub.Status == models.StatusAwaitingMethod {
-		// The wait for a new card outlived its dunning window.
+		// The wait for a new card outlived its dunning window. #839: limited
+		// mode never cancels locally; the operator sees the held outcome.
 		blocked := ""
-		if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
+		if materialize {
+			blocked = "mode=limited holds local terminal cancellations"
+		} else if gate := destructive.New(w.DB).Check(ctx, sub.MerchantID); !gate.Allowed {
 			blocked = gate.Reason
 		}
 		if _, err := lifecycle.ExpireAwaitingMethod(ctx, w.DB, sub, blocked); err != nil {

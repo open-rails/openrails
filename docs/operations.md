@@ -452,7 +452,9 @@ An apply runs five steps in a fixed order:
    of the intent log. Only `pending`/`failed_retryable` count as unfired.
 3. **Restore** the rows, in one transaction with step 2 — a reversal that
    superseded the intents but failed to restore the rows would leave the operator
-   worse off than before.
+   worse off than before. A subscription a renewal, cancel or payment moved after
+   the run keeps that newer state: rewriting it could make a paid period due
+   again. The plan counts those rows as `subscriptions_changed`.
 4. **Invalidate and re-derive.** The product-access windows the run closed are
    soft-deleted, never replayed, and `Converge` rebuilds them from the
    append-only grant log the rollback never touched. The proven source-domain

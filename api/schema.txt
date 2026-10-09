@@ -28,6 +28,7 @@ migration 0024_cost_resolutions.up.sql sha256:650fb1db36328c11d3171febc2f82f88e6
 migration 0025_cost_refusals.up.sql sha256:49d6fba4a1ca3f5ed5a5f752d2483a74b8f334563e657a7cb4bdd9390a46ac5a
 migration 0026_provider_stop_holds_slot.up.sql sha256:1e938e7834d24d4335eae50bb09b04803023f1e259a64f05a281278880bab3de
 migration 0027_obligation_paid_once.up.sql sha256:1d15f1a9a7a3ad8742435606499c33d82313f3dd7cb0d3729a2eec21d6b6d36b
+migration 0028_before_image_after_revision.up.sql sha256:53df4c851e6a42062f3cb5d28c7d5b8e12c7e536ccb5b61cc10dd514d7bf53ba
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -617,6 +618,7 @@ table billing.destructive_run_before_images
   column captured_at timestamp with time zone NOT NULL DEFAULT now()
   column restored_at timestamp with time zone
   column destructive_run_class text NOT NULL GENERATED ALWAYS AS ('destructive'::text) STORED
+  column after_lifecycle_rev bigint
   constraint destructive_run_before_images_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint destructive_run_before_images_pkey PRIMARY KEY (merchant_id, id)
   constraint destructive_run_before_images_run_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT

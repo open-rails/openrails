@@ -101,6 +101,7 @@ func (q *Queries) CaptureSubscriptionBeforeImage(ctx context.Context, arg Captur
 const countBeforeImagesForRun = `-- name: CountBeforeImagesForRun :one
 SELECT
     count(*) FILTER (WHERE table_name = 'subscriptions')::bigint AS subscriptions,
+    count(*) FILTER (WHERE table_name = 'subscriptions' AND restored_at IS NULL)::bigint AS subscriptions_unrestored,
     count(*) FILTER (WHERE table_name = 'product_access')::bigint AS product_access
 FROM billing.destructive_run_before_images
 WHERE merchant_id = $1::uuid
@@ -113,14 +114,15 @@ type CountBeforeImagesForRunParams struct {
 }
 
 type CountBeforeImagesForRunRow struct {
-	Subscriptions int64
-	ProductAccess int64
+	Subscriptions           int64
+	SubscriptionsUnrestored int64
+	ProductAccess           int64
 }
 
 func (q *Queries) CountBeforeImagesForRun(ctx context.Context, arg CountBeforeImagesForRunParams) (CountBeforeImagesForRunRow, error) {
 	row := q.db.QueryRow(ctx, countBeforeImagesForRun, arg.MerchantID, arg.RunID)
 	var i CountBeforeImagesForRunRow
-	err := row.Scan(&i.Subscriptions, &i.ProductAccess)
+	err := row.Scan(&i.Subscriptions, &i.SubscriptionsUnrestored, &i.ProductAccess)
 	return i, err
 }
 
@@ -250,38 +252,6 @@ func (q *Queries) ListProviderIntentsForRun(ctx context.Context, arg ListProvide
 	return items, nil
 }
 
-const markBeforeImagesRestored = `-- name: MarkBeforeImagesRestored :execrows
-UPDATE billing.destructive_run_before_images
-SET restored_at = $1::timestamptz
-WHERE merchant_id = $2::uuid
-  AND destructive_run_id = $3::uuid
-  AND table_name = $4::text
-  AND restored_at IS NULL
-`
-
-type MarkBeforeImagesRestoredParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	RunID      uuid.UUID
-	TableName  string
-}
-
-// Runs in the same transaction as the restore above. Access images are
-// deliberately excluded: leaving restored_at NULL on them is the durable record
-// that the reverse saw them and chose recomputation over restoration.
-func (q *Queries) MarkBeforeImagesRestored(ctx context.Context, arg MarkBeforeImagesRestoredParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markBeforeImagesRestored,
-		arg.Now,
-		arg.MerchantID,
-		arg.RunID,
-		arg.TableName,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const resetReconciliationStateUnproven = `-- name: ResetReconciliationStateUnproven :execrows
 
 UPDATE billing.reconciliation_state
@@ -304,7 +274,25 @@ func (q *Queries) ResetReconciliationStateUnproven(ctx context.Context, merchant
 }
 
 const restoreSubscriptionsFromBeforeImages = `-- name: RestoreSubscriptionsFromBeforeImages :execrows
-
+WITH restorable AS (
+    SELECT b.id, b.row_id, b.before
+    FROM billing.destructive_run_before_images b
+    JOIN billing.subscriptions s ON s.merchant_id = b.merchant_id AND s.id = b.row_id
+    WHERE b.merchant_id = $2::uuid
+      AND b.destructive_run_id = $3::uuid
+      AND b.table_name = 'subscriptions'
+      AND b.restored_at IS NULL
+      AND s.lifecycle_rev = b.after_lifecycle_rev
+      -- deleted_at is prune's (or#858). A converge reverse must not rewrite the
+      -- state of a row prune has since tombstoned.
+      AND s.deleted_at IS NULL
+    FOR UPDATE OF s
+), marked AS (
+    UPDATE billing.destructive_run_before_images i
+    SET restored_at = $1::timestamptz
+    FROM restorable r
+    WHERE i.merchant_id = $2::uuid AND i.id = r.id
+)
 UPDATE billing.subscriptions s
 SET lifecycle_rev            = s.lifecycle_rev + 1,
     status                   = (b.before->>'status'),
@@ -320,16 +308,9 @@ SET lifecycle_rev            = s.lifecycle_rev + 1,
     cancel_feedback          = b.before->>'cancel_feedback',
     deletion_scheduled_at    = (b.before->>'deletion_scheduled_at')::timestamptz,
     updated_at               = $1::timestamptz
-FROM billing.destructive_run_before_images b
-WHERE b.merchant_id = $2::uuid
-  AND b.destructive_run_id = $3::uuid
-  AND b.table_name = 'subscriptions'
-  AND b.restored_at IS NULL
-  AND s.merchant_id = b.merchant_id
+FROM restorable b
+WHERE s.merchant_id = $2::uuid
   AND s.id = b.row_id
-  -- deleted_at is prune's (or#858). A converge reverse must not rewrite the
-  -- state of a row prune has since tombstoned.
-  AND s.deleted_at IS NULL
 `
 
 type RestoreSubscriptionsFromBeforeImagesParams struct {
@@ -338,8 +319,10 @@ type RestoreSubscriptionsFromBeforeImagesParams struct {
 	RunID      uuid.UUID
 }
 
-// --- restore ------------------------------------------------------------------
-// Re-assert the columns a converge-enforce pass can move, and only those.
+// Re-assert the columns a converge-enforce pass can move, and only those, on
+// rows unchanged since the run's own write. A row a renewal, cancel or payment
+// moved later keeps that newer state: restoring over it could make a paid
+// period due again. Its image stays unrestored and the reverse reports it.
 //
 // Upsert-shaped by necessity, not by preference: `grants` FK-pins the payments
 // and products it justifies, so a rollback physically cannot delete-and-reinsert
@@ -390,6 +373,37 @@ func (q *Queries) StampProviderIntentsForRun(ctx context.Context, arg StampProvi
 		arg.SubscriptionID,
 		arg.Since,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const stampSubscriptionAfterImage = `-- name: StampSubscriptionAfterImage :execrows
+
+UPDATE billing.destructive_run_before_images b
+SET after_lifecycle_rev = s.lifecycle_rev
+FROM billing.subscriptions s
+WHERE b.merchant_id = $1::uuid
+  AND b.destructive_run_id = $2::uuid
+  AND b.table_name = 'subscriptions'
+  AND b.row_id = $3::uuid
+  AND b.restored_at IS NULL
+  AND s.merchant_id = b.merchant_id
+  AND s.id = b.row_id
+  AND s.deleted_at IS NULL
+`
+
+type StampSubscriptionAfterImageParams struct {
+	MerchantID     uuid.UUID
+	RunID          uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// --- restore ------------------------------------------------------------------
+// Right after the run's own write: the revision the reverse requires to find.
+func (q *Queries) StampSubscriptionAfterImage(ctx context.Context, arg StampSubscriptionAfterImageParams) (int64, error) {
+	result, err := q.db.Exec(ctx, stampSubscriptionAfterImage, arg.MerchantID, arg.RunID, arg.SubscriptionID)
 	if err != nil {
 		return 0, err
 	}

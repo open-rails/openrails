@@ -80,6 +80,9 @@ type UndoPlan struct {
 	// Converge REBUILDS them from the grant log. Not restorations, so not part
 	// of the expected count — but the operator is told.
 	AccessToInvalidate int64 `json:"access_to_invalidate"`
+	// SubscriptionsChanged are before-images whose row a renewal, cancel or
+	// payment moved after the run; the reverse leaves that newer state.
+	SubscriptionsChanged int64 `json:"subscriptions_changed"`
 	// SubscriptionsTombstoned are before-images whose row a LATER prune has since
 	// soft-deleted. They belong to that run's reverse, not this one, so this undo
 	// skips them — loudly, because a silent skip is how a partial recovery gets
@@ -190,7 +193,7 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		}
 		plan.Restorable["subscriptions"] = c.Subscriptions
 		plan.AccessToInvalidate = c.AccessToInvalidate
-		plan.SubscriptionsTombstoned = c.SubscriptionsTombstoned
+		plan.SubscriptionsTombstoned, plan.SubscriptionsChanged = c.SubscriptionsTombstoned, c.SubscriptionsChanged
 	}
 
 	manifest, err := q.ListProviderIntentsForRun(ctx, gen.ListProviderIntentsForRunParams{MerchantID: mid, RunID: runID})

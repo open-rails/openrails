@@ -648,7 +648,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 			// that have not fired and manifest the ones that have.
 			if destRunID != uuid.Nil && f.Apply.Decide != nil {
 				runAffected["subscriptions"]++
-				n, serr := e.Runs.StampIntents(ctx, destRunID, f.Apply.Decide.SubscriptionID, capturedAt)
+				n, serr := e.Runs.Seal(ctx, destRunID, f.Apply.Decide.SubscriptionID, capturedAt)
 				if serr != nil {
 					rep.ApplyErrors = append(rep.ApplyErrors, fmt.Sprintf("%s/%s: %v", f.Type, f.SubjectKey, serr))
 				}
