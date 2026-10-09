@@ -53,6 +53,18 @@ func (h heldNMI) RoundTrip(r *http.Request) (*http.Response, error) {
 	return jsonResponse(body), nil
 }
 
+// historylessStripe is a Stripe account with no history. The runtime's
+// provider refresh, which runs whenever River schedules it (before or after an
+// outage clears), reads empty lists; anything else is the wrapped fake's.
+type historylessStripe struct{ http.RoundTripper }
+
+func (s historylessStripe) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == http.MethodGet && strings.Count(r.URL.Path, "/") == 2 && r.URL.Path != "/v1/account" && r.URL.Path != "/v1/balance" {
+		return jsonResponse(`{"object":"list","data":[],"has_more":false,"url":"` + r.URL.Path + `"}`), nil
+	}
+	return s.RoundTripper.RoundTrip(r)
+}
+
 type resilientBoot struct {
 	vault  *vaultfake.Server
 	nmi    http.RoundTripper
@@ -82,7 +94,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 	cfg.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
-	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: b.stripe, NMITransport: b.nmi})
+	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on an optional provider")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
