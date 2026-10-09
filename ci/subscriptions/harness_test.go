@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -902,10 +903,11 @@ func (w *world) latestAttempt(customerID string) map[string]any {
 func (w *world) confirmAttempt(id billing.CheckoutAttemptID, signature string) (int, map[string]any) {
 	w.t.Helper()
 	got, err := confirmCheckoutAttempt(w.t.Context(), w.client[embedded], id, billing.ConfirmCheckoutAttemptParams{Signature: signature})
-	if err != nil {
-		status, code := checkoutErrorStatus(err)
-		return status, map[string]any{"error": map[string]any{"code": code, "message": err.Error()}}
+	var status *billing.StatusError
+	if errors.As(asStatusError(err), &status) {
+		return status.Status, map[string]any{"error": asJSON(w.t, status.ErrorDetails)}
 	}
+	require.NoError(w.t, err)
 	if got.Status == billing.CheckoutAttemptProcessing {
 		return http.StatusAccepted, asJSON(w.t, got)
 	}

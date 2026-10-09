@@ -4,22 +4,20 @@ package ci_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/integrations/vault"
+	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // enginesOf maps a world's remote client to its embedded one: both reach the
@@ -84,63 +82,21 @@ type statusError struct {
 
 func (e *statusError) Unwrap() []error { return []error{e.StatusError, e.cause} }
 
+// asStatusError answers err through the checkout attempt route's own error
+// writer and reads it back as the remote Client does.
 func asStatusError(err error) error {
-	if err == nil {
-		return nil
-	}
-	status, code := checkoutErrorStatus(err)
-	details := billing.ErrorDetails{Code: code, Message: err.Error()}
-	var refusal *apperr.Error
-	switch {
-	case errors.Is(err, checkout.ErrPaymentMethodRequired):
-		details.Param = new("payment_method_id")
-	case errors.As(err, &refusal) && refusal.Param != "":
-		details.Param = new(refusal.Param)
-	}
-	return &statusError{StatusError: &billing.StatusError{Status: status, ErrorDetails: details}, cause: err}
-}
-
-// checkoutErrorStatus is the status and code the API answers a checkout
-// attempt error with.
-func checkoutErrorStatus(err error) (int, string) {
-	var insufficient *recurring.InsufficientUSDCError
-	var refusal *apperr.Error
-	var blocked *checkout.CardAttemptsBlockedError
-	var declined *paymentmethods.PaymentMethodError
 	var already *statusError
-	switch {
-	case errors.As(err, &already):
-		return already.Status, already.Code
-	case errors.As(err, &blocked):
-		return http.StatusTooManyRequests, "card_attempts_blocked"
-	case errors.As(err, &declined):
-		return http.StatusPaymentRequired, "card_declined"
-	case errors.Is(err, paymentmethods.ErrCardNotSaved):
-		return http.StatusConflict, "card_not_saved"
-	case errors.Is(err, paymentmethods.ErrCardEntryNotEnabled), errors.Is(err, paymentmethods.ErrCardWithToken):
-		return http.StatusBadRequest, billing.CodeInvalidParam
-	case errors.Is(err, checkout.ErrPaymentMethodStale):
-		return http.StatusPaymentRequired, billing.CodePaymentMethodStale
-	case errors.Is(err, checkout.ErrPaymentMethodRequired):
-		return http.StatusBadRequest, billing.CodePaymentMethodRequired
-	case errors.Is(err, billing.ErrIdempotencyKeyReused):
-		return http.StatusConflict, "idempotency_key_reused"
-	case errors.As(err, &insufficient):
-		return http.StatusPaymentRequired, "insufficient_funds"
-	case errors.Is(err, vault.ErrUnavailable):
-		return http.StatusServiceUnavailable, "service_unavailable"
-	case errors.Is(err, checkout.ErrCheckoutAttemptNotFound):
-		return http.StatusNotFound, billing.CodeResourceNotFound
-	case errors.Is(err, checkout.ErrCheckoutAttemptForbidden):
-		return http.StatusForbidden, billing.CodeResourceAccessDenied
-	case errors.Is(err, checkout.ErrCheckoutAttemptExpired):
-		return http.StatusGone, "checkout_attempt_expired"
-	case errors.Is(err, checkout.ErrCheckoutAttemptPending), errors.Is(err, checkout.ErrCheckoutProcessing), errors.Is(err, checkout.ErrCheckoutAttemptConflict):
-		return http.StatusConflict, billing.CodeResourceConflict
-	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
-		return http.StatusBadRequest, billing.CodeInvalidParam
-	case errors.As(err, &refusal):
-		return refusal.Status, refusal.Code
+	if err == nil || errors.As(err, &already) {
+		return err
 	}
-	return http.StatusInternalServerError, billing.CodeInternalError
+	rec := httptest.NewRecorder()
+	handlers.WriteCheckoutAttemptError(rec, httptest.NewRequest(http.MethodPost, "/", nil), err)
+	var envelope struct {
+		Error *billing.ErrorDetails `json:"error"`
+	}
+	out := &billing.StatusError{Status: rec.Code, RetryAfter: rec.Header().Get("Retry-After")}
+	if json.Unmarshal(rec.Body.Bytes(), &envelope) == nil && envelope.Error != nil {
+		out.ErrorDetails = *envelope.Error
+	}
+	return &statusError{StatusError: out, cause: err}
 }

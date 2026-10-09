@@ -37,6 +37,12 @@ type checkoutAttemptErrorContext struct {
 	CheckoutAttemptID string
 }
 
+// WriteCheckoutAttemptError answers err as a checkout attempt's route does,
+// for a caller that runs the engine's checkout itself (the e2e suite).
+func WriteCheckoutAttemptError(w http.ResponseWriter, req *http.Request, err error) {
+	writeCheckoutAttemptError(httprequest.NewHTTP(w, req, nil), err, checkoutAttemptErrorContext{})
+}
+
 func writeCheckoutAttemptError(r *httprequest.Request, err error, ectx checkoutAttemptErrorContext) {
 	var blocked *checkout.CardAttemptsBlockedError
 	if errors.As(err, &blocked) {
