@@ -52,6 +52,12 @@ const (
 // Currency (USD is the only currency accepted for now). OperationID is also
 // the provider operation's idempotency identity. OpenRails verifies the
 // digest but never parses AuthorizationBody.
+//
+// OverdraftAmount lets a prepaid customer's capacity reach below zero: the hold
+// is granted while balance - holds - owed - Amount >= -OverdraftAmount. Spend past
+// the balance settles as owed, and the next funding repays it. It is policy for
+// this call, not part of the authorization's identity; arrears accounts use their
+// credit line instead.
 type OpenOperationAuthorizationParams struct {
 	OperationID             string     `json:"operation_id"` // canonical, at most 255 bytes
 	CustomerID              CustomerID `json:"customer_id"`
@@ -61,6 +67,7 @@ type OpenOperationAuthorizationParams struct {
 	ClaimReference          string     `json:"claim_reference"`    // canonical, at most 1024 bytes
 	AuthorizationBody       []byte     `json:"authorization_body"` // exact bytes, 1..65536
 	AuthorizationBodySHA256 SHA256     `json:"authorization_body_sha256"`
+	OverdraftAmount         int64      `json:"overdraft_amount,omitempty,string"`
 }
 
 // OperationAuthorization is the durable reservation. Amount is the opening
@@ -96,12 +103,13 @@ type OperationAuthorization struct {
 // accepting no less than MinimumAmount (0 < MinimumAmount <= Amount), under the
 // same capacity rule as opening it. Ordinal numbers the operation's extensions
 // from 1 without gaps; repeating a committed ordinal with the same amounts
-// replays its grant.
+// replays its grant. OverdraftAmount is as for opening.
 type ExtendOperationAuthorizationParams struct {
-	OperationID   string `json:"-"` // carried by the route path
-	Ordinal       int64  `json:"ordinal"`
-	Amount        int64  `json:"amount,string"`
-	MinimumAmount int64  `json:"minimum_amount,string"`
+	OperationID     string `json:"-"` // carried by the route path
+	Ordinal         int64  `json:"ordinal"`
+	Amount          int64  `json:"amount,string"`
+	MinimumAmount   int64  `json:"minimum_amount,string"`
+	OverdraftAmount int64  `json:"overdraft_amount,omitempty,string"`
 }
 
 // OperationAuthorizationExtension is one committed grant. AuthorizedAmount is

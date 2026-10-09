@@ -1029,6 +1029,7 @@ export type ExtendOperationAuthorizationParams = {
   ordinal?: number
   amount?: string
   minimum_amount?: string
+  overdraft_amount?: string
 }
 
 export type FederatedGrant = {
@@ -1534,6 +1535,7 @@ export type OpenOperationAuthorizationParams = {
   claim_reference?: string
   authorization_body?: string | null
   authorization_body_sha256?: string
+  overdraft_amount?: string
 }
 
 export type OperationAuthorization = {

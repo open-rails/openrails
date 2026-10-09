@@ -63,6 +63,8 @@ type OperationAuthorizationInput struct {
 	ClaimReference          string
 	AuthorizationBody       []byte
 	AuthorizationBodySHA256 [sha256.Size]byte
+	// OverdraftAmount is how far below zero this call lets prepaid capacity reach.
+	OverdraftAmount int64
 }
 
 type OperationAuthorization struct {
@@ -131,22 +133,20 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, getErr
 	}
 
-	ledgerAccountID, found, err := ledger.New(q, merchantID.UUID()).CustomerBalanceAccountID(
-		ctx, in.CustomerID.UUID(), operationAuthorizationCurrency,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("operation authorization: customer balance ledger account was not materialized")
-	}
-
-	capacity, err := txSvc.operationCapacity(ctx, q, merchantID.UUID(), in.CustomerID, bal)
+	capacity, err := txSvc.operationCapacity(ctx, q, merchantID.UUID(), in.CustomerID, bal, in.OverdraftAmount)
 	if err != nil {
 		return nil, err
 	}
 	if capacity < in.Amount {
 		return nil, ErrInsufficientCredits
+	}
+	// A customer never funded has no balance account yet; an overdraft can still
+	// cover the hold, and settlement posts against this account.
+	ledgerAccountID, err := ledger.New(q, merchantID.UUID()).EnsureCustomerBalance(
+		ctx, in.CustomerID.UUID(), operationAuthorizationCurrency,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	row, err := q.InsertOperationAuthorization(ctx, gen.InsertOperationAuthorizationParams{
@@ -185,8 +185,9 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 
 // operationCapacity is what a new or grown hold may take, read under the payer
 // lock: the balance net of every financial hold, then net of outstanding owed
-// under prepaid, or plus the arrears credit line still available.
-func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, bal *models.MoneyBalance) (int64, error) {
+// plus the call's overdraft under prepaid, or plus the arrears credit line still
+// available.
+func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, customer identity.CustomerID, bal *models.MoneyBalance, overdraft int64) (int64, error) {
 	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "financial holds")
 	if err != nil {
 		return 0, err
@@ -203,7 +204,10 @@ func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, me
 		return 0, fmt.Errorf("operation authorization: outstanding owed is negative")
 	}
 	if settings.BillingMode != BillingModeArrears {
-		return subtractOperationCapacity(capacity, outstanding, "outstanding owed")
+		if capacity, err = subtractOperationCapacity(capacity, outstanding, "outstanding owed"); err != nil {
+			return 0, err
+		}
+		return addOperationCapacity(capacity, overdraft)
 	}
 	if settings.CreditLimitAmount < 0 {
 		return 0, fmt.Errorf("operation authorization: credit limit is negative")
@@ -249,6 +253,9 @@ func validateOperationAuthorizationInput(in OperationAuthorizationInput) error {
 	}
 	if in.Amount <= 0 {
 		return fmt.Errorf("amount must be positive")
+	}
+	if in.OverdraftAmount < 0 {
+		return fmt.Errorf("overdraft_amount must be nonnegative")
 	}
 	if err := validateOperationAuthorizationText("claim_reference", in.ClaimReference, operationAuthorizationMaxReferenceBytes); err != nil {
 		return err

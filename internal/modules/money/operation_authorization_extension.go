@@ -20,6 +20,8 @@ type OperationAuthorizationExtensionInput struct {
 	Ordinal       int64
 	Amount        int64
 	MinimumAmount int64
+	// OverdraftAmount is how far below zero this call lets prepaid capacity reach.
+	OverdraftAmount int64
 }
 
 type OperationAuthorizationExtension struct {
@@ -92,7 +94,7 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 		return nil, fmt.Errorf("%w: authorized amount plus amount exceeds int64", billing.ErrInvalid)
 	}
 
-	capacity, err := txSvc.operationCapacity(ctx, q, merchantID.UUID(), payer, bal)
+	capacity, err := txSvc.operationCapacity(ctx, q, merchantID.UUID(), payer, bal, in.OverdraftAmount)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +135,9 @@ func validateOperationAuthorizationExtension(in OperationAuthorizationExtensionI
 	}
 	if in.Amount < in.MinimumAmount {
 		return fmt.Errorf("amount must be at least minimum_amount")
+	}
+	if in.OverdraftAmount < 0 {
+		return fmt.Errorf("overdraft_amount must be nonnegative")
 	}
 	return nil
 }

@@ -51,6 +51,7 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 		ClaimReference:          req.ClaimReference,
 		AuthorizationBody:       req.AuthorizationBody,
 		AuthorizationBodySHA256: req.AuthorizationBodySHA256,
+		OverdraftAmount:         req.OverdraftAmount,
 	})
 	if err != nil {
 		return nil, err
@@ -119,6 +120,7 @@ func (s *Service) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx,
 	}
 	ext, err := s.moneyService().ExtendOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationExtensionInput{
 		OperationID: req.OperationID, Ordinal: req.Ordinal, Amount: req.Amount, MinimumAmount: req.MinimumAmount,
+		OverdraftAmount: req.OverdraftAmount,
 	})
 	if err != nil {
 		return nil, err

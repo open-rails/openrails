@@ -78,6 +78,15 @@ customer with no credit line. A prepaid customer's open, extension and
 admission capacity is the balance net of holds and of what is owed, so no new
 hold is granted against money already owed; arrears capacity is unchanged.
 
+A host may let a prepaid customer run into debt down to a floor:
+`overdraft_amount` on an open or an extension adds that much to the call's
+capacity, so a hold is granted while balance − holds − owed − amount ≥
+−`overdraft_amount`. It is the host's policy for that call, not part of the
+authorization's identity, and it does not apply to arrears accounts. The hold
+may then exceed the balance; settlement spends the balance first and posts the
+rest as owed. A customer never funded has no balance account until a hold
+needs one: an open its capacity covers creates it.
+
 The next funding repays the debt first, in the same transaction and under the
 same customer lock: a purchased-credit lot repays from its paid part (a bonus
 never repays debt), and `CreateCreditGrant` from its amount. Each repayment is

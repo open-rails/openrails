@@ -1783,6 +1783,7 @@ pkg openrails/billing, type ExtendOperationAuthorizationParams struct, Amount in
 pkg openrails/billing, type ExtendOperationAuthorizationParams struct, MinimumAmount int64 `json:"minimum_amount,string"`
 pkg openrails/billing, type ExtendOperationAuthorizationParams struct, OperationID string `json:"-"`
 pkg openrails/billing, type ExtendOperationAuthorizationParams struct, Ordinal int64 `json:"ordinal"`
+pkg openrails/billing, type ExtendOperationAuthorizationParams struct, OverdraftAmount int64 `json:"overdraft_amount,omitempty,string"`
 pkg openrails/billing, type FederatedGrant struct
 pkg openrails/billing, type FederatedGrant struct, AcceptedAt *time.Time `json:"accepted_at"`
 pkg openrails/billing, type FederatedGrant struct, CreatedAt time.Time `json:"created_at"`
@@ -2259,6 +2260,7 @@ pkg openrails/billing, type OpenOperationAuthorizationParams struct, ClaimRefere
 pkg openrails/billing, type OpenOperationAuthorizationParams struct, Currency string `json:"currency"`
 pkg openrails/billing, type OpenOperationAuthorizationParams struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type OpenOperationAuthorizationParams struct, OperationID string `json:"operation_id"`
+pkg openrails/billing, type OpenOperationAuthorizationParams struct, OverdraftAmount int64 `json:"overdraft_amount,omitempty,string"`
 pkg openrails/billing, type OpenOperationAuthorizationParams struct, RecordOwner string `json:"record_owner"`
 pkg openrails/billing, type OperationAuthorization struct
 pkg openrails/billing, type OperationAuthorization struct, Amount int64 `json:"amount,string"`
