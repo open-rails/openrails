@@ -36,7 +36,7 @@ concurrency:
   cancel-in-progress: false
 
 # FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 runs the JavaScript-based actions
-# (checkout, docker/login-action, docker/setup-buildx-action) on Node.js 24.
+# (checkout, docker/setup-buildx-action) on Node.js 24.
 # Those actions still declare the Node 20 runtime, which GitHub deprecates on
 # 2026-06-16; this opts into the new runtime ahead of the cutover.
 env:
@@ -44,8 +44,9 @@ env:
   GHCR_IMAGE: ghcr.io/open-rails/openrails
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   # Docker Hub rate-limits anonymous pulls, and pull requests get no secrets.
-  # Docker official images come from ECR Public (Dockerfile too); binfmt and
-  # BuildKit from Google's Docker Hub mirror. Same digests as Docker Hub.
+  # The smoke database, binfmt and BuildKit come from Google's Docker Hub
+  # mirror; the Dockerfile's digest-pinned bases from ECR Public, which keeps
+  # every digest. Same digests as Docker Hub.
   BINFMT_IMAGE: mirror.gcr.io/tonistiigi/binfmt:latest
   BUILDKIT_IMAGE: mirror.gcr.io/moby/buildkit:buildx-stable-1
 
@@ -94,7 +95,7 @@ jobs:
     needs: verify-source
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:18-alpine
+        image: mirror.gcr.io/library/postgres:18-alpine
         env:
           POSTGRES_DB: openrails_db
           POSTGRES_USER: smoke
@@ -232,18 +233,17 @@ jobs:
             exit 1
           fi
 
+      # Registry auth services time out and fail transiently; retry the logins
+      # and the manifest pushes.
       - name: Login to DockerHub
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          username: openrails
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: scripts/ci-retry.sh bash -c 'docker login --username openrails --password-stdin <<<"$DOCKERHUB_TOKEN"'
 
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: scripts/ci-retry.sh bash -c 'docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"'
 
       # Only needed when the arm64 cache misses.
       - name: Set up QEMU
@@ -308,5 +308,5 @@ jobs:
             hub+=(-t "${IMAGE}:${name}")
             ghcr+=(-t "${GHCR_IMAGE}:${name}")
           done
-          docker buildx imagetools create "${hub[@]}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
-          docker buildx imagetools create "${ghcr[@]}" "${IMAGE}:${TAG}"
+          scripts/ci-retry.sh docker buildx imagetools create "${hub[@]}" "${IMAGE}@${AMD64}" "${IMAGE}@${ARM64}"
+          scripts/ci-retry.sh docker buildx imagetools create "${ghcr[@]}" "${IMAGE}:${TAG}"

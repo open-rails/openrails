@@ -137,15 +137,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Docker official images from ECR Public: Docker Hub rate-limits
-      # anonymous pulls.
-      - name: Start PostgreSQL
-        run: >-
-          docker run -d --name e2e-postgres -p 5432:5432
-          --tmpfs /var/lib/postgresql:rw,size=2g
-          -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
-          public.ecr.aws/docker/library/postgres:18-alpine
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Docker Hub rate-limits anonymous pulls; scripts/ci-pull-image.sh pulls
+      # from its mirrors with retries.
+      - name: Start PostgreSQL
+        run: |
+          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
+          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
+            --tmpfs /var/lib/postgresql:rw,size=2g \
+            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            "$image"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
@@ -204,17 +205,20 @@ jobs:
       OPENRAILS_E2E_TIMEOUT: 15m
       OPENRAILS_E2E_TIMINGS: ${{ github.workspace }}/e2e-timings.tsv
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # A step rather than a service: the multi-replica fleets (#1075) need
       # more than the default 100 connections, a server flag services cannot set.
       - name: Start PostgreSQL
-        run: >-
-          docker run -d --name e2e-postgres -p 5432:5432
-          --tmpfs /var/lib/postgresql:rw,size=2g
-          -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres
-          public.ecr.aws/docker/library/postgres:18-alpine -c max_connections=500
+        run: |
+          image="$(scripts/ci-pull-image.sh postgres:18-alpine)"
+          docker run -d --pull never --name e2e-postgres -p 5432:5432 \
+            --tmpfs /var/lib/postgresql:rw,size=2g \
+            -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            "$image" -c max_connections=500
       - name: Start Redis
-        run: docker run -d --name e2e-redis -p 6379:6379 public.ecr.aws/docker/library/redis:7-alpine
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        run: |
+          image="$(scripts/ci-pull-image.sh redis:7-alpine)"
+          docker run -d --pull never --name e2e-redis -p 6379:6379 "$image"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
