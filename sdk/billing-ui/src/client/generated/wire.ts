@@ -565,6 +565,17 @@ export type RetrySubscriptionNowParams = {
   payment_method_id?: string
 }
 
+export type ScheduledChange = {
+  price_id: string
+  quantity: number | null
+  effective_at: string
+  source: "change" | "migration"
+  price_migration_id: string | null
+  created_at: string
+  price?: Price
+  product?: ProductSummary
+}
+
 export type SetSubscriptionPaymentMethodParams = {
   payment_method_id?: string
 }
@@ -642,6 +653,7 @@ export type Subscription = {
   rail: string
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
+  scheduled_change: ScheduledChange | null
   scheduled_price_id?: string
   payment_method_id: string | null
   started_at: string

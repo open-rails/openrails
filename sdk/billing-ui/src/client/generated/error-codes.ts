@@ -148,8 +148,12 @@ export type OpenRailsErrorCode =
   | "payment_not_retryable"
   | "payment_provider_rejected"
   | "permission_required"
+  | "price_change_currency_mismatch"
+  | "price_change_target_archived"
+  | "price_increase_notice_too_short"
   | "price_key_cadence_conflict"
   | "price_key_not_found"
+  | "price_migration_not_found"
   | "price_not_found"
   | "price_not_sellable"
   | "product_not_found"
@@ -180,21 +184,13 @@ export type OpenRailsErrorCode =
   | "refund_unsupported"
   | "rename_too_soon"
   | "renames_disabled"
-  | "reprice_already_scheduled"
-  | "reprice_cross_currency"
-  | "reprice_cross_product"
-  | "reprice_inactive_price"
-  | "reprice_not_found"
-  | "reprice_not_scheduled"
-  | "reprice_notice_window_violation"
-  | "reprice_price_key_not_found"
-  | "reprice_target_price_not_found"
   | "request_body_too_large"
   | "resource_access_denied"
   | "resource_conflict"
   | "resource_not_found"
   | "role_escalation"
   | "route_not_found"
+  | "scheduled_change_exists"
   | "sender_proof_required"
   | "service_credential_customer_scope_denied"
   | "service_credential_invalid"
@@ -390,8 +386,12 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
+  price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
+  price_change_target_archived: { status: 422, type: "invalid_request_error", meaning: "The target price is archived." },
+  price_increase_notice_too_short: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },
   price_key_cadence_conflict: { status: 409, type: "invalid_request_error", meaning: "The product's default price key is held by a price on another cadence." },
   price_key_not_found: { status: 404, type: "invalid_request_error", meaning: "No price holds this key." },
+  price_migration_not_found: { status: 404, type: "invalid_request_error", meaning: "The price migration does not exist." },
   price_not_found: { status: 404, type: "invalid_request_error", meaning: "The price does not exist." },
   price_not_sellable: { status: 400, type: "invalid_request_error", meaning: "No PSP can sell this price." },
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
@@ -422,21 +422,13 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   refund_unsupported: { status: 400, type: "invalid_request_error", meaning: "The payment's rail has no automatic refund." },
   rename_too_soon: { status: 429, type: "invalid_request_error", meaning: "The merchant was renamed too recently." },
   renames_disabled: { status: 403, type: "invalid_request_error", meaning: "Merchant renames are disabled." },
-  reprice_already_scheduled: { status: 409, type: "invalid_request_error", meaning: "The subscription already has a scheduled reprice." },
-  reprice_cross_currency: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the same currency." },
-  reprice_cross_product: { status: 422, type: "invalid_request_error", meaning: "The target price must be on the same product." },
-  reprice_inactive_price: { status: 422, type: "invalid_request_error", meaning: "The target price must be active." },
-  reprice_not_found: { status: 404, type: "invalid_request_error", meaning: "The reprice does not exist." },
-  reprice_not_scheduled: { status: 409, type: "invalid_request_error", meaning: "The reprice is no longer scheduled." },
-  reprice_notice_window_violation: { status: 422, type: "invalid_request_error", meaning: "effective_at is inside the merchant's notice window for a price increase." },
-  reprice_price_key_not_found: { status: 404, type: "invalid_request_error", meaning: "The reprice names a price key that does not exist." },
-  reprice_target_price_not_found: { status: 404, type: "invalid_request_error", meaning: "The reprice's target price does not exist." },
   request_body_too_large: { status: 413, type: "invalid_request_error", meaning: "The request body exceeds the deployment's cap." },
   resource_access_denied: { status: 403, type: "authorization_error", meaning: "The credential may not access this resource." },
   resource_conflict: { status: 409, type: "invalid_request_error", meaning: "The request conflicts with the resource's current state." },
   resource_not_found: { status: 404, type: "invalid_request_error", meaning: "The addressed resource does not exist in this merchant." },
   role_escalation: { status: 403, type: "authorization_error", meaning: "The grant exceeds the caller's own authority." },
   route_not_found: { status: 404, type: "invalid_request_error", meaning: "No route matches the path." },
+  scheduled_change_exists: { status: 409, type: "invalid_request_error", meaning: "The subscription already has a scheduled change." },
   sender_proof_required: { status: 401, type: "authentication_error", meaning: "A sender-constrained token arrived without its DPoP proof." },
   service_credential_customer_scope_denied: { status: 403, type: "authorization_error", meaning: "The service credential may not act for this customer." },
   service_credential_invalid: { status: 401, type: "authentication_error", meaning: "The API key or service token is invalid." },

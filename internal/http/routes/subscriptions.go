@@ -11,8 +11,8 @@ import (
 var priceMigrationErrors = codes("invalid_param", "price_change_currency_mismatch", "price_change_target_archived", "price_key_not_found", "price_not_found", "product_not_found")
 
 // subscriptionsRoutes is recurring agreements: reading, canceling, resuming
-// and changing a subscription as the customer or as merchant staff, a
-// subscription's scheduled change, and the merchant's price migrations.
+// and changing a subscription as the customer or as merchant staff, and the
+// merchant's price migrations.
 var subscriptionsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/subscriptions", Group: Admin, Auth: AuthMerchant, Name: "ListSubscriptions", Level: LevelRead,
 		Query: params(queryOf(subscriptions.GetSubscriptionsFilters{}), idsParam, text("cursor"), integer("limit")), Responses: []Reply{{200, billing.ListPage[billing.Subscription]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query"), Handler: h(handlers.GetAdminSubscriptions)},
@@ -28,8 +28,6 @@ var subscriptionsRoutes = []Route{
 		Request: handlers.ChangeTierRequest{}, Responses: []Reply{{200, billing.TierChangePreview{}}}, Errors: codes("card_declined", "customer_action_required", "customer_email_required", "invalid_param", "payment_method_stale", "payment_provider_rejected", "price_not_found", "product_not_found", "price_change_currency_mismatch", "resource_conflict", "resource_not_found", "service_unavailable", "subscription_not_active", "subscription_not_found", "tier_change_already_scheduled", "tier_change_in_flight", "tier_change_period_unknown", "tier_change_provider_conflict", "tier_change_requires_linked_plan", "tier_change_target_inactive", "tier_change_unsupported_on_rail"), Handler: h(handlers.AdminChangeTierPreview)},
 	{Method: PUT, Path: "/v1/admin/subscriptions/{id}/payment-method", Group: Admin, Auth: AuthMerchant, Name: "SetSubscriptionPaymentMethod", Level: LevelWrite, Sensitive: true,
 		Request: handlers.UpdateSubscriptionPaymentMethodBody{}, Responses: []Reply{{200, billing.Subscription{}}}, Errors: codes("card_declined", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.AdminUpdateSubscriptionPaymentMethod)},
-	{Method: DELETE, Path: "/v1/admin/subscriptions/{id}/scheduled-change", Group: Admin, Auth: AuthMerchant, Name: "DeleteScheduledChange", Level: LevelWrite, Sensitive: true,
-		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "rebill_terms_committed", "scheduled_change_held_by_provider", "scheduled_change_not_found", "subscription_not_found"), Handler: h(handlers.DeleteScheduledChange)},
 	{Method: POST, Path: "/v1/admin/price-migrations", Group: Admin, Auth: AuthMerchant, Name: "CreatePriceMigration", Level: LevelWrite, Sensitive: true,
 		Request: billing.CreatePriceMigrationParams{}, Responses: []Reply{{201, billing.PriceMigration{}}}, Errors: priceMigrationErrors, Handler: h(handlers.CreatePriceMigration)},
 	{Method: POST, Path: "/v1/admin/price-migrations/preview", Group: Admin, Auth: AuthMerchant, Name: "PreviewPriceMigration", Level: LevelRead,

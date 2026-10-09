@@ -98,7 +98,8 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/invoices/{id}/uncollectible",
 	"POST /v1/admin/invoices/{id}/void",
 	"POST /v1/admin/payments/{id}/refunds",
-	"POST /v1/admin/plan-migrations",
+	"POST /v1/admin/price-migrations",
+	"POST /v1/admin/price-migrations/{id}/cancel",
 	"POST /v1/admin/product-access",
 	"POST /v1/admin/provider-operations",
 	"POST /v1/admin/provider-operations/{operation_id}/close",
@@ -111,9 +112,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/psps",
 	"POST /v1/admin/psps/refresh",
 	"POST /v1/admin/psps/{id}/archive",
-	"POST /v1/admin/reprice-batches",
-	"POST /v1/admin/reprice-batches/{id}/cancel",
-	"POST /v1/admin/reprices/{id}/cancel",
 	"POST /v1/admin/subscriptions/{id}/cancel",
 	"POST /v1/admin/subscriptions/{id}/change-tier",
 	"POST /v1/admin/subscriptions/{id}/resume",
@@ -300,7 +298,7 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			require.Equal(t, want, rec.take(), "%s as %s", r.Key(), who.SubjectKind)
 			checked++
 		}
-		require.Greater(t, checked, 180)
+		require.Greater(t, checked, 170)
 		if billingauth.Interactive(who) {
 			require.Greater(t, sensitive, 20)
 		}

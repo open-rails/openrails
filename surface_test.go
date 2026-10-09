@@ -68,6 +68,8 @@ var routeArguments = map[string][]any{
 	"ListOffers":             {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
 	"RefundPayment":          {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"ArchiveProduct":         {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
+	"CreatePriceMigration":   {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID(uuid.New()), ToPriceID: billing.PriceID(uuid.New())}},
+	"PreviewPriceMigration":  {billing.CreatePriceMigrationParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"UpdatePrice":            {billing.PriceID(uuid.New()), billing.UpdatePriceParams{Archived: catalog.Value(true)}},
 	"UpdateProduct":          {billing.ProductID(uuid.New()), billing.UpdateProductParams{Archived: catalog.Value(true)}},
 	"UpdateCustomerSettings": {[]billing.UpdateCustomerSettingsParams{{CustomerID: billing.CustomerID(uuid.New()), BillingPolicy: catalog.Null[string]()}}},

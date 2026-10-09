@@ -111,7 +111,8 @@ func canonicalWireFixtures() map[string]any {
 func ptr[T any](v T) *T { return &v }
 
 // subscriptionFixtureValue is the self-route shape: the merchant routes serve
-// the same struct without ScheduledPrice/ScheduledProduct/CancelPortalURL/Access.
+// the same struct without the scheduled change's Price/Product,
+// CancelPortalURL and Access.
 func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing.CardDetails) billing.Subscription {
 	portal := "https://support.ccbill.com/"
 	scheduled := price
@@ -119,15 +120,17 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 	return billing.Subscription{
 		CollectionPolicy: "provider",
 		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, Quantity: 1, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
-		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "active", ScheduledPriceID: ptr(scheduledPriceFixture), PaymentMethodID: &methodFixture,
+		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "active", PaymentMethodID: &methodFixture,
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
-		Price:            &price,
-		Product:          &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
-		ScheduledPrice:   &scheduled,
-		ScheduledProduct: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
-		Card:             card,
-		Access:           &billing.SubscriptionAccess{Kind: "subscription", ProductID: productFixture, SourceType: "subscription", SourceID: subscriptionFixture.String(), SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
-		Payments:         []billing.Payment{paymentFixtureValue(when, price, card)},
+		Price:   &price,
+		Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+		ScheduledChange: &billing.ScheduledChange{
+			PriceID: scheduledPriceFixture, EffectiveAt: when, Source: billing.ScheduledChangeChange, CreatedAt: when,
+			Price: &scheduled, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+		},
+		Card:     card,
+		Access:   &billing.SubscriptionAccess{Kind: "subscription", ProductID: productFixture, SourceType: "subscription", SourceID: subscriptionFixture.String(), SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
+		Payments: []billing.Payment{paymentFixtureValue(when, price, card)},
 	}
 }
 

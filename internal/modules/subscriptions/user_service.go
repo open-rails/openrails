@@ -204,8 +204,10 @@ func (s *UserSubscriptionService) enrichSubscriptionResponses(ctx context.Contex
 		}
 		applySubscriptionAccess(responses, active)
 	}
-	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subscriptionsOf(responses)); err != nil {
-		return err
+	if s.SubscriptionService != nil && s.SubscriptionService.Database() != nil {
+		if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), subscriptionsOf(responses)); err != nil {
+			return err
+		}
 	}
 	ids := make([]uuid.UUID, 0, 2*len(responses))
 	for _, resp := range responses {

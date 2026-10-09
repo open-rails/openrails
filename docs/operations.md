@@ -935,7 +935,7 @@ up. "start" = RunOnStart.
 | Notification email sweep | 10 min |
 | Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
-| Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
+| Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
 | Solana gas alert · Solana ledger reconcile | 6 h |
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |

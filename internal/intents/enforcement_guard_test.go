@@ -165,9 +165,9 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect":     "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
 	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":        "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 
-	// --- catalog push + plan migration ----------------------------------
-	"internal/service/catalog_provider_nmi.go:createPlan":                 "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",
-	"internal/modules/subscriptions/plan_migration_nmi.go:PushPlanAmount": "or#815 plan migration: repoints a live schedule at the successor plan",
+	// --- catalog push + price migration ---------------------------------
+	"internal/service/catalog_provider_nmi.go:createPlan":                  "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",
+	"internal/modules/subscriptions/price_migration_nmi.go:PushPlanAmount": "price migration: repoints a live NMI schedule at the target amount",
 
 	// --- solana: the three sign+submit entry points of the ONE Submitter ---
 	"internal/modules/solana/recurring/plan_service.go:Submit":                                "the Submitter implementation — the single Solana sign+submit choke; pulls route through the solana_pull intent handler",

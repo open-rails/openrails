@@ -40,7 +40,7 @@ var acceptedRenewalJSON = object(map[string]jsonRule{
 	"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
 	"period_start": textValue, "period_end": textValue, "access_duration_hours": nullable(integerValue),
 	"entitlements": nullable(acceptedEntitlementsJSON), "legacy_entitlements": dictionary(nullable(integerValue)), "previous_entitlements": nullable(acceptedEntitlementsJSON),
-	"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
+	"scheduled_change_id": uuidValue,
 })
 
 // mandateJSON is the mandate lineage an operation cites; it is not card data.

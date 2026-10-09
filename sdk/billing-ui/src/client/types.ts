@@ -170,8 +170,18 @@ export const subscriptionSchema = z.object({
   next_retry_at: time.nullish(),
   price: priceSchema.nullish(),
   product: subscriptionProductSchema.nullish(),
-  scheduled_price: priceSchema.nullish(),
-  scheduled_product: subscriptionProductSchema.nullish(),
+  /** The change waiting for the next renewal, with its price and product. */
+  scheduled_change: z
+    .object({
+      price_id: z.string(),
+      quantity: z.number().nullish(),
+      effective_at: time,
+      /** `change | migration` */
+      source: z.string(),
+      price: priceSchema.nullish(),
+      product: subscriptionProductSchema.nullish(),
+    })
+    .nullish(),
   card: cardSummarySchema.nullish(),
   recovery: paymentRecoverySchema.nullish(),
   /** Set on an action's answer when the rail needs the customer's step. */

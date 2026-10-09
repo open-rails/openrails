@@ -109,8 +109,6 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"reprice", fmt.Errorf("%w: to price", subscriptions.ErrPriceCurrencyMismatch), want{422, "price_change_currency_mismatch", ""}},
 		{"reprice", subscriptions.ErrPriceTargetArchived, want{422, "price_change_target_archived", ""}},
 		{"reprice", subscriptions.ErrChangeAlreadyScheduled, want{409, "scheduled_change_exists", ""}},
-		{"reprice", subscriptions.ErrScheduledChangeNotFound, want{404, "scheduled_change_not_found", ""}},
-		{"reprice", subscriptions.ErrScheduledChangeHeldByProvider, want{409, "scheduled_change_held_by_provider", ""}},
 		{"psp", apperr.Invalidf("unknown rail %q", "abacus").WithParam("rail"), want{400, api.CodeInvalidParam, "rail"}},
 		{"psp", fmt.Errorf("%w: stripe key rejected (401)", merchants.ErrPSPCredentialsRejected), want{400, "psp_credentials_rejected", ""}},
 		{"psp", merchants.ErrPSPNotFound, want{404, "psp_not_found", ""}},

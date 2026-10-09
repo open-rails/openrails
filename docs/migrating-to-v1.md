@@ -209,7 +209,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `models.StatusCancelled`, `cancelled_at` | `billing.SubscriptionCanceled`, `canceled_at` |
 | `SubscriptionAccess.StartAt`, `EndAt` (`start_at`, `end_at`) | `StartsAt`, `EndsAt` (`starts_at`, `ends_at`) |
 | `CutoverProvider`, `GetProviderCutover`, `PreviewProviderCutover`; engine takeover (`TakeOverBilling`, …) | Removed: a provider-owned subscription stays on its PSP until it ends |
-| `CancelPlanMigration`; reprice-all routes | `client.CreateRepriceBatch(`, `client.PreviewRepriceBatch(`, `client.ListRepriceBatches(`, `client.GetRepriceBatch(`, `client.CancelRepriceBatch(`; a plan migration is a `plan_change` batch |
+| `CancelPlanMigration`; reprice-all routes; reprice batches; reprices | `client.CreatePriceMigration(`, `client.PreviewPriceMigration(`, `client.ListPriceMigrations(`, `client.GetPriceMigration(`, `client.CancelPriceMigration(`; a subscription's pending move is its `scheduled_change`, cleared by a change back to its current price |
 | `GetMyInvoice`, `GetMySubscription`, `PayInvoiceNow`, `RetrySubscriptionNow` | Removed from the Client: `/v1/me` is for browsers |
 
 ### Credits, usage and admissions
@@ -315,7 +315,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change-tier` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
-| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}` | `/v1/admin/reprice-batches`, `/v1/admin/reprice-batches/{id}` |
+| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/admin/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |

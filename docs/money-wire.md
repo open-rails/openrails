@@ -46,7 +46,7 @@ another kind's prefix is `400 invalid_param`.
 | `cyc_` | rebill cycle | | |
 | `cgr_` | credit grant | `txn_` | balance transaction |
 | `ent_` | entitlement | `pa_` | product access |
-| `rep_` | reprice | `rpb_` | reprice batch |
+| `pmig_` | price migration | | |
 | `uev_` | usage event | `hev_` | host event |
 | `ntf_` | notification | `fnd_` | finding |
 | `awh_` | alert webhook | `pop_` | payment operation |

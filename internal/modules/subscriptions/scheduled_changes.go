@@ -24,11 +24,9 @@ import (
 // renewal admission and completion take.
 
 var (
-	ErrChangeAlreadyScheduled  = apperr.New(http.StatusConflict, billing.CodeScheduledChangeExists, "the subscription already has a scheduled change")
-	ErrScheduledChangeNotFound = apperr.New(http.StatusNotFound, billing.CodeScheduledChangeNotFound, "the subscription has no scheduled change")
-	// ErrScheduledChangeHeldByProvider refuses removing a change a provider
-	// already bills (a provider-owned subscription's schedule was moved).
-	ErrScheduledChangeHeldByProvider = apperr.New(http.StatusConflict, billing.CodeScheduledChangeHeldByProvider, "the provider already bills this change; change it back at the provider")
+	ErrChangeAlreadyScheduled = apperr.New(http.StatusConflict, billing.CodeScheduledChangeExists, "the subscription already has a scheduled change")
+	// ErrScheduledChangeNotFound: CancelPendingChange found nothing pending.
+	ErrScheduledChangeNotFound = errors.New("the subscription has no scheduled change")
 	// errChangeNotScheduled: a status-predicated transition lost to another.
 	errChangeNotScheduled = errors.New("scheduled change is no longer scheduled")
 )
@@ -173,7 +171,9 @@ func LoadScheduledChanges(ctx context.Context, d *db.DB, subs []*models.Subscrip
 }
 
 // CancelPendingChange cancels sub's scheduled change in the caller's
-// transaction (sub locked) and answers it, or ErrScheduledChangeNotFound.
+// transaction (sub locked) and answers it, or ErrScheduledChangeNotFound. A
+// change back to the subscription's current price and seats calls it; it
+// also excludes one subscriber from a price migration.
 func CancelPendingChange(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) (*models.ScheduledChange, error) {
 	if err := requireTx(d); err != nil {
 		return nil, err
@@ -274,29 +274,4 @@ func (r *SubscriptionRepo) ScheduleChange(ctx context.Context, subscriptionID, e
 		return err
 	})
 	return out, err
-}
-
-// CancelScheduledChange removes the subscription's scheduled change. A change
-// on a subscription its provider bills was already pushed to that provider
-// and is refused (ErrScheduledChangeHeldByProvider).
-func (r *SubscriptionRepo) CancelScheduledChange(ctx context.Context, subscriptionID uuid.UUID, now time.Time) error {
-	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := r.db.NewWithPgxTx(tx)
-		sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subscriptionID)
-		if err != nil {
-			return err
-		}
-		pending, err := PendingChange(ctx, d, sub.ID)
-		if err != nil {
-			return err
-		}
-		if pending == nil {
-			return ErrScheduledChangeNotFound
-		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine {
-			return ErrScheduledChangeHeldByProvider
-		}
-		_, err = CancelPendingChange(ctx, d, sub, now)
-		return err
-	})
 }

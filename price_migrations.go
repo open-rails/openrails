@@ -87,12 +87,3 @@ func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigra
 	}
 	return &out, nil
 }
-
-// DeleteScheduledChange removes the subscription's scheduled change.
-func (c *Client) DeleteScheduledChange(ctx context.Context, subscriptionID billing.SubscriptionID, requestOptions ...RequestOption) error {
-	sub, err := requireTypedID("subscription_id", subscriptionID)
-	if err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodDelete, "/v1/admin/subscriptions/"+sub+"/scheduled-change", nil, nil, requestOptions...)
-}

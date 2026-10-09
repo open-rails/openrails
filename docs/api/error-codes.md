@@ -153,8 +153,12 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
+| `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
+| `price_change_target_archived` | 422 | `invalid_request_error` | The target price is archived. |
+| `price_increase_notice_too_short` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |
 | `price_key_cadence_conflict` | 409 | `invalid_request_error` | The product's default price key is held by a price on another cadence. |
 | `price_key_not_found` | 404 | `invalid_request_error` | No price holds this key. |
+| `price_migration_not_found` | 404 | `invalid_request_error` | The price migration does not exist. |
 | `price_not_found` | 404 | `invalid_request_error` | The price does not exist. |
 | `price_not_sellable` | 400 | `invalid_request_error` | No PSP can sell this price. |
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
@@ -185,21 +189,13 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `refund_unsupported` | 400 | `invalid_request_error` | The payment's rail has no automatic refund. |
 | `rename_too_soon` | 429 | `invalid_request_error` | The merchant was renamed too recently. |
 | `renames_disabled` | 403 | `invalid_request_error` | Merchant renames are disabled. |
-| `reprice_already_scheduled` | 409 | `invalid_request_error` | The subscription already has a scheduled reprice. |
-| `reprice_cross_currency` | 422 | `invalid_request_error` | The target price must be in the same currency. |
-| `reprice_cross_product` | 422 | `invalid_request_error` | The target price must be on the same product. |
-| `reprice_inactive_price` | 422 | `invalid_request_error` | The target price must be active. |
-| `reprice_not_found` | 404 | `invalid_request_error` | The reprice does not exist. |
-| `reprice_not_scheduled` | 409 | `invalid_request_error` | The reprice is no longer scheduled. |
-| `reprice_notice_window_violation` | 422 | `invalid_request_error` | effective_at is inside the merchant's notice window for a price increase. |
-| `reprice_price_key_not_found` | 404 | `invalid_request_error` | The reprice names a price key that does not exist. |
-| `reprice_target_price_not_found` | 404 | `invalid_request_error` | The reprice's target price does not exist. |
 | `request_body_too_large` | 413 | `invalid_request_error` | The request body exceeds the deployment's cap. |
 | `resource_access_denied` | 403 | `authorization_error` | The credential may not access this resource. |
 | `resource_conflict` | 409 | `invalid_request_error` | The request conflicts with the resource's current state. |
 | `resource_not_found` | 404 | `invalid_request_error` | The addressed resource does not exist in this merchant. |
 | `role_escalation` | 403 | `authorization_error` | The grant exceeds the caller's own authority. |
 | `route_not_found` | 404 | `invalid_request_error` | No route matches the path. |
+| `scheduled_change_exists` | 409 | `invalid_request_error` | The subscription already has a scheduled change. |
 | `sender_proof_required` | 401 | `authentication_error` | A sender-constrained token arrived without its DPoP proof. |
 | `service_credential_customer_scope_denied` | 403 | `authorization_error` | The service credential may not act for this customer. |
 | `service_credential_invalid` | 401 | `authentication_error` | The API key or service token is invalid. |

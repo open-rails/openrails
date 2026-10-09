@@ -533,7 +533,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	uuidCalls := map[string]func() error{
 		"get price migration":     func() error { _, err := c.GetPriceMigration(ctx, billing.PriceMigrationID{}); return err },
 		"cancel price migration":  func() error { _, err := c.CancelPriceMigration(ctx, billing.PriceMigrationID{}); return err },
-		"delete scheduled change": func() error { return c.DeleteScheduledChange(ctx, billing.SubscriptionID{}) },
 		"acknowledge host event": func() error {
 			_, err := c.AcknowledgeHostEvents(ctx, []billing.HostEventID{{}})
 			return err

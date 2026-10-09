@@ -55,13 +55,11 @@ const (
 
 // Scheduled changes and price migrations.
 const (
-	CodeScheduledChangeExists         = "scheduled_change_exists"
-	CodeScheduledChangeNotFound       = "scheduled_change_not_found"
-	CodeScheduledChangeHeldByProvider = "scheduled_change_held_by_provider"
-	CodePriceMigrationNotFound        = "price_migration_not_found"
-	CodePriceChangeCurrencyMismatch   = "price_change_currency_mismatch"
-	CodePriceChangeTargetArchived     = "price_change_target_archived"
-	CodePriceIncreaseNoticeTooShort   = "price_increase_notice_too_short"
+	CodeScheduledChangeExists       = "scheduled_change_exists"
+	CodePriceMigrationNotFound      = "price_migration_not_found"
+	CodePriceChangeCurrencyMismatch = "price_change_currency_mismatch"
+	CodePriceChangeTargetArchived   = "price_change_target_archived"
+	CodePriceIncreaseNoticeTooShort = "price_increase_notice_too_short"
 )
 
 // CodeCatalogBenefitOverlap: two recurring products would grant one
@@ -263,8 +261,6 @@ var errorCodes = []ErrorCode{
 	{"solana_transaction_refused", 400, invalid, "The wallet transaction could not be prepared or confirmed; the message says why."},
 	{"solana_rpc_unavailable", 502, fault, "The Solana RPC endpoints did not answer; retry."},
 	{CodeScheduledChangeExists, 409, invalid, "The subscription already has a scheduled change."},
-	{CodeScheduledChangeNotFound, 404, invalid, "The subscription has no scheduled change."},
-	{CodeScheduledChangeHeldByProvider, 409, invalid, "The subscription's provider already bills the scheduled change; change it back at the provider."},
 	{CodePriceMigrationNotFound, 404, invalid, "The price migration does not exist."},
 	{CodePriceChangeCurrencyMismatch, 422, invalid, "The target price must be in the subscription's currency."},
 	{CodePriceChangeTargetArchived, 422, invalid, "The target price is archived."},

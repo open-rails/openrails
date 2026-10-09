@@ -9,7 +9,8 @@ import (
 )
 
 // Price migrations move subscribers to another price at their renewal; a
-// subscription's pending move is its scheduled_change.
+// subscription's pending move is its scheduled_change, which a change back
+// to its current price clears.
 
 func priceMigrationsReady(r *httprequest.Request) bool {
 	if r.State.PriceMigrationService == nil {
@@ -110,22 +111,4 @@ func CancelPriceMigration(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(out)
-}
-
-// DeleteScheduledChange removes a subscription's scheduled change.
-func DeleteScheduledChange(r *httprequest.Request) {
-	id, err := billing.ParseSubscriptionID(r.Param("id"))
-	if err != nil || id.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid subscription ID").WithParam("id"))
-		return
-	}
-	if r.State.AdminSubscriptionService == nil {
-		r.ErrorCode(billing.CodeInternalError, "subscription service unavailable")
-		return
-	}
-	if err := r.State.AdminSubscriptionService.CancelScheduledChange(r.Request.Context(), id.UUID()); err != nil {
-		writeRefusal(r, err, "scheduled change removal failed")
-		return
-	}
-	r.NoContent()
 }

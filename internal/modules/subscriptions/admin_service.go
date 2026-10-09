@@ -161,15 +161,6 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 	return response, nil
 }
 
-// CancelScheduledChange removes the subscription's scheduled change: 404 when
-// it has none, 409 when its provider already bills it.
-func (s *AdminSubscriptionService) CancelScheduledChange(ctx context.Context, subscriptionID uuid.UUID) error {
-	if _, err := s.requireSubscription(ctx, subscriptionID); err != nil {
-		return err
-	}
-	return NewSubscriptionRepo(s.SubscriptionService.Database()).CancelScheduledChange(ctx, subscriptionID, s.now())
-}
-
 // Partial admin commands must read their input image after taking the same
 // subscription lock as payment admission/completion. A metadata/status change
 // cannot replay an older price, card, period or pending quote from preflight.
