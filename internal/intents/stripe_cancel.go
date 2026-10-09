@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // TypeStripeCancelSubscription stops Stripe billing a membership whose access
@@ -62,11 +64,12 @@ type StripeCancelHandler struct {
 	Config  *config.Config
 	Rails   railresolve.Source
 	Clients *stripeapi.Factory
+	Clock   clockwork.Clock
 	Policy  BackoffPolicy
 }
 
-func NewStripeCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory) *StripeCancelHandler {
-	return &StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Policy: DefaultBackoff}
+func NewStripeCancelHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clients *stripeapi.Factory, clock clockwork.Clock) *StripeCancelHandler {
+	return &StripeCancelHandler{DB: d, Config: cfg, Rails: rails, Clients: clients, Clock: clock, Policy: DefaultBackoff}
 }
 
 func (h *StripeCancelHandler) Type() string                         { return TypeStripeCancelSubscription }
@@ -162,7 +165,7 @@ func (h *StripeCancelHandler) Verify(ctx context.Context, intent gen.BillingProv
 // stopped releases the slot the canceled subscription held while Stripe could
 // still bill it.
 func (h *StripeCancelHandler) stopped(ctx context.Context, intent gen.BillingProviderIntent, psid string, evidence map[string]any) Outcome {
-	if err := releaseProviderStop(ctx, h.DB, intent, psid, time.Now().UTC()); err != nil {
+	if err := releaseProviderStop(ctx, h.DB, intent, psid, timeutil.FirstClock(h.Clock).Now().UTC()); err != nil {
 		return Ambiguous("stripe billing stopped, but local release failed: " + err.Error())
 	}
 	return Succeeded(evidence)

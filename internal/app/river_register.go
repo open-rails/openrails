@@ -343,7 +343,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		ccbillCancel,
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
-		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients),
+		intents.NewStripeCancelHandler(r.DB, r.Config, r.RailConfigs, r.StripeClients, clock),
 		ccbillRefund,
 		rebill,
 		// Invoice collection rides the ledger like every other money mover; the

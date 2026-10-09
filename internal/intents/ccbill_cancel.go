@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // Only explicit HTTP/authentication refusals permit bounded clean retries.
@@ -147,11 +148,7 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 // stopped releases the slot the canceled subscription held while CCBill could
 // still rebill it.
 func (h *CCBillCancelHandler) stopped(ctx context.Context, intent gen.BillingProviderIntent, psid string, evidence map[string]any) Outcome {
-	now := time.Now().UTC()
-	if h.Clock != nil {
-		now = h.Clock.Now().UTC()
-	}
-	if err := releaseProviderStop(ctx, h.DB, intent, psid, now); err != nil {
+	if err := releaseProviderStop(ctx, h.DB, intent, psid, timeutil.FirstClock(h.Clock).Now().UTC()); err != nil {
 		return Ambiguous("ccbill rebilling stopped, but local release failed: " + err.Error())
 	}
 	return Succeeded(evidence)

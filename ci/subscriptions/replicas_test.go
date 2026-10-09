@@ -70,14 +70,18 @@ func TestReplicasAdmissionRace(t *testing.T) {
 }
 
 // requireDatabaseRefusesSecondWriter: whatever an application path does,
-// PostgreSQL itself refuses a second operation for a retry slot and a second
-// unresolved operation for a subscription.
+// PostgreSQL itself refuses a second operation for a retry slot, a second
+// unreleased operation for a paid period and a second unresolved operation
+// for a subscription.
 func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 	t := f.t
-	clone := func(attempt int, status string) error {
+	clone := func(attempt int, status string, order string) error {
 		payload := "payload"
 		if attempt >= 0 {
 			payload = fmt.Sprintf("jsonb_set(payload, '{attempt}', '%d'::jsonb)", attempt)
+		}
+		if order != "" {
+			payload = fmt.Sprintf("jsonb_set(%s, '{order_reference}', '%q'::jsonb)", payload, order)
 		}
 		_, err := f.base.pool.Exec(t.Context(), f.q(`INSERT INTO billing.provider_intents (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, origin, psp_id, next_attempt_at)
 			SELECT merchant_id, rail, intent_type, subscription_id, price_id, `+payload+`, idempotency_key || ':' || gen_random_uuid()::text, $2, origin, psp_id, now()
@@ -91,9 +95,10 @@ func (f *fleet) requireDatabaseRefusesSecondWriter(e *engineCase) {
 		require.Equal(t, "23505", pgErr.Code)
 		require.Equal(t, constraint, pgErr.ConstraintName)
 	}
-	refused(clone(-1, "failed_terminal"), "provider_intents_subscription_collection_slot_key")
-	require.NoError(t, clone(98, "pending"))
-	refused(clone(99, "pending"), "provider_intents_open_subscription_collection_key")
+	refused(clone(-1, "failed_terminal", ""), "provider_intents_subscription_collection_slot_key")
+	refused(clone(98, "pending", ""), "provider_intents_obligation_unreleased_key")
+	require.NoError(t, clone(98, "pending", "another-period"))
+	refused(clone(99, "pending", "a-third-period"), "provider_intents_open_subscription_collection_key")
 	_, err := f.base.pool.Exec(t.Context(), f.q(`DELETE FROM billing.provider_intents WHERE subscription_id = $1 AND status = 'pending'`), subUUID(e.sub))
 	require.NoError(t, err)
 }
