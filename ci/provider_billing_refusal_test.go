@@ -228,7 +228,9 @@ func TestProviderBillingRefusal(t *testing.T) {
 		for _, bad := range []func(*billing.CloseOperationAuthorizationParams){
 			func(r *billing.CloseOperationAuthorizationParams) { r.CostAmount = nil },
 			func(r *billing.CloseOperationAuthorizationParams) { r.CostAmount = cost(-1) },
-			func(r *billing.CloseOperationAuthorizationParams) { r.Kind = billing.ProviderBillingResolutionWrittenOff },
+			func(r *billing.CloseOperationAuthorizationParams) {
+				r.Kind = billing.ProviderBillingResolutionWrittenOff
+			},
 			func(r *billing.CloseOperationAuthorizationParams) { r.Kind = "refunded" },
 			func(r *billing.CloseOperationAuthorizationParams) { r.AttestedBy = "" },
 			func(r *billing.CloseOperationAuthorizationParams) { r.Reference = " invoice:1" },
