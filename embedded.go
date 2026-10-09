@@ -351,6 +351,16 @@ func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.
 	return e.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
+// ResolveProviderBillingQualificationTx is ResolveProviderBillingQualification
+// inside tx (see OpenOperationAuthorizationTx). Embedded only.
+func (c *Client) ResolveProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+	e, err := c.embedded()
+	if err != nil {
+		return nil, err
+	}
+	return e.ResolveProviderBillingQualificationTx(ctx, tx, req)
+}
+
 // GetProviderBillingQualificationTx is GetProviderBillingQualification inside
 // tx (see OpenOperationAuthorizationTx). Embedded only.
 func (c *Client) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {

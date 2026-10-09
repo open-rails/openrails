@@ -5,7 +5,7 @@ authorizes the spend before the provider creates anything, then reports what
 the provider billed. OpenRails holds the authorization, qualifies the evidence
 and settles the customer's reservation at the provider's cost.
 
-## The six commands
+## The commands
 
 Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
@@ -19,6 +19,8 @@ error classes; the embedded Client dispatches to the same handlers.
 | `ReleaseOperationAuthorization` | `POST /v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` |
 | `RecordProviderBillingObservation` | `POST /v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` |
 | `GetProviderBillingQualification` | `GET /v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` |
+| `ListProviderBillingQualifications` | `GET /v1/merchant/provider-qualifications` | `merchant:usage:read` |
+| `ResolveProviderBillingQualification` | `POST /v1/merchant/provider-operations/{operation_id}/resolution` | `merchant:admissions:create` |
 
 An authorization binds an immutable operation id, customer, record owner, claim
 reference, the exact body bytes with their SHA-256, and an `amount` in `USD`.
@@ -71,6 +73,35 @@ negative, corrective or decreasing evidence keeps the money reserved. Eligible
 evidence settles at pass-through: rated cost equals provider cost, and cost
 above the hold posts as owed instead of being clamped.
 
+## When qualification is refused
+
+A refused qualification (`provider_evidence_refused`,
+`negative_or_corrective_record`, `decreasing_provider_cost`) accepts no further
+observations (`provider_billing_qualification_refused`) and its hold cannot be
+released, so automatic settlement never closes it. An operator closes it.
+
+`ListProviderBillingQualifications` pages qualifications newest first, each with
+its authorization; `state=refused&authorization_state=open` lists exactly the
+holds waiting for an operator. Both filters take a comma-separated list.
+
+`ResolveProviderBillingQualification` records the operator's attestation, once
+per operation, and closes the hold in the same commit:
+
+- `kind: settled` with `cost_amount`, the provider cost the operator attests
+  (from the provider's invoice, say): settled at pass-through like qualified
+  evidence, above the hold as owed. The settlement body is the
+  `openrails/operator-attested-provider-cost` manifest: the refused
+  observation's digests, the hold and the attestation.
+- `kind: written_off` with no `cost_amount`: the hold is released and the
+  customer is not charged; the merchant absorbs what the provider billed.
+  `terminal_reference` is the attestation `reference`.
+
+`attested_by` names the operator and `reference` the evidence; `note` is
+optional. The qualification stays `refused` and carries the attestation as
+`resolution`. Repeating the same resolution replays; a changed term is 409
+`provider_billing_resolution_conflict` with the term as `param`. A pending or
+eligible qualification is 409 `provider_billing_qualification_not_refused`.
+
 ## Owed and the next funding
 
 Settlement never re-gates, so cost above the hold is owed even by a prepaid
@@ -99,15 +130,16 @@ refund returns only unused credit, and a chargeback of the lot makes the
 repaid part owed again (a won dispute repays it).
 
 Observations are kept 90 days after their operation is settled or released
-([data retention](../operations.md#data-retention)); authorizations and
-qualifications are permanent.
+([data retention](../operations.md#data-retention)); authorizations,
+qualifications and resolutions are permanent.
 
 ## Host transaction extension
 
 The embedded Client's `Tx` operations (`OpenOperationAuthorizationTx`,
 `GetOperationAuthorizationTx`, `ExtendOperationAuthorizationTx`,
 `ReleaseOperationAuthorizationTx`,
-`RecordProviderBillingObservationTx`, `GetProviderBillingQualificationTx`) are
+`RecordProviderBillingObservationTx`, `GetProviderBillingQualificationTx`,
+`ResolveProviderBillingQualificationTx`) are
 for a host that must commit its own provider obligation, absence fact or
 billing fact atomically with OpenRails. They take a `pgx.Tx` from the host's
 pool on the engine's database and bind the declared merchant to that

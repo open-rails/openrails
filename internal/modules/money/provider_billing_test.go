@@ -107,13 +107,14 @@ func TestProviderBillingObservationEnvelopeIsTransportNeutral(t *testing.T) {
 	}
 }
 
-// Only the evidence qualifier may reach customer settlement: the settlement
+// Only the evidence qualifier and an operator's recorded resolution of a
+// refused qualification may reach customer settlement: the settlement
 // primitive is unexported, and its one SQL statement has exactly one caller.
 func TestProviderSettlementHasOneQualifiedCaller(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	require.NoError(t, err)
 	allowed := map[string]map[string]bool{
-		"settlePassThroughProviderCostInTx":                   {"internal/modules/money/operation_authorization.go": true, "internal/modules/money/provider_billing.go": true},
+		"settlePassThroughProviderCostInTx":                   {"internal/modules/money/operation_authorization.go": true, "internal/modules/money/provider_billing.go": true, "internal/modules/money/provider_billing_resolution.go": true},
 		"SettleOperationAuthorizationPassThroughProviderCost": {"internal/modules/money/operation_authorization.go": true},
 	}
 	seen := map[string]int{}
@@ -150,6 +151,6 @@ func TestProviderSettlementHasOneQualifiedCaller(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, 1, seen["settlePassThroughProviderCostInTx"])
+	require.Equal(t, 2, seen["settlePassThroughProviderCostInTx"])
 	require.Equal(t, 1, seen["SettleOperationAuthorizationPassThroughProviderCost"])
 }

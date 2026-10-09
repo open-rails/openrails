@@ -452,3 +452,63 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 	)
 	return i, err
 }
+
+const writeOffOperationAuthorization = `-- name: WriteOffOperationAuthorization :one
+UPDATE billing.operation_authorizations
+SET state = 'released',
+    terminal_reference = $1::text,
+    released_at = $2::timestamptz
+WHERE merchant_id = $3::uuid
+  AND operation_id = $4::text
+  AND state = 'open'
+  AND EXISTS (
+      SELECT 1
+      FROM billing.cost_resolutions resolution
+      WHERE resolution.merchant_id = billing.operation_authorizations.merchant_id
+        AND resolution.operation_id = billing.operation_authorizations.operation_id
+        AND resolution.kind = 'written_off'
+  )
+RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
+`
+
+type WriteOffOperationAuthorizationParams struct {
+	TerminalReference string
+	ReleasedAt        time.Time
+	MerchantID        uuid.UUID
+	OperationID       string
+}
+
+// A refused qualification's hold is released only through a recorded write-off.
+func (q *Queries) WriteOffOperationAuthorization(ctx context.Context, arg WriteOffOperationAuthorizationParams) (BillingOperationAuthorization, error) {
+	row := q.db.QueryRow(ctx, writeOffOperationAuthorization,
+		arg.TerminalReference,
+		arg.ReleasedAt,
+		arg.MerchantID,
+		arg.OperationID,
+	)
+	var i BillingOperationAuthorization
+	err := row.Scan(
+		&i.OperationID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.RecordOwner,
+		&i.LedgerAccountID,
+		&i.Currency,
+		&i.Amount,
+		&i.ClaimReference,
+		&i.AuthorizationBodyBytes,
+		&i.AuthorizationBodyDigest,
+		&i.State,
+		&i.TerminalReference,
+		&i.CreatedAt,
+		&i.ReleasedAt,
+		&i.SettledAt,
+		&i.SettlementCostAmount,
+		&i.SettlementAmount,
+		&i.SettlementBodyBytes,
+		&i.SettlementBodyDigest,
+		&i.ExtendedAmount,
+		&i.AuthorizedAmount,
+	)
+	return i, err
+}

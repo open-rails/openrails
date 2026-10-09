@@ -1987,6 +1987,7 @@ export type ProviderBillingQualification = {
   qualified_observation_id: string
   qualified_cost_amount: string | null
   qualified_at: string | null
+  resolution: ProviderBillingResolution | null
   authorization: OperationAuthorization
   created_at: string
   updated_at: string
@@ -1998,6 +1999,15 @@ export type ProviderBillingRecord = {
   bucket_start?: string
   amount?: string
   time_billed_ms?: string
+}
+
+export type ProviderBillingResolution = {
+  kind: "settled" | "written_off"
+  cost_amount: string | null
+  attested_by: string
+  reference: string
+  note: string
+  resolved_at: string
 }
 
 export type RailDefinition = {
@@ -2195,6 +2205,14 @@ export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
+}
+
+export type ResolveProviderBillingQualificationParams = {
+  kind?: "settled" | "written_off"
+  cost_amount?: string | null
+  attested_by?: string
+  reference?: string
+  note?: string
 }
 
 export type RetryInvoiceCollectionParams = {

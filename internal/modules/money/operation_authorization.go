@@ -320,7 +320,8 @@ func replayOperationAuthorization(row gen.BillingOperationAuthorization, in Oper
 // provider-cost rating and performs the final customer settlement through the
 // existing double-entry ledger in a caller-owned transaction. It never calls
 // request admission and never commits or rolls back the transaction. It is
-// unexported: only the provider-billing qualifier may supply its cost.
+// unexported: only the provider-billing qualifier, or an operator's recorded
+// attestation of a refused qualification, may supply its cost.
 //
 // The payer row is the money mutex. Terminally settling before the ledger helper
 // excludes this authorization's full hold while every other open authorization

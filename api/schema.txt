@@ -24,6 +24,7 @@ migration 0020_product_access_cutover.up.sql sha256:7840a26f86166d6fb76936789d2a
 migration 0021_entitlement_cache.up.sql sha256:9c4b60cee1998e589501b2142c4e2fdf08c0a1614ec6d29c4bb3d2df85fb5371
 migration 0022_partition_race.up.sql sha256:6532f6a6254907507a3050ae4b42f05b79103b541be27cb9ff8d07707db8e097
 migration 0023_statement_coverage.up.sql sha256:b23f0cefea13ef00bdfd6057af36e113aafea7bbda12e4ba04ff1e0a0601db02
+migration 0024_cost_resolutions.up.sql sha256:650fb1db36328c11d3171febc2f82f88e6bf4ff538612532653eb477bd69ae7a
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -382,8 +383,28 @@ table billing.cost_qualifications
   constraint cost_qualifications_provider_check CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255)))
   constraint cost_qualifications_reference_check CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024)))
   constraint cost_qualifications_state_check CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
+  constraint cost_qualifications_state_key UNIQUE (merchant_id, operation_id, state)
   index CREATE UNIQUE INDEX cost_qualifications_pkey ON billing.cost_qualifications USING btree (merchant_id, operation_id)
+  index CREATE INDEX cost_qualifications_state_created_at_idx ON billing.cost_qualifications USING btree (merchant_id, state, created_at DESC, operation_id DESC)
+  index CREATE UNIQUE INDEX cost_qualifications_state_key ON billing.cost_qualifications USING btree (merchant_id, operation_id, state)
   trigger CREATE TRIGGER immutable_cost_qualification_facts BEFORE DELETE OR UPDATE ON billing.cost_qualifications FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'reason', 'baseline_observation_id', 'qualified_observation_id', 'qualified_cost_amount', 'qualified_at', 'updated_at')
+
+table billing.cost_resolutions
+  column merchant_id uuid NOT NULL
+  column operation_id text NOT NULL
+  column qualification_state text NOT NULL GENERATED ALWAYS AS ('refused'::text) STORED
+  column kind text NOT NULL
+  column cost_amount bigint
+  column attested_by text NOT NULL
+  column reference text NOT NULL
+  column note text
+  column resolved_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint cost_resolutions_attestation_check CHECK (((attested_by <> ''::text) AND (attested_by = btrim(attested_by)) AND (octet_length(attested_by) <= 255) AND (reference <> ''::text) AND (reference = btrim(reference)) AND (octet_length(reference) <= 1024) AND ((note IS NULL) OR ((note <> ''::text) AND (note = btrim(note)) AND (octet_length(note) <= 4096)))))
+  constraint cost_resolutions_kind_check CHECK ((((kind = 'settled'::text) AND (cost_amount IS NOT NULL) AND (cost_amount >= 0)) OR ((kind = 'written_off'::text) AND (cost_amount IS NULL))))
+  constraint cost_resolutions_pkey PRIMARY KEY (merchant_id, operation_id)
+  constraint cost_resolutions_qualification_fkey FOREIGN KEY (merchant_id, operation_id, qualification_state) REFERENCES billing.cost_qualifications(merchant_id, operation_id, state) ON UPDATE RESTRICT ON DELETE RESTRICT
+  index CREATE UNIQUE INDEX cost_resolutions_pkey ON billing.cost_resolutions USING btree (merchant_id, operation_id)
+  trigger CREATE TRIGGER immutable_cost_resolutions BEFORE DELETE OR UPDATE ON billing.cost_resolutions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.credential_publications
   column merchant_id uuid NOT NULL
@@ -2819,6 +2840,7 @@ function billing.guard_billing_restore_receipt()
                     'checkout_sessions',
                     'cost_observations',
                     'cost_qualifications',
+                    'cost_resolutions',
                     'credential_publications',
                     'custodians',
                     'custody_migrations',

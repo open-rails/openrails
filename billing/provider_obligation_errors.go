@@ -28,6 +28,8 @@ var (
 	ErrProviderBillingQualificationNotFound     error = newCodedError("provider_billing_qualification_not_found", ErrNotFound)
 	ErrProviderBillingObservationConflict       error = newCodedError("provider_billing_observation_conflict", ErrConflict)
 	ErrProviderBillingQualificationRefused      error = newCodedError("provider_billing_qualification_refused", ErrConflict)
+	ErrProviderBillingQualificationNotRefused   error = newCodedError("provider_billing_qualification_not_refused", ErrConflict)
+	ErrProviderBillingResolutionConflict        error = newCodedError("provider_billing_resolution_conflict", ErrConflict)
 )
 
 // OperationAuthorizationConflict names the immutable field an operation id
@@ -48,4 +50,15 @@ func (e *ProviderBillingObservationConflict) Error() string {
 }
 func (e *ProviderBillingObservationConflict) Unwrap() error {
 	return ErrProviderBillingObservationConflict
+}
+
+// ProviderBillingResolutionConflict names the term a repeated resolution
+// changed. Over HTTP the field is StatusError.Param.
+type ProviderBillingResolutionConflict struct{ Field string }
+
+func (e *ProviderBillingResolutionConflict) Error() string {
+	return fmt.Sprintf("provider billing resolution conflicts on %s", e.Field)
+}
+func (e *ProviderBillingResolutionConflict) Unwrap() error {
+	return ErrProviderBillingResolutionConflict
 }

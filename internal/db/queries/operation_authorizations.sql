@@ -109,3 +109,21 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND state = 'open'
   AND extended_amount = sqlc.arg(extended_amount)::bigint
 RETURNING *;
+
+-- A refused qualification's hold is released only through a recorded write-off.
+-- name: WriteOffOperationAuthorization :one
+UPDATE billing.operation_authorizations
+SET state = 'released',
+    terminal_reference = sqlc.arg(terminal_reference)::text,
+    released_at = sqlc.arg(released_at)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = sqlc.arg(operation_id)::text
+  AND state = 'open'
+  AND EXISTS (
+      SELECT 1
+      FROM billing.cost_resolutions resolution
+      WHERE resolution.merchant_id = billing.operation_authorizations.merchant_id
+        AND resolution.operation_id = billing.operation_authorizations.operation_id
+        AND resolution.kind = 'written_off'
+  )
+RETURNING *;

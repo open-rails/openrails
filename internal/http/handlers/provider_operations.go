@@ -75,6 +75,45 @@ func ServiceGetProviderBillingQualification(r *httprequest.Request) {
 	writeProviderOperation(r, out, err)
 }
 
+func ServiceResolveProviderBillingQualification(r *httprequest.Request) {
+	var req billing.ResolveProviderBillingQualificationParams
+	svc, ok := providerOperationService(r, &req)
+	if !ok {
+		return
+	}
+	req.OperationID = r.Param("operation_id")
+	out, err := svc.ResolveProviderBillingQualification(r.Request.Context(), req)
+	writeProviderOperation(r, out, err)
+}
+
+// ServiceListProviderBillingQualifications lists qualifications newest first.
+//
+//	GET /merchant/provider-qualifications?state&authorization_state&limit&cursor
+func ServiceListProviderBillingQualifications(r *httprequest.Request) {
+	svc, ok := providerOperationService(r, nil)
+	if !ok {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	q := queryReader{r: r}
+	filter := billing.ProviderBillingQualificationListParams{PageRequest: page}
+	for _, v := range q.list("state") {
+		filter.State = append(filter.State, billing.ProviderBillingQualificationState(v))
+	}
+	for _, v := range q.list("authorization_state") {
+		filter.AuthorizationState = append(filter.AuthorizationState, billing.OperationAuthorizationState(v))
+	}
+	out, err := svc.ListProviderBillingQualifications(r.Request.Context(), filter)
+	if err != nil {
+		writeRefusal(r, err, "provider billing qualifications could not be listed")
+		return
+	}
+	r.SuccessJSON(out)
+}
+
 // providerOperationService authenticates the merchant principal and, for a
 // write, strictly decodes exactly one JSON object into body.
 func providerOperationService(r *httprequest.Request, body any) (*billingservice.Service, bool) {
@@ -115,11 +154,14 @@ func writeProviderOperationError(r *httprequest.Request, err error) {
 	}
 	var authorizationConflict *billing.OperationAuthorizationConflict
 	var observationConflict *billing.ProviderBillingObservationConflict
+	var resolutionConflict *billing.ProviderBillingResolutionConflict
 	switch {
 	case errors.As(err, &authorizationConflict):
 		out.Param = &authorizationConflict.Field
 	case errors.As(err, &observationConflict):
 		out.Param = &observationConflict.Field
+	case errors.As(err, &resolutionConflict):
+		out.Param = &resolutionConflict.Field
 	}
 	r.APIError(out)
 }

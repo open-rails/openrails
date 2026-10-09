@@ -163,7 +163,9 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
 | `provider_billing_observation_conflict` | 409 | `invalid_request_error` | The provider billing evidence conflicts with a recorded observation; param names it. |
 | `provider_billing_qualification_not_found` | 404 | `invalid_request_error` | The operation has no provider billing qualification. |
+| `provider_billing_qualification_not_refused` | 409 | `invalid_request_error` | Only a refused provider billing qualification can be resolved by an operator. |
 | `provider_billing_qualification_refused` | 409 | `invalid_request_error` | The provider billing evidence was refused. |
+| `provider_billing_resolution_conflict` | 409 | `invalid_request_error` | The operation was already resolved with a different term; param names it. |
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |

@@ -1,0 +1,1 @@
+[{"kind":"settled","cost_amount":"1234567","attested_by":"operator:1","reference":"invoice:1","note":"corrected bucket","resolved_at":"2026-09-16T12:00:00.123456Z"},{"kind":"written_off","cost_amount":null,"attested_by":"operator:1","reference":"ticket:2","note":"","resolved_at":"2026-09-16T12:00:00.123456Z"}]

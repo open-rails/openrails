@@ -75,7 +75,13 @@ func setQuery(q url.Values, values map[string]string) {
 	}
 }
 
-func commaList(values []string) string { return strings.Join(values, ",") }
+func commaList[T ~string](values []T) string {
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = string(v)
+	}
+	return strings.Join(parts, ",")
+}
 
 func timeQuery(t time.Time) string {
 	if t.IsZero() {

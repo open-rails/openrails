@@ -208,7 +208,8 @@ type RecordProviderBillingObservationParams struct {
 
 // ProviderBillingQualification is whether an operation's provider evidence
 // qualifies for settlement. QualifiedCostAmount is in the authorization's
-// currency, null until eligible.
+// currency, null until eligible. Resolution is null unless an operator closed
+// a refused qualification.
 type ProviderBillingQualification struct {
 	OperationID             string                             `json:"operation_id"`
 	MerchantID              MerchantID                         `json:"merchant_id"`
@@ -221,8 +222,56 @@ type ProviderBillingQualification struct {
 	QualifiedObservationID  string                             `json:"qualified_observation_id"`
 	QualifiedCostAmount     *int64                             `json:"qualified_cost_amount,string"`
 	QualifiedAt             *time.Time                         `json:"qualified_at"`
+	Resolution              *ProviderBillingResolution         `json:"resolution"`
 	Authorization           OperationAuthorization             `json:"authorization"`
 	CreatedAt               time.Time                          `json:"created_at"`
 	UpdatedAt               time.Time                          `json:"updated_at"`
 	Replayed                bool                               `json:"replayed"`
+}
+
+// ProviderBillingQualificationListParams filters ListProviderBillingQualifications.
+// An empty filter admits every value; State refused with AuthorizationState
+// open lists the holds only an operator can close.
+type ProviderBillingQualificationListParams struct {
+	PageRequest
+	State              []ProviderBillingQualificationState
+	AuthorizationState []OperationAuthorizationState
+}
+
+type ProviderBillingResolutionKind string
+
+const (
+	// ProviderBillingResolutionSettled settles the hold at the operator-attested
+	// provider cost, under the pass-through contract: the customer is charged
+	// that cost, above the hold as owed.
+	ProviderBillingResolutionSettled ProviderBillingResolutionKind = "settled"
+	// ProviderBillingResolutionWrittenOff releases the hold without charging the
+	// customer; the merchant absorbs whatever the provider billed.
+	ProviderBillingResolutionWrittenOff ProviderBillingResolutionKind = "written_off"
+)
+
+// ResolveProviderBillingQualificationParams closes the open authorization of a
+// refused qualification on an operator's attestation, since automatic
+// settlement never will. CostAmount, in the authorization's currency, is
+// required for settled and null for written_off. AttestedBy names the operator
+// and Reference the evidence (a provider invoice or ticket), both opaque and
+// canonical; Note is optional. Repeating the same resolution replays.
+type ResolveProviderBillingQualificationParams struct {
+	OperationID string                        `json:"-"` // carried by the route path
+	Kind        ProviderBillingResolutionKind `json:"kind"`
+	CostAmount  *int64                        `json:"cost_amount,string"`
+	AttestedBy  string                        `json:"attested_by"` // at most 255 bytes
+	Reference   string                        `json:"reference"`   // at most 1024 bytes
+	Note        string                        `json:"note"`        // at most 4096 bytes
+}
+
+// ProviderBillingResolution is the operator's recorded close of a refused
+// qualification. Immutable.
+type ProviderBillingResolution struct {
+	Kind       ProviderBillingResolutionKind `json:"kind"`
+	CostAmount *int64                        `json:"cost_amount,string"`
+	AttestedBy string                        `json:"attested_by"`
+	Reference  string                        `json:"reference"`
+	Note       string                        `json:"note"`
+	ResolvedAt time.Time                     `json:"resolved_at"`
 }

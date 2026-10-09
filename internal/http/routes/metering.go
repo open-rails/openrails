@@ -53,4 +53,10 @@ var meteringRoutes = []Route{
 		Errors: codes("insufficient_credits", "invalid_param", "operation_authorization_not_found", "operation_authorization_not_open", "provider_billing_observation_conflict", "provider_billing_qualification_refused"), Handler: h(handlers.ServiceRecordProviderBillingObservation)},
 	{Method: GET, Path: "/v1/merchant/provider-operations/{operation_id}/qualification", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantUsageRead,
 		Responses: []Reply{{200, billing.ProviderBillingQualification{}}}, Errors: codes("invalid_param", "provider_billing_qualification_not_found"), Handler: h(handlers.ServiceGetProviderBillingQualification)},
+	{Method: POST, Path: "/v1/merchant/provider-operations/{operation_id}/resolution", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantAdmissionsCreate,
+		Request: billing.ResolveProviderBillingQualificationParams{}, Responses: []Reply{{200, billing.ProviderBillingQualification{}}},
+		Errors: codes("invalid_param", "operation_authorization_not_found", "operation_authorization_not_open", "provider_billing_qualification_not_found", "provider_billing_qualification_not_refused", "provider_billing_resolution_conflict"), Handler: h(handlers.ServiceResolveProviderBillingQualification)},
+	{Method: GET, Path: "/v1/merchant/provider-qualifications", Group: Merchant, Auth: AuthMerchant, Perm: billing.MerchantUsageRead,
+		Query: params(cursorPage, text("authorization_state"), text("state")), Responses: []Reply{{200, billing.ListPage[billing.ProviderBillingQualification]{}}},
+		Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ServiceListProviderBillingQualifications)},
 }

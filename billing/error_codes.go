@@ -275,6 +275,8 @@ var errorCodes = []ErrorCode{
 	{"provider_billing_qualification_not_found", 404, invalid, "The operation has no provider billing qualification."},
 	{"provider_billing_observation_conflict", 409, invalid, "The provider billing evidence conflicts with a recorded observation; param names it."},
 	{"provider_billing_qualification_refused", 409, invalid, "The provider billing evidence was refused."},
+	{"provider_billing_qualification_not_refused", 409, invalid, "Only a refused provider billing qualification can be resolved by an operator."},
+	{"provider_billing_resolution_conflict", 409, invalid, "The operation was already resolved with a different term; param names it."},
 	{"invalid_settlement_status_request", 400, invalid, "A settlement status read needs a customer and a price."},
 
 	// Customers.

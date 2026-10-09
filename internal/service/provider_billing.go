@@ -89,7 +89,67 @@ func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.
 	return providerBillingQualificationFromMoney(result), nil
 }
 
+// ResolveProviderBillingQualification closes a refused qualification's hold on
+// an operator's attestation in an OpenRails-owned transaction.
+func (s *Service) ResolveProviderBillingQualification(ctx context.Context, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *billing.ProviderBillingQualification
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.ResolveProviderBillingQualificationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
+}
+
+// ResolveProviderBillingQualificationTx is the host-transaction form.
+func (s *Service) ResolveProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.moneyService().ResolveProviderBillingQualificationInTx(ctx, txDB, req)
+	if err != nil {
+		return nil, err
+	}
+	return providerBillingQualificationFromMoney(result), nil
+}
+
+// ListProviderBillingQualifications pages qualifications, newest first.
+func (s *Service) ListProviderBillingQualifications(ctx context.Context, filter billing.ProviderBillingQualificationListParams) (*billing.ListPage[billing.ProviderBillingQualification], error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	page, err := s.moneyService().ListProviderBillingQualifications(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := billing.ListPage[billing.ProviderBillingQualification]{Items: make([]billing.ProviderBillingQualification, len(page.Items)), Next: page.Next}
+	for i, item := range page.Items {
+		out.Items[i] = *providerBillingQualificationFromMoney(item)
+	}
+	return &out, nil
+}
+
 func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *billing.ProviderBillingQualification {
+	var resolution *billing.ProviderBillingResolution
+	if r := result.Resolution; r != nil {
+		resolution = &billing.ProviderBillingResolution{
+			Kind: r.Kind, CostAmount: r.CostAmount, AttestedBy: r.AttestedBy, Reference: r.Reference, Note: r.Note, ResolvedAt: r.ResolvedAt,
+		}
+	}
 	return &billing.ProviderBillingQualification{
 		OperationID: result.OperationID,
 		MerchantID:  billing.MerchantID(result.MerchantID),
@@ -113,6 +173,7 @@ func providerBillingQualificationFromMoney(result *money.ProviderBillingQualific
 		QualifiedObservationID:  result.QualifiedObservationID,
 		QualifiedCostAmount:     result.QualifiedCostAmount,
 		QualifiedAt:             result.QualifiedAt,
+		Resolution:              resolution,
 		Authorization:           *operationAuthorizationFromMoney(result.Authorization),
 		CreatedAt:               result.CreatedAt,
 		UpdatedAt:               result.UpdatedAt,

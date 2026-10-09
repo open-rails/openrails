@@ -12,6 +12,65 @@ import (
 	"github.com/google/uuid"
 )
 
+const getLatestProviderBillingObservation = `-- name: GetLatestProviderBillingObservation :one
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at,
+       raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
+       has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
+FROM billing.cost_observations
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+ORDER BY observed_at DESC
+LIMIT 1
+`
+
+type GetLatestProviderBillingObservationParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+type GetLatestProviderBillingObservationRow struct {
+	MerchantID              uuid.UUID
+	OperationID             string
+	ObservationID           string
+	NormalizedQuery         string
+	QueryStartsAt           time.Time
+	QueryEndsAt             time.Time
+	RawBodyAvailable        bool
+	RawBodyDigest           []byte
+	NormalizedRecordsDigest []byte
+	CostAmount              *int64
+	HasNegativeRecord       bool
+	RefusalKind             *string
+	CoversLifetime          bool
+	QualificationReason     string
+	ObservedAt              time.Time
+}
+
+// An operation's latest observation: once a qualification is refused, the one
+// that refused it, since nothing is appended after.
+func (q *Queries) GetLatestProviderBillingObservation(ctx context.Context, arg GetLatestProviderBillingObservationParams) (GetLatestProviderBillingObservationRow, error) {
+	row := q.db.QueryRow(ctx, getLatestProviderBillingObservation, arg.MerchantID, arg.OperationID)
+	var i GetLatestProviderBillingObservationRow
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.ObservationID,
+		&i.NormalizedQuery,
+		&i.QueryStartsAt,
+		&i.QueryEndsAt,
+		&i.RawBodyAvailable,
+		&i.RawBodyDigest,
+		&i.NormalizedRecordsDigest,
+		&i.CostAmount,
+		&i.HasNegativeRecord,
+		&i.RefusalKind,
+		&i.CoversLifetime,
+		&i.QualificationReason,
+		&i.ObservedAt,
+	)
+	return i, err
+}
+
 const getProviderBillingObservation = `-- name: GetProviderBillingObservation :one
 SELECT merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at,
        raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
@@ -182,6 +241,35 @@ func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.C
 		&i.BillingOperationAuthorization.SettlementBodyDigest,
 		&i.BillingOperationAuthorization.ExtendedAmount,
 		&i.BillingOperationAuthorization.AuthorizedAmount,
+	)
+	return i, err
+}
+
+const getProviderBillingResolution = `-- name: GetProviderBillingResolution :one
+SELECT merchant_id, operation_id, qualification_state, kind, cost_amount, attested_by, reference, note, resolved_at
+FROM billing.cost_resolutions
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+`
+
+type GetProviderBillingResolutionParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+func (q *Queries) GetProviderBillingResolution(ctx context.Context, arg GetProviderBillingResolutionParams) (BillingCostResolution, error) {
+	row := q.db.QueryRow(ctx, getProviderBillingResolution, arg.MerchantID, arg.OperationID)
+	var i BillingCostResolution
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.QualificationState,
+		&i.Kind,
+		&i.CostAmount,
+		&i.AttestedBy,
+		&i.Reference,
+		&i.Note,
+		&i.ResolvedAt,
 	)
 	return i, err
 }
@@ -389,6 +477,209 @@ func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg In
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertProviderBillingResolution = `-- name: InsertProviderBillingResolution :one
+INSERT INTO billing.cost_resolutions (
+    merchant_id,
+    operation_id,
+    kind,
+    cost_amount,
+    attested_by,
+    reference,
+    note,
+    resolved_at
+) VALUES (
+    $1::uuid,
+    $2::text,
+    $3::text,
+    $4::bigint,
+    $5::text,
+    $6::text,
+    $7::text,
+    $8::timestamptz
+)
+RETURNING merchant_id, operation_id, qualification_state, kind, cost_amount, attested_by, reference, note, resolved_at
+`
+
+type InsertProviderBillingResolutionParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+	Kind        string
+	CostAmount  *int64
+	AttestedBy  string
+	Reference   string
+	Note        *string
+	ResolvedAt  time.Time
+}
+
+func (q *Queries) InsertProviderBillingResolution(ctx context.Context, arg InsertProviderBillingResolutionParams) (BillingCostResolution, error) {
+	row := q.db.QueryRow(ctx, insertProviderBillingResolution,
+		arg.MerchantID,
+		arg.OperationID,
+		arg.Kind,
+		arg.CostAmount,
+		arg.AttestedBy,
+		arg.Reference,
+		arg.Note,
+		arg.ResolvedAt,
+	)
+	var i BillingCostResolution
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.QualificationState,
+		&i.Kind,
+		&i.CostAmount,
+		&i.AttestedBy,
+		&i.Reference,
+		&i.Note,
+		&i.ResolvedAt,
+	)
+	return i, err
+}
+
+const listProviderBillingQualifications = `-- name: ListProviderBillingQualifications :many
+SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
+FROM billing.cost_qualifications q
+JOIN billing.operation_authorizations a
+  ON a.merchant_id = q.merchant_id
+ AND a.operation_id = q.operation_id
+WHERE q.merchant_id = $1::uuid
+  AND (cardinality($2::text[]) = 0 OR q.state = ANY($2::text[]))
+  AND (cardinality($3::text[]) = 0 OR a.state = ANY($3::text[]))
+  AND ($4::timestamptz IS NULL
+       OR (q.created_at, q.operation_id) < ($4::timestamptz, $5::text))
+ORDER BY q.created_at DESC, q.operation_id DESC
+LIMIT $6::int
+`
+
+type ListProviderBillingQualificationsParams struct {
+	MerchantID          uuid.UUID
+	States              []string
+	AuthorizationStates []string
+	AfterAt             *time.Time
+	AfterOperationID    *string
+	RowLimit            int32
+}
+
+type ListProviderBillingQualificationsRow struct {
+	BillingCostQualification      BillingCostQualification
+	BillingOperationAuthorization BillingOperationAuthorization
+}
+
+// Newest first; an empty filter admits every state.
+func (q *Queries) ListProviderBillingQualifications(ctx context.Context, arg ListProviderBillingQualificationsParams) ([]ListProviderBillingQualificationsRow, error) {
+	rows, err := q.db.Query(ctx, listProviderBillingQualifications,
+		arg.MerchantID,
+		arg.States,
+		arg.AuthorizationStates,
+		arg.AfterAt,
+		arg.AfterOperationID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProviderBillingQualificationsRow
+	for rows.Next() {
+		var i ListProviderBillingQualificationsRow
+		if err := rows.Scan(
+			&i.BillingCostQualification.MerchantID,
+			&i.BillingCostQualification.OperationID,
+			&i.BillingCostQualification.Provider,
+			&i.BillingCostQualification.ProviderResourceID,
+			&i.BillingCostQualification.ProviderLifetimeStartsAt,
+			&i.BillingCostQualification.ProviderLifetimeEndsAt,
+			&i.BillingCostQualification.ProviderAbsentAt,
+			&i.BillingCostQualification.ProviderAbsenceReference,
+			&i.BillingCostQualification.BillingStopReference,
+			&i.BillingCostQualification.WindowsClosedAt,
+			&i.BillingCostQualification.WindowsClosedReference,
+			&i.BillingCostQualification.LifecycleEvidenceBytes,
+			&i.BillingCostQualification.LifecycleEvidenceDigest,
+			&i.BillingCostQualification.QuiescenceSeconds,
+			&i.BillingCostQualification.State,
+			&i.BillingCostQualification.Reason,
+			&i.BillingCostQualification.BaselineObservationID,
+			&i.BillingCostQualification.QualifiedObservationID,
+			&i.BillingCostQualification.QualifiedCostAmount,
+			&i.BillingCostQualification.QualifiedAt,
+			&i.BillingCostQualification.CreatedAt,
+			&i.BillingCostQualification.UpdatedAt,
+			&i.BillingOperationAuthorization.OperationID,
+			&i.BillingOperationAuthorization.MerchantID,
+			&i.BillingOperationAuthorization.CustomerID,
+			&i.BillingOperationAuthorization.RecordOwner,
+			&i.BillingOperationAuthorization.LedgerAccountID,
+			&i.BillingOperationAuthorization.Currency,
+			&i.BillingOperationAuthorization.Amount,
+			&i.BillingOperationAuthorization.ClaimReference,
+			&i.BillingOperationAuthorization.AuthorizationBodyBytes,
+			&i.BillingOperationAuthorization.AuthorizationBodyDigest,
+			&i.BillingOperationAuthorization.State,
+			&i.BillingOperationAuthorization.TerminalReference,
+			&i.BillingOperationAuthorization.CreatedAt,
+			&i.BillingOperationAuthorization.ReleasedAt,
+			&i.BillingOperationAuthorization.SettledAt,
+			&i.BillingOperationAuthorization.SettlementCostAmount,
+			&i.BillingOperationAuthorization.SettlementAmount,
+			&i.BillingOperationAuthorization.SettlementBodyBytes,
+			&i.BillingOperationAuthorization.SettlementBodyDigest,
+			&i.BillingOperationAuthorization.ExtendedAmount,
+			&i.BillingOperationAuthorization.AuthorizedAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProviderBillingResolutions = `-- name: ListProviderBillingResolutions :many
+SELECT merchant_id, operation_id, qualification_state, kind, cost_amount, attested_by, reference, note, resolved_at
+FROM billing.cost_resolutions
+WHERE merchant_id = $1::uuid
+  AND operation_id = ANY($2::text[])
+`
+
+type ListProviderBillingResolutionsParams struct {
+	MerchantID   uuid.UUID
+	OperationIds []string
+}
+
+func (q *Queries) ListProviderBillingResolutions(ctx context.Context, arg ListProviderBillingResolutionsParams) ([]BillingCostResolution, error) {
+	rows, err := q.db.Query(ctx, listProviderBillingResolutions, arg.MerchantID, arg.OperationIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingCostResolution
+	for rows.Next() {
+		var i BillingCostResolution
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.OperationID,
+			&i.QualificationState,
+			&i.Kind,
+			&i.CostAmount,
+			&i.AttestedBy,
+			&i.Reference,
+			&i.Note,
+			&i.ResolvedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateProviderBillingQualification = `-- name: UpdateProviderBillingQualification :one

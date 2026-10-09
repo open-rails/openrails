@@ -18,6 +18,7 @@ var ownedTables = []string{
 	"checkout_sessions",
 	"cost_observations",
 	"cost_qualifications",
+	"cost_resolutions",
 	"credential_publications",
 	"custodians",
 	"custody_migrations",

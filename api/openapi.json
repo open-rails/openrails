@@ -7751,6 +7751,151 @@
         ]
       }
     },
+    "/v1/merchant/provider-operations/{operation_id}/resolution": {
+      "post": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveProviderBillingQualificationParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderBillingQualification"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:admissions:create",
+        "x-openrails-errors": [
+          "invalid_param",
+          "operation_authorization_not_found",
+          "operation_authorization_not_open",
+          "provider_billing_qualification_not_found",
+          "provider_billing_qualification_not_refused",
+          "provider_billing_resolution_conflict"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
+    "/v1/merchant/provider-qualifications": {
+      "get": {
+        "tags": [
+          "merchant"
+        ],
+        "parameters": [
+          {
+            "name": "authorization_state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProviderBillingQualification"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "merchant",
+        "x-openrails-permission": "merchant:usage:read",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:merchant",
+          "request"
+        ]
+      }
+    },
     "/v1/merchant/invoices": {
       "get": {
         "tags": [
@@ -22416,6 +22561,16 @@
               }
             ]
           },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "authorization": {
             "$ref": "#/components/schemas/OperationAuthorization"
           },
@@ -22443,6 +22598,7 @@
           "qualified_observation_id",
           "qualified_cost_amount",
           "qualified_at",
+          "resolution",
           "authorization",
           "created_at",
           "updated_at",
@@ -22468,6 +22624,50 @@
             "description": "A number as a decimal string."
           }
         }
+      },
+      "ProviderBillingResolution": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "written_off"
+            ]
+          },
+          "cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attested_by": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "resolved_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "cost_amount",
+          "attested_by",
+          "reference",
+          "note",
+          "resolved_at"
+        ]
       },
       "RailDefinition": {
         "type": "object",
@@ -23280,6 +23480,38 @@
             "type": "string"
           },
           "override_params": {}
+        }
+      },
+      "ResolveProviderBillingQualificationParams": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "settled",
+              "written_off"
+            ]
+          },
+          "cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attested_by": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       },
       "RetryInvoiceCollectionParams": {
@@ -26009,10 +26241,20 @@
       "type": "invalid_request_error",
       "meaning": "The operation has no provider billing qualification."
     },
+    "provider_billing_qualification_not_refused": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Only a refused provider billing qualification can be resolved by an operator."
+    },
     "provider_billing_qualification_refused": {
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The provider billing evidence was refused."
+    },
+    "provider_billing_resolution_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The operation was already resolved with a different term; param names it."
     },
     "provider_cancel_held": {
       "status": 409,

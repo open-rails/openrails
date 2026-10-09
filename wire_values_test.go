@@ -122,6 +122,16 @@ func TestProviderBillingQualificationWireContract(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &got))
 	require.True(t, reflect.DeepEqual(value, got), "qualification lost precision or null semantics: %#v", got)
 
+	settledCost := int64(1_234_567)
+	resolutions := []billing.ProviderBillingResolution{
+		{Kind: billing.ProviderBillingResolutionSettled, CostAmount: &settledCost, AttestedBy: "operator:1", Reference: "invoice:1", Note: "corrected bucket", ResolvedAt: when},
+		{Kind: billing.ProviderBillingResolutionWrittenOff, AttestedBy: "operator:1", Reference: "ticket:2", ResolvedAt: when},
+	}
+	raw = requireFixture(t, "provider_billing_resolution.json", resolutions)
+	var resolutionsGot []billing.ProviderBillingResolution
+	require.NoError(t, json.Unmarshal(raw, &resolutionsGot))
+	require.True(t, reflect.DeepEqual(resolutions, resolutionsGot), "resolution lost precision or null semantics: %#v", resolutionsGot)
+
 	open := billing.OperationAuthorization{State: billing.OperationAuthorizationOpen, CreatedAt: when}
 	raw, err := json.Marshal(open)
 	require.NoError(t, err)

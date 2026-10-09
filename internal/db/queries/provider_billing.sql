@@ -116,3 +116,64 @@ SET state = sqlc.arg(state)::text,
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text
 RETURNING *;
+
+-- An operation's latest observation: once a qualification is refused, the one
+-- that refused it, since nothing is appended after.
+-- name: GetLatestProviderBillingObservation :one
+SELECT merchant_id, operation_id, observation_id, normalized_query, query_starts_at, query_ends_at,
+       raw_body_available, raw_body_digest, normalized_records_digest, cost_amount,
+       has_negative_record, refusal_kind, covers_lifetime, qualification_reason, observed_at
+FROM billing.cost_observations
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = sqlc.arg(operation_id)::text
+ORDER BY observed_at DESC
+LIMIT 1;
+
+-- name: InsertProviderBillingResolution :one
+INSERT INTO billing.cost_resolutions (
+    merchant_id,
+    operation_id,
+    kind,
+    cost_amount,
+    attested_by,
+    reference,
+    note,
+    resolved_at
+) VALUES (
+    sqlc.arg(merchant_id)::uuid,
+    sqlc.arg(operation_id)::text,
+    sqlc.arg(kind)::text,
+    sqlc.narg(cost_amount)::bigint,
+    sqlc.arg(attested_by)::text,
+    sqlc.arg(reference)::text,
+    sqlc.narg(note)::text,
+    sqlc.arg(resolved_at)::timestamptz
+)
+RETURNING *;
+
+-- name: GetProviderBillingResolution :one
+SELECT *
+FROM billing.cost_resolutions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = sqlc.arg(operation_id)::text;
+
+-- name: ListProviderBillingResolutions :many
+SELECT *
+FROM billing.cost_resolutions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = ANY(sqlc.arg(operation_ids)::text[]);
+
+-- Newest first; an empty filter admits every state.
+-- name: ListProviderBillingQualifications :many
+SELECT sqlc.embed(q), sqlc.embed(a)
+FROM billing.cost_qualifications q
+JOIN billing.operation_authorizations a
+  ON a.merchant_id = q.merchant_id
+ AND a.operation_id = q.operation_id
+WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (cardinality(sqlc.arg(states)::text[]) = 0 OR q.state = ANY(sqlc.arg(states)::text[]))
+  AND (cardinality(sqlc.arg(authorization_states)::text[]) = 0 OR a.state = ANY(sqlc.arg(authorization_states)::text[]))
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (q.created_at, q.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
+ORDER BY q.created_at DESC, q.operation_id DESC
+LIMIT sqlc.arg(row_limit)::int;

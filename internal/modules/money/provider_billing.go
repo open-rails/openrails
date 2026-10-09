@@ -97,6 +97,7 @@ type ProviderBillingQualification struct {
 	QualifiedObservationID   string
 	QualifiedCostAmount      *int64
 	QualifiedAt              *time.Time
+	Resolution               *ProviderBillingResolution
 	Authorization            *OperationAuthorization
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
@@ -229,8 +230,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		if err := replayProviderBillingObservation(existing, in, prepared); err != nil {
 			return nil, err
 		}
-		result := providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true)
-		return result, nil
+		return withProviderBillingResolution(ctx, q, providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true))
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
@@ -648,18 +648,9 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 	if err != nil {
 		return nil, fmt.Errorf("load qualified provider billing evidence: %w", err)
 	}
-	extensions, err := q.ListOperationAuthorizationExtensions(ctx, gen.ListOperationAuthorizationExtensionsParams{
-		MerchantID: row.MerchantID, OperationID: row.OperationID,
-	})
+	authorization, err := providerBillingAuthorizationManifest(ctx, q, auth)
 	if err != nil {
-		return nil, fmt.Errorf("load operation authorization extensions: %w", err)
-	}
-	authorization := providerBillingSettlementAuthorization{
-		OpeningAmount: auth.Amount, AuthorizedAmount: auth.AuthorizedAmount,
-		Extensions: make([]providerBillingSettlementExtension, 0, len(extensions)),
-	}
-	for _, ext := range extensions {
-		authorization.Extensions = append(authorization.Extensions, providerBillingSettlementExtension{Ordinal: ext.Ordinal, GrantedAmount: ext.GrantedAmount})
+		return nil, err
 	}
 	body, err := json.Marshal(providerBillingSettlementManifest{
 		Contract:                 "openrails/pass-through-provider-cost",
@@ -685,6 +676,23 @@ func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.
 		return nil, fmt.Errorf("author provider billing settlement body: %w", err)
 	}
 	return body, nil
+}
+
+func providerBillingAuthorizationManifest(ctx context.Context, q *gen.Queries, auth gen.BillingOperationAuthorization) (providerBillingSettlementAuthorization, error) {
+	extensions, err := q.ListOperationAuthorizationExtensions(ctx, gen.ListOperationAuthorizationExtensionsParams{
+		MerchantID: auth.MerchantID, OperationID: auth.OperationID,
+	})
+	if err != nil {
+		return providerBillingSettlementAuthorization{}, fmt.Errorf("load operation authorization extensions: %w", err)
+	}
+	authorization := providerBillingSettlementAuthorization{
+		OpeningAmount: auth.Amount, AuthorizedAmount: auth.AuthorizedAmount,
+		Extensions: make([]providerBillingSettlementExtension, 0, len(extensions)),
+	}
+	for _, ext := range extensions {
+		authorization.Extensions = append(authorization.Extensions, providerBillingSettlementExtension{Ordinal: ext.Ordinal, GrantedAmount: ext.GrantedAmount})
+	}
+	return authorization, nil
 }
 
 func providerBillingSettlementObservationFromRow(row gen.GetProviderBillingObservationRow) providerBillingSettlementObservation {
@@ -764,5 +772,5 @@ func (s *MoneyService) GetProviderBillingQualificationInTx(ctx context.Context, 
 		return nil, err
 	}
 	auth := operationAuthorizationFromRow(row.BillingOperationAuthorization, false)
-	return providerBillingQualificationFromRow(row.BillingCostQualification, auth, false), nil
+	return withProviderBillingResolution(ctx, q, providerBillingQualificationFromRow(row.BillingCostQualification, auth, false))
 }

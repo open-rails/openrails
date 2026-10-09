@@ -65,6 +65,16 @@ func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.
 	return e.svc.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
+// ResolveProviderBillingQualification closes a refused qualification's hold on
+// an operator's attestation inside tx.
+func (e *Engine) ResolveProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+	ctx, err := e.bind(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return e.svc.ResolveProviderBillingQualificationTx(ctx, tx, req)
+}
+
 func (e *Engine) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {

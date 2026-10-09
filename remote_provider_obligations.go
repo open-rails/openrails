@@ -118,3 +118,32 @@ func (c *Client) GetProviderBillingQualification(ctx context.Context, operationI
 	}
 	return &out, nil
 }
+
+// ResolveProviderBillingQualification closes the open hold of a refused
+// qualification on an operator's attestation: settled charges the attested
+// provider cost (above the hold as owed), written_off releases it uncharged.
+// Repeating the same resolution replays; a changed term is refused.
+func (c *Client) ResolveProviderBillingQualification(ctx context.Context, req billing.ResolveProviderBillingQualificationParams, requestOptions ...RequestOption) (*billing.ProviderBillingQualification, error) {
+	path, err := providerOperationPath(req.OperationID)
+	if err != nil {
+		return nil, err
+	}
+	var out billing.ProviderBillingQualification
+	if err := c.do(ctx, http.MethodPost, path+"/resolution", req, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ListProviderBillingQualifications is one page of the merchant's provider
+// billing qualifications, newest first. State refused with AuthorizationState
+// open lists the holds only an operator can close.
+func (c *Client) ListProviderBillingQualifications(ctx context.Context, params billing.ProviderBillingQualificationListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProviderBillingQualification], error) {
+	q := pageValues(nil, params.PageRequest)
+	setQuery(q, map[string]string{"state": commaList(params.State), "authorization_state": commaList(params.AuthorizationState)})
+	var out billing.ListPage[billing.ProviderBillingQualification]
+	if err := c.do(ctx, http.MethodGet, withQuery("/v1/merchant/provider-qualifications", q), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

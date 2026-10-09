@@ -250,6 +250,19 @@ type BillingCostQualification struct {
 	UpdatedAt                time.Time
 }
 
+// An operator's attested close of an operation authorization whose provider billing qualification was refused: settled at the attested provider cost (pass-through, so the customer is charged it) or written off (released, the customer is not charged). Immutable. Retention: permanent, never pruned.
+type BillingCostResolution struct {
+	MerchantID         uuid.UUID
+	OperationID        string
+	QualificationState string
+	Kind               string
+	CostAmount         *int64
+	AttestedBy         string
+	Reference          string
+	Note               *string
+	ResolvedAt         time.Time
+}
+
 // Credential publication receipts. Identities and exact secret references only, never secret values. Retention: permanent, never pruned.
 type BillingCredentialPublication struct {
 	MerchantID       uuid.UUID
