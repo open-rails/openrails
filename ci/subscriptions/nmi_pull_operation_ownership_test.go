@@ -120,13 +120,16 @@ func TestNMIPullDoesNotReplaceCanonicalCollection(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, billing.InvoicePaid, inv.Status)
 				require.True(t, e.periodEnd().Equal(end))
-				require.Len(t, completed(w.payments(remote, e.c.id)), 1)
+				paid := completed(w.payments(remote, e.c.id))
+				require.Len(t, paid, 2, "the settled collection is the invoice's payment")
+				require.Equal(t, invoice, *paid[0].InvoiceID)
+				require.Equal(t, transaction, paid[0].TransactionID)
 			} else {
 				require.True(t, e.periodEnd().Equal(end.Add(monthHours*time.Hour)))
 				require.Len(t, completed(w.payments(remote, e.c.id)), 2)
 			}
-			// Exact canonical invoice receipts are recognized outside billing.payments;
-			// the next pull neither manufactures another payment nor leaves false debt.
+			// The exact canonical receipt is the invoice's payment; the next pull
+			// neither manufactures another payment nor leaves false debt.
 			insertPull()
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.reconciliation_findings WHERE finding_type='pull.charge.missing' AND subject_key=$1`), transaction).Scan(&finding))
 			require.Contains(t, []string{"fixed", "auto_fixed"}, finding)

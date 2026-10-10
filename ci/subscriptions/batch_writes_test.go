@@ -93,7 +93,7 @@ func TestUsageBatchesAnswerPerItem(t *testing.T) {
 		for i, r := range results {
 			statuses[i] = r.Status
 		}
-		require.Equal(t, []int{http.StatusCreated, http.StatusOK, http.StatusConflict, http.StatusBadRequest, http.StatusBadRequest, http.StatusCreated}, statuses)
+		require.Equal(t, []int{http.StatusCreated, http.StatusOK, http.StatusUnprocessableEntity, http.StatusBadRequest, http.StatusBadRequest, http.StatusCreated}, statuses)
 		require.False(t, results[0].Event.Replayed)
 		require.True(t, results[1].Event.Replayed)
 		require.Equal(t, results[0].Event.ID, results[1].Event.ID)

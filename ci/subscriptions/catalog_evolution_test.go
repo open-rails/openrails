@@ -398,11 +398,12 @@ func TestCatalogArchivePreservesAppliedHashesAndPriceRevisions(t *testing.T) {
 	require.NoError(t, merchantarchive.Export(t.Context(), source, merchantID, &archive))
 
 	// The pre-revision row format omitted product and price revisions and
-	// carried each product's keys on the product.
+	// ownership, and carried each product's keys on the product.
 	legacy := legacyArchive(t, archive.Bytes(), func(table string, values []*string) []*string {
 		switch table {
 		case "products":
 			keys := "[]"
+			values = values[:len(values)-1] // ownership, the last column
 			values = append(append(append([]*string{}, values[:6]...), &keys), values[6:]...)
 		}
 		if table == "prices" || table == "products" {

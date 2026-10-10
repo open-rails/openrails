@@ -67,7 +67,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	}{
 		{http.MethodPost, "/v1/admin/product-access", timed},
 		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
-		{http.MethodPost, "/v1/admin/customers/" + member.id + "/payments/off-channel", map[string]any{}},
+		{http.MethodPost, "/v1/admin/payments", map[string]any{}},
 		{http.MethodPost, "/v1/admin/payments/" + none + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/admin/subscriptions/" + none + "/cancel", map[string]any{}},
 		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
