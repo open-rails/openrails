@@ -19,8 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// pspCatalog is an in-memory Layer-B PSP catalog: key lookup, the #848
-// rail-kind list, archived keys (or#288) and identity lookup.
+// pspCatalog is an in-memory PSP catalog: key lookup, the rail-kind list,
+// archived keys and identity lookup.
 type pspCatalog struct {
 	scopes   []merchants.PSPScope
 	archived []string
@@ -108,7 +108,7 @@ func recurringPrice() *models.Price {
 }
 
 // A selector is a declared PSP key or, only when unambiguous, a rail kind.
-// Everything else fails closed with no scope (#848, or#893).
+// Everything else fails closed with no scope.
 func TestResolveRailTarget(t *testing.T) {
 	mobius := merchants.PSPScope{ID: uuid.New(), Rail: "nmi", AccountID: "gw-1", Key: "mobius"}
 	paykings := merchants.PSPScope{ID: uuid.New(), Rail: "nmi", AccountID: "gw-2", Key: "paykings"}
@@ -230,7 +230,7 @@ func TestRouteExplicitSelector(t *testing.T) {
 	require.Empty(t, decision.Reason().Fallbacks)
 	require.Empty(t, decision.Reason().Skipped)
 
-	// #1078: a named PSP still has to be able to make the sale.
+	// A named PSP still has to be able to make the sale.
 	decision, err = routingService(armedAll()).Route(merchantCtx(), RoutingInput{Price: recurringPrice(), Mode: models.CheckoutAttemptModeSubscription, Selector: "ccbill"})
 	require.ErrorIs(t, err, ErrNoRoutableProcessor)
 	require.Empty(t, decision.Selected())
@@ -323,7 +323,7 @@ func TestListCheckoutOptions(t *testing.T) {
 	require.Empty(t, empty)
 }
 
-// One readiness verdict backs both the option list and routing (or#288).
+// One readiness verdict backs both the option list and routing.
 func TestCheckoutRailSkipReason(t *testing.T) {
 	stripeCfg := &config.ResolvedPSP{Stripe: &config.StripeRailConfig{SecretKey: "sk_test"}}
 	nmiCfg := &config.ResolvedPSP{NMI: &config.NMIRailConfig{SecurityKey: "key"}}
@@ -375,7 +375,7 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
-	// #1078: Solana subscribes new members to the price's on-chain plan.
+	// Solana subscribes new members to the price's on-chain plan.
 	require.Empty(t, recurringReady.checkoutRailSkipReason(solanaPlan, railTarget{PSP: "solana", Rail: "solana"}, solanaCfg, S))
 	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, recurringReady.checkoutRailSkipReason(trial, railTarget{PSP: "solana", Rail: "solana"}, solanaCfg, S))
 }

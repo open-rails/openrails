@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// TypeNMISale is the one-time card sale on a saved PSP-held card. Despite the
-// historical name it serves every card rail that charges a saved method
-// directly (NMI vault sale, Stripe engine PaymentIntent).
+// TypeNMISale is the one-time card sale on a saved PSP-held card, on every
+// card rail that charges a saved method directly (NMI vault sale, Stripe
+// engine PaymentIntent).
 const TypeNMISale = "nmi_sale"
 
 // saleRails are the rails whose one-time sale charges a saved PSP card.
@@ -55,9 +55,9 @@ type NMISalePayload struct {
 	OwnershipStart      time.Time       `json:"ownership_start"`
 	OwnershipEnd        *time.Time      `json:"ownership_end"`
 	Eligibility         string          `json:"eligibility"`
-	// OrderID is the order the sale pays (#1168), through its checkout
-	// attempt CheckoutAttemptID. An order sale carries no price, product or
-	// benefit: paying settles the order's own frozen lines.
+	// OrderID is the order the sale pays, through its checkout attempt
+	// CheckoutAttemptID. An order sale carries no price, product or benefit:
+	// paying settles the order's own frozen lines.
 	OrderID uuid.UUID `json:"order_id,omitzero"`
 	// Recurring: the order has a recurring line, so the charge stores the
 	// card for a recurring agreement.

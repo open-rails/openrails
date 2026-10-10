@@ -55,9 +55,9 @@ func heldSub(status models.SubscriptionStatus, p *models.Product) *models.Subscr
 	return &models.Subscription{ID: uuid.New(), Status: status, PriceID: priceID, Price: &models.Price{ID: priceID, Product: p}}
 }
 
-// #269/#691: a second subscribe in the same price or tier group is blocked
-// before any charge; an `unknown` membership blocks with the verification
-// code because it may still be billing at the provider.
+// A second subscribe in the same price or tier group is blocked before any
+// charge; an `unknown` membership blocks with the verification code because it
+// may still be billing at the provider.
 func TestDuplicateBillingGuard(t *testing.T) {
 	const group = "plans"
 	held := tierProduct(group, 1)
@@ -152,7 +152,7 @@ func (c stripeCatalog) GetByID(_ context.Context, id uuid.UUID) (*models.Product
 	return nil, sql.ErrNoRows
 }
 
-// #213: Stripe itself is asked, so a missed webhook cannot admit a parallel
+// Stripe itself is asked, so a missed webhook cannot admit a parallel
 // subscription; the probe never creates a customer.
 func TestStripeTierGroupConflict(t *testing.T) {
 	catalog := stripeCatalog{"price_premium": tierProduct("premium", 1), "price_addon": tierProduct("addon", 1)}

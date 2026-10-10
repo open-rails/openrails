@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// or#827: the settlement feed publishes on money_movement alone, so a real charge must declare it.
+// The settlement feed publishes on money_movement alone, so a real charge must declare it.
 func TestMoneyMovementIsDeclared(t *testing.T) {
 	t.Parallel()
 	refunded := uuid.New()
@@ -46,7 +46,7 @@ func TestMoneyMovementIsDeclared(t *testing.T) {
 	require.False(t, IsSettlementCandidate(nil))
 }
 
-// CUR-6: every minted payment row carries the canonical upper-case currency, or none is minted.
+// Every minted payment row carries the canonical upper-case currency, or none is minted.
 func TestPaymentInsertParamsCanonicalize(t *testing.T) {
 	t.Parallel()
 	params, err := paymentInsertParams(&models.Payment{ID: uuid.New(), Amount: 1_000_000, Currency: " usd ", Status: "succeeded", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})

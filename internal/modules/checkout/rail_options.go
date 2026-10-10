@@ -143,11 +143,10 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutAttemp
 	return models.CheckoutAttemptModeOneOff
 }
 
-// checkoutRailSkipReason reports why this PSP cannot serve the price under mode,
-// or "" when it can. It is the single readiness verdict behind both the option
-// list and routing's fallback classes (or#288) — one place decides, so the
-// advertised list and the routed choice can never disagree. Which sale kinds a
-// rail supports is the rail registry's capability, never a list here (#1078).
+// checkoutRailSkipReason reports why this PSP cannot serve the price under
+// mode, or "" when it can. It is the one readiness verdict behind both the
+// option list and routing's fallback classes, so they never disagree. Which
+// sale kinds a rail supports is the rail registry's capability.
 func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.ResolvedPSP, mode models.CheckoutAttemptMode) string {
 	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
@@ -187,7 +186,7 @@ func (s *CheckoutAttemptService) checkoutRailSkipReason(price *models.Price, tar
 		return ""
 	case models.RailNMI:
 		// A one-time NMI sale is a direct gateway charge on the tokenized or
-		// vaulted card: an armed PSP is enough, no provider plan (#1055).
+		// vaulted card: an armed PSP is enough, no provider plan.
 		if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}

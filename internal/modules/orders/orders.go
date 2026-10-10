@@ -1,5 +1,5 @@
-// Package orders is the purchase (#1168): frozen lines and totals bought by
-// one customer, ownership claims that keep two buys of one thing from both
+// Package orders is the purchase: frozen lines and totals bought by one
+// customer, ownership claims that keep two buys of one thing from both
 // succeeding, the merchant's gapless document numbers, and fulfilment when an
 // order is paid. Charging is checkout's: an order's attempts are checkout
 // attempts, and their provider intents settle the order through Paid.

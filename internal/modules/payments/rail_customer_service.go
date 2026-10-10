@@ -33,27 +33,20 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	if userID == "" || rail == "" || customerID == "" {
 		return fmt.Errorf("invalid rail customer args")
 	}
-	// #635/#682: only rails with a PERSON-level remote customer object get a
-	// psp_customers row — Stripe (cus_*) only. NMI vault ids are per-card
-	// instrument containers (deliberately minted one per card, #682), CCBill
-	// keys on subscription_id, Solana on the wallet address; a row for any of
-	// those would conflate an instrument/subscription/wallet with a person.
-	// No-op for those rails: their durable handles live on payment_methods
-	// (rail_customer_ref) and subscriptions (rail_subscription_id).
+	// Only rails with a person-level remote customer object (Stripe cus_*)
+	// get a psp_customers row. NMI vaults are per-card, CCBill keys on
+	// subscription_id, Solana on the wallet; their handles live on
+	// payment_methods and subscriptions.
 	if !railHasRemoteCustomer(rail) {
 		return nil
 	}
-	// or#893: the mapping is per-PSP, so the caller must have resolved which of
-	// the merchant's accounts on this rail owns the remote customer object. Every
-	// live caller does (the webhook plane pins it on ctx; checkout stamps it from
-	// the routed target) — an unresolved one would silently overwrite a sibling
+	// The mapping is per PSP: an unresolved PSP would overwrite a sibling
 	// account's mapping.
 	pspID, err := db.RequirePSPID(ctx)
 	if err != nil {
 		return fmt.Errorf("upsert rail customer %s/%s: %w", rail, customerID, err)
 	}
-	// Resolve the payable merchant subject for this (merchant, user) so the row carries
-	// customer_id alongside the legacy user_id (#317).
+	// The customer row the mapping references.
 	customerRowID, err := db.EnsureCustomerID(ctx, s.DB.Qx(ctx), uuid.Nil, userID)
 	if err != nil {
 		return err
@@ -72,8 +65,8 @@ func (s *RailCustomerService) Upsert(ctx context.Context, userID, rail, customer
 	})
 }
 
-// railHasRemoteCustomer reports whether a rail exposes a card-independent remote
-// customer object worth materializing into psp_customers (#635). Registry-backed (#669).
+// railHasRemoteCustomer reports whether a rail has a card-independent remote
+// customer object worth a psp_customers row.
 func railHasRemoteCustomer(rail string) bool {
 	return rails.HasRemoteCustomer(models.Rail(rail))
 }
@@ -128,13 +121,10 @@ func (s *RailCustomerService) GetAccountIDForPSP(ctx context.Context, customerID
 	})
 }
 
-// GetUserIDByCustomerID reverses GetCustomerID: it resolves the platform user from a
-// rail customer id. Used by webhook handlers (e.g. subscription invoices) whose
-// payloads carry the customer id but not the user_id metadata.
-//
-// PSP-scoped (or#893): a remote customer id is only unique WITHIN the gateway
-// account that minted it, so the reverse lookup must be told which account's
-// payload it is reading. The webhook plane pins that on ctx when it routes.
+// GetUserIDByCustomerID resolves the platform user from a rail customer id,
+// for webhooks that carry the customer id but no user_id metadata. A remote
+// customer id is unique only within the account that minted it, so the lookup
+// is scoped to the PSP the webhook plane pinned on ctx.
 func (s *RailCustomerService) GetUserIDByCustomerID(ctx context.Context, rail, customerID string) (string, error) {
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("rail customer service not initialized")

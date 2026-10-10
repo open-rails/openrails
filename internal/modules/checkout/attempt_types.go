@@ -46,8 +46,8 @@ type CheckoutAttemptPaymentRequest struct {
 	CardType   string
 	ExpiryDate string
 
-	// Card is a new card for a PSP whose card_entry is server (#1129). It is
-	// never encoded: it is no part of a request fingerprint or a stored row.
+	// Card is a new card for a PSP whose card_entry is server. It is never
+	// encoded: it is no part of a request fingerprint or a stored row.
 	Card *cardguard.Card `json:"-"`
 }
 
@@ -64,10 +64,8 @@ type CheckoutAttemptCreateRequest struct {
 	Metadata       map[string]string
 	IdempotencyKey string
 
-	// SuccessURL / CancelURL are the post-checkout redirect targets for hosted
-	// Stripe Checkout, supplied by the caller (frontend, which knows its own
-	// origin). Empty for non-Stripe rails. Threaded onto the CheckoutRequest
-	// in initializeCheckoutAttempt; processStripePayment requires them.
+	// SuccessURL / CancelURL are the caller's redirect targets for hosted
+	// Stripe Checkout, which requires them; empty for other rails.
 	SuccessURL string
 	CancelURL  string
 

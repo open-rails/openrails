@@ -42,15 +42,14 @@ type ModelBUpgradeQuote struct {
 	PeriodEnd   time.Time
 }
 
-// QuoteModelBUpgrade prices a Model B upgrade (#268): the customer pays
-// New - Credit now for a fresh period [now, now+New's cycle], where
+// QuoteModelBUpgrade prices a Model B upgrade: the customer pays New - Credit
+// now for a fresh period [now, now+New's cycle], where
 //
-//	Credit = ceilMinor(Old × (PeriodEnd − max(now, PeriodStart)) / (PeriodEnd − PeriodStart))
+//	Credit = Old × (PeriodEnd − max(now, PeriodStart)) / (PeriodEnd − PeriodStart)
 //
-// measured against the subscription's actual current period at nanosecond
-// precision, so the old plan's own cadence governs its credit whatever the
-// new cadence is. Money is rounded once, up to a whole rail minor unit of the
-// currency (customer-favored), and never exceeds Old. Unknown cycles or
+// measured against the actual current period at nanosecond precision, so the
+// old plan's cadence governs its credit. Credit is rounded once, up to a whole
+// rail minor unit (customer-favored), and never exceeds Old. Unknown cycles or
 // periods and a credit larger than New are typed refusals, never defaults.
 func QuoteModelBUpgrade(u ModelBUpgrade, now time.Time) (ModelBUpgradeQuote, error) {
 	if err := RequireSameCurrency(u.Old, u.New); err != nil {

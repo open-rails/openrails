@@ -25,7 +25,7 @@ const (
 	StatusRemoved  = "removed"
 )
 
-// CardSource is who reported a change to a stored card (#1168).
+// CardSource is who reported a change to a stored card.
 type CardSource string
 
 const (
@@ -144,8 +144,8 @@ type CardHolders interface {
 }
 
 // ApplyCardLifecycle is the one writer of a stored card's facts and standing
-// for every source (#1168). Inside the caller's transaction it locks the
-// method, writes a card version and applies the event:
+// for every source. Inside the caller's transaction it locks the method,
+// writes a card version and applies the event:
 //   - a same-brand reissue updates the card and keeps its mandates;
 //   - another brand updates the card and holds its mandates for reconsent;
 //   - a closed account closes the method and ends its mandates; a closed card
@@ -200,8 +200,8 @@ func ApplyCardLifecycle(ctx context.Context, q *gen.Queries, ev CardEvent) (Card
 	case CardUpdated:
 		if out.Reissued || out.Change == CardBrandChanged {
 			next.ContactCardholderAt = nil
-			// or#872: the issuer's newest word about the card lifts a hold an
-			// older one placed; a deletion in flight stays fenced.
+			// The issuer's newest word about the card lifts a hold an older
+			// one placed; a deletion in flight stays fenced.
 			if !strings.HasPrefix(models.DerefStr(m.ParkReason), "delete:") {
 				next.ParkReason, next.ParkedAt = nil, nil
 			}

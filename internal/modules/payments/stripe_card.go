@@ -20,11 +20,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// StripeCardDetails is the raw card payload that appears under
-// payment_method_details.card on a charge, under card on a payment_method, and
-// under payment_method_details.card on a charge listed via the REST backfill.
-// It lives here (not in the webhooks package) so both the webhook handler and
-// the reconcile/backfill share one parse + normalize path.
+// StripeCardDetails is the raw card payload under payment_method_details.card
+// on a charge and under card on a payment_method, shared by the webhook
+// handler and the reconcile/backfill.
 type StripeCardDetails struct {
 	Brand       string `json:"brand"`
 	Last4       string `json:"last4"`
@@ -52,9 +50,9 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 	if database == nil || card == nil || len(txnIDs) == 0 {
 		return nil
 	}
-	// The merchant predicate is EXPLICIT (#227): the payments
-	// transaction-id unique is partial on deleted_at since or#858, so
-	// transaction_id alone no longer bounds this write.
+	// The merchant predicate is explicit: the payments transaction-id unique
+	// indexes are partial on deleted_at, so transaction_id alone does not
+	// bound this write.
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return fmt.Errorf("snapshot payment card: %w", err)
@@ -208,7 +206,7 @@ func UpsertStripeCardForCustomer(
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
-		// Stamp the payable merchant subject alongside the legacy user_id (#317).
+		// The customer row the method belongs to.
 		if pm.CustomerID, err = db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
 			return nil, false, fmt.Errorf("resolve merchant subject for stripe payment method: %w", err)
 		}

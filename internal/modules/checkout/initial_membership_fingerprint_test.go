@@ -14,8 +14,8 @@ import (
 )
 
 func TestInitialMembershipReplayPreservesLegacyFingerprint(t *testing.T) {
-	// This is the pre-duration-split quote shape and the fingerprint the old
-	// implementation persisted when the customer accepted this exact offer.
+	// A quote persisted in the older shape, and the fingerprint stored when
+	// the customer accepted this exact offer.
 	const legacyTerms = `{
 		"collection_policy":"engine",
 		"subscription_id":"11111111-1111-4111-8111-111111111111",

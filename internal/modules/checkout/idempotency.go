@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 )
 
-// idempotencyStore claims request keys durably (#1099).
+// idempotencyStore claims request keys durably.
 type idempotencyStore interface {
 	Begin(ctx context.Context, operation, key string) (*idempotency.Claim, *idempotency.Record, error)
 }

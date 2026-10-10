@@ -26,10 +26,10 @@ func quoteLeft(old, new PriceAmount, period, left time.Duration, newCycle int) (
 	return QuoteModelBUpgrade(ModelBUpgrade{Old: old, New: new, PeriodStart: &start, PeriodEnd: &end, NewCycleHours: &newCycle}, prorationNow)
 }
 
-// #1067: credit is measured against the old plan's own period at sub-second
+// Credit is measured against the old plan's own period at sub-second
 // precision, whatever the new cadence, and rounds once, up to a whole rail
-// minor unit (customer-favoured). Cadence rows that e2e also drives
-// through a real NMI sale are kept only where they pin rounding edges.
+// minor unit (customer-favoured). Cadence rows that e2e also drives through a
+// real NMI sale are kept only where they pin rounding edges.
 func TestModelBUpgradeQuote(t *testing.T) {
 	const h = time.Hour
 	for _, tc := range []struct {
@@ -111,8 +111,7 @@ func TestModelBUpgradeQuoteDoesNotOverflow(t *testing.T) {
 }
 
 // Refusals are typed and produce no amount. Cross-currency is refused in both
-// directions (#820): subtracting EUR credit from a USD price invents a 1.0 FX
-// rate, undercharging one way and overcharging the other.
+// directions: subtracting EUR credit from a USD price invents a 1.0 FX rate.
 func TestModelBUpgradeQuoteRefusals(t *testing.T) {
 	start, end := prorationNow.Add(-time.Hour), prorationNow.Add(time.Hour)
 	at := func(o, n PriceAmount, s, e *time.Time, cycle *int) ModelBUpgrade {

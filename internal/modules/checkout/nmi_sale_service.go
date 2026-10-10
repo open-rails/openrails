@@ -28,7 +28,7 @@ type checkoutSaleIdempotencyResult struct {
 	DelayedStart  *string   `json:"delayed_start,omitempty"`
 }
 
-// intentExecutor is the write-through provider-intents surface (#674):
+// intentExecutor is the write-through provider-intents surface:
 // EnqueueAndExecute posts the durable intent and executes it inline; anything
 // not finished inline is drained by the scheduled executor/verifier.
 type intentExecutor interface {
@@ -48,7 +48,7 @@ type CheckoutNMISaleService struct {
 	PaymentMethodResolver    *CheckoutPaymentMethodResolver
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	// ResolveNMIClient arms the ctx merchant's NMI client from the armed rail
-	// state (#788) — the ONLY client source; nil fails closed.
+	// state: the only client source; nil fails closed.
 	ResolveNMIClient func(context.Context, string) (*nmi.NMIClient, error)
 	// Config arms the Stripe sale clients.
 	Config *config.Config
@@ -56,8 +56,8 @@ type CheckoutNMISaleService struct {
 	Posture intents.ModeView
 	// StripeEngines arms the accepted Stripe account for saved-card sales.
 	StripeEngines intents.StripeEngineServiceResolver
-	// Intents executes the durable write-ahead sale intent (#674). Every card
-	// charge in this flow goes through it — there is no direct provider call here.
+	// Intents executes the durable write-ahead sale intent. Every card charge
+	// in this flow goes through it; there is no direct provider call here.
 	Intents intentExecutor
 	// Orders settles an order sale in its completion transaction.
 	Orders *orders.Service
@@ -75,12 +75,12 @@ func NewCheckoutNMISaleService(
 	}
 }
 
-// Process runs a one-time NMI sale as a write-through provider intent (#674):
-// durable intent first (unique on the checkout idempotency key), inline
-// execution in this request, provider order id derived from the intent id.
-// A crash/timeout at ANY point leaves a pending/unknown intent the scheduled
-// executor/verifier resolves against the SAME order id — never a blind retry
-// under a fresh key, never a charged-but-unrecorded sale.
+// Process runs a one-time NMI sale as a write-through provider intent: durable
+// intent first (unique on the checkout idempotency key), inline execution, and
+// a provider order id derived from the intent id. A crash at any point leaves
+// an intent the scheduled executor/verifier resolves against the same order
+// id: never a blind retry under a fresh key, never a charged-but-unrecorded
+// sale.
 func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, target railTarget) (*CheckoutResponse, error) {
 	// Rows and intents speak rail vocabulary; the provider (account key) pins
 	// the NMI client.
@@ -152,9 +152,9 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		if !db.IsNotFound(err) {
 			return err
 		}
-		// #1099: a new operation is admitted only for a session still open,
-		// under its lock, so a request whose claim lapsed can never charge a
-		// session another request already settled.
+		// A new operation is admitted only for a session still open, under its
+		// lock, so a request whose claim lapsed can never charge a session
+		// another request already settled.
 		if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
 			return err
 		}

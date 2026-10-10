@@ -34,11 +34,10 @@ func IsSettlementCandidate(p *models.Payment) bool {
 	return p != nil && PaymentStatusSucceeded(p.Status) && p.Amount > 0 && p.RefundedPaymentID == nil
 }
 
-// resolveMoneyMovement enforces or#827's positive marker at the one place every
-// payment row is minted. The feed publishes on this value alone, so on a row
-// that would otherwise be a settlement candidate an undeclared marker is a bug,
-// not a default: refusing the write is how a new synthetic payment shape gets
-// caught here instead of at a host that was told money arrived.
+// resolveMoneyMovement enforces the money_movement marker where every payment
+// row is minted. The settlement feed publishes on it alone, so a settlement
+// candidate without one is refused, never defaulted: a host must not be told
+// money arrived for a synthetic row.
 func resolveMoneyMovement(p *models.Payment) (models.MoneyMovement, error) {
 	switch {
 	case p.MoneyMovement.Valid():
@@ -55,9 +54,8 @@ func resolveMoneyMovement(p *models.Payment) (models.MoneyMovement, error) {
 // paymentInsertParams maps a model onto the insert parameter set shared by
 // CreatePayment and CreatePaymentIfNotExists (identical column lists).
 func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
-	// CUR-6: the ONE place both CreatePayment and CreatePaymentIfNotExists
-	// build their params, so canonicalising here covers every payment row the
-	// repo mints regardless of which rail's ingestion produced it.
+	// The one place both inserts build their params, so every payment row
+	// carries the canonical currency whatever rail produced it.
 	currency := moneyutil.NormalizeCurrency(p.Currency)
 	if currency == "" {
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment currency required")
@@ -155,7 +153,7 @@ func (r *PaymentRepo) Create(ctx context.Context, payment *models.Payment) error
 		return terr
 	}
 	params.MerchantID = tid.UUID()
-	// or#893: a charge on a rail names the account that took it.
+	// A charge on a rail names the account that took it.
 	if params.PspID == nil && params.Channel == string(models.ChannelRail) {
 		psp, perr := db.RequirePSPID(ctx)
 		if perr != nil {
@@ -186,7 +184,7 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 		return false, terr
 	}
 	params.MerchantID = tid.UUID()
-	// or#893: a charge on a rail names the account that took it.
+	// A charge on a rail names the account that took it.
 	if params.PspID == nil && params.Channel == string(models.ChannelRail) {
 		psp, perr := db.RequirePSPID(ctx)
 		if perr != nil {
@@ -351,10 +349,9 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 	return effectiveRefundTotalFromLinkedRows(refunds), nil
 }
 
-// GetCustomerPaymentRefundTotals returns completed display totals for a bounded
-// page of original charges. Reservation totals have a different contract.
 // RefundTotals reports the completed refunds against each listed charge,
-// including refunds outside the page the charges came from.
+// including refunds outside the page the charges came from. Reservation totals
+// have a different contract.
 func (r *PaymentRepo) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -612,9 +609,8 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 	return out, r.attachPaymentRelations(ctx, out.Items)
 }
 
-// attachPaymentRelations stitches Price (+Product) and Subscription onto the
-// supplied payments in two batched lookups — the sqlc replacement for bun's
-// Relation("Price").Relation("Price.Product").Relation("Subscription").
+// attachPaymentRelations stitches Price (with its Product) and Subscription
+// onto the supplied payments in two batched lookups.
 func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

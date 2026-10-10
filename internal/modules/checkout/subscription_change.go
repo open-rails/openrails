@@ -332,8 +332,8 @@ func (s *CheckoutService) resolveChange(ctx context.Context, req *SubscriptionCh
 		if !sameTierGroup(c.currentProduct, c.product) {
 			return nil, ErrTierChangeDifferentGroup
 		}
-		// A tier group may mix currencies, a subscription never moves across
-		// one (#820).
+		// A tier group may mix currencies; a subscription never moves across
+		// one.
 		if err := RequireSameCurrency(PriceAmountOf(c.currentPrice), PriceAmountOf(c.price)); err != nil {
 			return nil, err
 		}

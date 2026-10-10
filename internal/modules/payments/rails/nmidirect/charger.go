@@ -1,8 +1,7 @@
-// Package nmidirect implements the rail-agnostic charge seam (#297 Phase A,
-// internal/modules/payments/charge) for the direct NMI rail: it translates
-// CIT/MIT context into NMI's credential-on-file wire fields and normalizes
-// gateway outcomes. The custodian-proxied transport (nmiproxy) is a sibling
-// implementation of the same seam.
+// Package nmidirect implements the charge seam (internal/modules/payments/charge)
+// for the direct NMI rail: it maps CIT/MIT context onto NMI's
+// credential-on-file fields and normalizes gateway outcomes. nmiproxy is the
+// custodian-proxied sibling.
 package nmidirect
 
 import (
@@ -123,15 +122,15 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 }
 
 // IsHardDecline classifies parsed gateway response codes: communication
-// errors (420, 421) and duplicate-transaction detection (430) are transient —
-// everything else parsed as a failure is a hard decline. Shared with the
-// custodian-proxied charges (#795): one decline taxonomy, two transports.
+// errors (420, 421) and duplicate-transaction detection (430) are transient,
+// every other parsed failure is a hard decline. The custodian-proxied charges
+// share it.
 func IsHardDecline(code int) bool {
 	return !nmi.UncertainResponseCode(code)
 }
 
 // FailureCode extracts the verbatim rail failure code from a parsed NMI
-// decline (#733 no-fabrication: localization id, else nmi_response_<code>).
+// decline: its localization id, else nmi_response_<code>.
 func FailureCode(err *nmi.CustomerVaultError) string {
 	if err == nil {
 		return "nmi_declined"

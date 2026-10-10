@@ -1,21 +1,12 @@
-// Package idempotency is durable request idempotency in PostgreSQL (#1099):
-// who runs a request, and what a replay of it answers, across every replica.
+// Package idempotency is durable request idempotency in PostgreSQL: who runs a
+// request, and what a replay of it answers, across every replica. It claims
+// (merchant, operation, key); provider calls are made once separately, by
+// provider_intents whose keys derive from the request key.
 //
-// Two layers, never one:
-//
-//   - This store claims (merchant, operation, key). Exactly one caller holds a
-//     processing claim; the rest see it in progress or read its stored result.
-//   - A provider call is made once by provider_intents (unique per merchant on its
-//     idempotency key), whose keys derive from the request key. A request that
-//     runs twice therefore reaches the same intent, which never executes twice.
-//
-// A processing claim is leased, on the database's clock. Its owner renews the
-// lease (Claim.Hold) on a small pool of its own, so renewals never queue
-// behind request traffic. When a renewal cannot be confirmed before the lease
-// could lapse, Hold cancels the owner's context: an owner stops before anyone
-// else can reclaim. A lapsed claim passes to exactly one later Begin. The
-// token fences the superseded owner: its Complete, Fail and Renew are refused,
-// and Claim.InTx lets its transactions refuse to commit.
+// A processing claim is leased on the database's clock and renewed by Hold on
+// its own small pool; Hold cancels the owner's context before the lease could
+// lapse. A lapsed claim passes to exactly one later Begin, and its token fences
+// the superseded owner: Complete, Fail, Renew and InTx refuse it.
 package idempotency
 
 import (

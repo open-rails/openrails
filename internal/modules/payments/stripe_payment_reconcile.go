@@ -55,9 +55,9 @@ func MirrorAttachedStripePaymentMethod(
 	return pm, life, err
 }
 
-// ObserveStripeCard applies the card Stripe holds for a mirrored method
-// (#1168). Stripe reissues under the same pm_ and reports a brand change the
-// same way, so brand and fingerprint are compared on every observation.
+// ObserveStripeCard applies the card Stripe holds for a mirrored method.
+// Stripe reissues under the same pm_ and reports a brand change the same way,
+// so brand and fingerprint are compared on every observation.
 func ObserveStripeCard(ctx context.Context, database *db.DB, clock clockwork.Clock, methodID uuid.UUID, truth *StripePaymentMethodState, source paymentmethods.CardSource, eventRef string) (paymentmethods.CardLifecycle, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

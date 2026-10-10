@@ -81,9 +81,9 @@ func (c *Charger) chargeRecurring(ctx context.Context, req charge.Request) (char
 		if parseErr != nil || codeErr != nil || fields.Get("response") != "2" || code != refusal.ResponseCode || code < 200 || code >= 300 {
 			return charge.Result{}, nil, err
 		}
-		// Expose only the structured refusal. Gateway free text and raw bodies are
-		// not durable financial proof and must not escape through engine evidence.
-		// The transaction id and AVS/CVV letters are structured (#1110).
+		// Expose only the structured refusal (code, transaction id, AVS/CVV
+		// letters). Gateway free text and raw bodies are not durable financial
+		// proof and must not escape through engine evidence.
 		answer := url.Values{"response": {"2"}, "response_code": {strconv.Itoa(code)}}
 		for _, key := range []string{"transactionid", "avsresponse", "cvvresponse"} {
 			if value := strings.TrimSpace(fields.Get(key)); value != "" {

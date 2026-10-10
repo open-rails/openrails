@@ -61,7 +61,7 @@ func TestSolanaPlanTerms(t *testing.T) {
 }
 
 // Which sessions surface a solana_pay_url, and the flow is declared, never
-// inferred (or#893).
+// inferred.
 func TestSolanaSessionFlows(t *testing.T) {
 	mk := func(rail models.Rail, mode models.CheckoutAttemptMode, flow string) *models.CheckoutAttempt {
 		return &models.CheckoutAttempt{ID: uuid.New(), Status: models.CheckoutAttemptStatusRequiresAction, Rail: rail, Mode: mode, RailState: map[string]any{"flow": flow}}
@@ -192,7 +192,7 @@ func TestSolanaSessionUsesPersistedQuote(t *testing.T) {
 }
 
 // Poller-driven confirms have no request PSP; they pin the session's so the
-// rows they write are attributable (or#893), and never invent one.
+// rows they write are attributable, and never invent one.
 func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
 	svc := &CheckoutAttemptService{}
 	psp := uuid.New()

@@ -23,8 +23,8 @@ func (s *CheckoutAttemptService) acceptedOperationSessionResponse(ctx context.Co
 	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(native))
 	custodian := false
 	if db.IsNotFound(err) {
-		// A custodian-held card's sale is keyed under its own type (#1099):
-		// read it too, so its in-flight charge never reads as no operation.
+		// A custodian-held card's sale is keyed under its own type: read it
+		// too, so its in-flight charge never reads as no operation.
 		operation, err = intents.NewStore(s.db).GetByIdempotencyKey(ctx, CustodianSaleIdempotencyKey(native))
 		custodian = true
 	}

@@ -80,10 +80,10 @@ func networkTokenExpExpr(ntID string) string {
 	return fmt.Sprintf(`{{ network_token: %s | json: "$.data" | card_exp: "MMYY" }}`, ntID)
 }
 
-// SaleForm composes the classic NMI DirectPost sale form with BT
-// detokenization expressions. Pure: no I/O, no defaults fabricated —
-// missing amount/currency/source is a loud error (#651). cryptogram is
-// required for network-token CITs (nil otherwise).
+// SaleForm composes the classic NMI Direct Post sale form with BT
+// detokenization expressions. Pure: a missing amount, currency or source is an
+// error, never a default. cryptogram is required for network-token CITs (nil
+// otherwise).
 func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basistheory.Cryptogram) (url.Values, error) {
 	if strings.TrimSpace(gw.SecurityKey) == "" {
 		return nil, errors.New("nmiproxy: gateway security_key is required")

@@ -25,12 +25,11 @@ func NewCheckoutPaymentMethodResolver(paymentMethodService *paymentmethods.Payme
 	}
 }
 
-// ResolvePaymentMethod returns the vault handle pair (customer-scope vault id +
-// instrument-scope billing id, #682), the resolved payment method row (#297:
-// carries the stored-credential replay references), and whether it was freshly
-// vaulted from a token in THIS request (created=true — the caller may
-// best-effort clean it up on a verified-clean decline). The billing id is ""
-// for pre-#682 rows that never recorded one.
+// ResolvePaymentMethod returns the vault handles (customer-scope vault id,
+// instrument-scope billing id), the payment method row with its
+// stored-credential references, and created when this request vaulted it from
+// a token (the caller may clean it up on a verified-clean decline). The
+// billing id is "" for a row that never recorded one.
 func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (railCustomerRef, billingID string, pm *models.PaymentMethod, created bool, err error) {
 	if req.PaymentMethodID != "" {
 		pmID, err := billing.ParsePaymentMethodID(req.PaymentMethodID)
@@ -56,7 +55,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 			return "", "", nil, false, err
 		}
 
-		// NMI: vault id + billing id (#682). Stripe: customer + PaymentMethod.
+		// NMI: vault id + billing id. Stripe: customer + PaymentMethod.
 		return pm.RailCustomerRef, pm.RailMethodRef, pm, false, nil
 	}
 

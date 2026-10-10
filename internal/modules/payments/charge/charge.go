@@ -1,22 +1,18 @@
-// Package charge is the narrow, rail-agnostic charge seam (#297): "charge an
-// instrument, an amount, under a flow". Callers state the flow (who initiates
-// and which agreement the charge runs under); each rail derives its network
-// and stored-credential flags from it (nmidirect.StoredCredentialFor, the
-// Stripe engine's flags) and never takes them from callers.
+// Package charge is the rail-agnostic charge seam: charge an instrument an
+// amount under a flow. Callers state the flow (initiator and agreement); each
+// rail derives its network and stored-credential flags from it, never from
+// callers.
 //
-// Network model (NMI integration portal + docs.nmi.com, 2026-07-06):
-//   - A charge on a stored credential declares who initiated it (customer =
-//     CIT, merchant = MIT) and whether it is the storing transaction of an
-//     agreement or a later use.
-//   - An agreement is a mandate (internal/modules/mandates): recurring for one
-//     subscription, unscheduled for collection in one currency, card_on_file
-//     for one-click reuse. Its storing transaction's references are its
-//     lineage, scoped to the gateway account that ran it; later charges send
-//     them. The networks keep the recurring and unscheduled sequences apart,
-//     and card_on_file rides the unscheduled one.
+// A charge on a stored credential is customer- (CIT) or merchant-initiated
+// (MIT), and either its agreement's storing transaction or a later use. An
+// agreement is a mandate (internal/modules/mandates): recurring for one
+// subscription, unscheduled for collection in one currency, card_on_file for
+// one-click reuse. The storing transaction's references are its lineage,
+// scoped to the gateway account that ran it; later charges send them. The
+// networks keep the recurring and unscheduled sequences apart; card_on_file
+// rides the unscheduled one.
 //
-// The NMI schedule lanes (add_subscription, rebill_subscription) charge NMI's
-// own schedule objects rather than (instrument, amount), so they derive their
+// The NMI schedule lanes (add_subscription, rebill_subscription) derive their
 // wire fields from a Context through nmidirect instead of calling Charger.
 package charge
 
@@ -127,7 +123,7 @@ type Instrument struct {
 // Request charges one instrument for one amount under one CIT/MIT context.
 type Request struct {
 	Instrument Instrument
-	// AmountMinor is rail minor units (typed Cents, #671).
+	// AmountMinor is in rail minor units (cents), not micros.
 	AmountMinor moneyutil.Cents
 	Currency    string
 	Description string
@@ -138,8 +134,7 @@ type Request struct {
 }
 
 // TokenType is the credential form the rail presented to the network for one
-// charge (#796): the token_type dimension that makes the network-token
-// uplift measurable. Stamped by the rail at charge time; "" = unknown.
+// charge, stamped by the rail at charge time; "" = unknown.
 const (
 	// TokenTypePSPToken: the PSP holds the card and charged its own stored
 	// credential (NMI customer vault, a Stripe pm_).
@@ -158,9 +153,8 @@ const (
 type Result struct {
 	TransactionID string
 
-	// TokenType is the credential form presented (TokenType* consts, #796).
-	// Set on approvals AND parsed declines; "" only when the rail predates
-	// the instrumentation.
+	// TokenType is the credential form presented (TokenType* consts), set on
+	// approvals and parsed declines; "" when the rail does not report it.
 	TokenType string
 
 	// CapturedRef is the initial transaction id an approved storing charge

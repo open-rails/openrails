@@ -104,7 +104,7 @@ func TestPayment(t *testing.T) {
 	_, _, err = Payment(card, PayCheckoutSessionParams{PaymentToken: "tok", BillingDetails: details("A", "QA", "", "")}, "", owns)
 	require.NoError(t, err, "a postal code is not demanded where none exists")
 
-	// A PSP whose card_entry is server takes the card itself (#1129).
+	// A PSP whose card_entry is server takes the card itself.
 	server := Option{CheckoutSessionOption: CheckoutSessionOption{ID: "option_server", Rail: "nmi", Driver: "card", PSPID: billing.PSPID(uuid.New())}, Selector: "cards"}
 	entered, err := cardguard.NewCard("4111111111111111", 10, 2027, "0739")
 	require.NoError(t, err)

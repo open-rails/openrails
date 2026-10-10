@@ -1,20 +1,15 @@
-// Package nmiproxy implements the rail-agnostic charge seam (#297 Phase B /
-// #795) for NMI charges whose card is held by a third-party CUSTODIAN: Basis
-// Theory's ephemeral detokenizing proxy presents the stored card to the NMI
-// DirectPost gateway. Same rail as nmidirect, same decline taxonomy — only the
-// transport differs (or#879). The PAN never touches OpenRails (SAQ A); the
-// engine holds only the custodian token reference
-// (payment_methods.rail_method_ref) and the NMI security key.
+// Package nmiproxy implements the charge seam for NMI charges whose card a
+// third-party custodian holds: Basis Theory's detokenizing proxy presents the
+// stored card to NMI's Direct Post gateway. Same rail and decline taxonomy as
+// nmidirect; only the transport differs. The PAN never touches OpenRails (SAQ
+// A): the engine holds only the custodian token reference and the NMI
+// security key. As in nmidirect, NMI's transactionid is the stored-credential
+// reference.
 //
-// Anchor semantics are IDENTICAL to nmidirect: NMI's gateway transactionid is
-// the stored-credential replay reference — NMI-scoped, so instruments survive
-// a future vault swap per-agreement-sequence.
-//
-// Retry safety: the BT proxy has NO idempotency support. Safety rests on the
-// durable intents log (#674), NMI duplicate detection (430 = transient), and
-// the orderid verify leg. Ambiguous outcomes (basistheory.IsTransportAmbiguous
-// or nmi.IsTransportAmbiguous) must be VERIFIED, never blind-retried and never
-// treated as declines.
+// The BT proxy has no idempotency support: retry safety rests on the durable
+// intents log, NMI duplicate detection (430 = transient) and the orderid
+// verify leg. Ambiguous outcomes (basistheory.IsTransportAmbiguous,
+// nmi.IsTransportAmbiguous) are verified, never blind-retried or declined.
 package nmiproxy
 
 import (
@@ -32,13 +27,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
-// It is NMI: the proxy changes how the card reaches the gateway, never which
-// gateway charges it (or#879).
+// Rail is NMI: the proxy changes how the card reaches the gateway, never which
+// gateway charges it.
 const Rail = string(models.RailNMI)
 
-// Custodian is the payment_methods.custodian value for these rows (or#880):
-// the PAN is held at Basis Theory while the processor stays NMI.
+// Custodian is the payment_methods.custodian of these rows: the PAN is held
+// at Basis Theory while the processor stays NMI.
 const Custodian = models.CustodianBasisTheory
 
 // Charger charges custodian-held instruments through the seam. Source selects the

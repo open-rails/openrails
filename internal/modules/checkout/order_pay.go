@@ -31,9 +31,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Orders (#1168) are paid by checkout attempts (mode order) whose charge is
-// the sale intent: the same admission, submission fence, receipt and
-// verification as a one-price sale, settling the order's own lines.
+// Orders are paid by checkout attempts (mode order) whose charge is the sale
+// intent: the same admission, submission fence, receipt and verification as a
+// one-price sale, settling the order's own lines.
 
 // orderAttemptTTL bounds one attempt; the order's own expiry bounds it too.
 const orderAttemptTTL = 24 * time.Hour

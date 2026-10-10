@@ -6,9 +6,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// IsNMI reports whether the rail is the NMI gateway. The rail value IS the
-// gateway now (post-#630), so this is a plain equality check — there is no
-// longer a name-set mapping multiple rail names onto NMI.
+// IsNMI reports whether the rail is the NMI gateway.
 func IsNMI(rail models.Rail) bool {
 	return normalize.Lower(string(rail)) == string(models.RailNMI)
 }

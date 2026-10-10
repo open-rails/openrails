@@ -78,8 +78,8 @@ func (i FrozenInstrument) Validate() error {
 	return nil
 }
 
-// custodianHeld: the frozen charge addressed the card through a custodian
-// proxy (or#879), so the gateway holds no vault for it.
+// CustodianHeld reports whether the frozen charge addressed the card through a
+// custodian proxy, so the gateway holds no vault for it.
 func (i FrozenInstrument) CustodianHeld() bool { return i.Custodian != models.CustodianPSP }
 
 // Matches checks the method still has the custody the operation froze. The

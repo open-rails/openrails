@@ -13,14 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// Deterministic processor routing (or#288).
-//
-// One function decides which PSP a checkout lands on, and the SAME function
-// backs the option list, session creation and the dry-run trace — there is no
-// second implementation to drift. Routing is a pre-session act: it ranks
-// declared candidates, drops the ones that cannot serve this price right now,
-// and takes the first survivor. It never retries after a charge — a decline is
-// a per-charge outcome, not a routing failure.
+// Deterministic processor routing: one function decides which PSP a checkout
+// lands on and backs the option list, session creation and the dry-run trace.
+// It ranks declared candidates, drops those that cannot serve this price, and
+// takes the first survivor. It never retries after a charge: a decline is a
+// per-charge outcome, not a routing failure.
 
 // defaultRoutingOrder is the built-in preference order used when the merchant
 // declares no policy. Rail kinds, not PSP keys: it must hold for merchants
@@ -150,7 +147,7 @@ func (s *CheckoutAttemptService) Route(ctx context.Context, in RoutingInput) (*R
 			return decision, fmt.Errorf("resolve payment provider %q: %w", selector, err)
 		}
 		// Named, not swept: no fallback, but the PSP must still be able to
-		// make this sale (#1078: a named CCBill never enrolls a new subscription).
+		// make this sale (a named CCBill never enrolls a new subscription).
 		if skip := s.checkoutRailSkipReason(in.Price, target, providerConfig, in.Mode); skip != "" {
 			decision.Target = railTarget{}
 			decision.Candidates[0].Skip = skip
@@ -169,7 +166,7 @@ func (s *CheckoutAttemptService) Route(ctx context.Context, in RoutingInput) (*R
 		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, PSPID: targetPSPID(target), Skip: skip}
 		if skip == "" {
 			// The resolved PSP key is the answer, not the requested selector: a
-			// rail kind resolves to the armed account's key (#848).
+			// rail kind resolves to the armed account's key.
 			candidate.Selector = target.PSP
 			if decision.Target.PSP == "" {
 				decision.Target = target

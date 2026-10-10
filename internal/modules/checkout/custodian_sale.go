@@ -35,21 +35,19 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// Custodian-held card checkout collection (#795 B5): the browser tokenizes
-// into a Basis Theory token INTENT (Elements; the PAN goes browser->custodian,
-// SAQ A); the engine accepts ONLY {bt_token_intent_id}. The CIT charges the
-// INTENT (CVC present), converts to a durable token in-request on approval,
-// writes the instrument row, and persists the stored-credential anchor exactly
-// like the nmidirect paths. NT provisioning rides behind the merchant flag and
-// is never load-bearing.
-//
-// The RAIL here is NMI (or#879): the custodian holds the card, the PSP's own
+// Custodian-held card checkout: the browser tokenizes into a Basis Theory
+// token intent (Elements; the PAN goes browser to custodian, SAQ A) and the
+// engine accepts only {bt_token_intent_id}. The CIT charges the intent (CVC
+// present), converts it to a durable token on approval, writes the instrument
+// row and records the stored-credential anchor like the nmidirect paths.
+// Network-token provisioning rides behind the merchant flag and is never
+// load-bearing. The rail is NMI: the custodian holds the card, the PSP's own
 // gateway charges it.
 
-// TypeCustodianSale is the write-through checkout sale intent (#674) for a
+// TypeCustodianSale is the write-through checkout sale intent for a
 // custodian-held card. The NMI order id derives from the intent id, so the
-// verify leg answers "did THIS sale charge?" against the GATEWAY (the proxy
-// has no idempotency — the intents log + NMI dup detection are the safety).
+// verify leg asks the gateway "did THIS sale charge?" (the proxy has no
+// idempotency: the intents log and NMI dup detection are the safety).
 const TypeCustodianSale = "custodian_sale"
 
 func CustodianSaleIdempotencyKey(checkoutIdempotencyKey string) string {
@@ -97,14 +95,14 @@ type custodianInstrumentStore interface {
 type custodialPSP struct {
 	Custody            *config.ResolvedCustodian
 	GatewaySecurityKey string
-	// The charging PSP's exact identity and declared credential set (#1055).
+	// The charging PSP's exact identity and declared credential set.
 	MerchantID billing.MerchantID
 	Scope      merchants.PSPScope
 	Settings   *config.NMIProviderSettings
 }
 
-// resolveConfig arms the ctx merchant's custodian-held-card credentials (#788):
-// the NMI PSP that charges, and the custodian it references (or#879/or#880).
+// resolveConfig arms the ctx merchant's custodian-held-card credentials: the
+// NMI PSP that charges, and the custodian it references.
 func (s *CheckoutCustodianSaleService) resolveConfig(ctx context.Context) (*custodialPSP, error) {
 	if s.Rails == nil {
 		return nil, errors.New("rail resolution not configured")
@@ -243,7 +241,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		Origin:         intents.OriginUser,
 		OriginReason:   "checkout one-time sale (custodian-held card)",
 	}
-	// Admitted under the session's lock, like the native sale (#1099).
+	// Admitted under the session's lock, like the native sale.
 	if req.CheckoutAttemptID != "" && s.DB != nil {
 		err = s.DB.MerchantTx(work, func(ctx context.Context, tx pgx.Tx) error {
 			if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
@@ -286,8 +284,6 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		return nil, ErrCheckoutProcessing
 	}
 }
-
-// --- intent handler ----------------------------------------------------------
 
 // CustodianSaleIntentHandler: money-mover semantics mirror the NMI sale
 // handler — re-executions verify at the GATEWAY first (the BT proxy has no
@@ -363,8 +359,8 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Bil
 	}
 
 	// Prior anchor: an instrument with the intent's fingerprint may already be
-	// anchored — reuse its unscheduled sequence. Fingerprint comes from the
-	// intent read (loud not-found = expired intent, #651).
+	// anchored; reuse its unscheduled sequence. The fingerprint comes from the
+	// intent read (not found = expired intent, an error).
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
 		return intents.Parked("custodian client build failed: " + err.Error())
@@ -584,8 +580,8 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		})
 		if err != nil {
 			if basistheory.IsNotFound(err) {
-				// Intent expired inside the crash window. The charge HAPPENED —
-				// register the money; the instrument needs re-collection (#657).
+				// Intent expired inside the crash window. The charge happened:
+				// register the money; the instrument needs re-collection.
 				log.WithContext(ctx).WithFields(log.Fields{
 					"bt_token_intent_id": p.TokenIntentID, "order_id": orderID,
 				}).Error("custodian sale: token intent expired before conversion; purchase recorded WITHOUT a stored instrument (re-collect card)")
@@ -618,8 +614,8 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 				log.WithContext(ctx).WithError(merr).Warn("custodian sale: failed to record the card's mandate; the next customer-present charge stores it")
 			}
 		}
-		// NT provisioning (B8): armed by config, idempotent per PAN, and never
-		// load-bearing — any failure warns and the instrument stays pan_proxy.
+		// Network-token provisioning: armed by config, idempotent per PAN, and
+		// never load-bearing; any failure warns and the instrument stays pan_proxy.
 		if cfg.Custody.NetworkTokens && token != nil {
 			h.provisionNetworkToken(ctx, bt, merchantID, *instrumentID, token.ID, orderID)
 		}
@@ -735,8 +731,8 @@ func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, 
 	}
 }
 
-// recordAttempt records the custodian sale's answer (#1110). The sale's own
-// writes are not one transaction, so a failed write is logged.
+// recordAttempt records the custodian sale's answer. The sale's own writes
+// are not one transaction, so a failed write is logged.
 func (h *CustodianSaleIntentHandler) recordAttempt(ctx context.Context, intent gen.BillingProviderIntent, cfg *custodialPSP, p CustodianSalePayload, a attempts.Attempt) {
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil || h.Sale.DB == nil || cfg.Scope.ID == uuid.Nil {

@@ -13,9 +13,9 @@ import (
 type CancelMode string
 
 const (
-	// CancelModeReversible: cancellation can be undone in-place before the paid
+	// CancelModeReversible: cancellation can be undone in place before the paid
 	// period ends (Stripe's cancel_at_period_end; NMI while a deferred delete is
-	// still pending — issue 216).
+	// still pending).
 	CancelModeReversible CancelMode = "reversible"
 
 	// CancelModeDestructive: cancellation tears down the rail-side subscription
@@ -23,9 +23,8 @@ const (
 	// Solana).
 	CancelModeDestructive CancelMode = "destructive"
 
-	// CancelModeExternalPortal: we cannot cancel or resume from our system; the
-	// user must use the rail's own consumer portal. No current rail (#696 moved
-	// CCBill onto the DataLink SMS cancel); kept for the API vocabulary.
+	// CancelModeExternalPortal: the user cancels or resumes in the rail's own
+	// consumer portal. No current rail; kept for the API vocabulary.
 	CancelModeExternalPortal CancelMode = "external_portal"
 )
 
@@ -40,9 +39,8 @@ type CredentialKey struct {
 	Required bool
 }
 
-// Descriptor declares one rail's capabilities and metadata (#669) — the facts
-// that previously lived in scattered per-rail switches. Function fields carry
-// per-rail behavior that is still a fact of the rail, not deployment wiring.
+// Descriptor declares one rail's capabilities and metadata. Function fields
+// carry per-rail behavior that is a fact of the rail, not deployment wiring.
 type Descriptor struct {
 	Rail models.Rail
 
@@ -53,58 +51,46 @@ type Descriptor struct {
 	// PSP catalog (billing.psps).
 	HasPSPs bool
 
-	// HasRemoteCustomer: the rail exposes a PERSON-level remote customer
-	// object worth materializing into psp_customers (#635) — Stripe cus_*
-	// only. NMI's vault "customer" is an instrument container that OpenRails
-	// deliberately mints PER CARD (#682), so it is not person-unique and does
-	// not qualify; CCBill keys on subscription_id and Solana on the wallet
-	// address — none of these is a customer.
+	// HasRemoteCustomer: the rail has a person-level remote customer object
+	// worth a psp_customers row (Stripe cus_*). NMI vaults are minted per card,
+	// CCBill keys on subscription_id and Solana on the wallet: none is a
+	// customer.
 	HasRemoteCustomer bool
 
 	// SupportsChargeSavedMethod: invoice collection may charge a saved method
-	// on this rail (arrears settlement #241).
+	// on this rail.
 	SupportsChargeSavedMethod bool
 
-	// SupportsCatalogTrial: the rail can honour a catalog first phase
-	// (`trial:` — free or paid intro) declared on a price (or#896). Stripe
-	// maps it onto subscription_data[trial_end]; CCBill's FlexForm carries the
-	// terms and OpenRails validates the billed amount against them. NMI's
-	// add_subscription and Solana's on-chain plan have no first-phase concept —
-	// declaring a trial there is REFUSED at catalog push, never silently dropped.
+	// SupportsCatalogTrial: the rail can honour a price's catalog first phase
+	// (`trial:`, free or paid intro): Stripe via subscription_data[trial_end],
+	// CCBill via FlexForm terms OpenRails validates the billed amount against.
+	// Elsewhere a declared trial is refused at catalog push, never dropped.
 	SupportsCatalogTrial bool
 
 	// SupportsPaymentMethodCRUD: OpenRails owns first-party payment-instrument
-	// CRUD on this rail (or#896). NMI only — its customer vault is the one
-	// instrument store OpenRails writes. Stripe delegates to Checkout / the
-	// Billing Portal, CCBill owns its own vault, Solana has no instrument.
+	// CRUD on this rail. NMI only: its customer vault is the one instrument
+	// store OpenRails writes.
 	SupportsPaymentMethodCRUD bool
 
-	// OpenRailsDrivenDunning: OpenRails owns the retry timing (models grace
-	// access as explicit entitlement windows during dunning). NMI + Solana
-	// recurring (#256/#257) — both charged by an OpenRails worker. Stripe
-	// drives its own dunning and emits webhooks.
+	// OpenRailsDrivenDunning: an OpenRails worker owns the retry timing and
+	// models grace access as entitlement windows (NMI, Solana). Stripe drives
+	// its own dunning and emits webhooks.
 	OpenRailsDrivenDunning bool
 
 	// RemoteDeleteOnTerminalCancel: a terminal cancellation must durably queue
 	// deletion of the rail-side recurring schedule or the provider keeps
-	// rebilling it (#344/#679). NMI only: Stripe/CCBill drive their own
-	// lifecycle; Solana recurring is pulled by our cranker (stopped by the
-	// local cancel cascade).
+	// rebilling it. NMI only.
 	RemoteDeleteOnTerminalCancel bool
 
-	// AutoBilled reports whether the provider rebills this subscription on its
-	// own side, so OpenRails must not manual-rebill or terminate it (#635), AS
-	// CONSULTED BY THE DUNNING WORKER: CCBill always; NMI only when vault-less
-	// (a vault-less recurring sub auto-charges on the remote subscription id).
-	// Stripe is declared false here although it rebills itself — the dunning
-	// worker never processes Stripe cohorts (OpenRailsDrivenDunning=false), and
-	// the historical switch returned false; preserved deliberately (#669 note B).
+	// AutoBilled reports whether the provider rebills the subscription itself,
+	// so the dunning worker must not rebill or terminate it: CCBill always, NMI
+	// never. Stripe is false although it rebills itself: the dunning worker
+	// never processes Stripe (OpenRailsDrivenDunning=false).
 	AutoBilled func(sub *models.Subscription) bool
 
-	// CancelMode classifies how a cancellation of a subscription on this rail
-	// behaves. Takes the full subscription (never nil — callers guard) because
-	// NMI is state-conditional: reversible only while its deferred delete is
-	// still pending (issue 216). Never nil.
+	// CancelMode classifies how cancelling a subscription on this rail
+	// behaves. It takes the subscription (never nil) because NMI is reversible
+	// only while its deferred delete is pending. Never nil.
 	CancelMode func(sub *models.Subscription, now time.Time) CancelMode
 
 	// CancelPortalURL is the rail's external consumer portal for subscription
@@ -124,15 +110,15 @@ type Descriptor struct {
 	OneOffSale bool
 
 	// NewSubscription is how checkout enrolls a NEW subscription on this rail.
-	// Existing and imported agreements keep working regardless (#1045).
+	// Existing and imported agreements keep working regardless.
 	NewSubscription NewSubscription
 
 	// ServerCardEntry: the gateway has a server-side vault call, so a PSP of
-	// this rail may declare card_entry: server (#1129).
+	// this rail may declare card_entry: server.
 	ServerCardEntry bool
 }
 
-// NewSubscription classifies new-subscription enrollment on a rail (#1078).
+// NewSubscription classifies new-subscription enrollment on a rail.
 type NewSubscription string
 
 const (
@@ -153,9 +139,8 @@ func cancelReversible(*models.Subscription, time.Time) CancelMode  { return Canc
 func cancelDestructive(*models.Subscription, time.Time) CancelMode { return CancelModeDestructive }
 
 // nmiCancelMode: reversible only while the subscription is canceled, its
-// deferred delete_subscription has not yet executed (DeletionScheduledAt is
-// cleared by the River finalizer), and the paid period is still in the future
-// (issue 216). Once the delete fires or the period lapses it is destructive.
+// deferred delete_subscription has not executed (the River finalizer clears
+// DeletionScheduledAt), and the paid period is still ahead.
 func nmiCancelMode(sub *models.Subscription, now time.Time) CancelMode {
 	if sub.Status != models.StatusCanceled {
 		return CancelModeDestructive
@@ -183,24 +168,22 @@ var descriptors = []Descriptor{
 		models.RailNMI,
 		"Credit Card", // DisplayName
 		true,          // HasPSPs
-		false,         // HasRemoteCustomer (#682: vault ids are per-card instrument containers, not persons)
+		false,         // HasRemoteCustomer (vault ids are per-card)
 		true,          // SupportsChargeSavedMethod
-		false,         // SupportsCatalogTrial (add_subscription has no first phase — or#896 refuses the declaration)
+		false,         // SupportsCatalogTrial (add_subscription has no first phase)
 		true,          // SupportsPaymentMethodCRUD (the customer vault)
 		true,          // OpenRailsDrivenDunning
 		true,          // RemoteDeleteOnTerminalCancel (or NMI keeps retrying the schedule forever)
 		nmiAutoBilled,
 		nmiCancelMode,
 		"", // CancelPortalURL
-		// or#880: a custodian's private application key is NOT an NMI
-		// credential. It belongs to the custodian account, not to whichever
-		// gateway its proxy detokenizes into, and lives under
+		// A custodian's API key is not an NMI credential: it lives under
 		// custodians/<kind>/<environment>/<account_id>/api_key.
-		// webhook_signing_secret_previous: the rotated-out secret, verified
-		// only until webhook_overlap_expires_at (SEC-29).
+		// webhook_signing_secret_previous verifies only until
+		// webhook_overlap_expires_at.
 		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_previous", true, false}},
 		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment", "card_entry", "webhook_overlap_expires_at"},
-		true,                  // OneOffSale (direct gateway sale, #1055)
+		true,                  // OneOffSale (direct gateway sale)
 		NewSubscriptionEngine, // saved vault card charged by OpenRails
 		true,                  // ServerCardEntry (Direct Post customer_vault=add_customer)
 	},
@@ -215,12 +198,12 @@ var descriptors = []Descriptor{
 		false,         // OpenRailsDrivenDunning (CCBill retries itself)
 		false,         // RemoteDeleteOnTerminalCancel (CCBill drives its own lifecycle)
 		autoBilledAlways,
-		cancelDestructive, // #696: DataLink SMS cancel — no resume API, access rides the paid runway
-		"",                // CancelPortalURL (none since #696; cancels happen on OUR site)
+		cancelDestructive, // DataLink SMS cancel: no resume API, access rides the paid runway
+		"",                // CancelPortalURL (cancels happen on our site)
 		[]CredentialKey{{"salt", true, true}, {"datalink_username", true, false}, {"datalink_password", true, false}},
 		nil,
 		false,               // OneOffSale
-		NewSubscriptionNone, // retained cohort only; new sales are refused (#1045, #1070)
+		NewSubscriptionNone, // retained cohort only; new sales are refused
 		false,               // ServerCardEntry (CCBill's own page takes the card)
 	},
 	{
@@ -236,9 +219,8 @@ var descriptors = []Descriptor{
 		autoBilledNever,
 		cancelReversible, // cancel_at_period_end
 		"",               // CancelPortalURL
-		// webhook_signing_secret_previous (#856): the outgoing secret, retained
-		// for the rollover overlap so events still queued on the superseded
-		// endpoint keep verifying, never past webhook_overlap_expires_at (SEC-29).
+		// webhook_signing_secret_previous keeps events queued on the rotated-out
+		// endpoint verifying, never past webhook_overlap_expires_at.
 		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
 		[]string{"publishable_key", "webhook_overlap_expires_at"},
 		true,                  // OneOffSale
@@ -251,7 +233,7 @@ var descriptors = []Descriptor{
 		true,     // HasPSPs
 		false,    // HasRemoteCustomer (keys on wallet address)
 		false,    // SupportsChargeSavedMethod
-		false,    // SupportsCatalogTrial (the on-chain plan has one period price — or#896 refuses the declaration)
+		false,    // SupportsCatalogTrial (the on-chain plan has one period price)
 		false,    // SupportsPaymentMethodCRUD (a wallet is not an instrument we hold)
 		true,     // OpenRailsDrivenDunning (recurring pulled by our worker)
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
@@ -292,7 +274,7 @@ func All() []Descriptor {
 }
 
 // HasRemoteCustomer reports whether the rail exposes a card-independent remote
-// customer object (#635). Unknown rails: false.
+// customer object. Unknown rails: false.
 func HasRemoteCustomer(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.HasRemoteCustomer
@@ -305,9 +287,9 @@ func SupportsPSPs(rail models.Rail) bool {
 	return ok && d.HasPSPs
 }
 
-// SupportsCatalogTrial reports whether a catalog `trial:` first phase can be
-// executed on this rail (or#896). Unknown rails: false — a trial declared
-// against something we cannot classify is refused, never dropped.
+// SupportsCatalogTrial reports whether a catalog `trial:` first phase can run
+// on this rail. Unknown rails: false, so an unclassified trial is refused,
+// never dropped.
 func SupportsCatalogTrial(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.SupportsCatalogTrial
@@ -334,7 +316,7 @@ func SellsOnLocalTerms(rail models.Rail) bool {
 }
 
 // SupportsServerCardEntry reports whether a PSP of this rail may take cards on
-// the server (#1129). Unknown rails: false.
+// the server. Unknown rails: false.
 func SupportsServerCardEntry(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.ServerCardEntry
@@ -347,7 +329,7 @@ func NewSubscriptionFor(rail models.Rail) NewSubscription {
 }
 
 // SupportsPaymentMethodCRUD reports whether OpenRails owns first-party
-// payment-instrument CRUD on this rail (or#896). Unknown rails: false.
+// payment-instrument CRUD on this rail. Unknown rails: false.
 func SupportsPaymentMethodCRUD(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.SupportsPaymentMethodCRUD
@@ -361,8 +343,8 @@ func AutoBilled(rail models.Rail, sub *models.Subscription) bool {
 }
 
 // RemoteDeleteOnTerminalCancel reports whether a terminal cancellation on this
-// rail must durably queue deletion of the rail-side recurring schedule
-// (#344/#679). Unknown rails: false.
+// rail must durably queue deletion of the rail-side recurring schedule.
+// Unknown rails: false.
 func RemoteDeleteOnTerminalCancel(rail models.Rail) bool {
 	d, ok := Lookup(rail)
 	return ok && d.RemoteDeleteOnTerminalCancel
@@ -390,7 +372,7 @@ func CancelPortalURL(rail models.Rail) string {
 }
 
 // DisplayName returns the subscriber-facing rail name. Unknown non-empty rails
-// fall back to the upper-cased value; empty stays empty (legacy email behavior).
+// fall back to the upper-cased value; empty stays empty.
 func DisplayName(rail models.Rail) string {
 	if d, ok := Lookup(rail); ok {
 		return d.DisplayName

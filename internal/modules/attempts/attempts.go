@@ -1,7 +1,6 @@
-// Package attempts records every authorization a PSP answered (#1110): the $0
-// card verification, sales, rebills and retries, approved or not, classified by
-// internal/decline. It is written where the answer is retained, in the
-// same transaction.
+// Package attempts records every authorization a PSP answered: the $0 card
+// verification, sales, rebills and retries, approved or not, classified by
+// internal/decline. It is written in the transaction that retains the answer.
 package attempts
 
 import (
@@ -100,8 +99,8 @@ type Attempt struct {
 	// Step keys an operation's attempts that carry no transaction id.
 	Step      string
 	TokenType string
-	// EnrichedAt is when Answer was read from the PSP's transaction report
-	// (#1114); zero when it is the PSP's reply to our request.
+	// EnrichedAt is when Answer was read from the PSP's transaction report;
+	// zero when it is the PSP's reply to our request.
 	EnrichedAt time.Time
 	// Cycle is the rebill a rebill, dunning or customer retry belongs to.
 	Cycle *Cycle
@@ -111,7 +110,7 @@ type Attempt struct {
 }
 
 // Cycle is one expected rebill: the subscription's paid period that came due
-// at DueAt (#1111).
+// at DueAt.
 type Cycle struct {
 	SubscriptionID uuid.UUID
 	DueAt          time.Time
@@ -259,8 +258,8 @@ func Record(ctx context.Context, q *gen.Queries, a Attempt) error {
 	return err
 }
 
-// Enrich fills an attempt from the PSP's transaction read (#1114), once and
-// only where the row is empty. A zero answer marks it read with nothing.
+// Enrich fills an attempt from the PSP's transaction read, once and only where
+// the row is empty. A zero answer marks it read with nothing.
 func Enrich(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, answer decline.Evidence, at time.Time) error {
 	c := cardOf(answer)
 	_, err := q.EnrichPaymentAttempt(ctx, gen.EnrichPaymentAttemptParams{

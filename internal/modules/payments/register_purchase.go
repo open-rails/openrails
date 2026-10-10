@@ -27,11 +27,11 @@ type RegisterPurchaseRequest struct {
 	DiscountReason   *string
 	DiscountMetadata map[string]any
 	Metadata         map[string]any
-	// AttemptKind stamps payments.attempt_kind (initial|renewal, #733);
-	// empty = unknown (manual/imported rows).
+	// AttemptKind stamps payments.attempt_kind (initial|renewal); empty =
+	// unknown (manual/imported rows).
 	AttemptKind string
-	// TokenType stamps payments.token_type (charge.TokenType* consts, #796);
-	// empty = unknown (non-card rails, imported rows).
+	// TokenType stamps payments.token_type (charge.TokenType* consts); empty
+	// = unknown (non-card rails, imported rows).
 	TokenType string
 }
 

@@ -16,7 +16,7 @@ import (
 )
 
 // CardAttemptsBlockedError refuses a card attempt while the customer is
-// blocked by the card-testing ledger (SEC-30).
+// blocked by the card-testing ledger.
 type CardAttemptsBlockedError struct{ RetryAfter time.Duration }
 
 func (e *CardAttemptsBlockedError) Error() string {
@@ -73,7 +73,7 @@ func CardAttemptFailed(resp *CheckoutAttemptResponse, err error) bool {
 }
 
 // validateReturnURLs refuses redirect targets outside the host's allowed
-// return origins (SEC-33).
+// return origins.
 func (s *CheckoutAttemptService) validateReturnURLs(urls ...string) error {
 	for _, raw := range urls {
 		if strings.TrimSpace(raw) == "" {

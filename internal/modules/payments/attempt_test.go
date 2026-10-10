@@ -9,7 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// or#879: the token_type stamp needs rail AND custody; unstated custody stamps nothing.
+// The token_type stamp needs rail AND custody; unstated custody stamps nothing.
 func TestDefaultTokenType(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ rail, custodian, want string }{

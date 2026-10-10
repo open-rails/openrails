@@ -19,10 +19,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// A checkout attempt's status means one thing (#1099): created may still run;
-// failed is final for its key and is written only for a definite refusal,
-// and only while no provider operation was admitted for the session.
-// Ambiguous errors leave it created, so its key resumes it.
+// A checkout attempt's status means one thing: created may still run; failed
+// is final for its key and is written only for a definite refusal, and only
+// while no provider operation was admitted for the session. Ambiguous errors
+// leave it created, so its key resumes it.
 
 const (
 	failureKindPaymentMethod = "payment_method"

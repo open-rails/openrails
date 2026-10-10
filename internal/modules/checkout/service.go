@@ -41,7 +41,6 @@ import (
 )
 
 // TierChangeResponse represents the response from a tier change operation.
-// This reuses the CheckoutSessionResponse envelope pattern for API consistency.
 type TierChangeResponse = billing.SubscriptionChange
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
@@ -66,15 +65,14 @@ type CheckoutService struct {
 	RailPaymentMethodService *paymentmethods.RailPaymentMethodService
 	MerchantSecrets          merchants.MerchantSecretReader
 	ProviderSecrets          merchants.PSPSecretResolver
-	// RailCustomerService maps app users to rail customer ids so we
-	// reuse a single Stripe customer per user (issue #212) and can record the
-	// mapping at checkout time instead of relying solely on webhooks.
+	// RailCustomerService maps users to rail customer ids: one Stripe customer
+	// per user, recorded at checkout rather than only by webhooks.
 	RailCustomerService *payments.RailCustomerService
-	// StripeService is used to resolve/create the Stripe customer and to run the
-	// webhook-independent duplicate guard (issue #213).
+	// StripeService resolves or creates the Stripe customer and runs the
+	// webhook-independent duplicate guard.
 	StripeService *subscriptions.StripeService
-	// Intents executes durable write-ahead provider intents (#674). Every NMI
-	// recurring create in this flow goes through it.
+	// Intents executes durable write-ahead provider intents; a new
+	// membership's charge goes through it.
 	Intents   intentExecutor
 	Lifecycle *subscriptions.SubscriptionLifecycleService
 	clock     clockwork.Clock
@@ -146,8 +144,8 @@ func NewCheckoutService(
 		Rails:                    railSet,
 	}
 	service.NMISaleService = NewCheckoutNMISaleService(service.PurchaseService, service.PaymentMethodResolver, railPMService)
-	// The scoped resolver is the ONLY NMI client source (#788); armed for
-	// real once SetMerchantSecretStore wires the merchant secret store.
+	// The scoped resolver is the only NMI client source; armed once
+	// SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient
 	service.CustodianSaleService = &CheckoutCustodianSaleService{
 		PurchaseService:      service.PurchaseService,
@@ -179,17 +177,9 @@ func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string,
 	}
 }
 
-// CheckPurchaseEligibility determines if a user can purchase a given price.
-// This should be called BEFORE generating payment URLs or charging cards.
-//
-// Returns:
-//   - EligibilityAllowed: User can proceed with purchase
-//   - EligibilityBlocked: User already owns this product (duplicate prevention)
-//   - EligibilityUpgrade: User is upgrading within a tier group
-//   - EligibilityDowngrade: User is downgrading within a tier group
-//
-// For upgrades/downgrades, the caller can decide how to handle (e.g., proration).
-// For blocked, the caller should reject the purchase attempt.
+// CheckPurchaseEligibility reports whether a user may buy a price (allowed,
+// blocked as already owned, or an upgrade or downgrade within a tier group).
+// Call it before generating payment URLs or charging cards.
 func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID string, priceID uuid.UUID) (*EligibilityResult, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -197,11 +187,10 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 	return s.PurchaseService.CheckPurchaseEligibility(ctx, userID, priceID)
 }
 
-// CheckSubscriptionConflict is the shared duplicate-billing guard (issue #269):
-// it reports whether the user already holds a non-terminal subscription that
-// blocks a new subscribe for this price/product (same exact price, or same
-// tier-group at any tier). Callers must run it BEFORE charging or preparing any
-// on-chain action and reject when Blocked.
+// CheckSubscriptionConflict is the shared duplicate-billing guard: whether the
+// user already holds a non-terminal subscription to this exact price or in its
+// tier group. Run it before charging or preparing any on-chain action, and
+// reject when Blocked.
 func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -239,7 +228,6 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		return nil, errors.New("price is not available for purchase")
 	}
 
-	// Get product
 	product, err := s.ProductService.GetByID(ctx, price.ProductID)
 	if err != nil {
 		return nil, fmt.Errorf("product not found: %w", err)
@@ -253,15 +241,13 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		}
 	}
 
-	// Normalize rail
 	rail := strings.TrimSpace(strings.ToLower(req.Rail))
 	if rail == "" {
 		return nil, errors.New("rail is required")
 	}
 
-	// #704: pin the active PSP for this rail so payment /
-	// subscription / payment-method rows created by this flow carry
-	// psp_id provenance (nil when unresolvable — never invented).
+	// Pin the active PSP for this rail so the rows this flow creates carry
+	// psp_id (nil when unresolvable, never invented).
 	ctx = s.stampPSP(ctx, rail)
 
 	// Check for tier group conflicts (upgrade/downgrade scenarios)
@@ -308,11 +294,9 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 			}
 		}
 
-		// Webhook-independent guard (issue #213): the local check above only sees
-		// what webhooks have written. If a webhook was missed, the local DB can be
-		// empty and the guard would let a second parallel subscription through.
-		// For Stripe, additionally ask Stripe directly whether this customer
-		// already holds an active/trialing subscription in the same tier group.
+		// Webhook-independent guard: the local check sees only what webhooks
+		// wrote, so for Stripe also ask Stripe whether this customer already
+		// holds an active or trialing subscription in the same tier group.
 		if rail == "stripe" {
 			blocked, err := s.stripeTierGroupConflict(ctx, user, *product.TierGroup)
 			if err != nil {
@@ -340,7 +324,6 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
 	}
 
-	// Deduplication logic
 	if coverage.HasCoverage {
 		if coverage.IsIndefinite {
 			// User has indefinite coverage - block purchase
@@ -362,16 +345,13 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 		// Other rails: allow with delayed start
 	}
 
-	// Determine if this is a subscription or one-time purchase
 	isSubscription := price.IsRecurring()
 
 	if isSubscription {
-		// #691 checkout guard: an `unknown` sub for this product/tier-group means
-		// an existing membership pending provider verification — its real
-		// provider-side sub may still be alive and billing, so a re-purchase
-		// double-bills. Reject with the machine-readable code; verify/resume
-		// instead of repurchase. (past_due already holds the lifecycle slot and is
-		// blocked by the tier-group/coverage guards above.)
+		// An `unknown` sub for this product or tier group may still be billing
+		// at the provider, so a re-purchase double-bills: refuse with the
+		// machine-readable code (verify or resume instead). past_due is already
+		// refused by the tier-group and coverage guards above.
 		if s.PurchaseService != nil {
 			conflict, err := s.PurchaseService.checkUnknownSubscriptionConflict(ctx, user.ID, product)
 			if err != nil {
@@ -390,10 +370,8 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, rail)
 }
 
-// GetUserProductCoverage checks if user has active coverage for a product.
-// It checks both:
-// 1. Active/pending subscriptions (using the denormalized ProductID field)
-// 2. Active entitlements matching the product's Entitlements
+// GetUserProductCoverage reports a user's coverage of a product: an active or
+// pending subscription to it, or live product access windows.
 func (s *CheckoutService) GetUserProductCoverage(ctx context.Context, userID string, product *models.Product) (*CoverageInfo, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
@@ -443,9 +421,8 @@ func (s *CheckoutService) processOneTimePurchase(
 	switch {
 	case rails.IsNMI(models.Rail(target.Rail)):
 		if custodianHeld(target) {
-			// or#879: same rail, same gateway — the card is held by a custodian,
-			// so the sale goes through its detokenizing proxy. The PSP decides
-			// this, not a separate rail value.
+			// Same rail and gateway, but a custodian holds the card, so the
+			// sale goes through its detokenizing proxy. The PSP decides this.
 			if s.CustodianSaleService == nil {
 				return nil, errors.New("custodian-held card checkout is not configured")
 			}
@@ -481,7 +458,6 @@ func (s *CheckoutService) processCCBillUpgrade(
 		return nil, err
 	}
 
-	// Validate existing subscription is CCBill
 	if existingSub.Rail != models.RailCCBill {
 		return nil, errors.New("existing subscription is not a CCBill subscription")
 	}
@@ -489,7 +465,6 @@ func (s *CheckoutService) processCCBillUpgrade(
 		return nil, errors.New("existing subscription is missing CCBill reference")
 	}
 
-	// Validate new price has CCBill configuration
 	formName, flexID, hasCCBill := newPrice.GetCCBillFlexForm()
 	if !hasCCBill {
 		return nil, fmt.Errorf("target price %s is not configured for CCBill", newPrice.ID)
@@ -510,7 +485,7 @@ func (s *CheckoutService) processCCBillUpgrade(
 		Email:                  *user.Email,
 		FormName:               formName,
 		FlexID:                 flexID,
-		Currency:               newPrice.Currency, // #819
+		Currency:               newPrice.Currency,
 		OriginalSubscriptionID: existingSub.RailSubscriptionID,
 	}
 
@@ -722,16 +697,11 @@ func (s *CheckoutService) stripeClient() stripeCustomerClient {
 }
 
 // resolveStripeCustomerWith returns the durable Stripe customer id for a user,
-// resolving in priority order (issue #212):
-//
-//  1. local mapping (RailCustomerService.GetCustomerID)
-//  2. Stripe Customer Search on metadata[app_user_id]
-//  3. create a fresh, idempotent Stripe customer
-//
-// Whenever a customer is resolved (or created), the local mapping is upserted so
-// the link survives even if the corresponding webhook is missed. It returns ""
-// (and no error) only when the dependencies are unavailable, in which case the
-// caller falls back to the legacy customer_email behavior.
+// in priority order: the local mapping, Stripe Customer Search on
+// metadata[app_user_id], then a fresh idempotent customer. A resolved customer
+// is upserted into the local mapping so the link survives a missed webhook.
+// "" (no error) only when the dependencies are unavailable; the caller then
+// falls back to customer_email.
 func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, user *UserIdentity) (string, error) {
 	if user == nil || strings.TrimSpace(user.ID) == "" {
 		return "", nil
@@ -778,8 +748,8 @@ func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, cli
 	return customerID, nil
 }
 
-// stripeTierGroupConflict is the production wiring for the webhook-independent
-// duplicate guard (issue #213).
+// stripeTierGroupConflict is the production wiring of the webhook-independent
+// duplicate guard.
 func (s *CheckoutService) stripeTierGroupConflict(ctx context.Context, user *UserIdentity, tierGroup string) (bool, error) {
 	var prices stripePriceResolver
 	if s.PriceService != nil {
@@ -793,11 +763,10 @@ func (s *CheckoutService) stripeTierGroupConflict(ctx context.Context, user *Use
 }
 
 // stripeTierGroupConflictWith reports whether the user already has an active or
-// trialing Stripe subscription whose price maps to the requested tier group
-// (issue #213). It consults Stripe directly so a missed webhook (which would
-// leave the local DB empty) cannot allow a second parallel subscription. It
-// never creates a customer: if no customer is mapped/found, there is by
-// definition no Stripe-side subscription to conflict with.
+// trialing Stripe subscription whose price maps to the requested tier group.
+// It asks Stripe, so a missed webhook cannot admit a parallel subscription. It
+// never creates a customer: with none mapped or found there is no Stripe-side
+// subscription to conflict with.
 func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, prices stripePriceResolver, products productResolver, user *UserIdentity, tierGroup string) (bool, error) {
 	tierGroup = strings.TrimSpace(tierGroup)
 	if tierGroup == "" {
@@ -913,8 +882,8 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	values.Set("cancel_url", params.CancelURL)
 	values.Set("client_reference_id", params.UserID)
 	// Stripe Checkout: `customer` and `customer_email` are mutually exclusive.
-	// Prefer the resolved customer so one app user maps to exactly one Stripe
-	// customer (issue #212); fall back to customer_email only when unresolved.
+	// Prefer the resolved customer so one user maps to one Stripe customer;
+	// customer_email only when unresolved.
 	if customerID := strings.TrimSpace(params.CustomerID); customerID != "" {
 		values.Set("customer", customerID)
 	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
@@ -1022,33 +991,17 @@ func parseStripeError(body []byte) string {
 	return strings.TrimSpace(out.Error.Message)
 }
 
-// ResolvePaymentMethod gets an existing payment method or creates one from a payment token
-// grantProductEntitlements grants entitlements from product spec after a one-time or subscription purchase
-
 func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// RegisterPurchase records a confirmed one-time purchase and grants entitlements.
-// This is the single source of truth for "user paid for product" logic.
-//
-// Called by:
-//   - NMI-backed sale (after charging card)
-//   - Solana poller (after detecting on-chain payment)
-//   - CCBill webhook (after receiving payment confirmation)
-//   - Admin API (for manual grants)
-//
-// It handles:
-//  1. Creating the Payment record
-//  2. Looking up Product from Price
-//  3. Checking coverage for delayed start
-//  4. Granting entitlements from Product.Entitlements
+// RegisterPurchase records a confirmed one-time purchase and grants its
+// product, stamping the payment row with the PSP of req.Rail.
 func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	if s.PurchaseService == nil {
 		return nil, errors.New("purchase service unavailable")
 	}
 	if req != nil {
-		// #704 provenance stamping for the registered payment row.
 		ctx = s.stampPSP(ctx, req.Rail)
 	}
 	return s.PurchaseService.RegisterPurchase(ctx, req)
@@ -1211,9 +1164,9 @@ func (s *CheckoutService) processTierChangeStripe(
 		payload.ProrationBehavior, payload.PeriodStart, payload.PeriodEnd = "none", periodStart.UTC(), existingSub.CurrentPeriodEndsAt.UTC()
 		payload.BillingCycleDays = newPrice.RecurringCycleDays()
 	} else {
-		// #268 Model B: Stripe resets the cycle to now and invoices the
-		// proration immediately. The frozen now-amount is the local estimate
-		// (matching the preview); Stripe finalizes the exact proration.
+		// Model B: Stripe resets the cycle to now and invoices the proration
+		// immediately. The frozen now-amount is the local estimate (matching
+		// the preview); Stripe finalizes the exact proration.
 		quote, err := QuoteModelBUpgrade(providerUpgradeOf(existingSub, currentPrice, newPrice), now)
 		if err != nil {
 			return nil, err
@@ -1225,29 +1178,10 @@ func (s *CheckoutService) processTierChangeStripe(
 	return s.enqueueStripeTierChange(ctx, existingSub, payload, tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey))
 }
 
-// processTierChangeSolana handles recurring-Solana subscription tier changes (#272).
-//
-// Solana plan terms are immutable and a subscription is bound to one plan PDA, so
-// a tier change is mechanically cancel-old + subscribe-new — done as a SINGLE
-// ATOMIC, wallet-signed on-chain transaction. The synchronous (card-style)
-// TierChange API cannot collect a wallet signature, so for BOTH directions this
-// returns requires_action directing the client to the dedicated prepare/confirm
-// endpoints (#272):
-//
-//   - UPGRADE: the prepare endpoint returns a PARTIALLY-signed (cranker co-signed)
-//     [cancel + subscribe + prorated transfer] tx; the wallet completes + sends it,
-//     then confirms. The Model-B prorated first pull (new_full - old_unused) is
-//     charged atomically with the switch. The confirm step mirrors the new
-//     membership + cancels the old.
-//
-//   - DOWNGRADE: the prepare endpoint returns an UNSIGNED [cancel + subscribe] tx
-//     (no immediate charge); the wallet signs + sends, then confirms. The confirm
-//     step defers the new plan's first pull to the OLD period end, so the user
-//     keeps the higher tier they already paid for until then.
-//
-// No charge or DB state change happens in THIS method — it only routes the client
-// to the atomic endpoints (Solana is the source of truth; nothing is mirrored
-// until the on-chain switch is confirmed).
+// processTierChangeSolana refuses a server-side Solana tier change. Plan terms
+// are immutable and a subscription is bound to one plan, so a change is
+// cancel-old plus subscribe-new in one atomic transaction the customer's
+// wallet signs.
 func (s *CheckoutService) processTierChangeSolana(
 	ctx context.Context,
 	req *SubscriptionChangeRequest,
@@ -1270,9 +1204,8 @@ func (s *CheckoutService) processTierChangeSolana(
 	return nil, &TierChangeError{Code: billing.CodeCustomerActionRequired, Message: "a Solana tier change is signed by the customer's wallet"}
 }
 
-// processTierChangeCCBill handles CCBill subscription tier changes.
-// Upgrades: returns redirect URL to CCBill upgrade FlexForm
-// Downgrades: blocked (CCBill doesn't support programmatic downgrades)
+// processTierChangeCCBill redirects an upgrade to CCBill's upgrade FlexForm
+// and refuses a downgrade, which CCBill cannot make programmatically.
 func (s *CheckoutService) processTierChangeCCBill(
 	ctx context.Context,
 	req *SubscriptionChangeRequest,
@@ -1292,13 +1225,11 @@ func (s *CheckoutService) processTierChangeCCBill(
 		}, nil
 	}
 
-	// Use existing CCBill upgrade logic
 	checkoutResp, err := s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
 	if err != nil {
 		return nil, err
 	}
 
-	// Map to TierChangeResponse
 	subID := billing.SubscriptionID(existingSub.ID)
 	resp := &TierChangeResponse{
 		Status:         "requires_action",
@@ -1309,7 +1240,6 @@ func (s *CheckoutService) processTierChangeCCBill(
 		Message:        "Redirect to CCBill to complete upgrade",
 	}
 
-	// Build NextAction for redirect
 	if checkoutResp.RedirectURL != "" {
 		redirect := checkoutResp.RedirectURL
 		resp.NextAction = &billing.NextAction{Type: "redirect_to_url", URL: &redirect}

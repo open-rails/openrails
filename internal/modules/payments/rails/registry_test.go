@@ -30,7 +30,7 @@ func TestRegistryCompleteness(t *testing.T) {
 	}
 }
 
-// Pins the per-rail facts the old switches encoded, so a descriptor edit that flips behaviour fails here.
+// Pins the per-rail facts, so a descriptor edit that flips behaviour fails here.
 func TestRegistryPinnedFacts(t *testing.T) {
 	t.Parallel()
 	delegated := &models.Subscription{CollectionPolicy: models.CollectionPolicyNMISchedule}
@@ -63,7 +63,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		require.Equal(t, c.activeCancel, CancelModeFor(&models.Subscription{Rail: c.rail, Status: models.StatusActive}, time.Now()), c.rail)
 	}
 
-	// Required keys gate arming; the Solana signer is operator-only (#669 note D).
+	// Required keys gate arming; the Solana signer is operator-only.
 	k, ok := CredentialKeyFor(models.RailSolana, " PRIVATE_KEY ")
 	require.True(t, ok)
 	require.False(t, k.MerchantWritable)
@@ -74,7 +74,7 @@ func TestRegistryPinnedFacts(t *testing.T) {
 	require.False(t, ok, "a custodian key is not an NMI credential (or#880)")
 }
 
-// NMI cancellation is reversible only while canceled, delete still pending, and paid period ahead (issue 216).
+// NMI cancellation is reversible only while canceled, delete still pending, and paid period ahead.
 func TestCancelModeFor(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
@@ -100,7 +100,7 @@ func TestRailNormalization(t *testing.T) {
 	t.Parallel()
 	_, ok := Lookup(" STRIPE ")
 	require.True(t, ok)
-	_, ok = Lookup("mobius") // #630: a PSP name on rail nmi, not a rail
+	_, ok = Lookup("mobius") // a PSP name on rail nmi, not a rail
 	require.False(t, ok)
 	require.False(t, HasRemoteCustomer("bogus") || SupportsPSPs("bogus") || AutoBilled("bogus", nil) || RemoteDeleteOnTerminalCancel("bogus") || SupportsCatalogTrial("bogus"))
 	require.Nil(t, CredentialKeys("bogus"))

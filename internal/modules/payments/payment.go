@@ -82,7 +82,6 @@ func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pay
 	return s.repo.GetByID(ctx, id)
 }
 
-// GetByIDWithDetails returns a payment with all related entities and any refund entries
 // AttachRelations loads each payment's price, product and subscription.
 func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
 	return s.repo.AttachRelations(ctx, payments...)
@@ -112,9 +111,8 @@ func (s *PaymentService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("payments cannot be deleted")
 }
 
-// Reversal kinds for the mirror rows Refund writes (#733): a chargeback is
-// recorded through the same negative-row mechanics as a refund, but the kind
-// discriminator keeps them distinguishable for metrics.
+// Reversal kinds of the mirror rows Refund writes: a chargeback is recorded
+// like a refund, and the kind tells them apart for metrics.
 const (
 	ReversalRefund          = "refund"
 	ReversalChargeback      = "chargeback"
@@ -180,7 +178,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	if !db.IsNotFound(err) {
 		return nil, err
 	}
-	// SEC-33: while an OpenRails refund of this payment is in flight, a provider
+	// While an OpenRails refund of this payment is in flight, a provider
 	// refund fact may be that same refund; recording it now would count it
 	// twice. The caller retries once the reservation resolves.
 	if reversalKind == ReversalRefund {
@@ -213,8 +211,8 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 			return &id
 		}(),
 		Rail: orig.Rail,
-		// or#893: a reversal is executed by the account that took the charge,
-		// so it inherits the original's provenance rather than re-resolving.
+		// A reversal is executed by the account that took the charge, so it
+		// inherits the original's PSP rather than re-resolving.
 		PspID:         orig.PspID,
 		TransactionID: refundTransactionID,
 		Amount:        -amount,
@@ -223,7 +221,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		Status:        PaymentStatusSucceededValue,
 		ReversalKind:  &reversalKind,
 		// The reversal settled at the rail; the feed excludes it on
-		// amount/refunded_payment_id, not on this marker (or#827).
+		// amount/refunded_payment_id, not on this marker.
 		MoneyMovement: models.MoneyMovementRail,
 		PurchasedAt:   s.now(),
 		CreatedAt:     s.now(),
@@ -289,7 +287,7 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 			return &id
 		}(),
 		Rail: orig.Rail,
-		// or#893: same account as the charge it reverses.
+		// Same account as the charge it reverses.
 		PspID:         orig.PspID,
 		TransactionID: reservationTransactionID,
 		Amount:        -amount,
@@ -454,11 +452,9 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if orig.Amount <= 0 || orig.RefundedPaymentID != nil {
 		return errors.New("only successful charge payments can be refunded")
 	}
-	// You can only send back money that arrived. Bookkeeping rows — attempt
-	// anchors whose real charge is a different row, declines, placeholders —
-	// carry a locally-minted transaction reference the rail would not
-	// recognise. or#827 replaced the transaction_id prefix denylist this used
-	// to guess from with the row's own positive marker.
+	// Only money that arrived can be sent back. Bookkeeping rows (attempt
+	// anchors, declines, placeholders) carry a locally minted transaction
+	// reference the rail would not recognise.
 	if orig.MoneyMovement != models.MoneyMovementRail {
 		return errors.New("payment records no money movement at the rail and is not refundable")
 	}

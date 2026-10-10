@@ -7,20 +7,18 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
-// token-intent handle. A raw card number reaching OpenRails — pasted into any
-// request field — would silently escalate the PCI posture (SAQ A -> SAQ D), so
-// card-number-shaped values are rejected LOUDLY, never stored or forwarded.
+// PAN firewall (SAQ A): custodian-held-card checkout accepts only the BT
+// token-intent handle. A raw card number in any request field would escalate
+// the PCI posture (SAQ A to SAQ D), so card-number-shaped values are refused,
+// never stored or forwarded.
 //
-// Every field is scanned unconditionally. Identifiers are kept out of the
-// refusals by the detector's grouping rule (internal/cardguard), never by a
-// per-field exemption: an exemption is a hole an attacker can aim at, and it
-// only ever covered the fields someone had already been burned by.
+// Every field is scanned. Identifiers pass by the detector's grouping rule
+// (internal/cardguard), never by a per-field exemption, which would be a hole
+// to aim at.
 //
-// The one card OpenRails takes is the typed `card` field (cardguard.Card,
-// #1129), and only for the PSP a request routes to when that PSP declares
-// card_entry: server (cardEntryFor). It is not a string field, so nothing here
-// is relaxed for it.
+// The one card OpenRails takes is the typed `card` field (cardguard.Card),
+// only for a PSP that declares card_entry: server (cardEntryFor). It is not a
+// string field, so nothing here is relaxed for it.
 
 // cardEntryFor is where the PSP a request routed to takes new cards.
 func cardEntryFor(target railTarget) string {

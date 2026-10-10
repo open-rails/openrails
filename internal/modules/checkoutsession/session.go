@@ -1,7 +1,7 @@
-// Package checkoutsession stores checkout sessions (#1124): one buyer,
-// one offer, addressed by a session id that is the only credential. A session
-// is immutable after mint except for its payment attempt number and the
-// checkout attempt that attempt created.
+// Package checkoutsession stores checkout sessions: one buyer, one offer,
+// addressed by a session id that is the only credential. A session is
+// immutable after mint except for its attempt number and that attempt's
+// checkout attempt.
 package checkoutsession
 
 import (
@@ -76,8 +76,8 @@ type Offer struct {
 	Buyer               Buyer               `json:"buyer"`
 }
 
-// UnmarshalJSON preserves an already minted offer across the duration split.
-// These legacy names are read only from persisted sessions, never request DTOs.
+// UnmarshalJSON also reads the older plan fields (period_hours,
+// automatically_renews) of persisted sessions; request DTOs never carry them.
 func (o *Offer) UnmarshalJSON(data []byte) error {
 	type plain Offer
 	var decoded plain

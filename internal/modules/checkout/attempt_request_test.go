@@ -201,8 +201,8 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 	}
 }
 
-// SEC-33 at the session seam: blanks are "not supplied", everything else
-// must match an allowed origin exactly (host policy itself is e2e's).
+// Blanks are "not supplied"; everything else must match an allowed origin
+// exactly (host policy itself is e2e's).
 func TestValidateReturnURLs(t *testing.T) {
 	svc := &CheckoutAttemptService{config: &config.Config{PublicBillingBaseURL: "https://billing.example/api"}}
 	require.NoError(t, svc.validateReturnURLs("", "  ", "https://billing.example/done"))
@@ -299,8 +299,8 @@ func (c *capturingExecutor) CheckSubscriptionConflict(context.Context, string, *
 	return &SubscriptionConflict{}, nil
 }
 
-// #521/#848: the session hands the executor its return URLs, start time and
-// pinned PSP, under a session-derived provider key, and maps the outcome.
+// The session hands the executor its return URLs, start time and pinned PSP,
+// under a session-derived provider key, and maps the outcome.
 func TestInitializeCheckoutAttempt(t *testing.T) {
 	started := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	session := func() *models.CheckoutAttempt {

@@ -20,11 +20,10 @@ type UserIdentity struct {
 	ClientIP string
 }
 
-// customerIDFromUser derives the payable merchant subject id from the verified
-// caller's user id. Payable identities are UUID-only (#364) — the auth boundary
-// already rejects non-UUID subjects, so a zero derivation here means a broken
-// or bypassed boundary, and the write must not proceed (it would attribute
-// money rows to uuid.Nil or a mismatched subject).
+// customerIDFromUser derives the payable customer id from the verified
+// caller's user id. The auth boundary already refuses non-UUID subjects, so a
+// zero derivation means a broken boundary: the write must not attribute money
+// rows to uuid.Nil or another subject.
 func customerIDFromUser(userID string) (uuid.UUID, error) {
 	id := identity.CustomerIDFromString(userID)
 	if id.IsZero() {
@@ -36,7 +35,7 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 type CheckoutRequest struct {
 	AutoRenew        *bool `json:"auto_renew,omitempty"`
 	acceptedPurchase *acceptedPurchaseTerms
-	// attempt places a new card's verification in its checkout (#1110).
+	// attempt places a new card's verification in its checkout.
 	attempt         cardAttempt
 	PriceID         string `json:"price_id"`
 	PriceKey        string `json:"price_key,omitempty"`
@@ -44,10 +43,10 @@ type CheckoutRequest struct {
 	Amount          *int64 `json:"amount,string,omitempty"`
 	PaymentMethodID string `json:"payment_method_id,omitempty"`
 	PaymentToken    string `json:"payment_token,omitempty"`
-	// Card is a new card for a PSP whose card_entry is server (#1129).
+	// Card is a new card for a PSP whose card_entry is server.
 	Card *cardguard.Card `json:"-"`
-	// BTTokenIntentID (#795): the Basis Theory token-intent id from BT Elements
-	// — the ONLY card handle custodian-held-card checkout accepts (PAN firewall).
+	// BTTokenIntentID is the Basis Theory token-intent id from BT Elements:
+	// the only card handle custodian-held-card checkout accepts (PAN firewall).
 	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`
 	Rail            string `json:"rail"`
 	SuccessURL      string `json:"success_url,omitempty"`
@@ -112,7 +111,7 @@ type EligibilityResult struct {
 	ExistingProduct      *models.Product
 }
 
-// cardAttempt is the checkout a new card's verification belongs to (#1110).
+// cardAttempt is the checkout a new card's verification belongs to.
 type cardAttempt struct {
 	target string
 	owner  attempts.Owner

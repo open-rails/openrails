@@ -687,8 +687,8 @@ func (h *NMIUpgradeIntentHandler) terminal(ctx context.Context, in gen.BillingPr
 	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, outcome, h.Checkout.now())
 }
 
-// recordProration records a refused proration charge (#1110); an approved one
-// is recorded separately from its qualified receipt before the tier changes.
+// recordProration records a refused proration charge; an approved one is
+// recorded separately from its qualified receipt before the tier changes.
 func (h *NMIUpgradeIntentHandler) recordProration(ctx context.Context, in gen.BillingProviderIntent, p subscriptions.NMIUpgradePayload, a paymentattempts.Attempt) error {
 	customer, err := customerIDFromUser(p.UserID)
 	if err != nil {

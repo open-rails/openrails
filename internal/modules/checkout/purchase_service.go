@@ -27,20 +27,15 @@ type checkoutSubscriptionAccess interface {
 	GetActiveOrPendingByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
 	GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
 	GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error)
-	// #691 checkout guard: `unknown` subs don't hold the lifecycle slot but may
-	// still be alive (billing) at the provider — a re-purchase double-bills.
+	// `unknown` subs hold no lifecycle slot but may still bill at the
+	// provider: a re-purchase double-bills.
 	GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error)
 	GetUnknownByUserIDAndTierGroup(ctx context.Context, userID, tierGroup string) (*models.Subscription, error)
 }
 
-// nonTerminalSubscriptionStatuses is the single source of truth for which
-// subscription statuses still bill or grant access (issue #269). A user must
-// never hold two of these concurrently in the same product/tier-group — that is
-// double-billing; the correct operation is a subscription change, not a second subscribe.
-//
-// Terminal statuses (canceled — which the model also uses for expired/failed/
-// max-retries per its own docs) are excluded: a user with only a terminal
-// subscription is free to subscribe again.
+// nonTerminalSubscriptionStatuses are the statuses that block a second
+// subscribe: a customer never holds two in one product or tier group (that
+// double-bills; the remedy is a subscription change).
 var nonTerminalSubscriptionStatuses = []models.SubscriptionStatus{
 	models.StatusPending, // created, awaiting first payment confirmation
 	models.StatusActive,  // good standing, rebill scheduled
@@ -48,8 +43,7 @@ var nonTerminalSubscriptionStatuses = []models.SubscriptionStatus{
 }
 
 // IsNonTerminalSubscriptionStatus reports whether a subscription in this status
-// still bills or grants access and therefore blocks a second subscribe in the
-// same product/tier-group (issue #269).
+// blocks a second subscribe in the same product or tier group.
 func IsNonTerminalSubscriptionStatus(status models.SubscriptionStatus) bool {
 	for _, s := range nonTerminalSubscriptionStatuses {
 		if s == status {
@@ -166,8 +160,8 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	return &EligibilityResult{Status: EligibilityAllowed, Reason: "Purchase allowed", Coverage: coverage}, nil
 }
 
-// Machine-readable conflict codes (#691) so clients can route the user to the
-// right remedy instead of parsing prose.
+// Machine-readable conflict codes, so clients can route the user to the right
+// remedy instead of parsing prose.
 const (
 	// ConflictCodeDuplicateSubscription: a non-terminal subscription to the same
 	// plan/tier already exists — re-purchasing would double-bill.
@@ -175,15 +169,14 @@ const (
 	// ConflictCodeChangeTierRequired: the conflict is a tier change — use the
 	// change endpoint, not a second subscribe.
 	ConflictCodeChangeTierRequired = "change_tier_required"
-	// ConflictCodeMembershipPendingVerification (#691): the customer holds an
-	// `unknown` subscription for this product/tier-group — an existing membership
-	// pending provider verification. It may still be alive and billing at the
-	// provider; verify/resume it instead of purchasing again.
+	// ConflictCodeMembershipPendingVerification: the customer holds an
+	// `unknown` subscription for this product or tier group that may still be
+	// billing at the provider; verify or resume it instead of purchasing again.
 	ConflictCodeMembershipPendingVerification = "membership_pending_verification"
 )
 
 // SubscriptionConflict describes an existing non-terminal subscription that
-// blocks a new subscribe for the same product/tier-group (issue #269).
+// blocks a new subscribe for the same product or tier group.
 type SubscriptionConflict struct {
 	// Blocked is true when a second subscribe must be rejected and the caller
 	// directed to the change endpoint instead.
@@ -199,17 +192,11 @@ type SubscriptionConflict struct {
 	Message string
 }
 
-// CheckSubscriptionConflict is the shared duplicate-billing guard (issue #269).
-// It must run at subscribe time for every rail BEFORE any charge or
-// on-chain action. It blocks when the user already holds a NON-terminal
-// subscription (active/pending/past_due) that either:
-//   - is to this exact price (idempotent re-subscribe; no second sub/charge), or
-//   - shares the target product's tier-group (any tier — stacking a $20 and a
-//     $50 sub for the same product is double-billing; the correct operation is
-//     upgrade/downgrade via the change endpoint).
-//
-// It returns Blocked=false (no conflict) when the user has no such subscription,
-// so a first-time subscribe and a DIFFERENT tier-group are both allowed.
+// CheckSubscriptionConflict is the shared duplicate-billing guard, run on every
+// rail before any charge or on-chain action. It blocks when the customer holds
+// a non-terminal subscription to this exact price (an idempotent re-subscribe)
+// or in the product's tier group (stacking tiers double-bills; the remedy is a
+// subscription change). Blocked=false otherwise.
 func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
 	if s.SubscriptionService == nil {
 		return &SubscriptionConflict{}, nil
@@ -218,7 +205,7 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 		return nil, errors.New("price and product are required for conflict check")
 	}
 
-	// Exact-same-price re-subscribe: idempotent, never charge twice (issue #269).
+	// Exact-same-price re-subscribe: idempotent, never charge twice.
 	existingSamePrice, err := s.SubscriptionService.GetByUserIDAndPriceID(ctx, userID, price.ID)
 	if err != nil && !db.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to check existing price subscription: %w", err)
@@ -275,9 +262,8 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 		}
 	}
 
-	// #691: an `unknown` sub for the same product or tier-group blocks a new
-	// subscribe — the real provider-side sub may still be alive and billing, so
-	// a re-purchase double-bills. Verify/resume instead of repurchase.
+	// An `unknown` sub for the same product or tier group blocks a new
+	// subscribe: the provider-side sub may still be billing.
 	if conflict, err := s.checkUnknownSubscriptionConflict(ctx, userID, product); err != nil || conflict != nil {
 		if err != nil {
 			return nil, err
@@ -288,9 +274,9 @@ func (s *CheckoutPurchaseService) CheckSubscriptionConflict(ctx context.Context,
 	return &SubscriptionConflict{}, nil
 }
 
-// checkUnknownSubscriptionConflict returns the #691 verification-pending
-// conflict when the customer holds an `unknown` subscription for the product or
-// its tier-group, nil otherwise.
+// checkUnknownSubscriptionConflict returns the verification-pending conflict
+// when the customer holds an `unknown` subscription for the product or its
+// tier group, nil otherwise.
 func (s *CheckoutPurchaseService) checkUnknownSubscriptionConflict(ctx context.Context, userID string, product *models.Product) (*SubscriptionConflict, error) {
 	if s.SubscriptionService == nil || product == nil {
 		return nil, nil
@@ -510,8 +496,8 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		DiscountMetadata:    req.DiscountMetadata,
 		Metadata:            req.Metadata,
 		CreditGrantSnapshot: settledCredit,
-		// or#827: RegisterPurchase records a charge the rail already approved,
-		// keyed on the rail's own transaction id.
+		// RegisterPurchase records a charge the rail already approved, keyed on
+		// the rail's own transaction id.
 		MoneyMovement: models.MoneyMovementRail,
 	}
 	if req.AttemptKind != "" {

@@ -25,11 +25,10 @@ func TakesCards(driver string) bool {
 }
 
 // Payment turns the browser's pay body into the engine's payment options for
-// the minted option it names. The option decides the PSP and the settlement
-// token; the browser supplies only the instrument and its billing identity.
-// savedMethod reports whether a saved method id is the buyer's on this option.
-// The card, when the page sent one, is returned beside the options: it
-// travels to the engine and nowhere else.
+// the minted option it names: the option decides the PSP and settlement token,
+// the browser supplies only the instrument and billing identity. savedMethod
+// reports whether a saved method id is the buyer's. A card the page sent is
+// returned beside the options and travels to the engine only.
 func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string, savedMethod func(id string) bool) (billing.CheckoutPaymentOptions, *cardguard.Card, error) {
 	in := billingInputOf(input.BillingDetails)
 	input.OptionID, input.PaymentToken, input.TokenSymbol = strings.TrimSpace(input.OptionID), strings.TrimSpace(input.PaymentToken), strings.TrimSpace(input.TokenSymbol)

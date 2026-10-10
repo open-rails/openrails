@@ -27,10 +27,9 @@ var (
 	ErrPaymentMethodNotFound     = errors.New("payment method not found")
 	ErrPaymentMethodAccessDenied = errors.New("payment method access denied")
 
-	// ErrPaymentMethodsUnsupportedOnRail marks a rail that has no first-party
-	// payment-instrument CRUD (or#896). It is an UNSUPPORTED SURFACE, not a
-	// misconfiguration: the request must never read as "PSP is not configured",
-	// which sends the operator hunting for credentials that were never needed.
+	// ErrPaymentMethodsUnsupportedOnRail marks a rail without first-party
+	// payment-method CRUD: an unsupported surface, never "PSP is not
+	// configured", which sends the operator hunting for credentials.
 	ErrPaymentMethodsUnsupportedOnRail = errors.New("payment methods are not managed by OpenRails on this rail")
 )
 
@@ -76,8 +75,8 @@ func (s *PaymentMethodService) GetByUserID(ctx context.Context, userID string) (
 	return s.repo.GetByUserID(ctx, userID)
 }
 
-// LatestCharges returns the derived last-charge health (#589) keyed by payment
-// method id for the supplied methods. Methods with no charge history are absent.
+// LatestCharges returns the last-charge health of each method, keyed by id.
+// Methods with no charge history are absent.
 func (s *PaymentMethodService) LatestCharges(ctx context.Context, methods []*models.PaymentMethod) (map[uuid.UUID]models.PaymentMethodCharge, error) {
 	ids := make([]uuid.UUID, 0, len(methods))
 	for _, m := range methods {
@@ -107,8 +106,8 @@ func (s *PaymentMethodService) GetByCustodianRef(ctx context.Context, custodianI
 	return s.repo.GetByCustodianRef(ctx, custodianID, customerID, methodRef)
 }
 
-// GetByRailMethodRef finds a payment method by its instrument-scope rail handle
-// (e.g. a Stripe pm_ token) for the given rail.
+// GetByPSPMethodRef finds a payment method by its instrument-scope handle on
+// provider (e.g. a Stripe pm_ token).
 func (s *PaymentMethodService) GetByPSPMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error) {
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
@@ -144,8 +143,7 @@ func (s *PaymentMethodService) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// ValidateOwnership verifies that a payment method belongs to the specified user
-// Returns error if the payment method doesn't exist or doesn't belong to the user
+// ValidateOwnership errors unless payment method id belongs to userID.
 func (s *PaymentMethodService) ValidateOwnership(ctx context.Context, id uuid.UUID, userID string) error {
 	if id == uuid.Nil {
 		return errors.New("invalid payment method ID")
@@ -167,9 +165,9 @@ func (s *PaymentMethodService) ValidateOwnership(ctx context.Context, id uuid.UU
 	return nil
 }
 
-// ValidatePaymentMethodOperation performs general validation for payment method operations
+// ValidatePaymentMethodOperation reads payment method id, refusing it unless
+// it belongs to userID.
 func (s *PaymentMethodService) ValidatePaymentMethodOperation(ctx context.Context, id uuid.UUID, userID string) (*models.PaymentMethod, error) {
-	// Validate input parameters
 	if id == uuid.Nil {
 		return nil, errors.New("invalid payment method ID")
 	}
@@ -178,7 +176,6 @@ func (s *PaymentMethodService) ValidatePaymentMethodOperation(ctx context.Contex
 		return nil, errors.New("user ID is required")
 	}
 
-	// Get the payment method
 	paymentMethod, err := s.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, ErrPaymentMethodNotFound) {
@@ -187,7 +184,6 @@ func (s *PaymentMethodService) ValidatePaymentMethodOperation(ctx context.Contex
 		return nil, fmt.Errorf("failed to get payment method: %w", err)
 	}
 
-	// Validate ownership
 	if err := s.ValidateOwnership(ctx, id, userID); err != nil {
 		if errors.Is(err, ErrPaymentMethodAccessDenied) {
 			return nil, ErrPaymentMethodAccessDenied

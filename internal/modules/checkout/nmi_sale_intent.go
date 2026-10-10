@@ -452,8 +452,8 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 	return out
 }
 
-// recordSaleAttempt records the sale's answer (#1110) in its completion
-// transaction. Its target is the order an order sale pays, else the price.
+// recordSaleAttempt records the sale's answer in its completion transaction.
+// Its target is the order an order sale pays, else the price.
 func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"

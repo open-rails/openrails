@@ -31,17 +31,17 @@ var (
 	ErrTierChangePending        = errors.New("tier change already pending")
 	ErrTierChangeSameProduct    = errors.New("already on this plan")
 	ErrTierChangeDifferentGroup = errors.New("cannot change to a different tier group")
-	// ErrTierChangeCrossCurrency (#820): proration subtracts the old plan's
-	// unused value from the new plan's price, which is only meaningful inside
-	// one currency. Wraps the price-change FX sentinel, so every FX-crossing
-	// price move answers to one errors.Is.
+	// ErrTierChangeCrossCurrency: proration subtracts the old plan's unused
+	// value from the new plan's price, meaningful only inside one currency.
+	// Wraps the price-change FX sentinel, so every FX-crossing price move
+	// answers to one errors.Is.
 	ErrTierChangeCrossCurrency = fmt.Errorf("cannot change to a plan in a different currency: %w", subscriptions.ErrPriceCurrencyMismatch)
 )
 
 // PriceAmount is an amount together with the currency it is denominated in.
 // Money crosses API boundaries as this pair, never a bare int64, so an FX
-// boundary cannot be crossed by accident (#820). Micros are the system-wide
-// money unit; no float ever represents or converts one.
+// boundary cannot be crossed by accident. Micros are the system-wide money
+// unit; no float ever represents or converts one.
 type PriceAmount struct {
 	Micros   int64
 	Currency string

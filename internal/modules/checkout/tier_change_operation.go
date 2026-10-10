@@ -35,7 +35,7 @@ const tierChangeSubjectConstraint = "provider_intents_subscription_id_tier_chang
 // The ledger's (merchant_id, idempotency_key) unique constraint arbitrates
 // concurrent requests before either provider-specific handler can execute.
 // The customer scope keeps another customer from pre-claiming a predictable
-// key (SEC-33).
+// key.
 func tierChangeIdempotencyKey(customerID, key string) string {
 	customerID = strings.TrimSpace(customerID)
 	if id, err := uuid.Parse(customerID); err == nil {

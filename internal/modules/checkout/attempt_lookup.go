@@ -32,7 +32,7 @@ func (s *CheckoutAttemptService) LookupSession(ctx context.Context, req *Checkou
 	id := idempotentCheckoutAttemptID(mid.UUID(), scoped)
 	// The claim and the session are read from one snapshot, so no reclaim can
 	// land between them. While a request for the key runs its outcome is not
-	// known, and a host must not move on to another attempt (#1099).
+	// known, and a host must not move on to another attempt.
 	var session *models.CheckoutAttempt
 	err = s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		rec, err := idempotency.GetInTx(ctx, tx, mid.UUID(), checkoutAttemptIdempotencyOp, scoped)
@@ -65,9 +65,9 @@ func (s *CheckoutAttemptService) LookupSession(ctx context.Context, req *Checkou
 	stored, _ := session.RailState[checkoutAttemptFingerprintKey].(string)
 	fingerprint := checkoutAttemptRequestFingerprintForRail(req, user, string(session.Rail))
 	if stored == "" || stored != fingerprint {
-		// #1104: a buyer retrying a finished attempt with other details (a new
-		// card after a decline) must learn it finished, or its host never moves
-		// on. The answer is the session's identity and terminal status only.
+		// A buyer retrying a finished attempt with other details (a new card
+		// after a decline) must learn it finished, or its host never moves on.
+		// The answer is the session's identity and terminal status only.
 		if terminalCheckoutStatus(response.Status) {
 			return &CheckoutAttemptResponse{Object: response.Object, ID: response.ID, Status: response.Status}, nil
 		}

@@ -25,10 +25,6 @@ type PaymentMethodRepo struct {
 
 func NewPaymentMethodRepo(d *db.DB) *PaymentMethodRepo { return &PaymentMethodRepo{db: d} }
 
-// ErrPaymentMethodNotFound is declared in payment_method.go (the service
-// file); the repo and service sentinels were unified when this moved into the
-// module (#688) — same message, same errors.Is matching.
-
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
 	if (m.Custodian != "" && m.Custodian != models.CustodianPSP) || !strings.EqualFold(strings.TrimSpace(string(m.Rail)), "nmi") {
 		return r.create(ctx, m)
@@ -142,7 +138,7 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 		NetworkTokenID:     m.NetworkTokenID,
 		NetworkTokenStatus: m.NetworkTokenStatus,
 		NetworkTokenPar:    m.NetworkTokenPAR,
-		ChargeVia:          m.ChargeVia, // "" -> DB default 'pan_proxy'
+		ChargeVia:          m.ChargeVia, // "" -> 'pan_proxy'
 	})
 	if err != nil {
 		return err
@@ -153,9 +149,8 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 	return nil
 }
 
-// attachPaymentMethodSubscriptions loads the Subscriptions (+ their Product)
-// relation for the supplied payment methods (bun-era
-// Relation("Subscriptions").Relation("Subscriptions.Product")).
+// attachPaymentMethodSubscriptions loads the subscriptions, with their
+// products, of the supplied payment methods.
 func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context, methods []*models.PaymentMethod) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -329,9 +324,9 @@ func (r *PaymentMethodRepo) ListByIDs(ctx context.Context, customerID uuid.UUID,
 	return methods, r.attachPaymentMethodSubscriptions(ctx, methods)
 }
 
-// CountSharingCustomerRef reports how many OTHER payment methods share this
-// rail customer-scope handle (#682 shared-vault guard — e.g. an imported
-// multi-card NMI vault whose sibling cards a whole-vault delete would destroy).
+// CountSharingCustomerRef reports how many other payment methods share this
+// customer-scope handle, e.g. the sibling cards of an imported multi-card NMI
+// vault that a whole-vault delete would destroy.
 func (r *PaymentMethodRepo) CountSharingCustomerRef(ctx context.Context, rail string, pspID uuid.UUID, customerRef string, excludeID uuid.UUID) (int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -431,7 +426,7 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 	return nil
 }
 
-// GetAllNMIBacked returns all payment methods for NMI-backed rails
+// GetAllNMIBacked returns the merchant's NMI payment methods.
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -444,7 +439,7 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 	return models.PaymentMethodsFromGen(rows)
 }
 
-// GetNMIBackedByUserID returns all payment methods for NMI-backed rails for a user
+// GetNMIBackedByUserID returns a customer's NMI payment methods.
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -510,9 +505,9 @@ func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*mod
 	return pm, nil
 }
 
-// LatestChargeByMethodIDs returns the most recent charge (time + raw status) per
-// payment-method id, derived via the subscription link (#589). Methods with no
-// charge history are simply absent from the map.
+// LatestChargeByMethodIDs returns the most recent charge (time and raw status)
+// per payment method id, derived via the subscription link. Methods with no
+// charge history are absent.
 func (r *PaymentMethodRepo) LatestChargeByMethodIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.PaymentMethodCharge, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

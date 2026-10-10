@@ -44,9 +44,8 @@ func (s *CheckoutService) merchantSecret(ctx context.Context, name string) (stri
 }
 
 // merchantSecretRef is the single credential read for checkout money paths. It
-// carries the or#812 rotation version floor, so a credential rotated on ANOTHER
-// node is picked up on the next charge instead of after a cache TTL of
-// presenting a retired key to the gateway.
+// carries the rotation version floor, so a credential rotated on another node
+// is used on the next charge, never a retired key until a cache TTL lapses.
 func (s *CheckoutService) merchantSecretRef(ctx context.Context, ref merchants.SecretRef) (string, bool, error) {
 	if s == nil || s.MerchantSecrets == nil {
 		return "", false, nil
@@ -109,8 +108,8 @@ func (s *CheckoutService) scopedProviderSecretsEnabled() bool {
 	return s != nil && s.MerchantSecrets != nil && s.ProviderSecrets != nil
 }
 
-// pspEnvironment is the environment PSP rows carry in
-// this deployment: test under test_mode, live otherwise (#641).
+// pspEnvironment is the environment PSP rows carry in this deployment: test
+// under test_mode, live otherwise.
 func (s *CheckoutService) pspEnvironment() string {
 	return config.ExpectedProviderEnvironment(s != nil && s.Config != nil && config.IsTestMode(s.Config))
 }
@@ -134,7 +133,7 @@ var knownRails = map[string]struct{}{
 }
 
 // AmbiguousRailError reports a bare rail-kind selector that matched more than
-// one armed PSP: the wire must name the PSP key (#848).
+// one armed PSP: the wire must name the PSP key.
 type AmbiguousRailError struct {
 	Rail string
 	Keys []string
@@ -292,11 +291,10 @@ func (s *CheckoutService) CheckoutRailUsable(ctx context.Context, selector strin
 	return nil
 }
 
-// ResolvePSPID resolves the PSP for new work on the given provider/rail name
-// for provenance stamping. Returns uuid.Nil when no resolver is wired or
-// nothing is armed — provenance is only ever stamped with a REAL resolved
-// account, never invented. or#893: the CALLER decides what an unresolved PSP
-// means; every provider-bound write now refuses one.
+// ResolvePSPID resolves the PSP for new work on the given provider/rail name,
+// for provenance stamping. uuid.Nil when no resolver is wired or nothing is
+// armed: provenance is never invented. The caller decides what an unresolved
+// PSP means; every provider-bound write refuses one.
 func (s *CheckoutService) ResolvePSPID(ctx context.Context, name string) uuid.UUID {
 	if s == nil || s.ProviderSecrets == nil {
 		return uuid.Nil
@@ -316,9 +314,8 @@ func (s *CheckoutService) railSource() railresolve.Source {
 	return s.Rails
 }
 
-// stampPSP pins resolved account provenance into ctx so the
-// payment / subscription / payment-method writes downstream of this checkout
-// flow stamp psp_id (#704).
+// stampPSP pins the resolved account into ctx so the payment, subscription and
+// payment-method writes downstream of this checkout stamp psp_id.
 func (s *CheckoutService) stampPSP(ctx context.Context, name string) context.Context {
 	return db.WithPSPID(ctx, s.ResolvePSPID(ctx, name))
 }
@@ -344,7 +341,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		return nil, errors.New("payment provider identity is unavailable")
 	}
 	// Pinned to the resolved account's own versioned secret and declared
-	// endpoint deployment (or#812, #1055).
+	// endpoint deployment.
 	owner, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -383,9 +380,8 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	if err != nil {
 		return nil, err
 	}
-	// Environment follows test_mode (#641/#668): sandbox deployments declare
-	// environment=test rows (ValidateRailSet enforces it), so a hardcoded
-	// "live" here can never resolve under test_mode.
+	// Environment follows test_mode: sandbox deployments declare
+	// environment=test rows (ValidateRailSet enforces it).
 	env := s.pspEnvironment()
 	var scope merchants.PSPScope
 	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
@@ -404,7 +400,7 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	if base != nil {
 		*cfg = *base
 	}
-	// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
+	// CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
 	// 999999-0000). Both parts are numeric, so the first dash is the separator.
 	acc, sub, ok := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 	if !ok || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
@@ -439,18 +435,15 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 }
 
 // custodianHeld reports whether the resolved PSP's instruments are held by a
-// third-party custodian (or#879/or#880) — the axis that decides which charge
-// transport a checkout takes, orthogonal to the rail that charges. It is a
-// plain reference check now: the PSP row either points at a custodians row or
-// it does not, so there is no parse here to be ambiguous about.
+// third-party custodian: the axis that picks a checkout's charge transport,
+// orthogonal to the rail that charges.
 func custodianHeld(target railTarget) bool {
 	return target.Scope != nil && target.Scope.CustodianID != nil
 }
 
-// pspKeyArchived reports whether selector names a declared-but-archived PSP
-// (or#288). Best-effort by design: it only refines a skip CLASS in the routing
-// trace, never a routing outcome, so a resolver that cannot answer leaves the
-// class as-is rather than failing the checkout.
+// pspKeyArchived reports whether selector names a declared-but-archived PSP.
+// Best-effort: it only refines a skip class in the routing trace, never a
+// routing outcome, so a resolver that cannot answer leaves the class as-is.
 func (s *CheckoutService) pspKeyArchived(ctx context.Context, selector string) bool {
 	resolver, ok := s.ProviderSecrets.(merchants.ArchivedPSPKeyResolver)
 	if !ok {
