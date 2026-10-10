@@ -42,10 +42,9 @@ const (
 	KindProviderRefresh         = "openrails.provider_refresh"
 	KindProviderRefreshMerchant = "openrails.provider_refresh_merchant"
 
-	// QueueProviderRefresh bounds refresh concurrency in standalone (#719): a
-	// small MaxWorkers cap is the global brake on refresh HTTP so thousands of
-	// merchants can't stampede a provider's API budget. Embedded hosts route
-	// the kind onto QueueBilling instead (see AddBillingWorkersTo).
+	// QueueProviderRefresh bounds refresh concurrency in standalone: a small
+	// MaxWorkers cap keeps many merchants from stampeding a provider's API
+	// budget. Embedded hosts run the kind on QueueBilling.
 	QueueProviderRefresh = "provider_refresh"
 
 	providerRefreshDomainEvents = "events"
@@ -57,15 +56,13 @@ const (
 	defaultRefreshStagger = 30 * time.Minute
 )
 
-// ProviderRefreshArgs is the periodic SCHEDULER kind (#719). The kind string is
-// unchanged from the pre-#719 serial umbrella, so a pending umbrella row from a
-// mid-upgrade deployment is worked as a scheduler pass (fan-out), never as a
-// second serial loop.
+// ProviderRefreshArgs is the periodic scheduler kind: it fans out one
+// ProviderRefreshMerchantArgs job per merchant.
 type ProviderRefreshArgs struct{}
 
 func (ProviderRefreshArgs) Kind() string { return KindProviderRefresh }
 
-// ProviderRefreshMerchantArgs is one merchant's refresh job (#719).
+// ProviderRefreshMerchantArgs is one merchant's refresh job.
 type ProviderRefreshMerchantArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id" river:"unique"`
 	// Requested marks a host-requested refresh: it must observe provider state
@@ -76,10 +73,9 @@ type ProviderRefreshMerchantArgs struct {
 
 func (ProviderRefreshMerchantArgs) Kind() string { return KindProviderRefreshMerchant }
 
-// providerRefreshUniqueStates = default unique set minus completed: exactly one
-// IN-FLIGHT job per merchant, re-enqueueable next tick. Overlapping scheduler
-// passes (a mid-upgrade leftover umbrella row next to the fresh periodic tick)
-// dedupe here instead of double-refreshing a merchant.
+// providerRefreshUniqueStates is the default unique set minus completed: one
+// in-flight job per merchant, re-enqueueable next tick, so overlapping
+// scheduler passes never double-refresh a merchant.
 var providerRefreshUniqueStates = []rivertype.JobState{
 	rivertype.JobStateAvailable,
 	rivertype.JobStatePending,
@@ -118,12 +114,10 @@ type refreshJobInserter interface {
 	Insert(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error)
 }
 
-// ProviderRefreshSchedulerWorker (#719) is the periodic umbrella: it lists
-// active merchants and enqueues ONE per-merchant refresh job each, spread
-// evenly over Stagger. Merchants that cannot possibly arm (no declared
-// rail accounts AND no boot-config fallback plane) are skipped before enqueue
-// via a cheap merchant-scoped EXISTS. River supplies the rest: per-merchant error
-// isolation + retries, and the bounded queue caps refresh concurrency.
+// ProviderRefreshSchedulerWorker is the periodic umbrella: it enqueues one
+// refresh job per active merchant that has a PSP, spread evenly over Stagger.
+// River supplies per-merchant error isolation and retries; the bounded queue
+// caps refresh concurrency.
 type ProviderRefreshSchedulerWorker struct {
 	river.WorkerDefaults[ProviderRefreshArgs]
 	DB     *db.DB
@@ -172,10 +166,9 @@ func (w *ProviderRefreshSchedulerWorker) listMerchants(ctx context.Context) ([]u
 	return w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 }
 
-// merchantHasRailAccounts: cheap accounts-exist predicate. psps
-// is merchant-owned, so the EXISTS runs per merchant. Archived rows
-// count — drain pulls still arm (#655). Environment is NOT filtered: a
-// wrong-environment row enqueues a job that arms nothing (fail open, cheap).
+// merchantHasRailAccounts reports whether the merchant declares any PSP.
+// Archived PSPs count (drain pulls still arm). Environment is not filtered: a
+// wrong-environment PSP enqueues a job that arms nothing (fail open, cheap).
 func (w *ProviderRefreshSchedulerWorker) merchantHasRailAccounts(ctx context.Context, mid uuid.UUID) (bool, error) {
 	if w.HasRailAccounts != nil {
 		return w.HasRailAccounts(ctx, mid)
@@ -214,9 +207,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	if n := len(merchantIDs); n > 0 {
 		spacing = w.stagger() / time.Duration(n)
 	}
-	// #788: the armed rail state (psps) is the only
-	// credential plane, so a merchant with zero declared accounts has nothing
-	// to refresh — always skip it before enqueue.
+	// A merchant with no PSP has nothing to refresh: skip it before enqueue.
 	var enqueued, deduped, skipped, failed, slot int
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "refresh scheduler merchant "+mid.String())
@@ -261,39 +252,34 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	return nil
 }
 
-// ProviderRefreshWorker (#574) is ONE merchant's provider-read refresh (#719:
-// the kind fans out from the scheduler above). It keeps provider truth fresh
-// without remote mutations: bounded event pulls with durable watermarks, the
-// unknown-cohort reconcile (#632/#633/#665 — the ONE per-subscription
-// verification path), and the CCBill DataLink bulk lane. Provider outages
-// leave watermarks in place for the next scheduled/startup pass.
-//
-// Credentials arm PER MERCHANT (#699): fetchers/probers are built inside the
-// merchant's scope from the merchant-secrets store first, with the boot-config
-// rails (Rails + the boot-built clients below) as the fallback plane. Clients
-// are cheap per-merchant structs — nothing credentialed is cached across
-// merchants (#653).
+// ProviderRefreshWorker is one merchant's provider-read refresh. It keeps
+// provider truth fresh without remote mutations: bounded event pulls with
+// durable watermarks, the unknown-cohort reconcile (the one per-subscription
+// verification path) and the CCBill DataLink lane. Provider outages leave
+// watermarks in place for the next pass. Fetchers and probers arm per
+// merchant, inside its scope, from its PSPs; nothing credentialed is cached
+// across merchants.
 type ProviderRefreshWorker struct {
 	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[ProviderRefreshMerchantArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
-	// Merchants resolves per-merchant PSPs + scoped secrets
-	// (#699/#788 — the ONLY credential plane). nil = nothing arms.
+	// Merchants resolves per-merchant PSPs and scoped secrets. nil = nothing
+	// arms.
 	Merchants   *merchants.Service
 	DeferDelete subscriptions.ProviderCancelScheduler
 	// Contacts supplies customer emails for identity matching.
 	Contacts identity.Directory
-	// Alerts bridges requires_review findings into the #736 operator
-	// notification store (#787). nil = no-op (no alerting service wired).
+	// Alerts sends requires_review findings to the operator notification
+	// store. nil = no-op.
 	Alerts *alerting.Service
 
 	// PullEndpoints overrides provider base URLs on store-armed clients
 	// (fake-provider test seam).
 	PullEndpoints reconcile.ProviderEndpoints
 	NMIClients    *railresolve.NMIFactory
-	// Verifier reads the unverified NMI rows (#1094); nil leaves them to the
+	// Verifier reads the unverified NMI rows; nil leaves them to the
 	// unknown-cohort reconcile.
 	Verifier *reconcile.Verifier
 	// Positive invoice recovery does not authorize provider or lifecycle writes.
@@ -335,10 +321,9 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	}
 	defer release()
 
-	// #699/#788: fetchers + per-sub probers (#665) arm PER MERCHANT inside
-	// the merchant scope from the armed rail state. A rail that cannot arm is
-	// absent for that merchant (its WARN names merchant/rail/secret); the
-	// other rails keep pulling.
+	// Fetchers and per-subscription probers arm per merchant, inside its scope.
+	// A rail that cannot arm is absent for that merchant (its WARN names
+	// merchant/rail/secret); the other rails keep pulling.
 	builder := reconcile.MerchantFetcherBuilder{
 		StripeClients: w.StripeClients,
 		Config:        w.Config,
@@ -435,9 +420,9 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
 		}
 
-		// #665 §3.2 confirmed-absence gate: a completed exhaustive pull
-		// PROVES a source domain — flip reconciliation_state before the
-		// convergence pass so held EXCESS repairs can proceed.
+		// Confirmed-absence gate: a completed exhaustive pull proves a source
+		// domain; mark it reconciled before convergence so held excess
+		// repairs can proceed.
 		if len(res.Proofs) > 0 {
 			if flipped, err := reconcile.MarkReconciledSourceDomains(tctx, w.DB.Gen(tctx), mid, res.Proofs); err != nil {
 				stats.LaneErrors++
@@ -452,10 +437,8 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 				logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: scoped convergence failed")
 			}
 		}
-		// #633: reconcile the `unknown` cohort against provider truth (one
-		// windowed bulk pull per rail + targeted per-sub probe fallbacks).
-		// Tolerant of missing/failed fetchers — those rails' subs stay
-		// `unknown` and are retried next pass (backoff).
+		// Reconcile the `unknown` cohort against the provider. A rail without
+		// a working fetcher leaves its subscriptions `unknown` for the next pass.
 		if err := w.runUnknownReconcile(tctx, mid, armed.Fetchers, armed.Probers); err != nil {
 			stats.LaneErrors++
 			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: unknown-cohort reconcile failed")
@@ -477,14 +460,12 @@ func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataL
 	}.Run(ctx)
 }
 
-// runUnknownReconcile resolves the merchant's `unknown` subscription cohort (#632)
-// against provider truth via one windowed bulk pull per rail (#633), backfilling
-// missing charges (#634). The lifecycle service is built with nil deps (like the
-// converge engine): the resolver only needs local-state writes + the entitlement
-// service it constructs internally for revokes — plus the deferred-delete
-// scheduler (#679) so stale-decline cancels queue the NMI delete intent.
-// Best-effort: a rail whose pull fails leaves its subs `unknown` for the next
-// scheduled pass (River backoff).
+// runUnknownReconcile resolves the merchant's `unknown` subscriptions against
+// the provider (one windowed bulk pull per rail, probes as fallback),
+// backfilling missing charges; with a Verifier, NMI rows go to it instead. The
+// lifecycle service needs only local writes, so it is built with nil deps.
+// Best-effort: a rail whose pull fails leaves its subscriptions `unknown` for
+// the next pass.
 func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uuid.UUID, fetchers map[reconcile.Provider]reconcile.RailFetcher, probers map[reconcile.Provider]reconcile.SubscriptionProber) error {
 	clock := w.Clock
 	if clock == nil {
@@ -493,8 +474,8 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, clock)
 	lc.SetConfig(w.Config)
 	if w.DeferDelete != nil {
-		// #679: a stale-decline cancel must durably queue the deferred NMI
-		// delete; without this the lifecycle WARNs and the remote keeps retrying.
+		// A stale-decline cancel must durably queue the deferred NMI delete;
+		// without this the lifecycle WARNs and the remote keeps retrying.
 		lc.SetProviderCancelScheduler(w.DeferDelete)
 	}
 	opts := reconcile.UnknownReconcileOptions{}
@@ -523,8 +504,7 @@ func (w *ProviderRefreshWorker) runConvergence(ctx context.Context, mid uuid.UUI
 	engine := converge.NewConvergeEngine(w.DB)
 	engine.Now = func() time.Time { return w.now() }
 	if w.Alerts != nil {
-		// #787: nil-check before assigning to the interface field — a nil
-		// *alerting.Service boxed into a non-nil FindingNotifier interface
+		// A nil *alerting.Service boxed into the FindingNotifier interface
 		// would panic on first use.
 		engine.Notifier = w.Alerts
 	}
@@ -536,11 +516,8 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	result := providerRefreshMerchantResult{}
 	providers := refreshProviders(fetchers)
 	for _, provider := range providers {
-		// or#893: the pass already KNOWS which PSP armed the rail's fetcher —
-		// resolveScopeCoverage recorded it. It used to be thrown away, so the
-		// watermark keyed globally per (merchant, rail) and reconcile ran
-		// account-agnostic: pulling mobius advanced paykings' watermark past
-		// events nobody had read, and every mirror row landed unattributed.
+		// Watermarks and mirror rows are per PSP: pulling one account must
+		// never advance another's watermark or land unattributed.
 		binding := coverage[provider].Binding
 		if binding.ID == uuid.Nil {
 			result.ProviderErrors++
@@ -554,11 +531,8 @@ func (w *ProviderRefreshWorker) runEventRefresh(ctx context.Context, mid uuid.UU
 	return result
 }
 
-// refreshProviders selects the pull lanes to run. Only what actively matters
-// runs: fetchers arm PER MERCHANT from the secrets store (#699) — a merchant
-// with no credentials/accounts on a rail gets no fetcher and no pull. The
-// allowed map is the second gate: lane production-readiness (solana joined
-// once #714/#715 made its fetcher real).
+// refreshProviders selects the pull lanes to run, sorted: the armed fetchers
+// whose rail is production-ready.
 func refreshProviders(fetchers map[reconcile.Provider]reconcile.RailFetcher) []reconcile.Provider {
 	allowed := map[reconcile.Provider]bool{
 		reconcile.ProviderNMI:    true,
@@ -617,7 +591,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 	engine.RecoverInvoicePayment = w.RecoverInvoicePayment
 	engine.Now = func() time.Time { return now }
 	if w.Alerts != nil {
-		engine.Notifier = w.Alerts // #787: nil-check, see runConvergence
+		engine.Notifier = w.Alerts // nil-check: see runConvergence
 	}
 	maxWindows := w.maxWindows()
 	for i := 0; i < maxWindows && since.Before(horizon); i++ {
@@ -641,10 +615,8 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		res, err := engine.Run(ctx, params)
 		if err != nil {
 			out.ProviderErrors++
-			// or#823: the failure is recorded by the job (log + River's own error
-			// record), not by a watermark column nothing surfaced. The row is
-			// deliberately left alone: an unadvanced watermark IS the durable
-			// statement that this window still needs reading.
+			// The unadvanced watermark is the durable record that this window
+			// still needs reading; the job's log and error report the failure.
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"provider": provider,
 				"since":    since,
@@ -657,13 +629,13 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			out.NewFindings += rep.NewFindings
 			out.UpdatedFindings += rep.UpdatedFindings
 		}
-		// Completed enforce window: its coverage is a pull proof (#665 gate).
+		// A completed enforce window's coverage is a pull proof.
 		out.Proofs = res.PullProofs()
 		out.AppliedChanges += len(res.AppliedChanges)
 		out.Changed = out.Changed || len(res.AppliedChanges) > 0
-		// #786 drift: pull-applied corrections while the rail's accepted-webhook
-		// watermark predates the previous pull (gated in SQL) — changes a
-		// webhook should have announced. Best-effort telemetry.
+		// Webhook drift: pull-applied corrections while the rail's
+		// accepted-webhook watermark predates the previous pull (gated in SQL)
+		// are changes a webhook should have announced. Best-effort telemetry.
 		if n := len(res.AppliedChanges); n > 0 {
 			if _, derr := webhookhealth.Drift(ctx, w.DB, pspID, now, n); derr != nil {
 				log.WithContext(ctx).WithError(derr).WithField("provider", provider).Warn("Provider Refresh: record webhook drift failed")
@@ -701,8 +673,8 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 			}
 		}
 	}
-	// #786: advance the pull watermark AFTER the pass so the NEXT pass's drift
-	// gate compares against this pull.
+	// Advance the pull watermark after the pass so the next pass's drift gate
+	// compares against this pull.
 	if out.Windows > 0 {
 		if err := webhookhealth.StampPull(ctx, w.DB, pspID, now); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("provider", provider).Warn("Provider Refresh: stamp webhook pull watermark failed")
@@ -854,7 +826,7 @@ type providerRefreshProviderResult struct {
 	WatermarkErrors int
 	ProviderErrors  int
 	Changed         bool
-	// Proofs carries the completed pull's coverage for the #665 gate.
+	// Proofs carries the completed pull's coverage for the confirmed-absence gate.
 	Proofs reconcile.PullProofs
 }
 

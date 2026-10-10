@@ -23,13 +23,10 @@ type JobRescueArgs struct{}
 
 func (JobRescueArgs) Kind() string { return KindJobRescue }
 
-// JobRescueWorker is the rescue River's own rescuer no longer performs for
-// OpenRails jobs: they run with no elapsed-time timeout (xs-007) and River
-// v0.47 never rescues a job whose timeout is negative, so a job killed with
-// its process stayed running forever and its operation never resumed. The
-// liveness beat is the evidence: a job whose beat stopped is dead. Rescued
-// work re-enters through its own recovery (an operation re-reads the
-// provider before any write), never as a blind re-send.
+// JobRescueWorker rescues OpenRails jobs, which River's own rescuer skips
+// because their timeout is negative. A job whose liveness beat stopped is
+// dead. Rescued work re-enters through its own recovery (an operation
+// re-reads the provider before any write), never as a blind re-send.
 type JobRescueWorker struct {
 	river.WorkerDefaults[JobRescueArgs]
 	River   RiverTableAccess

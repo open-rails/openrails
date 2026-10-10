@@ -114,9 +114,9 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		if existing.Status == "active" {
 			continue
 		}
-		// A roster listing is a status fact, never payment (#1094): the lane
-		// changes no lifecycle state. CCBill's RenewalSuccess (webhook or
-		// transaction export) is what restores access.
+		// A roster listing is a status fact, never payment: the lane changes no
+		// lifecycle state. CCBill's RenewalSuccess (webhook or transaction
+		// export) is what restores access.
 		if ferr := w.recordUnpaidActiveFinding(ctx, existing, record); ferr != nil {
 			log.WithContext(ctx).WithError(ferr).Warn("CCBillReconcile: failed to persist unpaid-active finding")
 		}

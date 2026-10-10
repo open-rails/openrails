@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	// KindSolanaGasAlert is the cranker-wallet SOL float monitor (#258). NOT a
-	// fee-payer / auto-top-up system — just an alert so ops keeps the wallet
-	// funded. A pull that fails for lack of SOL is operational (retry), never
-	// subscriber dunning.
+	// KindSolanaGasAlert is the cranker-wallet SOL float monitor: an alert
+	// only, no auto-top-up. A pull that fails for lack of SOL is operational
+	// (retry), never subscriber dunning.
 	KindSolanaGasAlert = "openrails.solana_gas_alert"
 
 	// defaultGasAlertThresholdLamports ~0.05 SOL. Each crank costs ~5000 lamports,

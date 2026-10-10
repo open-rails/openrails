@@ -30,17 +30,12 @@ type DelinquencyArgs struct{}
 
 func (DelinquencyArgs) Kind() string { return KindDelinquency }
 
-// DelinquencyWorker evaluates arrears delinquency and emits the host signal
-// (or#878).
-//
-// It is deliberately its OWN job rather than a leg of the hourly invoice pass:
-//
-//   - it must run when no charger is armed and in limited/readonly mode, because
-//     it moves no money and calls no provider — it reads invoices and writes
-//     local state;
-//   - the EXIT half is latency-sensitive in the direction that hurts customers.
-//     A cleared debt that goes unnoticed is someone who paid still being told
-//     they cannot spend, so this runs on a tighter cadence than collection.
+// DelinquencyWorker evaluates arrears delinquency and emits the host signal.
+// It is its own job, not a leg of the invoice pass: it moves no money and
+// calls no provider, so it runs with no charger armed and in limited/readonly
+// mode; and its exit half is latency-sensitive (a cleared debt left unnoticed
+// keeps a customer who paid blocked from spending), so it runs on a tighter
+// cadence than collection.
 type DelinquencyWorker struct {
 	river.WorkerDefaults[DelinquencyArgs]
 	DB    *db.DB

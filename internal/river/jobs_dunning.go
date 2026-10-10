@@ -55,59 +55,52 @@ type dunningOutcome int
 const (
 	dunningOutcomeFailed dunningOutcome = iota
 	dunningOutcomeSucceeded
-	// dunningOutcomeWindowExpired: the missed rebill is older than the dunning
-	// window — the charge was skipped and the subscription PARKED as unknown
-	// for provider verification (#839; it is never canceled here).
+	// dunningOutcomeWindowExpired: the dunning window passed. A past_due
+	// subscription parks as unknown uncharged; one awaiting a card expires.
 	dunningOutcomeWindowExpired
-	// dunningOutcomeMaterialized (#366, mode=limited): the charge decision was
-	// recorded as a parked system-origin intent on the ledger instead of
-	// executed; the scheduled executor drains it at mode=full.
+	// dunningOutcomeMaterialized: the charge decision was recorded as an
+	// intent (parked under mode=limited) instead of executed inline.
 	dunningOutcomeMaterialized
 	// dunningOutcomeSettled: another replica's pass or a concurrent command
 	// resolved the obligation between this pass's scan and its admission.
 	dunningOutcomeSettled
 )
 
-// DunningArgs triggers a dunning run that processes all due past_due subscriptions.
+// DunningArgs triggers one due pass; a set MerchantID scopes it to that merchant.
 type DunningArgs struct {
 	MerchantID uuid.UUID `json:"merchant_id,omitempty"`
 }
 
 func (DunningArgs) Kind() string { return KindDunning }
 
-// DunningWorker queries all past_due subscriptions where next_retry_at is in the past
-// and attempts to rebill them via NMI. It processes each subscription inline and
-// updates the database after each attempt for idempotency.
+// DunningWorker is the due pass: per merchant with due work it retries past_due
+// NMI subscriptions through manual_rebill intents, admits due engine renewals
+// to collection, and ends memberships whose wait for a card outlived the
+// dunning window.
 type DunningWorker struct {
 	river.WorkerDefaults[DunningArgs]
 	DB     *db.DB
 	Config *config.Config
 	Clock  clockwork.Clock
-	// NMIResolver arms store-scoped NMI clients per merchant (#730/#788, the
-	// ONLY credential plane). Consulted at the charge gate; the rebill
-	// handler re-resolves at charge time (no caching).
+	// NMIResolver arms store-scoped NMI clients per merchant. Consulted at the
+	// charge gate; the rebill handler re-resolves at charge time.
 	NMIResolver money.NMIClientResolver
-	// DeferDelete schedules the rail-side delete for terminal cancellations
-	// (#344). Threaded into the per-run lifecycle so an evidence-backed terminal
-	// decline stops the remote NMI subscription via the ONE scheduled mechanism
-	// (kill-switch governed at execution). nil in producer-less wirings/tests:
-	// cancellation still happens, the remote sub is left for reconciliation.
+	// DeferDelete schedules the provider-side delete for terminal
+	// cancellations through the self-assembled rebill handler. nil leaves the
+	// remote subscription for reconciliation.
 	DeferDelete subscriptions.ProviderCancelScheduler
-	// Intents executes the provider-side charge through the intent ledger
-	// (#358 phase C): the worker enqueues a manual_rebill intent and runs it
-	// synchronously through the identical gate/execute/classify pipeline,
-	// driving lifecycle off the returned status. nil builds a Runner over the
-	// worker's own dependencies.
+	// Intents executes the provider-side charge through the intent ledger: the
+	// worker enqueues a manual_rebill intent and runs it synchronously. nil
+	// builds a Runner over the worker's own dependencies.
 	Intents *intents.Runner
 	// EngineCollections admits stored engine obligations; the existing
 	// provider-intent fleet performs the accepted charge and receipt recovery.
 	EngineCollections *money.MoneyService
 }
 
-// intentRunner returns the configured Runner or self-assembles one (direct
-// worker constructions in tests). Config is only attached when non-nil: since
-// or#865 a nil ModeView fails CLOSED, and a typed-nil interface would read as
-// readonly rather than panic — either way every rebill would park silently.
+// intentRunner returns the configured Runner or assembles one (tests). Config
+// is attached only when set: a nil ModeView fails closed, so every rebill
+// would park silently.
 func (w *DunningWorker) intentRunner() *intents.Runner {
 	if w.Intents != nil {
 		return w.Intents
@@ -126,9 +119,9 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 }
 
 // storeArmsNMI reports whether the merchant-secrets store can arm an NMI
-// client for the subscription's account (#730). Resolver errors count as
-// armable: a declared-but-unarmable account must reach the ledger and park
-// with its loud fail-closed reason, not vanish in a silent skip.
+// client for the subscription's account. Resolver errors count as armable: a
+// declared-but-unarmable account must reach the ledger and park with its loud
+// fail-closed reason, not vanish in a silent skip.
 func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscription) bool {
 	if w.NMIResolver == nil {
 		return false
@@ -148,16 +141,10 @@ func (w *DunningWorker) now() time.Time {
 }
 
 func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) error {
-	// Mode handling (#345/#366). Dunning is a PROACTIVE operation, so provider
-	// charges never fire outside mode=full — but the SCAN still runs under
-	// limited and MATERIALIZES its decisions (#366): stale subs are parked as
-	// `unknown` locally NOW, and in-window charges are enqueued as parked
-	// system-origin intents the ledger executor drains at mode=full. That makes
-	// a freshly migrated backlog VISIBLE in `openrails intents` instead of
-	// implicit in subscription rows. #839: limited mode no longer performs LOCAL
-	// terminal cancellations either — nothing on this path cancels without a
-	// charge. Readonly stays a pure observer: no charges, no state moves, no
-	// intents.
+	// Charges fire only in mode=full. Under limited the scan still materializes
+	// its decisions: stale subscriptions park as unknown and in-window charges
+	// enqueue as parked system-origin intents, visible in `openrails intents`.
+	// Nothing on this path cancels without a charge. Readonly only observes.
 	// Each merchant's write posture can lower the process's mode (an exported
 	// or restored merchant, a copied book).
 	postures := writeposture.View{Config: w.Config, DB: w.DB}
@@ -180,16 +167,9 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		return nil
 	}
 
-	// or#877 B5: the due scan used to run on the job's BARE context. Under
-	// the since-removed RLS it matched nothing — an empty slice, a "no
-	// subscriptions due" debug line and a successful return, every four hours
-	// since the worker shipped. The per-subscription RunInMerchantConn below it
-	// never executed because the loop it lived in never had a row. Scheduled
-	// dunning — retries, #839 staleness parking, #840 terminal handling — had
-	// therefore never run at all. Enumerate the merchants with due work through
-	// the dunning work queue (ids only), then scan and charge inside each
-	// merchant's own scope. Use w.now() instead of SQL NOW()
-	// to support time mocking in tests.
+	// Merchants with due work come from the dunning work queue (ids only); the
+	// scan and charge run inside each merchant's scope. w.now(), not SQL NOW(),
+	// so tests can mock time.
 	nmiRails := []string{string(models.RailNMI)}
 	if w.EngineCollections != nil {
 		nmiRails = append(nmiRails, string(models.RailStripe))
@@ -267,10 +247,8 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 				if err := w.recordSubscriptionOutcome(mctx, &sub, processErr); err != nil {
 					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, err))
 				}
-				// #511 Phase E: re-converge this customer inline after the dunning
-				// transition (past_due / grace / terminal cancel / renewal) — already
-				// on the merchant-scoped connection, so call Converge directly. Best-
-				// effort: a convergence error must not fail the dunning run.
+				// Re-converge this customer after the dunning transition.
+				// Best-effort: a convergence error must not fail the run.
 				if _, cerr := converge.AfterMutation(mctx, w.DB, billing.MerchantID(sub.MerchantID), sub.CustomerID, w.Clock); cerr != nil {
 					log.WithContext(mctx).WithError(cerr).WithField("subscription_id", sub.ID).
 						Warn("Dunning: inline converge failed; the sweep will reconcile")
@@ -341,8 +319,8 @@ func (w *DunningWorker) processSubscription(
 	materialize bool,
 ) (dunningOutcome, error) {
 	if sub.Status == models.StatusAwaitingMethod {
-		// The wait for a new card outlived its dunning window. #839: limited
-		// mode never cancels locally; the operator sees the held outcome.
+		// The wait for a new card outlived its dunning window. Limited mode
+		// never ends it locally; the operator sees the held outcome.
 		blocked := ""
 		if materialize {
 			blocked = "mode=limited holds local terminal cancellations"
@@ -397,22 +375,12 @@ func (w *DunningWorker) processSubscription(
 
 	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub)
 
-	// Dunning staleness window (#344, #359): charges are only attempted within
-	// the window DERIVED from the price's billing cycle (last retry offset +
-	// one day of slack — see collection.Window). Anything older (e.g.
-	// months-stale subscriptions imported from a legacy system) must never be
-	// surprise-charged by a catch-up run.
-	//
-	// #839: expiry SKIPS THE CHARGE and PARKS. It used to cancel + revoke
-	// entitlements + queue the irreversible NMI SCHEDULE delete, with a date
-	// comparison as its only evidence and zero charge attempts — and because a
-	// sub-4-day cycle derived a ZERO window, `now > periodEnd + 0` was true by
-	// construction, so a daily subscription was destroyed on its first dunning
-	// touch having never been billed once. A clock reading is not a death
-	// certificate: NMI rebills forever, so a lapsed date is the NORMAL state of
-	// a dunning customer. The row parks as `unknown` — access intact, out of the
-	// dunning queue — and the unknown-cohort provider probe resolves it against
-	// provider truth.
+	// Charges are attempted only within the window derived from the price's
+	// billing cycle: an older rebill (e.g. a months-stale legacy import) is
+	// never surprise-charged by a catch-up run. Expiry skips the charge and
+	// parks the row as `unknown` (access intact, out of the dunning queue) for
+	// the unknown-cohort provider probe: NMI rebills forever, so a lapsed date
+	// is evidence of nothing.
 	cycleHours := collection.BillingCycleHoursOf(sub.Price)
 	if cycleHours <= 0 && priceSvc != nil {
 		if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
@@ -436,19 +404,14 @@ func (w *DunningWorker) processSubscription(
 		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
 	}
 
-	// #635: a provider-auto-billed subscription is charged by the provider itself,
-	// not by us. Still let the stale-window check above close truly stale rows,
-	// but never manual-rebill a vault-less provider-billed subscription.
+	// The provider charges a provider-auto-billed subscription itself: never
+	// manual-rebill it.
 	if providerAutoBilled {
 		logEntry.WithField("rail", railName).
 			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation (#632/#633)")
 		return dunningOutcomeFailed, nil
 	}
 
-	// #730/#788: the armed rail state is the ONLY arming plane — a merchant
-	// whose NMI account can arm (or errors while arming) must reach the
-	// rebill intent (the handler re-resolves at charge time; a declared-but-
-	// unarmable account parks on the ledger with its fail-closed reason).
 	if !w.storeArmsNMI(ctx, sub) {
 		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI rail is not armed for this merchant; skipping")
 		return dunningOutcomeFailed, nil
@@ -505,10 +468,9 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed, nil
 
 	case intents.StatusUnknownNeedsVerify:
-		// Exactly the old markManualRebillUnknown posture: no lifecycle
-		// change, no next retry scheduled for this attempt; the intent
-		// verifier resolves it via the NMI Query API, and on late-confirmed
-		// success the handler's finalize repairs the lifecycle.
+		// No lifecycle change and no next retry for this attempt: the intent
+		// verifier resolves it via the NMI Query API, and a late-confirmed
+		// success repairs the lifecycle in the handler's finalize.
 		logEntry.Warn("Dunning: manual rebill status unknown; verifier will resolve via provider reads (no further automatic charge for this attempt)")
 		return dunningOutcomeFailed, nil
 
@@ -527,14 +489,11 @@ func (w *DunningWorker) processSubscription(
 	}
 }
 
-// parkStaleSubscription handles a past_due subscription whose missed rebill is
-// older than the dunning window (#839). The charge is SKIPPED — a rebill that
-// went stale months ago is never fired by a catch-up run — and the row is
-// PARKED as `unknown`: entitlements intact, out of the dunning queue, no
-// provider delete queued. It never terminates. The window is a clock reading,
-// and a clock reading is not evidence a subscription is dead; the
-// unknown-cohort provider probe (ProviderRefreshWorker) is what verifies it
-// against provider truth and may then resolve it either way.
+// parkStaleSubscription skips the charge of a past_due subscription whose
+// missed rebill is older than the dunning window and parks it as `unknown`:
+// access intact, out of the dunning queue, no provider delete. It never
+// terminates; the unknown-cohort probe (ProviderRefreshWorker) resolves it
+// against the provider.
 func (w *DunningWorker) parkStaleSubscription(
 	ctx context.Context,
 	logEntry *log.Entry,
@@ -555,8 +514,8 @@ func (w *DunningWorker) parkStaleSubscription(
 }
 
 // subscriptionProviderAutoBilled reports whether the provider bills this
-// subscription on its own side, so OpenRails must not manual-rebill or terminate
-// it (#635). Registry-backed (#669); see rails.Descriptor.AutoBilled.
+// subscription itself, so OpenRails must not manual-rebill or terminate it
+// (see rails.Descriptor.AutoBilled).
 func subscriptionProviderAutoBilled(rail string, sub *models.Subscription) bool {
 	return rails.AutoBilled(models.Rail(rail), sub)
 }
@@ -566,7 +525,6 @@ func resolveSubscriptionRail(sub *models.Subscription) string {
 		return ""
 	}
 
-	// Use rail field directly
 	if p := normalizeRail(sub.Rail); p != "" {
 		return p
 	}
@@ -588,11 +546,9 @@ func normalizeRail(value interface{}) string {
 	case string:
 		return normalize.Lower(v)
 	case models.Rail:
-		// Subscription.Rail and PaymentMethod.Rail are the named type
-		// models.Rail (type Rail string), which does NOT match `case
-		// string` in a Go type switch. Without this case resolveSubscriptionRail
-		// returns "" for every subscription, so NMIClients[""] is nil and NMI
-		// dunning rebills are silently skipped (caught by the dunning integration test).
+		// models.Rail does not match `case string` in a type switch; without
+		// this case every subscription resolves to no rail and is never
+		// rebilled.
 		return normalize.Lower(string(v))
 	default:
 		return ""

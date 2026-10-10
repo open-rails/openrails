@@ -26,10 +26,8 @@ import (
 const KindCleanupExpiredData = "openrails.cleanup_expired_data"
 
 const (
-	// cleanupMerchantBatch caps one pass's fan-out. The work queue is indexed
-	// on the work itself, so this bounds a pass by ACTIVITY — and the durable
-	// cursor means the merchants beyond the cap are the NEXT pass's head, not
-	// the tail of a queue that never gets there.
+	// cleanupMerchantBatch caps one pass's fan-out; the durable cursor makes
+	// the merchants beyond the cap the next pass's head.
 	cleanupMerchantBatch = 200
 
 	// cleanupDeleteBatch bounds ONE delete statement, and so one transaction.
@@ -56,33 +54,26 @@ type CleanupConfig struct {
 	NotificationUnseenRetention time.Duration
 
 	// WebhookEventRetention is how long completed webhook dedup marks
-	// (billing.webhook_events, #678) are kept. Default: 90 days.
+	// (webhook_events) are kept. Default: 90 days.
 	WebhookEventRetention time.Duration
 
-	// PaymentSettlementAckedRetention is how long acknowledged (delivered)
-	// payment settlement events (#827) are kept. Default: 30 days. Pending
-	// (unacked) events are never pruned.
+	// PaymentSettlementAckedRetention is how long acknowledged payment
+	// settlement events are kept. Default: 30 days. Pending events are never
+	// pruned.
 	PaymentSettlementAckedRetention time.Duration
 
 	// HostLifecycleEventAckedRetention is how long acknowledged host-lifecycle
-	// events (or#878 delinquency transitions) are kept. Default: 30 days, the
-	// same as the settlement feed it is modelled on. Pending (unacked) events
-	// are NEVER pruned — an unread shutoff or restore instruction is not
-	// garbage, it is undone work.
+	// events (delinquency transitions) are kept. Default: 30 days. Pending
+	// events are never pruned: an unread shutoff or restore is undone work.
 	HostLifecycleEventAckedRetention time.Duration
 
-	// PaymentAttemptRetention is how long payment attempts, rebill cycles
-	// and NMI history months (#1110, #1111, #1120) are kept. Default: 25
-	// months.
+	// PaymentAttemptRetention is how long payment attempts, rebill cycles and
+	// NMI history months are kept. Default: 25 months.
 	PaymentAttemptRetention time.Duration
 }
 
-// DefaultCleanupConfig is the ONE defaults path (#711): worker registration
-// passes it (or a test passes an explicit config); Work never re-defaults —
-// a zero retention is a wiring bug and fails loudly instead of mass-deleting.
-// clampInt32 narrows a row/batch budget for sqlc's int32 params; budgets are
-// small positive constants, so the clamp exists for the checker and the
-// impossible case, not for expected values.
+// clampInt32 narrows a small positive row/batch budget to sqlc's int32
+// params; the clamp exists for the checker, not for expected values.
 func clampInt32(v int) int32 {
 	if v < 0 {
 		return 0
@@ -93,6 +84,8 @@ func clampInt32(v int) int32 {
 	return int32(v)
 }
 
+// DefaultCleanupConfig is the one defaults path: Work never re-defaults, so a
+// zero retention fails loudly instead of mass-deleting.
 func DefaultCleanupConfig() CleanupConfig {
 	return CleanupConfig{
 		NotificationSeenRetention:   retention.NotificationsRead,
@@ -162,29 +155,16 @@ type CleanupResult struct {
 	MerchantsBudgetCapped int
 }
 
-// Work runs every retention sweep once per merchant WITH DUE WORK, inside that
-// merchant's own scope.
+// Work runs every retention sweep once per merchant with due work, inside that
+// merchant's scope and with the merchant predicate in the SQL:
 //
-// or#877 B4 fixed the scope bug: three of the five sweeps carried UNQUALIFIED
-// predicates, which under the since-removed RLS matched nothing — zero rows,
-// no error, an hourly log line claiming success. All six now delete inside
-// the merchant's scope with the merchant predicate written into the SQL.
-//
-// or#837 fixes what that left: the walk itself. It enumerated EVERY active
-// merchant every hour, `ORDER BY id`, no cursor and no LIMIT, then opened six
-// transactions per merchant to discover — nearly always — nothing to delete. At
-// thousands of merchants that is work scaling with the directory, not with
-// activity. Now:
-//
-//   - merchants come from migration 0056's indexed work queue: only those
-//     holding a row past one of THIS config's cutoffs, capped at
-//     cleanupMerchantBatch;
-//   - a durable cursor (billing.worker_state) makes the next pass
-//     resume after the last merchant handled, so a capped pass cannot re-serve
-//     the same head forever and starve the tail. Draining the queue clears the
-//     cursor and the ring starts over;
-//   - each sweep deletes in bounded batches and loops, so a huge backlog is
-//     many short transactions rather than one long one.
+//   - merchants come from an indexed work queue (only those holding a row
+//     past one of this config's cutoffs), capped at cleanupMerchantBatch;
+//   - a durable cursor (worker_state) resumes the next pass after the last
+//     merchant handled, so a capped pass cannot starve the tail; draining the
+//     queue clears it;
+//   - each sweep deletes in bounded batches, so a huge backlog is many short
+//     transactions rather than one long one.
 func (w CleanupExpiredDataWorker) Work(ctx context.Context, job *river.Job[CleanupExpiredDataArgs]) error {
 	_, _, err := w.sweepPass(ctx)
 	return err
@@ -196,10 +176,8 @@ func (w CleanupExpiredDataWorker) Sweep(ctx context.Context) (CleanupResult, err
 	return result, err
 }
 
-// sweepPass is Work's body, returning what the pass actually did: the merchants
-// it visited (the due-work list, in visit order) and the row counts. Work
-// discards both; the scaling tests assert on them, because "only the merchants
-// with due work were touched" is not observable from the deleted rows alone.
+// sweepPass runs one pass and returns the merchants it visited, in order, and
+// the row counts; tests assert that only merchants with due work were touched.
 func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, CleanupResult, error) {
 	clock := w.Clock
 	if clock == nil {
@@ -240,8 +218,8 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		result.PartitionsDropped = n
 	}
 
-	// Checkout sessions past their reconciliation window (#1124): one
-	// indexed, bounded delete across merchants, so it needs no due-work walk.
+	// Checkout sessions past their reconciliation window: one indexed, bounded
+	// delete across merchants, so it needs no due-work walk.
 	for range cleanupCheckoutSessionMaxBatches {
 		n, err := checkoutsession.DeleteExpired(ctx, w.DB, now, cleanupDeleteBatch)
 		if err != nil {
@@ -286,11 +264,9 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		return nil, result, fmt.Errorf("cleanup expired data: list merchants with retention work: %w", err)
 	}
 
-	// The ring wraps INSIDE the pass. A short list means everything after the
-	// cursor is drained, so the rest of this pass's capacity goes to the
-	// merchants before it rather than being thrown away — otherwise the tail of
-	// the ring costs a whole empty tick to notice. Ids at or below the cursor
-	// are exactly the ones the first query could not have returned.
+	// The ring wraps inside the pass: after a short list, the remaining
+	// capacity goes to the merchants at or below the cursor (which the first
+	// query could not return) instead of costing a whole empty tick.
 	if cursor != nil && len(merchantIDs) < batch {
 		head, herr := dueWork(nil, clampInt32(batch-len(merchantIDs)))
 		if herr != nil {
@@ -362,10 +338,10 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	return visited, result, nil
 }
 
-// sweepMerchant runs the retention sweeps for ONE merchant, already inside
-// its scope. Each BATCH gets its own transaction, so a failing sweep cannot roll
-// back another's deletes and no single statement holds a transaction open across
-// a large backlog (or#837, inherited from or#846).
+// sweepMerchant runs the retention sweeps for one merchant, already inside
+// its scope. Each batch gets its own transaction, so a failing sweep cannot
+// roll back another's deletes and no transaction stays open across a large
+// backlog.
 func (w CleanupExpiredDataWorker) sweepMerchant(
 	ctx context.Context, mid uuid.UUID, now time.Time, config CleanupConfig,
 	result *CleanupResult, cleanupErr *error,
@@ -427,29 +403,28 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 3. Webhook dedup marks (#678)
+	// 3. Webhook dedup marks.
 	sweep("delete webhook events", &result.WebhookEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteCompletedWebhookEventsBefore(ctx, gen.DeleteCompletedWebhookEventsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.WebhookEventRetention), RowLimit: limit,
 		})
 	})
 
-	// 4. Acked payment settlement events (#827). Pending events are never pruned.
+	// 4. Acked payment settlement events. Pending events are never pruned.
 	sweep("delete payment settlements", &result.PaymentSettlements, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentSettlementAckedRetention), RowLimit: limit,
 		})
 	})
 
-	// 5. Acked host-lifecycle events (or#878). Same discipline as the feed above:
-	// only DELIVERED rows are pruned.
+	// 5. Acked host-lifecycle events. Pending events are never pruned.
 	sweep("delete host lifecycle events", &result.HostLifecycleEvents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.HostLifecycleEventAckedRetention), RowLimit: limit,
 		})
 	})
 
-	// 6. Payment attempts and then the rebill cycles they leave empty (#1118).
+	// 6. Payment attempts and then the rebill cycles they leave empty.
 	sweep("delete payment attempts", &result.PaymentAttempts, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeletePaymentAttemptsBefore(ctx, gen.DeletePaymentAttemptsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
@@ -460,7 +435,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,
 		})
 	})
-	// 7. NMI history months (#1120), kept as long as attempts.
+	// 7. NMI history months, kept as long as attempts.
 	sweep("delete nmi history months", &result.NMIHistoryMonths, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteNMIHistoryMonthsBefore(ctx, gen.DeleteNMIHistoryMonthsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-config.PaymentAttemptRetention), RowLimit: limit,

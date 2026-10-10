@@ -16,10 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// #689/#895: per-worker health bookkeeping. The middleware is attached to every
-// OpenRails worker at registration (internal/app.addTrackedWorker) and upserts
-// billing.worker_state per job completion. The ALERT EVALUATOR that reads
-// these rows lives in progress.go and is deliberately NOT a River job (#895).
+// Per-worker health bookkeeping: WorkerHealthMiddleware rides on every
+// OpenRails worker (internal/app.addTrackedWorker) and upserts worker_state
+// per job completion. The evaluator that reads these rows (progress.go) is
+// not a River job.
 
 // maxWorkerHealthErrorLen bounds last_error (runes, so truncation never splits
 // a UTF-8 sequence — Postgres rejects invalid text).
@@ -76,9 +76,9 @@ func (r *WorkerRegistrations) Snapshot() map[string]time.Duration {
 	return out
 }
 
-// WorkerHealthMiddleware is a rivertype.WorkerMiddleware installed once on the
-// client: after every worked job it upserts the kind's health row. Bookkeeping
-// failures are logged, never surfaced as job errors.
+// WorkerHealthMiddleware is attached to every OpenRails worker: after every
+// worked job it upserts the kind's health row. Bookkeeping failures are
+// logged, never surfaced as job errors.
 type WorkerHealthMiddleware struct {
 	river.MiddlewareDefaults
 	DB    *db.DB

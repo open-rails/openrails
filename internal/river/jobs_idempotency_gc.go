@@ -25,7 +25,7 @@ type IdempotencyGCArgs struct{}
 
 func (IdempotencyGCArgs) Kind() string { return KindIdempotencyGC }
 
-// IdempotencyGCWorker deletes expired request and webhook claims (#1099).
+// IdempotencyGCWorker deletes expired request and webhook claims.
 type IdempotencyGCWorker struct {
 	river.WorkerDefaults[IdempotencyGCArgs]
 	DB *db.DB

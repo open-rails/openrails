@@ -42,11 +42,11 @@ type NMIHistoryArgs struct{}
 func (NMIHistoryArgs) Kind() string { return KindNMIHistory }
 
 // NMIHistoryWorker keeps each NMI PSP's authorization history as monthly
-// aggregates (#1120): the decline report's numbers, through the same read. A
-// PSP's first read backfills NMIHistoryMonths; later ones, daily, re-read
-// from the month before the last read's. A read replaces the months it
-// covers in one transaction, so a rerun is idempotent and a failed read
-// leaves the stored months as they were. It only reads NMI.
+// aggregates: the decline report's numbers, through the same read. A PSP's
+// first read backfills NMIHistoryMonths; later ones, daily, re-read from the
+// month before the last read's. A read replaces the months it covers in one
+// transaction, so a rerun is idempotent and a failed read leaves the stored
+// months as they were. It only reads NMI.
 type NMIHistoryWorker struct {
 	river.WorkerDefaults[NMIHistoryArgs]
 	DB          *db.DB

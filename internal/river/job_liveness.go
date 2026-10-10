@@ -17,51 +17,31 @@ import (
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
-// xs-007 row 31: no River job runs under a clock.
+// No River job runs under a clock: a job is stopped by observed lack of
+// progress, never by elapsed time. The middleware rides on every OpenRails
+// worker, so a host's river.Config cannot omit it:
 //
-// River's client default is JobTimeoutDefault = 1 minute, and nothing in
-// OpenRails ever overrode it, so EVERY job — dunning across every merchant,
-// cleanup, provider refresh, account-updater batches, ledger integrity — had
-// its context canceled at 60 s. The worst case is a charge that landed at
-// NMI at t=60 whose bookkeeping never ran. The number appeared nowhere in
-// OpenRails code, docs or tests.
+//   - JobTimeout is -1 (River's "never") on the wrapper worker and on the
+//     standalone client.
+//   - Liveness: while a job runs, the middleware beats river_job.attempted_at.
+//     JobRescueWorker returns a running job only once its beat stops, so a
+//     live long job is never re-enqueued and run twice.
+//   - Progress: workers report units of work through progress.Mark. A job
+//     silent past its kind's staleness threshold (staleThreshold, shared with
+//     the fleet monitor) is wedged and canceled with a NoProgressError naming
+//     the last thing it reported.
 //
-// The rule (owner ruling, xs-007): a job is stopped by OBSERVED lack of
-// progress, never by elapsed time. This middleware is how that rule is
-// enforced for every OpenRails worker, with no host cooperation (#895 posture:
-// it rides on the worker, so a host's own river.Config cannot omit it):
-//
-//   - JobTimeout is -1 (River's "never") on the wrapper worker AND on the
-//     standalone client. Duration is not evidence.
-//   - LIVENESS: while a job runs, the middleware beats River's own
-//     river_job.attempted_at. That column is the ONE thing River's JobRescuer
-//     reads to call a job stuck (`state='running' AND attempted_at < now -
-//     RescueStuckJobsAfter`), so the rescue horizon becomes "silence from a
-//     dead process", measured from the last beat, instead of a cap on how long
-//     a live job may run. Without the beat, a live 61-minute job is re-enqueued
-//     and runs TWICE — the duplicate-execution class River's own docs warn of.
-//   - PROGRESS: workers report units of work through progress.Mark. A job that
-//     stays silent past the same staleness rule the fleet monitor applies to
-//     its kind (k x declared cadence, floored — progress.go, one function) is
-//     wedged, and its context is canceled with a NoProgressError that names
-//     the last thing it reported. "A clock reading is not a death certificate"
-//     (jobs_dunning.go); silence is.
-//
-// A job that dies WITH its process stops beating and stops marking; River's
-// rescuer takes it back at its horizon. A job that is alive but wedged keeps
-// beating (so it is never duplicated) and is canceled here (so it does not
-// hold a worker slot forever). A job that is alive and progressing runs for as
-// long as the work takes.
+// A job that dies with its process stops beating and is rescued; one alive
+// but wedged keeps beating and is canceled here; one progressing runs as long
+// as the work takes.
 
-// JobLivenessBeat is the beat cadence: a poll interval, not a decision. It has
-// to be short against River's rescue horizon (1 h by default, never below a
-// host's JobTimeout) so a live job is never mistaken for a dead one; it also
-// sets how promptly a wedged job is noticed. A minute serves both.
+// JobLivenessBeat is the beat cadence. It must be short against
+// JobRescueSilence so a live job is never taken for dead; it also sets how
+// promptly a wedged job is noticed.
 const JobLivenessBeat = time.Minute
 
-// Workers report progress with progress.Mark(ctx, note) (internal/shared/
-// progress — a leaf package, so the intent runner and the reconcile engine can
-// mark on the context they were handed without importing this one).
+// progress is a leaf package, so the intent runner and the reconcile engine
+// can mark progress without importing this one.
 
 // NoProgressError is the reason a wedged job was canceled: what it last
 // reported, and how long ago. It is what the job row's error records.
@@ -93,9 +73,8 @@ type RiverTableAccess func() (pool *pgxpool.Pool, schema string)
 // (internal/app.addTrackedWorker). See the file comment.
 type JobLivenessMiddleware struct {
 	river.MiddlewareDefaults
-	// River grants the beat access to river_job. Nil disables the beat and is
-	// logged once, loudly: River's rescuer then measures from attempt start,
-	// which is the duplicate-execution exposure this file exists to remove.
+	// River grants the beat access to river_job. Nil disables the beat (logged
+	// once): a long job is then rescued while alive and may run twice.
 	River RiverTableAccess
 	// Registrations supplies each kind's declared cadence, the base of the
 	// staleness rule. Nil means every kind is on-demand (floor only).
@@ -216,10 +195,9 @@ func (m *JobLivenessMiddleware) watch(ctx context.Context, job *rivertype.JobRow
 	}
 }
 
-// beatLiveness refreshes river_job.attempted_at for the running job. Raw SQL
-// against River's OWN table (see internal/db/queries/EXEMPTIONS.md): the
-// column is River's, the schema is River's, and the update is the only way to
-// tell River's rescuer "still here" — it has no heartbeat API.
+// beatLiveness refreshes river_job.attempted_at, which JobRescueWorker reads,
+// for the running job. Raw SQL against River's own table (see
+// internal/db/queries/EXEMPTIONS.md): River has no heartbeat API.
 func (m *JobLivenessMiddleware) beatLiveness(ctx context.Context, job *rivertype.JobRow) {
 	if m.River == nil {
 		m.warnNoAccess.Do(func() {

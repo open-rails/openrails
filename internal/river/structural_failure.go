@@ -12,22 +12,12 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// or#901: River retries every returned error the same way — up to max_attempts,
-// with backoff — because at the queue level a structural failure and a provider
-// blip look identical. They are not. A job whose PRECONDITIONS are wrong (the
-// database does not have the function the code calls; the context carries no
-// merchant) will fail exactly the same way on attempt 25 as on attempt 1, and
-// retrying it only buries the defect in noise that reads as transient.
-//
-// That is measured, not hypothetical: openrails.catalog_reconciliation_pull
-// accumulated 578 retryable rows across two stacks and completed ZERO times in
-// 15 days, first on `merchant: no merchant resolved on context` and then on
-// `SQLSTATE 42883 undefined_function`. A release check flagged the backlog twice
-// and both times it read as noise.
-//
-// StructuralFailureMiddleware converts those two classes into river.JobCancel,
-// which is terminal and records the reason on the job row, and logs them at
-// error with a typed event so the queue stops being the only witness.
+// River retries every returned error alike, but a job whose preconditions are
+// wrong (the database lacks the function the code calls; the context carries
+// no merchant) fails identically on every attempt, and retries bury the
+// defect in noise that reads as transient. StructuralFailureMiddleware cancels
+// those jobs (river.JobCancel: terminal, with the reason on the job row) and
+// logs them at error with a typed event.
 
 // StructuralFailureMiddleware terminates jobs that failed on a structural
 // precondition instead of letting them retry to exhaustion.

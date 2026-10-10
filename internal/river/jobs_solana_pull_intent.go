@@ -19,11 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 )
 
-// TypeSolanaPull is the recurring on-chain pull (#674): one durable intent per
-// (subscription row, period anchor). The signed tx SIGNATURE is persisted onto
-// the intent BEFORE submission, so a crash between submit and record resolves
-// by reading the chain for that signature and running the renewal repair —
-// never a subscriber who paid on-chain and got nothing.
+// TypeSolanaPull is the recurring on-chain pull: one durable intent per
+// (subscription row, period anchor). The signed tx signature is persisted
+// onto the intent before submission, so a crash between submit and record
+// resolves by reading the chain for that signature and running the renewal
+// repair, never a subscriber who paid on-chain and got nothing.
 const TypeSolanaPull = "solana_pull"
 
 // SolanaPullIdempotencyKey addresses one pull episode: the anchor is the
@@ -166,8 +166,8 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 		return h.Store.RecordProgress(ctx, intent.ID, map[string]any{"transaction_id": sig})
 	}
 
-	// The intent id is the #713 memo local-id: it exists durably BEFORE the
-	// send, so the stamped pull is chain-recognizable even if every local send
+	// The intent id is the memo local-id: it exists durably before the send,
+	// so the stamped pull is chain-recognizable even if every local send
 	// record is lost.
 	outcome, crankErr := h.Core.crankOne(ctx, repo, row, intent.ID, presubmit)
 	if crankErr != nil {
@@ -191,8 +191,9 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	case crankSucceeded:
 		return intents.Succeeded(evidence)
 	case crankAlreadyPaid:
-		// Out-of-band payment (this intent never recorded a signature): mirror
-		// the legacy advance; the reconcile worker (#258) repairs the ledger.
+		// Out-of-band payment (this intent recorded no signature): the row
+		// advanced without a local renewal; the reconcile worker repairs the
+		// ledger.
 		evidence["repair"] = "advanced_without_local_renewal"
 		return intents.Succeeded(evidence)
 	case crankGhostExpired, crankCanceled, crankDunned:
@@ -258,8 +259,8 @@ const (
 )
 
 // checkSignature reads the chain for the recorded signature. sigVerdictLanded
-// reports a CONFIRMED, on-chain-successful transaction (result non-nil only
-// then, for the #713 memo cross-check).
+// reports a confirmed, on-chain-successful transaction (result non-nil only
+// then, for the memo cross-check).
 func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	if h.Chain == nil {
 		return nil, sigVerdictUnknown
@@ -286,15 +287,10 @@ func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature 
 	return result, sigVerdictLanded
 }
 
-// verifyPullMemoMatchesIntent applies the #713 verify rule to a landed pull:
-// the stamped purchase memo must name THIS intent — a different local-id is
-// cross-wired evidence, parked for operator triage, never auto-repaired.
-//
-// or#893: MemoRequired. OPENRAILS builds and signs the pull transaction and
-// stamps the intent id on it before submission, and the signature being
-// verified is the one we recorded pre-submit — so an unstamped tx at this
-// signature is not "a pre-memo pull", it is not the transaction we built.
-// Parking it is the safe direction; auto-repairing it is not.
+// verifyPullMemoMatchesIntent checks that a landed pull's memo names this
+// intent. OpenRails stamps the intent id before submission and the signature
+// is the one recorded pre-submit, so a different or absent memo is not our
+// transaction: it parks for operator triage, never auto-repaired.
 func verifyPullMemoMatchesIntent(result *rpc.GetTransactionResult, intentID uuid.UUID) error {
 	if result == nil || result.Transaction == nil {
 		return nil

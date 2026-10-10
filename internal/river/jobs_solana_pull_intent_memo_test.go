@@ -33,10 +33,10 @@ func landedPull(t *testing.T, memoLocalID uuid.UUID) *rpc.GetTransactionResult {
 	return &rpc.GetTransactionResult{Transaction: env, Meta: &rpc.TransactionMeta{}}
 }
 
-// #713/or#893: OpenRails builds, stamps and records the pull signature before
-// submit, so the landed tx at that signature must carry THIS intent's memo; a
-// different or absent memo is not our transaction (parked, never repaired). A
-// thin RPC answer with no tx payload is not memo evidence and passes.
+// OpenRails builds, stamps and records the pull signature before submit, so
+// the landed tx at that signature must carry this intent's memo; a different
+// or absent memo is not our transaction (parked, never repaired). A thin RPC
+// answer with no tx payload is not memo evidence and passes.
 func TestVerifyPullMemoMatchesIntent(t *testing.T) {
 	intentID := uuid.New()
 	require.NoError(t, verifyPullMemoMatchesIntent(landedPull(t, intentID), intentID))

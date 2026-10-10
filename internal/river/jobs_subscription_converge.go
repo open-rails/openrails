@@ -33,11 +33,11 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 )
 
-// #684: webhooks are wake-up signals. This worker is the coalesced dirty-flag
-// fetch: unique per (merchant, PSP, rail, subscription reference) with a short
-// debounce, so a burst of events about one subscription collapses to ONE
-// provider fetch, converged through the #665 decider. Provider outages leave
-// the job retrying (the dirty mark parks; access intact — #664 posture).
+// Webhooks are wake-up signals. This worker is the coalesced dirty-flag
+// fetch: unique per (merchant, PSP, rail, subscription reference) with a
+// short debounce, so a burst of events about one subscription collapses to
+// one provider fetch, converged through the decider. Provider outages leave
+// the job retrying, access intact.
 
 const (
 	KindSubscriptionConverge = "openrails.subscription_converge"
@@ -49,30 +49,25 @@ const (
 
 	// subscriptionConvergeSnoozeFor paces the settlement-lag snooze loop
 	// (pending NMI signups whose charge hasn't appeared yet): one provider
-	// read per minute per pending signup. The loop ENDS on observation, not
-	// on a clock (xs-007 row 38): the subscription leaving `pending` (the
-	// fetched charge or decline, or checkout expiry — the converge then
-	// returns something other than ErrConvergeRetryLater), or the provider
-	// refresh pull having covered this rail since the job was born
-	// (psp_refresh_watermarks, scoped to the captured PSP) —
-	// from then on the pull re-reads the same provider evidence on its own
-	// cadence, and this job's snooze would only duplicate it. It used to give
-	// up after 24 h whether or not anything else had looked.
+	// read per minute per pending signup. The loop ends on observation, never
+	// a clock: the subscription leaves `pending`, or a refresh pull of the
+	// captured PSP has covered the rail since the job was born
+	// (psp_refresh_watermarks) and re-reads the same evidence on its own
+	// cadence.
 	subscriptionConvergeSnoozeFor     = time.Minute
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
-// SubscriptionConvergeArgs identifies one dirty subscription. Only the four
-// identity fields participate in uniqueness — EventType/EventCreated are
-// forensics, so a burst about one subscription dedupes to one job.
+// SubscriptionConvergeArgs identifies one dirty subscription. EventType and
+// EventCreated are forensics outside uniqueness, so a burst about one
+// subscription dedupes to one job.
 type SubscriptionConvergeArgs struct {
 	PSPID                 uuid.UUID `json:"psp_id" river:"unique"`
 	MerchantID            uuid.UUID `json:"merchant_id" river:"unique"`
 	Rail                  string    `json:"rail" river:"unique"`
 	SubscriptionReference string    `json:"subscription_reference" river:"unique"`
-	// After is the converge job that was already running when this event
-	// arrived: it may have fetched before the event, so this job re-fetches
-	// once that one finishes (audit 19).
+	// After is the converge job already running when this event arrived: it
+	// may have fetched before the event, so this job re-fetches once it ends.
 	After        int64  `json:"after,omitempty" river:"unique"`
 	EventType    string `json:"event_type,omitempty"`
 	EventCreated int64  `json:"event_created,omitempty"`
@@ -148,7 +143,7 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 const subscriptionConvergeMaxChain = 4
 
 // SubscriptionConvergeWorker fetches provider truth for one subscription and
-// converges the local row through the decider (#665) plus the rail-specific
+// converges the local row through the decider plus the rail-specific
 // signup/mirror legs (webhooks.StripeConvergeService / NMIConvergeService).
 type SubscriptionConvergeWorker struct {
 	StripeClients *stripeapi.Factory
@@ -158,8 +153,7 @@ type SubscriptionConvergeWorker struct {
 	Rails  railresolve.Source
 	Clock  clockwork.Clock
 
-	// NMIResolver arms the args merchant's NMI client from the armed rail
-	// state (#788).
+	// NMIResolver arms the args merchant's NMI client from the armed rail state.
 	NMIResolver money.NMIClientResolver
 	// StripeProber overrides the config-built prober (tests). Nil = build from Rails.
 	StripeProber subscriptions.StripeLivenessProber
@@ -201,8 +195,8 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		if cerr != nil {
 			return cerr
 		}
-		// Inline convergence pass (#511 Phase E): project entitlement windows /
-		// grant effects the transition implies. Best-effort — the sweep backstops.
+		// Project the entitlement windows and grant effects the transition
+		// implies. Best-effort: the sweep backstops.
 		if customerID != uuid.Nil {
 			if _, aerr := converge.AfterMutation(cctx, w.DB, billing.MerchantID(args.MerchantID), customerID, w.Clock); aerr != nil {
 				log.WithContext(cctx).WithError(aerr).WithFields(log.Fields{

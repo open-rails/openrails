@@ -21,8 +21,8 @@ type OrderExpiryArgs struct{}
 func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
 
 // OrderExpiryWorker expires orders past their expiry, releasing their claims,
-// and purges unpaid closed orders past retention (#1168). It never touches an
-// order whose payment is processing: only the provider's answer ends that.
+// and purges unpaid closed orders past retention. It never touches an order
+// whose payment is processing: only the provider's answer ends that.
 type OrderExpiryWorker struct {
 	river.WorkerDefaults[OrderExpiryArgs]
 	DB     *db.DB

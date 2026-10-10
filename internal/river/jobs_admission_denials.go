@@ -24,13 +24,11 @@ type AdmissionDenialFlushArgs struct{}
 
 func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush }
 
-// AdmissionDenialFlushWorker moves the Redis hourly denial counters (#733,
-// or:mdeny:* hashes written by admission.DenialRecorder) into
-// billing.admission_denials_hourly. Concurrency-safe: it reads each field's
-// count, upserts it additively into PG, then HINCRBYs the same amount back
-// out — increments landing mid-flush survive for the next cycle. Keys whose
-// hour has been closed for > 5 minutes are deleted after draining (no writer
-// touches a past hour).
+// AdmissionDenialFlushWorker moves the Redis hourly denial counters
+// (admission.DenialRecorder) into admission_denials_hourly. It upserts each
+// count additively, then HINCRBYs the same amount back out, so increments
+// landing mid-flush survive. A drained key whose hour closed over 5 minutes
+// ago is deleted: no writer touches a past hour.
 type AdmissionDenialFlushWorker struct {
 	river.WorkerDefaults[AdmissionDenialFlushArgs]
 	DB    *db.DB

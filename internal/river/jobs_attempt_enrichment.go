@@ -43,9 +43,9 @@ type AttemptEnrichmentArgs struct{}
 func (AttemptEnrichmentArgs) Kind() string { return KindAttemptEnrichment }
 
 // AttemptEnrichmentWorker fills NMI attempts from the Query API's transaction
-// report (#1114): the card's BIN and brand, AVS/CVV the reply lacked, the
-// issuer's raw answer, and whether a network token was used. Each attempt is
-// read once, up to nmi.MaxQueryIDs per query.
+// report: the card's BIN and brand, AVS/CVV the reply lacked, the issuer's raw
+// answer, and whether a network token was used. Each attempt is read once, up
+// to nmi.MaxQueryIDs per query.
 type AttemptEnrichmentWorker struct {
 	river.WorkerDefaults[AttemptEnrichmentArgs]
 	DB          *db.DB

@@ -22,11 +22,11 @@ import (
 
 const (
 	// KindSolanaReconcile cross-checks confirmed on-chain pulls against the
-	// billing ledger (#258). The cranker records a payment (RenewMembership) and
-	// then stamps last_signature (AdvanceAfterPull) in two steps; a crash between
-	// them — or a RenewMembership idempotency skip that masked a real gap — leaves
-	// a confirmed pull with no payment row. This sweep surfaces that drift as an
-	// ledger repair in the merchant inbox, like the Stripe/NMI reconcilers.
+	// ledger. The cranker records a payment (RenewMembership), then stamps
+	// last_signature (AdvanceAfterPull); a crash between them, or an
+	// idempotency skip that masked a real gap, leaves a confirmed pull with no
+	// payment row, which this sweep puts in the merchant inbox as a ledger
+	// repair.
 	KindSolanaReconcile = "openrails.solana_reconcile"
 
 	solanaReconcileBatchSize = 500

@@ -20,8 +20,7 @@ import (
 
 const KindLedgerIntegrity = "openrails.ledger_integrity"
 
-// Finding types (reconciliation_findings' CHECK regex:
-// (pull|derive|life|consistency).seg[.seg]).
+// Finding types (reconciliation_findings' CHECK: family.seg[.seg]).
 const (
 	FindingLedgerConservation = "consistency.ledger.conservation"
 	FindingLedgerCounterDrift = "consistency.ledger.counter_drift"
@@ -31,31 +30,16 @@ type LedgerIntegrityArgs struct{}
 
 func (LedgerIntegrityArgs) Kind() string { return KindLedgerIntegrity }
 
-// LedgerIntegrityWorker runs or#833's two ledger invariants per merchant and
+// LedgerIntegrityWorker checks the two ledger invariants per merchant and
 // raises an operator finding on divergence.
 //
-// Why a periodic FULL check, when the standing rule is "work scales with
-// activity, not records": for this failure mode there IS no activity signal.
-// `ledger_accounts.{credits,debits}_posted` is a MAINTAINED PROJECTION written
-// by the transfer insert trigger. The only way it can diverge from
-// `ledger_transfers` is a write that BYPASSED that trigger — a superuser
-// session, a COPY, a restore, a migration that disabled triggers. Those emit no
-// event, touch no watermark and raise no error; every balance read is simply
-// wrong from then on. Nothing can be pushed, so something has to look.
-//
-// Cadence: DAILY. It is the slowest cadence that still bounds the damage —
-// balances, entitlement decisions and invoices computed off a drifted counter
-// compound for exactly one day before an operator hears about it — and the
-// drift sources are rare, human-initiated maintenance events, so nothing is
-// gained by looking more often. The cost per merchant is one aggregate over
-// ledger_accounts plus one grouped pass over that merchant's transfer log, off
-// the request path, on the maintenance queue.
-//
-// or#824/or#861: no bare-context sweep. Under the since-removed RLS a no-GUC
-// pass read NOTHING and reported a perfectly clean fleet — the exact silence
-// this job exists to break. The merchant list comes from the global
-// control-plane `merchants` table via GenDirectory(); both checks then run
-// inside each merchant's own RunInMerchantScope.
+// It is a periodic full check because this failure has no activity signal:
+// ledger_accounts' credits_posted/debits_posted are a projection maintained
+// by the transfer insert trigger, and only a write that bypassed it (a
+// superuser session, COPY, a restore, a migration with triggers disabled)
+// makes them diverge from ledger_transfers. Daily bounds how long a drifted
+// balance compounds; the sources are rare maintenance events. Both checks run
+// inside each merchant's RunInMerchantScope.
 type LedgerIntegrityWorker struct {
 	river.WorkerDefaults[LedgerIntegrityArgs]
 	DB    *db.DB

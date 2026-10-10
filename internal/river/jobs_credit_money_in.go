@@ -18,13 +18,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// forEachActiveMerchant runs fn once per active merchant under a merchant-scoped
-// connection (#673): River job contexts carry no merchant, and every money path
-// these workers call requires one. Mirrors ConvergeSweepWorker — a no-GUC
-// read of the control-plane merchant directory, then each merchant's
-// work runs inside its own RunInMerchantConn. One merchant's failure
-// is logged and does not abort the rest; the joined error is returned so a
-// failing run is visible in River instead of silently "succeeding".
+// forEachActiveMerchant runs fn once per active merchant inside its
+// RunInMerchantConn: River job contexts carry no merchant, and every money
+// path these workers call requires one. One merchant's failure does not abort
+// the rest; the joined error makes a failing run visible in River.
 func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, fn func(ctx context.Context) error) error {
 	if dbi == nil {
 		logger.Debug("db not configured; skipping")
@@ -46,7 +43,7 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 	return errors.Join(errs...)
 }
 
-// --- Invoices and arrears collection (#241/#301/#303) ---
+// --- Invoices and arrears collection ---
 
 const KindInvoice = "openrails.invoice"
 
@@ -93,8 +90,8 @@ func (w InvoiceWorker) Work(ctx context.Context, job *river.Job[InvoiceArgs]) er
 		ctx = merchant.WithID(ctx, *job.Args.MerchantID)
 		return w.DB.RunInMerchantConn(ctx, func(ctx context.Context) error { return w.workMerchant(ctx, job, logger) })
 	}
-	// #673: every money path below (settings, finalize, collect) requires a
-	// merchant in context; fan out per merchant.
+	// Every money path below (settings, finalize, collect) requires a merchant
+	// in context: fan out per merchant.
 	return forEachActiveMerchant(ctx, w.DB, logger, func(ctx context.Context) error {
 		return w.workMerchant(ctx, job, logger)
 	})
@@ -133,7 +130,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 	}
 
 	if job.Args.Collect {
-		// #798: payers hear about overdue net-N receivables before collection,
+		// Customers hear about overdue net-N receivables before collection,
 		// even when no charger is armed.
 		if n, err := w.Money.NotifyOverdueInvoices(ctx, now); err != nil {
 			return err
@@ -159,7 +156,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 	return nil
 }
 
-// --- Ledger reconciliation (#243) ---
+// --- Ledger reconciliation ---
 
 const KindCreditReconcile = "openrails.credit_reconcile"
 

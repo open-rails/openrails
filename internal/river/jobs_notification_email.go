@@ -29,13 +29,11 @@ type NotificationEmailSweepArgs struct{}
 
 func (NotificationEmailSweepArgs) Kind() string { return KindNotificationEmailSweep }
 
-// NotificationEmailSweepWorker (#789) delivers undelivered notifications
-// rows (emailed_at NULL) through the SAME NotificationService.DeliverEmail path
-// the inline dispatch uses — DeliverEmail stamps emailed_at on success, no-ops
-// (and stamps) unsupported types, and leaves failures NULL for the next sweep.
-// It is the delivery half of the converge NOTIFY pass, which only creates rows.
-// Mirrors ConvergeSweepWorker: privileged merchant list, per-merchant
-// RunInMerchantConn, one merchant's failure never aborts the rest.
+// NotificationEmailSweepWorker delivers undelivered notifications (emailed_at
+// NULL) through NotificationService.DeliverEmail, the inline dispatch's path:
+// it stamps emailed_at on success or an unsupported type and leaves failures
+// for the next sweep. It is the delivery half of the converge NOTIFY pass,
+// which only creates rows. One merchant's failure never aborts the rest.
 type NotificationEmailSweepWorker struct {
 	river.WorkerDefaults[NotificationEmailSweepArgs]
 	DB            *db.DB
@@ -51,10 +49,8 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 		return nil
 	}
 
-	// billing.merchants is the global directory, so this read genuinely works
-	// on the base pool. It is NOT a privileged read — no such thing exists —
-	// and every merchant-owned query below runs inside RunInMerchantConn
-	// (or#868).
+	// merchants is the global directory; every merchant-owned query below runs
+	// inside RunInMerchantConn.
 	merchantIDs, err := w.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("notification email sweep: list merchants: %w", err)

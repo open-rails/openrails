@@ -25,15 +25,12 @@ type CreditExpiryArgs struct{}
 
 func (CreditExpiryArgs) Kind() string { return KindCreditExpiry }
 
-// CreditExpiryWorker claws back the unspent remainder of lapsed credit lots
-// (#514): for every (merchant, customer, currency) with a past-expiry credit
-// grant that still has an unspent balance, it runs grants.ExpireLapsed, which
-// emits a #512 ledger transfer (DR customer_balance / CR expired_credits) per
-// lapsed lot — conserved, append-only, idempotent (an already-clawed lot has
-// zero remainder and is skipped). ExpireLapsed takes the per-customer spend
-// lock inside this worker's tx (#677), so an expiry never races a spend on the
-// same lot. The credit lot IS the grant; there is no money_blocks table to
-// compact anymore.
+// CreditExpiryWorker claws back the unspent remainder of lapsed credit lots:
+// for every (merchant, customer, currency) with a past-expiry lot it runs
+// grants.ExpireLapsed, one ledger transfer (DR customer_balance / CR
+// expired_credits) per lot, idempotent because a clawed lot has zero
+// remainder. ExpireLapsed takes the per-customer spend lock inside this
+// worker's tx, so an expiry never races a spend.
 type CreditExpiryWorker struct {
 	river.WorkerDefaults[CreditExpiryArgs]
 	DB        *db.DB
@@ -59,11 +56,8 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 
 	batchSize32, _ := safecast.Convert[int32](batchSize)
 
-	// or#868 B1: this used to enumerate customers with a bare `RunInTx` on the
-	// base pool, under a comment calling it a "privileged (no-GUC)
-	// cross-merchant sweep". Enumerate the merchants through the lapsed-lot work
-	// queue (ids only), then do the real work — the per-customer list AND the
-	// ledger claw-back — inside each merchant's own scope.
+	// The lapsed-lot work queue yields merchant ids only; the customer list and
+	// the claw-back run inside each merchant's own scope.
 	merchantIDs, err := w.DB.GenDirectory().ListLapsedCreditLotMerchants(ctx, gen.ListLapsedCreditLotMerchantsParams{
 		AsOf: now, MerchantLimit: batchSize32,
 	})

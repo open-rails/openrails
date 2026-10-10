@@ -59,12 +59,12 @@ type RebillWatchArgs struct{}
 
 func (RebillWatchArgs) Kind() string { return KindRebillWatch }
 
-// RebillWatchWorker records rebills that never happened (#1112): an
-// auto-renewing subscription whose period ended past its owner's deadline
-// with no attempt for that cycle. An NMI-owned one is probed first: the Query
-// API is the backstop for a lost webhook, so a charge found there is recorded
-// and converged, and only a proven absence is a miss. A period NMI's schedule
-// skipped is then collected by OpenRails (#1113).
+// RebillWatchWorker records rebills that never happened: an auto-renewing
+// subscription whose period ended past its owner's deadline with no attempt
+// for that cycle. An NMI-owned one is probed first: the Query API is the
+// backstop for a lost webhook, so a charge found there is recorded and
+// converged, and only a proven absence is a miss. A period NMI's schedule
+// skipped is then collected by OpenRails.
 type RebillWatchWorker struct {
 	river.WorkerDefaults[RebillWatchArgs]
 	DB          *db.DB

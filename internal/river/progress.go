@@ -21,26 +21,16 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
-// #895: the progress detector must NOT be a River job.
-//
-// It used to be — WorkerHealthCheckWorker was itself a River periodic job, so a
-// stalled River stalled its own detector and could only report health in the
-// cases where health was never in doubt. ProgressMonitor is a plain goroutine
-// owned by OpenRails: it reads River's OWN `river_job` table plus the
-// billing.worker_state rows and decides whether the periodic fleet is
-// progressing, without needing a job to run to find out.
-//
-// river_job is the primary signal deliberately. worker_state.last_success_at
-// is written by WorkerHealthMiddleware, so a fleet running without that
-// middleware reports never_succeeded for every kind forever. river_job is written by
-// River itself, so it stays truthful regardless of how the host wired things.
+// ProgressMonitor is not a River job: a stalled River would stall its own
+// detector. Its primary signal is River's own river_job table, which River
+// writes however the host wired things; the worker_state rows
+// WorkerHealthMiddleware writes are per-kind detail.
 
 // Progress verdicts. Empty string means healthy.
 const (
 	// ProgressNotScheduling: River is not inserting OpenRails' periodic jobs at
-	// all — the client was never started, the periodic jobs were never
-	// registered, or the whole process is gone. This is the failure that used to
-	// be invisible by construction.
+	// all: the client was never started, the periodic jobs were never
+	// registered, or the whole process is gone.
 	ProgressNotScheduling = "river_not_scheduling"
 	// ProgressNotCompleting: rows ARE being inserted but nothing finalizes —
 	// workers unregistered, the billing queue not configured on the host's
@@ -111,9 +101,9 @@ func (r ProgressReport) Err() error {
 }
 
 // ProgressMonitor evaluates whether the River periodic fleet is progressing.
-// It is NOT a River worker and never enqueues anything (#895): Check is a pure
-// read, and Run is an ordinary ticker goroutine owned by the OpenRails runtime,
-// so it keeps reporting while River itself is dead.
+// It is not a River worker and never enqueues anything: Check is a pure read,
+// and Run is an ordinary ticker goroutine owned by the OpenRails runtime, so
+// it keeps reporting while River itself is dead.
 type ProgressMonitor struct {
 	DB *db.DB
 	// Pool reads River's own tables. River's schema is configurable and its
@@ -168,13 +158,10 @@ func (m *ProgressMonitor) minStale() time.Duration {
 	return defaultMinStale
 }
 
-// The ONE staleness rule of this package, shared by the fleet monitor (is this
-// kind late?) and the per-job liveness middleware (is this running job
-// wedged? — job_liveness.go, xs-007 row 31): no progress within k x the
-// kind's declared cadence, floored so a tight cadence does not turn one slow
-// provider round-trip into a stall. Neither number decides on its own; the
-// cadence the worker declared at registration is what "late" is measured
-// against.
+// The one staleness rule of this package, shared by the fleet monitor (is this
+// kind late?) and the liveness middleware (is this running job wedged?): no
+// progress within k x the kind's declared cadence, floored so a tight cadence
+// does not turn one slow provider round-trip into a stall.
 const (
 	defaultStaleMultiplier = 3
 	defaultMinStale        = 30 * time.Minute
@@ -315,9 +302,9 @@ func (m *ProgressMonitor) Check(ctx context.Context) (ProgressReport, error) {
 	return report, nil
 }
 
-// fleetVerdict answers Paul's question directly — "is the cron system
-// progressing?" — from river_job watermarks alone, with a boot grace period so
-// a process that just started does not alarm before its first tick could fire.
+// fleetVerdict says whether the cron fleet is progressing, from river_job
+// watermarks alone, with a boot grace period so a process that just started
+// does not alarm before its first tick could fire.
 func (m *ProgressMonitor) fleetVerdict(report ProgressReport, now time.Time) string {
 	if report.ShortestPeriod <= 0 {
 		return "" // no periodic kinds registered: nothing to be late against
@@ -475,9 +462,8 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 	}
 
 	var alerted, failedAlerts int
-	// The fleet-level stall is the #895 signal: it fires even when every
-	// per-kind row still looks fine (nothing has been late long enough yet),
-	// and it is the ONLY one that can fire while River is completely dead.
+	// The fleet-level stall fires even when every per-kind row still looks
+	// fine, and is the only signal that can fire while River is dead.
 	fleetRow := byKind[fleetHealthKind]
 	fleetRow.WorkerKind = fleetHealthKind
 	if report.Progressing {
@@ -564,9 +550,8 @@ func (m *ProgressMonitor) resolveStall(ctx context.Context, row gen.BillingWorke
 const fleetHealthKind = "openrails.river_fleet"
 
 func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.BillingWorkerState, reason string, now time.Time, report ProgressReport) error {
-	// Cross-merchant read on purpose: the alert fans out to every active
-	// merchant, so this must be the explicit directory accessor, not a
-	// merchant-scoped handle (or#861/or#877).
+	// Cross-merchant on purpose: the alert fans out to every active merchant,
+	// so this is the explicit directory accessor.
 	merchantIDs, err := m.DB.GenDirectory().ListActiveMerchantIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list merchants: %w", err)

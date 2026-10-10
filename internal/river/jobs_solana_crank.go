@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	// KindSolanaCrank is the recurring Solana pull ("cranking") job (#256). It is
-	// the Solana analog of the NMI DunningWorker: each run charges every due
+	// KindSolanaCrank is the recurring Solana pull ("cranking") job, the
+	// Solana analog of the NMI DunningWorker: each run charges every due
 	// subscription.
 	KindSolanaCrank = "openrails.solana_crank"
 
@@ -48,11 +48,10 @@ type solanaCranker interface {
 	Crank(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error)
 }
 
-// presubmitCranker is the optional signature write-ahead capability (#674):
-// presubmit(sig) persists the signed tx signature BEFORE submission.
-// memoLocalID (the durable pull-intent id; Nil = unstamped) is the #713
-// self-recognition memo stamped on the pull tx.
-// *recurring.CrankService implements it; fakes without it skip the write-ahead.
+// presubmitCranker is the optional signature write-ahead capability:
+// presubmit(sig) persists the signed tx signature before submission, and
+// memoLocalID (the durable pull-intent id; Nil = unstamped) is stamped on the
+// pull tx as its self-recognition memo. Fakes without it skip the write-ahead.
 type presubmitCranker interface {
 	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
 }
@@ -63,15 +62,14 @@ type presubmitCranker interface {
 type membershipManager interface {
 	RenewMembership(ctx context.Context, params *subscriptions.RenewMembershipParams) error
 	FailMembership(ctx context.Context, params *subscriptions.FailMembershipParams) error
-	// CancelMembership terminates the subscription (used for out-of-band cancels
-	// detected at rebill time, #265: subscriber revoked the delegation on-chain).
+	// CancelMembership terminates the subscription (an out-of-band cancel
+	// detected at rebill time: the subscriber revoked the delegation on-chain).
 	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
 }
 
 // solanaSubStore is the persistence surface crankOne mutates (satisfied by
-// *solanasubs.SolanaSubscriptionRepo). Extracted as an interface so the
-// state-machine/scheduling logic can be exercised by a fake in fast, network-
-// free unit tests (#275) while production keeps using the real repo.
+// *solanasubs.SolanaSubscriptionRepo), so tests can drive the state machine
+// with a fake.
 type solanaSubStore interface {
 	SetStatus(ctx context.Context, id uuid.UUID, status string) error
 	SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error
@@ -88,33 +86,25 @@ type resolvedPlan struct {
 	fiatAmount      int64
 	currency        string
 	// cycleHours is the price's billing cycle in hours (0 = unknown) and
-	// retryAttempts the subscription's consecutive-failure count so far —
-	// together they feed the cadence-relative dunning schedule (#359).
+	// retryAttempts the subscription's consecutive-failure count so far: they
+	// feed the cadence-relative dunning schedule.
 	cycleHours    int
 	retryAttempts int
-	// The subscription a failed pull is an attempt of (#1111).
+	// The subscription a failed pull is an attempt of.
 	customerID, pspID uuid.UUID
 	policy            models.CollectionPolicy
 	periodEnd         *time.Time
 }
 
-// SolanaCrankWorker queries due Solana subscriptions and cranks each: pull the
-// plan amount on-chain, then RenewMembership (extends the paid period + records
-// the payment, idempotent on the tx signature) and advance next_pull_at. A failed
-// pull routes to FailMembership -> the existing dunning state machine.
+// SolanaCrankWorker cranks each due Solana subscription: pull the plan amount
+// on-chain, RenewMembership (idempotent on the tx signature) and advance
+// next_pull_at. A failed pull routes to FailMembership and dunning.
 //
-// MISSED PERIODS ARE NEVER BACK-BILLED. If the cranker was down (outage,
-// mode=limited/readonly, #345/#346) across one or more whole periods, resuming produces
-// exactly ONE pull per subscription, and the new period anchors at the pull
-// moment (RenewMembership gets CurrentPeriodStartsAt=now, not the lapsed
-// boundary): one due row -> one pull -> next_pull_at = now + period. There is
-// deliberately no catch-up loop charging elapsed periods. The on-chain program
-// independently enforces the same bound — the subscriber's delegate approval
-// authorizes ONE plan-amount per period (a second pull in the same period
-// fails Custom:400 "period already paid"), and missed periods do not bank up
-// into a withdrawable balance — so even a buggy cranker cannot collect more
-// than the current period. Access stays fair: the entitlement lapsed with the
-// unpaid period, so the subscriber pays one period and receives one period.
+// Missed periods are never back-billed: after downtime each subscription gets
+// one pull, and the new period anchors at the pull moment. The program
+// enforces the same bound (one plan amount per period, Custom:400 "period
+// already paid", no banked balance), so even a buggy cranker cannot collect
+// more than the current period.
 type SolanaCrankWorker struct {
 	river.WorkerDefaults[SolanaCrankArgs]
 	DB        *db.DB
@@ -123,23 +113,16 @@ type SolanaCrankWorker struct {
 	Cranker   solanaCranker
 	Lifecycle membershipManager
 	BatchSize int
-	// Intents is the write-through provider-intent runner (#674): each due row
-	// posts a durable solana_pull intent (keyed on the persisted next_pull_at)
-	// and executes it inline through SolanaPullIntentHandler; ambiguity resolves
-	// via the recorded pre-submit signature instead of a blind re-pull.
-	//
-	// or#893: REQUIRED by Work. It used to be optional, with a "legacy direct
-	// crank (unit-test harnesses only)" branch below — an unstamped pull with no
-	// durable record, so a crash between signing and finalize left a subscriber
-	// charged and unrenewed with nothing to recover from. Tests drive crankOne
-	// (the production seam the intent handler itself calls) instead. The one
-	// legitimate runner-less SolanaCrankWorker is the intent HANDLER's own core:
-	// it is never registered as a River worker, so Work never runs on it.
+	// Intents is the write-through provider-intent runner, required by Work:
+	// each due row posts a durable solana_pull intent (keyed on next_pull_at)
+	// and executes it inline through SolanaPullIntentHandler, so a crash
+	// between signing and finalize resolves via the recorded pre-submit
+	// signature, never a blind re-pull. The intent handler's own core is
+	// runner-less and never registered as a worker.
 	Intents *intents.Runner
 
 	// resolvePlanFn loads the billing terms for a row. nil in production (the
-	// DB-backed w.resolvePlan is used); tests inject a fake to drive crankOne
-	// without a database (#275).
+	// DB-backed w.resolvePlan); tests inject a fake.
 	resolvePlanFn func(ctx context.Context, row *models.SolanaSubscription) (resolvedPlan, error)
 }
 
@@ -161,9 +144,8 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		log.WithContext(ctx).Warn("Solana cranker not fully wired (no cranker/lifecycle); skipping run")
 		return nil
 	}
-	// or#893: a pull without a durable intent is a charge nothing can recover.
-	// This is a wiring defect, not a runtime condition — fail the job loudly
-	// rather than quietly pulling money on the unrecoverable path.
+	// A pull without a durable intent is a charge nothing can recover: a
+	// wiring defect, so fail the job loudly.
 	if w.Intents == nil {
 		return fmt.Errorf("solana crank: no intent runner wired; a recurring pull must post a durable intent first (#674)")
 	}
@@ -194,12 +176,10 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			log.WithContext(ctx).WithFields(log.Fields{"merchant_id": row.MerchantID, "reason": posture.Reason}).Warn("Solana cranker: recurring pulls wait for this merchant's write posture")
 			continue
 		}
-		// Per-row isolation: a failure on one subscriber never aborts the batch.
-		//
-		// #674 write-through: durable intent first (keyed on the persisted
-		// next_pull_at anchor), inline execution, pre-submit signature
-		// write-ahead. Crash at any point ⇒ verify-then-resolve off the
-		// recorded signature, never a paid-but-unrenewed subscriber.
+		// Per-row isolation: one subscriber's failure never aborts the batch.
+		// Durable intent first, inline execution, pre-submit signature
+		// write-ahead: a crash resolves off the recorded signature, never a
+		// paid-but-unrenewed subscriber.
 		err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
 			_, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
 				MerchantID:     row.MerchantID,
@@ -231,8 +211,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	return nil
 }
 
-// crankKind classifies a completed (error-free) crankOne for the intent
-// ledger (#674).
+// crankKind classifies a completed (error-free) crankOne for the intent ledger.
 type crankKind int
 
 const (
@@ -253,15 +232,12 @@ type crankOutcome struct {
 }
 
 // crankOne runs the pull state machine for one row. presubmit (optional)
-// durably records the signed tx signature BEFORE submission (#674) when the
-// cranker supports it. memoLocalID (the pull intent id; Nil = unstamped) is
-// stamped on the pull tx as the #713 self-recognition SPL Memo — it exists
-// durably BEFORE the send, so a chain-side reader can resolve the tx back to
-// the intent (and through it the subscription) with no local send record.
-// The returned error means the pull is UNRESOLVED
-// (operational failure, or a pull that happened but whose local finalize
-// failed — the caller distinguishes via the recorded signature); a nil error
-// means the state machine resolved the period (see crankKind).
+// durably records the signed tx signature before submission. memoLocalID (the
+// pull intent id; Nil = unstamped) is stamped on the pull tx as its SPL Memo,
+// so a chain reader can resolve the tx to the intent with no local send
+// record. An error means the pull is unresolved (operational failure, or a
+// landed pull whose local finalize failed; the recorded signature tells them
+// apart); nil means the period resolved (see crankKind).
 func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, memoLocalID uuid.UUID, presubmit func(signature string) error) (crankOutcome, error) {
 	merchantID := billing.MerchantID(row.MerchantID)
 
@@ -298,11 +274,11 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 		sig, crankErr = w.Cranker.Crank(ctx, merchantID, row, amountBaseUnits)
 	}
 	if crankErr != nil {
-		// One classifier maps the on-chain error onto the shared billing
-		// decline-code vocabulary + the action to take (#270). Codes confirmed on
-		// devnet (#263): Custom:400 = period already paid (idempotent); token
-		// OwnerMismatch (Custom:4) = subscriber revoked the SPL delegate (terminal);
-		// token InsufficientFunds (Custom:1) = recoverable; RPC/gas = operational.
+		// ClassifyCrankError maps the on-chain error onto the billing
+		// decline-code vocabulary and an action. Devnet codes: Custom:400 =
+		// period already paid (idempotent); token OwnerMismatch (Custom:4) =
+		// delegate revoked (terminal); token InsufficientFunds (Custom:1) =
+		// recoverable; RPC/gas = operational.
 		cf := recurring.ClassifyCrankError(crankErr)
 		llog := log.WithContext(ctx).WithError(crankErr).WithFields(log.Fields{
 			"subscription_pda": row.SubscriptionPDA,
@@ -317,12 +293,10 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			llog.Warn("Solana cranker: operational pull failure; retry next run (no dunning)")
 			return crankOutcome{}, crankErr
 		case recurring.AlreadyPaid:
-			// The period was already pulled on-chain but our DB did not record it
-			// (the partial-failure window). Advance past this period so we neither
-			// re-attempt nor dun; the reconcile worker (#258) repairs the ledger.
-			// (#674: an intent-driven crank whose OWN recorded signature landed
-			// never reaches here — the handler repairs the renewal via the
-			// signature BEFORE re-cranking.)
+			// Pulled on-chain but not recorded locally: advance past this
+			// period without re-attempting or dunning; the reconcile worker
+			// repairs the ledger. An intent-driven crank whose own recorded
+			// signature landed repairs the renewal first, so never gets here.
 			llog.Warn("Solana cranker: period already paid on-chain (idempotent); advancing, ledger repair via reconcile (#258)")
 			periodHoursI64, err := safecast.Convert[int64](periodHours)
 			if err != nil {
@@ -338,14 +312,11 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				evidence: map[string]any{"decline_code": string(cf.Code)},
 			}, nil
 		case recurring.Terminal:
-			// The subscriber revoked the SPL token delegate on-chain — transfer_subscription
-			// can no longer move funds. Mirror it: cancel + stop, never dun. NOTE: a
-			// plain cancel_subscription does NOT reach here (it stops FUTURE-period
-			// pulls but not the current period, so it produces no crank error this
-			// period, #263); the standard user cancel is an immediate on-chain
-			// cancel_subscription the user signs, which OpenRails then mirrors here/at
-			// confirm. Solana never uses a scheduled-cancel (the card "cancel at period
-			// end" deferral) — Solana cancels are immediate and on-chain.
+			// The subscriber revoked the SPL token delegate on-chain: cancel
+			// and stop, never dun. A user's cancel_subscription stops only
+			// future-period pulls, so it raises no crank error here; OpenRails
+			// mirrors it at confirm. Solana cancels are immediate, never
+			// scheduled.
 			llog.Warn("Solana cranker: terminal pull failure (delegate revoked); cancelling subscription (no dunning)")
 			if err := w.recordPullAttempt(ctx, row, plan, memoLocalID, string(cf.Code), crankErr.Error()); err != nil {
 				return crankOutcome{}, err
@@ -371,10 +342,9 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 				evidence: map[string]any{"decline_code": string(cf.Code)},
 			}, nil
 		default:
-			// Recoverable subscriber decline (insufficient USDC, etc.) -> dunning.
-			// Advance next_pull_at by the cadence-relative dunning interval
-			// (#359, derived from the price's billing cycle) so we align with
-			// the dunning cadence instead of re-failing every hourly run.
+			// Recoverable subscriber decline (insufficient USDC, etc.) ->
+			// dunning. Advance next_pull_at by the cadence-relative dunning
+			// interval so it aligns with dunning instead of re-failing hourly.
 			llog.Warn("Solana cranker: recoverable pull failure; routing to dunning")
 			reason := crankErr.Error()
 			code := string(cf.Code)
@@ -427,10 +397,10 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 	return crankOutcome{kind: crankSucceeded, signature: sig}, nil
 }
 
-// finalizePull is the renewal repair for a CONFIRMED on-chain pull: renew the
-// membership window (payment row, period advance, notifications — idempotent
+// finalizePull is the renewal repair for a confirmed on-chain pull: renew the
+// membership window (payment row, period advance, notifications; idempotent
 // on the tx signature) and advance the row past the pulled period. Shared by
-// the inline success path and the #674 recorded-signature verify leg.
+// the inline success path and the recorded-signature verify leg.
 func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, plan resolvedPlan, sig string) error {
 	ctx = db.WithPSPID(ctx, row.PspID)
 	periodHoursI64, err := safecast.Convert[int64](plan.periodHours)
@@ -461,11 +431,11 @@ func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStor
 	return repo.AdvanceAfterPull(ctx, row.ID, now, sig, periodEnd)
 }
 
-// recordPullAttempt records a refused on-chain pull as its cycle's attempt
-// (#1111): the cycle's rebill, or a dunning retry after an earlier failure. It
-// is keyed on the pull's durable intent (one per subscription and pull slot),
-// so a crank retried before the lifecycle applied the failure records nothing
-// new (#1119). The failpoint after it lets tests crash there.
+// recordPullAttempt records a refused on-chain pull as its cycle's attempt:
+// the cycle's rebill, or a dunning retry after an earlier failure. It is keyed
+// on the pull's durable intent (one per subscription and pull slot), so a
+// crank retried before the lifecycle applied the failure records nothing new.
+// The failpoint after it lets tests crash there.
 func (w *SolanaCrankWorker) recordPullAttempt(ctx context.Context, row *models.SolanaSubscription, plan resolvedPlan, pullIntent uuid.UUID, code, text string) error {
 	if plan.periodEnd == nil {
 		return nil // no paid period: nothing came due

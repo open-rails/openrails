@@ -20,9 +20,8 @@ import (
 )
 
 // CardRefreshWorker reads a card whose charge was declined as expired or
-// reissued (#1168). A holder that holds a newer card gives it to the same
-// method, which wakes the subscriptions waiting on it; otherwise the members
-// are asked for a new card, as the decline alone would have.
+// reissued. A newer card held for it applies to the same method and wakes the
+// subscriptions waiting on it; otherwise the customer is asked for a new card.
 type CardRefreshWorker struct {
 	river.WorkerDefaults[paymentmethods.CardRefreshArgs]
 	DB        *db.DB
