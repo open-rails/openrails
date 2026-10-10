@@ -29,6 +29,8 @@ func TestTypedIDsHaveOneWireSpelling(t *testing.T) {
 		{billing.PaymentAttemptIDPrefix, func(s string) (wireID, error) { return billing.ParsePaymentAttemptID(s) }, func(u uuid.UUID) wireID { return billing.PaymentAttemptID(u) }},
 		{billing.RebillCycleIDPrefix, func(s string) (wireID, error) { return billing.ParseRebillCycleID(s) }, func(u uuid.UUID) wireID { return billing.RebillCycleID(u) }},
 		{billing.PSPIDPrefix, func(s string) (wireID, error) { return billing.ParsePSPID(s) }, func(u uuid.UUID) wireID { return billing.PSPID(u) }},
+		{billing.OrderIDPrefix, func(s string) (wireID, error) { return billing.ParseOrderID(s) }, func(u uuid.UUID) wireID { return billing.OrderID(u) }},
+		{billing.OrderLineIDPrefix, func(s string) (wireID, error) { return billing.ParseOrderLineID(s) }, func(u uuid.UUID) wireID { return billing.OrderLineID(u) }},
 		{"", func(s string) (wireID, error) { return billing.ParseCustomerID(s) }, func(u uuid.UUID) wireID { return billing.CustomerID(u) }},
 	}
 	for _, kind := range kinds {

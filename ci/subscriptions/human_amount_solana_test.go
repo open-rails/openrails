@@ -71,7 +71,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 				require.Len(t, paid, 1, "a chain signature and accepted checkout settle once")
 				require.Equal(t, tc.token, paid[0].Currency)
 				require.Equal(t, tc.native, paid[0].Amount, "the stored payment retains its native denomination without USD conversion")
-				require.Equal(t, price.ID, paid[0].PriceID)
+				require.Equal(t, price.ID, *paid[0].PriceID)
 				var raw []byte
 				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT metadata FROM billing.payments WHERE id=$1`), paid[0].ID.UUID()).Scan(&raw))
 				var metadata map[string]any

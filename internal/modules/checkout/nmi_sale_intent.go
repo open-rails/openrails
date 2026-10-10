@@ -104,8 +104,9 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		return intents.Parked("nmi client is read-only")
 	}
 	// A one-off buy on a saved card is a one-click use of its card-on-file
-	// lineage, or stores it.
-	credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementCardOnFile))
+	// lineage, or stores it; an order with a recurring line opens a recurring
+	// agreement.
+	credential, err := nmidirect.StoredCredentialFor(p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement()))
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence(err.Error(), map[string]any{"not_executed": true}))
 	}
@@ -343,7 +344,11 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		}
 		purchase := h.Sale.PurchaseService.transactionBound(d)
 		now := purchase.now().UTC()
-		if success {
+		if p.OrderID != uuid.Nil {
+			if err := h.completeOrder(ctx, d, in, p, customer, receipt, success, evidence, outcome, now); err != nil {
+				return err
+			}
+		} else if success {
 			price := &models.Price{ID: p.PriceID, ProductID: p.ProductID, Amount: p.ListAmount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours}
 			product := &models.Product{ID: p.ProductID}
 			eligibility := &EligibilityResult{Status: EligibilityStatus(p.Eligibility), Coverage: &CoverageInfo{}}
@@ -439,10 +444,13 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 }
 
 // recordSaleAttempt records the sale's answer (#1110) in its completion
-// transaction.
+// transaction. Its target is the order an order sale pays, else the price.
 func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
+	if p.OrderID != uuid.Nil {
+		a.Target = p.OrderID.String()
+	}
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = charge.TokenTypePSPToken
 	a.Sent = p.Instrument.Mandate

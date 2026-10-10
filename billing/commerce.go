@@ -147,11 +147,15 @@ type CheckoutAttempt struct {
 // window; it returns to the success URL. solana_pay: show URL (a solana: Solana
 // Pay link) as a QR code or wallet link. solana_sign_transactions: the wallet
 // signs and sends Transactions (base64, unsigned) in order, then the attempt is
-// confirmed with each signature.
+// confirmed with each signature. authenticate: the PSP's own script completes
+// Payload on the host page (Stripe.js handleNextAction with client_secret),
+// then the payable is confirmed.
 type NextAction struct {
-	Type         string   `json:"type"`
-	URL          *string  `json:"url"`
-	Transactions []string `json:"transactions"`
+	Type         string            `json:"type"`
+	URL          *string           `json:"url"`
+	Transactions []string          `json:"transactions"`
+	PSPID        *PSPID            `json:"psp_id"`
+	Payload      map[string]string `json:"payload"`
 }
 
 // PaymentFailure is the customer-facing reason a card payment was definitely

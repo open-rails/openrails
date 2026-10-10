@@ -107,7 +107,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"GET /v1/admin/customers/{customer_id}/entitlements":                             read,
 		"POST /v1/admin/tiers/lookup":                                                    read,
 		"GET /v1/admin/customers/{customer_id}":                                          read,
-		"GET /v1/admin/customers/{customer_id}/payment-settlement-status":                read,
+		"GET /v1/admin/orders":                                                           read,
 		"PUT /v1/admin/customers/{customer_id}/spend-delegations":                        write,
 		"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}": write,
 		"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}":                  write,

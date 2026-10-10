@@ -47,7 +47,7 @@ func (q *Queries) AcknowledgeHostEvents(ctx context.Context, arg AcknowledgeHost
 
 const listHostEvents = `-- name: ListHostEvents :many
 SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
-  p.subscription_id AS payment_subscription_id
+  p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = $1::uuid
@@ -84,6 +84,7 @@ type ListHostEventsRow struct {
 	PaymentCustomerID     *uuid.UUID
 	PaymentPriceID        *uuid.UUID
 	PaymentSubscriptionID *uuid.UUID
+	PaymentOrderID        *uuid.UUID
 }
 
 // A settled payment carries its payer, price and subscription from the
@@ -120,6 +121,7 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 			&i.PaymentCustomerID,
 			&i.PaymentPriceID,
 			&i.PaymentSubscriptionID,
+			&i.PaymentOrderID,
 		); err != nil {
 			return nil, err
 		}
@@ -133,7 +135,7 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 
 const listHostEventsByIDs = `-- name: ListHostEventsByIDs :many
 SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
-  p.subscription_id AS payment_subscription_id
+  p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = $1::uuid AND h.id = ANY($2::uuid[])
@@ -161,6 +163,7 @@ type ListHostEventsByIDsRow struct {
 	PaymentCustomerID     *uuid.UUID
 	PaymentPriceID        *uuid.UUID
 	PaymentSubscriptionID *uuid.UUID
+	PaymentOrderID        *uuid.UUID
 }
 
 func (q *Queries) ListHostEventsByIDs(ctx context.Context, arg ListHostEventsByIDsParams) ([]ListHostEventsByIDsRow, error) {
@@ -188,6 +191,7 @@ func (q *Queries) ListHostEventsByIDs(ctx context.Context, arg ListHostEventsByI
 			&i.PaymentCustomerID,
 			&i.PaymentPriceID,
 			&i.PaymentSubscriptionID,
+			&i.PaymentOrderID,
 		); err != nil {
 			return nil, err
 		}

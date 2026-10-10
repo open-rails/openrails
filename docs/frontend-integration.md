@@ -305,9 +305,10 @@ Handle in the frontend:
   with the `DPoP-Nonce` value. Embedded: your normal session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
   else's `payment_method_id`).
-- **409** — `idempotency_key_reused` (same key, different terms),
-  `payment_in_progress` (a retry landed while the original is still running) or
-  `provider_outcome_unknown` (read the resource before trying again).
+- **409** — `idempotency_key_in_use` or `payment_in_progress` (a retry landed
+  while the original is still running) or `provider_outcome_unknown` (read the
+  resource before trying again).
+- **422** — `idempotency_key_reused` (same key, different terms).
 - **410** — `checkout_session_expired` (or `checkout_attempt_expired`); create a new one.
 - **413** — request body over the bucket cap (64 KiB on checkout/subscription/
   payment-method routes). Carries `Retry-After`.

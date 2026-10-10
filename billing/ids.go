@@ -9,7 +9,7 @@ import (
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
 // OpenRails-minted resources travel as prefixed text (prod_, price_, sub_,
-// pay_, pm_, mdt_, chk_, att_, cyc_, psp_, fgr_) and host-owned identities (CustomerID, MerchantID) as the
+// pay_, pm_, mdt_, chk_, att_, cyc_, psp_, fgr_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
 // id marshals to "" and "" decodes to the zero id; use IsZero (and the json
@@ -37,6 +37,9 @@ type (
 	// FederatedGrantID names one merchant role granted to a trusted issuer's
 	// user.
 	FederatedGrantID uuid.UUID
+	// OrderID names one purchase; OrderLineID one of its lines.
+	OrderID     uuid.UUID
+	OrderLineID uuid.UUID
 )
 
 const (
@@ -51,6 +54,8 @@ const (
 	RebillCycleIDPrefix     = "cyc_"
 	PSPIDPrefix             = "psp_"
 	FederatedGrantIDPrefix  = "fgr_"
+	OrderIDPrefix           = "ord_"
+	OrderLineIDPrefix       = "oli_"
 )
 
 // MerchantID is the merchant's own UUID (billing.merchants.id, never an
@@ -97,6 +102,14 @@ func ParseMandateID(s string) (MandateID, error) {
 	u, err := parsePrefixedID("mandate", MandateIDPrefix, s)
 	return MandateID(u), err
 }
+func ParseOrderID(s string) (OrderID, error) {
+	u, err := parsePrefixedID("order", OrderIDPrefix, s)
+	return OrderID(u), err
+}
+func ParseOrderLineID(s string) (OrderLineID, error) {
+	u, err := parsePrefixedID("order line", OrderLineIDPrefix, s)
+	return OrderLineID(u), err
+}
 func ParseCheckoutAttemptID(s string) (CheckoutAttemptID, error) {
 	u, err := parsePrefixedID("checkout attempt", CheckoutAttemptIDPrefix, s)
 	return CheckoutAttemptID(u), err
@@ -133,6 +146,8 @@ func (id PaymentID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PaymentMethodID) UUID() uuid.UUID   { return uuid.UUID(id) }
 func (id MandateID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id CheckoutAttemptID) UUID() uuid.UUID { return uuid.UUID(id) }
+func (id OrderID) UUID() uuid.UUID           { return uuid.UUID(id) }
+func (id OrderLineID) UUID() uuid.UUID       { return uuid.UUID(id) }
 func (id PaymentAttemptID) UUID() uuid.UUID  { return uuid.UUID(id) }
 func (id RebillCycleID) UUID() uuid.UUID     { return uuid.UUID(id) }
 func (id PSPID) UUID() uuid.UUID             { return uuid.UUID(id) }
@@ -146,6 +161,8 @@ func (id PaymentID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentMethodID) IsZero() bool   { return uuid.UUID(id) == uuid.Nil }
 func (id MandateID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id CheckoutAttemptID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
+func (id OrderID) IsZero() bool           { return uuid.UUID(id) == uuid.Nil }
+func (id OrderLineID) IsZero() bool       { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentAttemptID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
 func (id RebillCycleID) IsZero() bool     { return uuid.UUID(id) == uuid.Nil }
 func (id PSPID) IsZero() bool             { return uuid.UUID(id) == uuid.Nil }
@@ -166,6 +183,8 @@ func (id MandateID) String() string { return formatPrefixedID(MandateIDPrefix, u
 func (id CheckoutAttemptID) String() string {
 	return formatPrefixedID(CheckoutAttemptIDPrefix, uuid.UUID(id))
 }
+func (id OrderID) String() string     { return formatPrefixedID(OrderIDPrefix, uuid.UUID(id)) }
+func (id OrderLineID) String() string { return formatPrefixedID(OrderLineIDPrefix, uuid.UUID(id)) }
 func (id PaymentAttemptID) String() string {
 	return formatPrefixedID(PaymentAttemptIDPrefix, uuid.UUID(id))
 }
@@ -183,6 +202,8 @@ func (id PaymentID) MarshalText() ([]byte, error)         { return []byte(id.Str
 func (id PaymentMethodID) MarshalText() ([]byte, error)   { return []byte(id.String()), nil }
 func (id MandateID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id CheckoutAttemptID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
+func (id OrderID) MarshalText() ([]byte, error)           { return []byte(id.String()), nil }
+func (id OrderLineID) MarshalText() ([]byte, error)       { return []byte(id.String()), nil }
 func (id PaymentAttemptID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
 func (id RebillCycleID) MarshalText() ([]byte, error)     { return []byte(id.String()), nil }
 func (id PSPID) MarshalText() ([]byte, error)             { return []byte(id.String()), nil }
@@ -220,6 +241,16 @@ func (id *PaymentMethodID) UnmarshalText(text []byte) error {
 }
 func (id *MandateID) UnmarshalText(text []byte) error {
 	parsed, err := ParseMandateID(string(text))
+	*id = parsed
+	return err
+}
+func (id *OrderID) UnmarshalText(text []byte) error {
+	parsed, err := ParseOrderID(string(text))
+	*id = parsed
+	return err
+}
+func (id *OrderLineID) UnmarshalText(text []byte) error {
+	parsed, err := ParseOrderLineID(string(text))
 	*id = parsed
 	return err
 }

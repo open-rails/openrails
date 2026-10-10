@@ -2183,7 +2183,7 @@ ON CONFLICT DO NOTHING
 
 type ReconcileBackfillPaymentParams struct {
 	MerchantID     uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Rail           string
 	TransactionID  string
 	Amount         int64
@@ -2732,7 +2732,7 @@ ON CONFLICT DO NOTHING
 
 type ReconcileRecordRefundParams struct {
 	MerchantID        uuid.UUID
-	PriceID           uuid.UUID
+	PriceID           *uuid.UUID
 	Rail              string
 	TransactionID     string
 	Amount            int64

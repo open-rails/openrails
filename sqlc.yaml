@@ -34,6 +34,7 @@ sql:
       - "internal/migrate/postgres/0035_psp_credential_fingerprint.up.sql"
       - "internal/migrate/postgres/0036_invoice_overdue_is_a_filter.up.sql"
       - "internal/migrate/postgres/0037_failed_usage.up.sql"
+      - "internal/migrate/postgres/0038_orders.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

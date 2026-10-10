@@ -138,7 +138,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 func paymentFixtureValue(when time.Time, price billing.Price, card *billing.CardDetails) billing.Payment {
 	return billing.Payment{
 		ID: paymentFixture, Kind: billing.PaymentCharge, Status: billing.PaymentSucceeded, Amount: price.UnitAmount, Currency: "USD", CustomerID: customerFixture,
-		SubscriptionID: &subscriptionFixture, PriceID: priceFixture, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+		SubscriptionID: &subscriptionFixture, PriceID: &priceFixture, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Price:   &price,
 		Channel: billing.ChannelRail, Rail: ptr("nmi"), PSPID: ptr(billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555"))), TransactionID: "txn-1", Card: card, CreatedAt: when,
 	}

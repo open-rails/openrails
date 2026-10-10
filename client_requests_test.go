@@ -316,14 +316,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.UpdateCustomer(ctx, billing.CustomerID{}, billing.UpdateCustomerParams{})
 			return err
 		},
-		"settled payment customer": func() error {
-			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID{}, price)
-			return err
-		},
-		"settled payment price": func() error {
-			_, err := c.GetPaymentSettlementStatus(ctx, billing.CustomerID(uuid.New()), billing.PriceID{})
-			return err
-		},
+		"order":                 func() error { _, err := c.GetOrder(ctx, billing.OrderID{}); return err },
 		"off-channel payment": func() error {
 			_, err := c.CreateOffChannelPayment(ctx, billing.CustomerID(uuid.New()), billing.CreateOffChannelPaymentParams{})
 			return err

@@ -36,6 +36,15 @@ func NewProductService(db *db.DB) *ProductService {
 	return &ProductService{db: db}
 }
 
+// ownershipColumn stores an undeclared rule as NULL.
+func ownershipColumn(o catalogwire.Ownership) *string {
+	if o == "" {
+		return nil
+	}
+	v := string(o)
+	return &v
+}
+
 func productTierRankInt32(v int) (int32, error) {
 	if v < math.MinInt32 || v > math.MaxInt32 {
 		return 0, fmt.Errorf("product tier_rank %d outside int32 range", v)
@@ -67,6 +76,9 @@ type KeyChange struct {
 func (c KeyChange) Changed() bool { return len(c.Added) > 0 || len(c.Removed) > 0 }
 
 func (s *ProductService) Create(ctx context.Context, product *models.Product, edit KeyEdit) error {
+	if err := product.Ownership.Validate(); err != nil {
+		return apperr.Invalidf("%v", err)
+	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
@@ -109,6 +121,7 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product, ed
 		CreditGrant: credit,
 		TierGroup:   product.TierGroup,
 		TierRank:    tierRank32,
+		Ownership:   ownershipColumn(product.Ownership),
 		Archived:    product.Archived,
 		CreatedAt:   product.CreatedAt,
 		UpdatedAt:   product.UpdatedAt,
@@ -305,6 +318,8 @@ type ProductDefinitionUpdateParams struct {
 	TierGroup       *string
 	SetTierGroup    bool
 	TierRank        *int
+	Ownership       catalogwire.Ownership
+	SetOwnership    bool
 	Archived        *bool
 	// KeyEdit attributes a change of Entitlements.
 	KeyEdit KeyEdit
@@ -343,6 +358,9 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 	if err != nil {
 		return nil, change, err
 	}
+	if err := params.Ownership.Validate(); err != nil {
+		return nil, change, apperr.Invalidf("%v", err)
+	}
 	var rank *int32
 	if params.TierRank != nil {
 		value, err := productTierRankInt32(*params.TierRank)
@@ -356,7 +374,8 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		Description: params.Description, SetDescription: params.Description != nil,
 		CreditGrant: credit, SetCreditGrant: params.SetCreditGrant,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
-		TierRank: rank, Archived: params.Archived, KeysChanged: change.Changed(),
+		TierRank: rank, Ownership: ownershipColumn(params.Ownership), SetOwnership: params.SetOwnership,
+		Archived: params.Archived, KeysChanged: change.Changed(),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError

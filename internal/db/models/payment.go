@@ -41,6 +41,8 @@ type Payment struct {
 
 	// Optional linkage to the subscription that generated this payment
 	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
+	// OrderID is the order this charge (or its refund) paid.
+	OrderID *uuid.UUID `json:"order_id,omitempty"`
 
 	// Optional linkage back to the payment that this record refunds
 	RefundedPaymentID *uuid.UUID `json:"refunded_payment_id,omitempty"`

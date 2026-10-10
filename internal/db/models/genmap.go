@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -100,8 +101,9 @@ func PaymentFromGen(p gen.BillingPayment) (*Payment, error) {
 	m := &Payment{
 		ID:                p.ID,
 		CustomerID:        p.CustomerID,
-		PriceID:           p.PriceID,
+		PriceID:           DerefUUID(p.PriceID),
 		SubscriptionID:    p.SubscriptionID,
+		OrderID:           p.OrderID,
 		RefundedPaymentID: p.RefundedPaymentID,
 		Channel:           Channel(p.Channel),
 		TransactionID:     p.TransactionID,
@@ -181,6 +183,7 @@ func ProductFromGen(p gen.BillingProduct) (*Product, error) {
 		Description: DerefStr(p.Description),
 		TierGroup:   p.TierGroup,
 		TierRank:    int(p.TierRank),
+		Ownership:   catalog.Ownership(DerefStr(p.Ownership)),
 		Archived:    p.Archived,
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,

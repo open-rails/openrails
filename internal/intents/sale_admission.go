@@ -39,7 +39,8 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		return row, err
 	}
 	customer, err := uuid.Parse(terms.UserID)
-	if err != nil || customer == uuid.Nil || p.PriceID == nil || *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
+	order := terms.OrderID != uuid.Nil
+	if err != nil || customer == uuid.Nil || order != (p.PriceID == nil) || !order && *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
 		return row, errors.New("sale admission coordinates contradict requested purchase")
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -63,7 +64,9 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if terms.AccessDurationHours == nil {
+		// An order's claims, taken when it was created, keep its lines from
+		// being bought twice.
+		if !order && terms.AccessDurationHours == nil {
 			covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutAttemptID})
 			if err != nil {
 				return err
@@ -79,12 +82,14 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 				return apperr.Conflictf("another checkout of this product is unresolved")
 			}
 		}
-		_, err = d.Gen(ctx).GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.ProductID.String()})
-		if err == nil {
-			return apperr.Conflictf("another purchase of this product is unresolved")
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
+		if !order {
+			_, err = d.Gen(ctx).GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.ProductID.String()})
+			if err == nil {
+				return apperr.Conflictf("another purchase of this product is unresolved")
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
 		}
 		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
 		if err != nil {

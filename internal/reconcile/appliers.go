@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
@@ -96,7 +97,7 @@ func (w *PGLocalWriter) backfillPayment(ctx context.Context, d *db.DB, a Backfil
 	}
 	n, err := d.Gen(ctx).ReconcileBackfillPayment(ctx, gen.ReconcileBackfillPaymentParams{
 		MerchantID:     tid.UUID(),
-		PriceID:        a.PriceID,
+		PriceID:        uuidOrNil(a.PriceID),
 		Rail:           string(a.Rail),
 		TransactionID:  a.TransactionID,
 		Amount:         int64(amount),
@@ -144,7 +145,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	}
 	n, err := w.DB.Gen(ctx).ReconcileRecordRefund(ctx, gen.ReconcileRecordRefundParams{
 		MerchantID:        tid.UUID(),
-		PriceID:           a.PriceID,
+		PriceID:           uuidOrNil(a.PriceID),
 		Rail:              string(a.Rail),
 		TransactionID:     a.TransactionID,
 		Amount:            int64(amount),
@@ -270,4 +271,12 @@ func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a Materiali
 		res.PaymentBackfilled = backfilled
 	}
 	return res, nil
+}
+
+// uuidOrNil is an optional id: the zero id is none.
+func uuidOrNil(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }

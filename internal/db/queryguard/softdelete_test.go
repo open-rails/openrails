@@ -25,6 +25,7 @@ const (
 var policedTables = []string{"checkout_attempts", "payments", "product_access", "subscriptions"}
 
 var allow = map[string]string{
+	"DeleteClosedUnpaidOrders":                "a tombstoned attempt still references its order, which retention must then keep",
 	"InvoiceRecoveryHasOtherPayment":          "a tombstoned payment still owns its provider transaction; recovery must not allocate it to another invoice",
 	"PSPRecoveryBookAge":                      "tombstones do not turn an established restored provider book into a fresh account or authorize new writes",
 	"GetInitialMembershipForUpdate":           "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",
@@ -34,7 +35,6 @@ var allow = map[string]string{
 	"CountInvalidPurchaseCheckoutReferences":  "archive validates retained purchase terms including checkout tombstones",
 	"CountInvalidStripeSetupReferences":       "archive retains completed setup history including tombstones",
 	"CountInvalidCheckoutCaptureReferences":   "archive audits every retained capture binding; not a live-session read",
-	"HasSettledPayment":                       "positive payment proof survives archival; a tombstone must not grant another first-payment trial",
 	"HasUnresolvedProductCheckout":            "a tombstone is not provider nonexecution; unknown checkout still excludes a second charge",
 	"PermanentBenefitsCovered":                "unresolved checkout reservations survive tombstones until the provider outcome resolves",
 	"MerchantHasActivity":                     "retirement is only for never-used merchants; tombstoned rows disqualify",

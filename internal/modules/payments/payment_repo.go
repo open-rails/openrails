@@ -95,9 +95,13 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 	default:
 		return gen.CreatePaymentParams{}, fmt.Errorf("payment channel %q is not a known value", channel)
 	}
+	var price *uuid.UUID
+	if p.PriceID != uuid.Nil {
+		price = &p.PriceID
+	}
 	return gen.CreatePaymentParams{
 		ID:                  p.ID,
-		PriceID:             p.PriceID,
+		PriceID:             price,
 		Channel:             string(channel),
 		Rail:                rail,
 		TransactionID:       p.TransactionID,
@@ -124,6 +128,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		ReversalKind:        p.ReversalKind,
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
+		OrderID:             p.OrderID,
 	}, nil
 }
 

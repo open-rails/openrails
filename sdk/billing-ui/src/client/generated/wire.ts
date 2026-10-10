@@ -155,6 +155,12 @@ export type CollectionPaymentMethod = {
   payment_method_id: string
 }
 
+export type CreateOrderParams = {
+  lines?: OrderLineParams[]
+  expected_total?: string
+  payment?: OrderPayment
+}
+
 export type CreatePaymentMethodParams = {
   psp_id?: string
   payment_token?: string
@@ -307,6 +313,8 @@ export type NextAction = {
   type: string
   url: string | null
   transactions: string[]
+  psp_id: string | null
+  payload: Record<string, string> | null
 }
 
 export type Notification = {
@@ -359,6 +367,84 @@ export type NotificationData = {
   user_email?: string
 }
 
+export type Order = {
+  id: string
+  customer_id: string
+  origin: "customer" | "merchant"
+  status: "canceled" | "expired" | "open" | "paid" | "processing" | "requires_action"
+  number: string | null
+  currency: string
+  total: string
+  lines: OrderLine[]
+  next_action: NextAction | null
+  last_payment_error: PaymentFailure | null
+  payment_options: OrderPaymentOption[]
+  payment_method_id: string | null
+  payment_id: string | null
+  expires_at: string
+  paid_at: string | null
+  canceled_at: string | null
+  expired_at: string | null
+  created_at: string
+}
+
+export type OrderLine = {
+  id: string
+  price_id: string
+  product_id: string
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique"
+  billing_interval_hours: number | null
+  access_duration_hours: number | null
+  subscription_id: string | null
+  product_access_id: string | null
+}
+
+export type OrderLineParams = {
+  price_id?: string
+  quantity?: number
+}
+
+export type OrderLineRefusal = {
+  code: string
+  message: string
+  owned_by: string | null
+  hint: string | null
+}
+
+export type OrderPayment = {
+  payment_method_id?: string
+}
+
+export type OrderPaymentOption = {
+  psp_id: string
+  rail: string
+  accepts: string[]
+}
+
+export type OrderPreview = {
+  currency: string
+  total: string
+  lines: OrderPreviewLine[]
+  payment_options: OrderPaymentOption[]
+}
+
+export type OrderPreviewLine = {
+  price_id: string
+  product_id: string
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique"
+  billing_interval_hours: number | null
+  access_duration_hours: number | null
+  refusal: OrderLineRefusal | null
+}
+
 export type PSPLinkState = {
   status: "error" | "linked" | "pending_manual_link" | "sync_disabled"
   ids: Record<string, string> | null
@@ -394,6 +480,11 @@ export type PayInvoiceParams = {
   payment_method_id?: string
 }
 
+export type PayOrderParams = {
+  payment?: OrderPayment
+  expected_total?: string
+}
+
 export type Payment = {
   id: string
   kind: "charge" | "chargeback" | "dispute_reversal" | "refund"
@@ -403,7 +494,8 @@ export type Payment = {
   currency: string
   customer_id: string
   subscription_id: string | null
-  price_id: string
+  order_id: string | null
+  price_id: string | null
   price: Price | null
   product: ProductSummary | null
   channel: "manual" | "rail"
@@ -491,6 +583,10 @@ export type PortalResponse = {
   url: string
 }
 
+export type PreviewOrderParams = {
+  lines?: OrderLineParams[]
+}
+
 export type Price = {
   customer_amount?: CustomerAmount
   revision: number
@@ -520,6 +616,7 @@ export type Product = {
   credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
+  ownership: "consumable" | "extend" | "unique" | null
   archived: boolean
   prices: Price[]
   created_at: string

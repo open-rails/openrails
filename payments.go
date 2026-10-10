@@ -3,7 +3,6 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -50,24 +49,6 @@ func (c *Client) CreateOffChannelPayment(ctx context.Context, customerID billing
 	}
 	var out billing.Payment
 	if err := c.do(ctx, http.MethodPost, path+"/payments/off-channel", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetPaymentSettlementStatus reports whether a customer ever paid for a price
-// through a rail. Refunding or archiving that payment does not undo it.
-func (c *Client) GetPaymentSettlementStatus(ctx context.Context, customerID billing.CustomerID, priceID billing.PriceID, requestOptions ...RequestOption) (*billing.PaymentSettlementStatus, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	price, err := requireTypedID("price_id", priceID)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.PaymentSettlementStatus
-	if err := c.do(ctx, http.MethodGet, path+"/payment-settlement-status?price_id="+url.QueryEscape(price), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

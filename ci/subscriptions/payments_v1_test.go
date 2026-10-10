@@ -49,7 +49,7 @@ func TestOffChannelPaymentIdempotency(t *testing.T) {
 			changed.Amount = &amount
 			_, err = client.CreateOffChannelPayment(t.Context(), c.cid(), changed)
 			require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-			requireCode(t, err, http.StatusConflict, "idempotency_key_reused")
+			requireCode(t, err, http.StatusUnprocessableEntity, "idempotency_key_reused")
 			require.Len(t, completed(w.payments(tp, c.id)), 1, "nothing else was recorded")
 		})
 	}

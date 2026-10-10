@@ -28,9 +28,12 @@ import (
 // Params contains the accepted payment's immutable benefit and
 // cash funding. Expiry is frozen by the checkout, never recomputed on replay.
 type Params struct {
-	CustomerID  identity.CustomerID
-	PaymentID   uuid.UUID
-	ProductID   uuid.UUID
+	CustomerID identity.CustomerID
+	PaymentID  uuid.UUID
+	ProductID  uuid.UUID
+	// OrderLineID is the order line the payment bought the credit with; zero
+	// for a payment of one price.
+	OrderLineID uuid.UUID
 	Currency    string
 	Amount      int64
 	PaidAmount  int64
@@ -75,15 +78,28 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if err != nil {
 			return fmt.Errorf("load credit funding payment: %w", err)
 		}
-		if payment.CustomerID != p.CustomerID.UUID() || payment.Amount != p.PaidAmount || payment.Currency != p.Currency || payment.Status != "completed" || payment.RefundedPaymentID != nil {
+		if payment.CustomerID != p.CustomerID.UUID() || payment.Currency != p.Currency || payment.Status != "completed" || payment.RefundedPaymentID != nil {
 			return fmt.Errorf("credit funding does not match completed payment")
 		}
-		price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: payment.PriceID})
-		if err != nil {
-			return fmt.Errorf("load credit purchase price: %w", err)
-		}
-		if price.ProductID != p.ProductID {
-			return fmt.Errorf("credit grant product does not own paid price")
+		if p.OrderLineID != uuid.Nil {
+			line, err := q.GetOrderLine(ctx, gen.GetOrderLineParams{MerchantID: mid.UUID(), ID: p.OrderLineID})
+			if err != nil {
+				return fmt.Errorf("load credit order line: %w", err)
+			}
+			if payment.OrderID == nil || line.OrderID != *payment.OrderID || line.ProductID != p.ProductID || line.Amount != p.PaidAmount {
+				return fmt.Errorf("credit funding does not match its order line")
+			}
+		} else {
+			if payment.Amount != p.PaidAmount || payment.PriceID == nil {
+				return fmt.Errorf("credit funding does not match completed payment")
+			}
+			price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: *payment.PriceID})
+			if err != nil {
+				return fmt.Errorf("load credit purchase price: %w", err)
+			}
+			if price.ProductID != p.ProductID {
+				return fmt.Errorf("credit grant product does not own paid price")
+			}
 		}
 		existing, err := q.GetPurchasedCreditGrant(ctx, gen.GetPurchasedCreditGrantParams{MerchantID: mid.UUID(), PaymentID: p.PaymentID})
 		if err == nil {

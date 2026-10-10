@@ -245,7 +245,7 @@ func TestAdmitVerdictsIsolateItems(t *testing.T) {
 	for i, v := range out {
 		status[i] = v.Status
 	}
-	require.Equal(t, []int{200, 402, 400, 429, 500, 403, 400, 400, 409}, status)
+	require.Equal(t, []int{200, 402, 400, 429, 500, 403, 400, 400, 422}, status)
 	require.Equal(t, "trusted", seenTrust)
 	require.Equal(t, "insufficient_balance", *out[1].Admission.DenyCode)
 	require.Nil(t, out[2].Admission)

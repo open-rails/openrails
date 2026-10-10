@@ -37,8 +37,18 @@ const (
 	CodeInternalError          = "internal_error"
 	CodeServiceUnavailable     = "service_unavailable"
 	CodeIdempotencyKeyReused   = "idempotency_key_reused"
+	CodeIdempotencyKeyInUse    = "idempotency_key_in_use"
 	CodeInsufficientCredits    = "insufficient_credits"
 	CodeInsufficientFunds      = "insufficient_funds"
+	// Orders.
+	CodeAlreadyOwned             = "already_owned"
+	CodeOrderLineUnavailable     = "order_line_unavailable"
+	CodeQuantityNotAllowed       = "quantity_not_allowed"
+	CodeOrderTotalChanged        = "order_total_changed"
+	CodeOrderPaymentInProgress   = "order_payment_in_progress"
+	CodeOrderNotPayable          = "order_not_payable"
+	CodeOrderNotCancelable       = "order_not_cancelable"
+	CodePaymentOptionUnavailable = "payment_option_unavailable"
 	// CodeModelUnavailable: the language model behind an ask or generate
 	// route did not answer.
 	CodeModelUnavailable = "model_unavailable"
@@ -136,7 +146,8 @@ var errorCodes = []ErrorCode{
 	{CodeRateLimitExceeded, 429, limit, "Too many requests; Retry-After says when to try again."},
 	{CodeInternalError, 500, fault, "OpenRails failed; request_id identifies the failure in its logs."},
 	{CodeServiceUnavailable, 503, fault, "A dependency is temporarily unavailable; retry."},
-	{CodeIdempotencyKeyReused, 409, invalid, "The idempotency key already committed with different terms."},
+	{CodeIdempotencyKeyReused, 422, invalid, "The idempotency key already committed with different terms."},
+	{CodeIdempotencyKeyInUse, 409, invalid, "The request first sent with this Idempotency-Key is still running; retry once it finishes."},
 	{CodeInsufficientCredits, 402, card, "The customer's credit balance does not cover the operation."},
 	{CodeInsufficientFunds, 402, card, "The payment instrument lacks funds."},
 	{"database_busy", 503, fault, "No database connection is available; retry shortly."},
@@ -233,6 +244,16 @@ var errorCodes = []ErrorCode{
 	{"checkout_payment_in_progress", 409, invalid, "A payment on this checkout session is already being processed."},
 	{"checkout_request_invalid", 422, invalid, "The checkout request is invalid."},
 	{"checkout_offer_unavailable", 422, invalid, "The purchase is not available."},
+
+	// Orders.
+	{CodeAlreadyOwned, 409, invalid, "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."},
+	{CodeOrderLineUnavailable, 422, invalid, "A line cannot be bought; param names it and metadata.code says why."},
+	{CodeQuantityNotAllowed, 422, invalid, "The line's recurring price has no seats: it takes no quantity."},
+	{CodeOrderTotalChanged, 409, invalid, "The order's total is not expected_total; preview it again."},
+	{CodeOrderPaymentInProgress, 409, invalid, "A payment on this order is unresolved; read the order."},
+	{CodeOrderNotPayable, 409, invalid, "The order takes no payment: it is paid, canceled or expired."},
+	{CodeOrderNotCancelable, 409, invalid, "Only an open order, or one awaiting the customer's action, can be canceled."},
+	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the order's lines accepts this payment."},
 
 	// Subscriptions and tier changes.
 	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},

@@ -254,7 +254,7 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 		checkout.ErrCheckoutAttemptExpired:                     410,
 		checkout.ErrCheckoutAttemptValidation:                  400,
 		checkout.ErrCheckoutCaptureUnavailable:                 503,
-		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   409,
+		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   422,
 	}
 	for err, status := range checkoutStatus {
 		got := render(t, func(r *httprequest.Request) { writeCheckoutAttemptError(r, err) })

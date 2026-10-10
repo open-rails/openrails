@@ -236,7 +236,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; invoices use the per-currency collection card |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListInvoicePayments(`, `client.CreateInvoicePayment(` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
-| `HasSettledPayment` | `client.GetPaymentSettlementStatus(` |
+| `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderPaid` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | It answers the `billing.Payment`; changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 | `Subscription.RailSubscriptionID`, `SpendDelegation.Provenance`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |

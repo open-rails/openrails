@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -190,6 +191,10 @@ func (h *NMISaleIntentHandler) authenticationAbandoned(in gen.BillingProviderInt
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return false
+	}
+	// A closed order abandons its challenge at once.
+	if p.OrderID != uuid.Nil && intents.EvidenceString(in, orderClosedKey) == "true" {
+		return true
 	}
 	return h.Sale.PurchaseService.now().After(p.AcceptedAt.Add(subscriptions.EngineAuthenticationWindow))
 }

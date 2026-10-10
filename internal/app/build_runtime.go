@@ -43,6 +43,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -351,6 +352,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutAttemptService: serviceInstances.CheckoutAttemptService,
 		CheckoutSessions:       checkoutsession.NewStore(database),
+		Orders:                 orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
+		Idempotency:            serviceInstances.Idempotency,
 		CardAbuseGuard:         cardAbuseGuard,
 		CaptchaStore:           captchaStore,
 		CardFailureLedger:      cardFailureLedger,
@@ -478,6 +481,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner
 		}
 	}
+	if runtime.CheckoutAttemptService != nil {
+		runtime.CheckoutAttemptService.SetOrders(runtime.Orders)
+	}
 	// #674 tail: user-initiated payment-method deletes route through the
 	// durable nmi_vault_delete intent.
 	if runtime.RailPaymentMethodService != nil {
@@ -532,6 +538,8 @@ func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 
 type servicesInstances struct {
 	SubscriptionService *subscriptions.SubscriptionService
+	// Idempotency claims request keys (#1099).
+	Idempotency *idempotency.Store
 
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
@@ -809,6 +817,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		WebhookDispatcher:            webhookDispatcher,
 		CheckoutService:              checkoutService,
 		CheckoutAttemptService:       checkoutAttemptService,
+		Idempotency:                  idempotencyService,
 		MoneyService:                 moneyService,
 		MetricsService:               metricsService,
 		DashboardService:             dashboardService,

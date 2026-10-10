@@ -585,7 +585,7 @@ func (q *Queries) FailHostedPurchaseInitialization(ctx context.Context, arg Fail
 }
 
 const getCheckoutAttemptByID = `-- name: GetCheckoutAttemptByID :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_attempts WHERE checkout_attempts.merchant_id = $2::uuid AND id = $1
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts WHERE checkout_attempts.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL
 `
 
@@ -622,12 +622,13 @@ func (q *Queries) GetCheckoutAttemptByID(ctx context.Context, arg GetCheckoutAtt
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
 		&i.RoutingReason,
+		&i.OrderID,
 	)
 	return i, err
 }
 
 const getCheckoutAttemptByReference = `-- name: GetCheckoutAttemptByReference :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_attempts cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts cs
 WHERE cs.merchant_id = $2::uuid AND cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1
@@ -666,6 +667,7 @@ func (q *Queries) GetCheckoutAttemptByReference(ctx context.Context, arg GetChec
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
 		&i.RoutingReason,
+		&i.OrderID,
 	)
 	return i, err
 }
@@ -733,7 +735,7 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 }
 
 const getLatestOpenCheckoutAttempt = `-- name: GetLatestOpenCheckoutAttempt :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_attempts cs
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts cs
 WHERE cs.merchant_id = $4::uuid AND cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
@@ -786,12 +788,13 @@ func (q *Queries) GetLatestOpenCheckoutAttempt(ctx context.Context, arg GetLates
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
 		&i.RoutingReason,
+		&i.OrderID,
 	)
 	return i, err
 }
 
 const getPaymentMethodSetupSessionForUpdate = `-- name: GetPaymentMethodSetupSessionForUpdate :one
-SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM billing.checkout_attempts
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason, order_id FROM billing.checkout_attempts
 WHERE id=$1 AND merchant_id=$2
   AND mode='payment_method' AND deleted_at IS NULL
 FOR UPDATE
@@ -830,6 +833,7 @@ func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg
 		&i.DestructiveRunID,
 		&i.DestructiveRunClass,
 		&i.RoutingReason,
+		&i.OrderID,
 	)
 	return i, err
 }

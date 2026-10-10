@@ -16,16 +16,17 @@ const createProduct = `-- name: CreateProduct :execrows
 
 INSERT INTO billing.products (
     id, merchant_id, key, display_name, description, credit_grant,
-    tier_group, tier_rank, archived, created_at, updated_at
+    tier_group, tier_rank, ownership, archived, created_at, updated_at
 ) VALUES (
     $1,
     $4::uuid,
     $2, $3, $5, $6,
     NULLIF($7::text, ''),
     COALESCE(NULLIF($8::int, 0), 0),
-    $9::boolean,
-    COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $9::text,
+    $10::boolean,
+    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -38,6 +39,7 @@ type CreateProductParams struct {
 	CreditGrant []byte
 	TierGroup   *string
 	TierRank    int32
+	Ownership   *string
 	Archived    bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
@@ -54,6 +56,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 		arg.CreditGrant,
 		arg.TierGroup,
 		arg.TierRank,
+		arg.Ownership,
 		arg.Archived,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -65,7 +68,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $2::uuid AND id = $1
 `
 
 type GetProductByIDParams struct {
@@ -89,12 +92,13 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.MerchantID,
 		&i.Revision,
 		&i.CreditGrant,
+		&i.Ownership,
 	)
 	return i, err
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $2::uuid AND key = $1
 `
 
 type GetProductByKeyParams struct {
@@ -118,12 +122,13 @@ func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams
 		&i.MerchantID,
 		&i.Revision,
 		&i.CreditGrant,
+		&i.Ownership,
 	)
 	return i, err
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $1::uuid AND NOT archived
 `
 
 func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) ([]BillingProduct, error) {
@@ -148,6 +153,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 			&i.MerchantID,
 			&i.Revision,
 			&i.CreditGrant,
+			&i.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -160,7 +166,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products
 WHERE products.merchant_id = $1::uuid
 `
 
@@ -186,6 +192,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 			&i.MerchantID,
 			&i.Revision,
 			&i.CreditGrant,
+			&i.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -198,7 +205,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
 
@@ -229,6 +236,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 			&i.MerchantID,
 			&i.Revision,
 			&i.CreditGrant,
+			&i.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -241,7 +249,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 }
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
-SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant FROM billing.products
+SELECT id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership FROM billing.products
 WHERE products.merchant_id = $1::uuid
   AND ($2::boolean IS NULL OR archived = $2::boolean)
   AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
@@ -300,6 +308,7 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 			&i.MerchantID,
 			&i.Revision,
 			&i.CreditGrant,
+			&i.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -318,11 +327,12 @@ UPDATE billing.products SET
     credit_grant = CASE WHEN $4::boolean THEN $5::jsonb ELSE credit_grant END,
     tier_group = CASE WHEN $6::boolean THEN NULLIF($7::text, '') ELSE tier_group END,
     tier_rank = COALESCE($8::int, tier_rank),
-    archived = COALESCE($9::boolean, archived),
-    revision = CASE WHEN $10::boolean THEN revision + 1 ELSE revision END,
+    ownership = CASE WHEN $9::boolean THEN $10::text ELSE ownership END,
+    archived = COALESCE($11::boolean, archived),
+    revision = CASE WHEN $12::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()
-WHERE products.merchant_id = $11::uuid AND id = $12::uuid
-RETURNING id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant
+WHERE products.merchant_id = $13::uuid AND id = $14::uuid
+RETURNING id, key, display_name, description, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, revision, credit_grant, ownership
 `
 
 type PatchProductParams struct {
@@ -334,6 +344,8 @@ type PatchProductParams struct {
 	SetTierGroup   bool
 	TierGroup      *string
 	TierRank       *int32
+	SetOwnership   bool
+	Ownership      *string
 	Archived       *bool
 	KeysChanged    bool
 	MerchantID     uuid.UUID
@@ -351,6 +363,8 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		arg.SetTierGroup,
 		arg.TierGroup,
 		arg.TierRank,
+		arg.SetOwnership,
+		arg.Ownership,
 		arg.Archived,
 		arg.KeysChanged,
 		arg.MerchantID,
@@ -370,6 +384,7 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Bil
 		&i.MerchantID,
 		&i.Revision,
 		&i.CreditGrant,
+		&i.Ownership,
 	)
 	return i, err
 }

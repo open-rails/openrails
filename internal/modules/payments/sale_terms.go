@@ -55,6 +55,23 @@ type NMISalePayload struct {
 	OwnershipStart      time.Time       `json:"ownership_start"`
 	OwnershipEnd        *time.Time      `json:"ownership_end"`
 	Eligibility         string          `json:"eligibility"`
+	// OrderID is the order the sale pays (#1168), through its checkout
+	// attempt CheckoutAttemptID. An order sale carries no price, product or
+	// benefit: paying settles the order's own frozen lines.
+	OrderID uuid.UUID `json:"order_id,omitzero"`
+	// Recurring: the order has a recurring line, so the charge stores the
+	// card for a recurring agreement.
+	Recurring bool `json:"recurring,omitempty"`
+}
+
+// Agreement is the stored-credential agreement the sale charges under: a
+// recurring one for an order with a recurring line, else the card's
+// card-on-file reuse.
+func (p NMISalePayload) Agreement() charge.Agreement {
+	if p.Recurring {
+		return charge.AgreementRecurring
+	}
+	return charge.AgreementCardOnFile
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -66,6 +83,9 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, err
 	}
 	customer, err := uuid.Parse(p.UserID)
+	if p.OrderID != uuid.Nil {
+		return p, validateOrderSale(in, p, customer, err)
+	}
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() {
 		return p, errors.New("sale operation contradicts its accepted purchase")
 	}
@@ -105,6 +125,28 @@ func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) 
 		return p, err
 	}
 	return p, nil
+}
+
+// validateOrderSale checks an order sale: money, instrument and binding, and
+// none of a price sale's benefits.
+func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer uuid.UUID, parseErr error) error {
+	if parseErr != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || !saleRails[in.Rail] || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID != nil ||
+		p.CheckoutAttemptID == uuid.Nil || p.PriceID != uuid.Nil || p.ProductID != uuid.Nil || p.CreditGrant != nil || p.AccessDurationHours != nil || p.OwnershipEnd != nil || len(p.Entitlements) > 0 ||
+		p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount != p.Amount || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || !p.AcceptedAt.Equal(p.AcceptedAt.Truncate(time.Microsecond)) {
+		return errors.New("order sale contradicts its order")
+	}
+	digest, err := hex.DecodeString(p.RequestFingerprint)
+	if err != nil || len(digest) != 32 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {
+		return errors.New("order sale has no canonical request binding")
+	}
+	if err := p.Instrument.Validate(); err != nil {
+		return err
+	}
+	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || p.Instrument.RailCustomerRef == "" || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" {
+		return errors.New("order sale instrument contradicts its order")
+	}
+	_, err = moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
+	return err
 }
 
 func NMISaleOrderReference(id uuid.UUID, runID string) string {

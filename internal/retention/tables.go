@@ -71,6 +71,8 @@ var Tables = map[string]Table{
 	"maintenance_runs":                {Rows, "reconciliation runs no finding refers to are deleted 12 months (366 days) after they started, by the cleanup job only; every other kind is permanent."},
 	"checkout_attempts":               {Rows, "attempts that expired without reaching a provider are deleted 90 days after expires_at; every other attempt is permanent."},
 	"checkout_sessions":               {Rows, "rows are deleted at purge_at, 24 hours after the session expired."},
+	"orders":                          {Rows, "unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent."},
+	"order_lines":                     {Rows, "deleted with their order."},
 	"notifications":                   {Rows, "rows are deleted 90 days after created_at once read, 180 days if never read."},
 	"webhook_events":                  {Rows, "completed events are deleted 90 days after completed_at."},
 	"host_outbox":                     {Rows, "delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted."},
@@ -127,4 +129,6 @@ var Tables = map[string]Table{
 	"nmi_bulk_checkpoints":              {Class: State},
 	"nmi_history_reads":                 {Class: State},
 	"reconciliation_state":              {Class: State},
+	"ownership_claims":                  {Class: State},
+	"document_sequences":                {Class: State},
 }

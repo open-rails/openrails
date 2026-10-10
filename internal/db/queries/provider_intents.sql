@@ -760,7 +760,14 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
     OR (intent_type='subscription_collection'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
-        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
+        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+    -- An order's sale paid the first period of the subscription its line made.
+    OR (intent_type='nmi_sale' AND payload ? 'order_id' AND EXISTS (
+        SELECT 1 FROM billing.order_lines l
+        JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
+        WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = sqlc.arg(subscription_id)::uuid
+          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'paid'
+          AND o.paid_at + make_interval(hours => l.billing_interval_hours) = sqlc.arg(period_end)::timestamptz)))
 ORDER BY id LIMIT 2;
 -- name: ExpireProviderIntentByID :execrows
 UPDATE billing.provider_intents pi

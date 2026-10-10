@@ -86,7 +86,7 @@ func (s *Service) CreateCreditGrants(ctx context.Context, items []billing.Create
 	trxs, err := s.moneyService().DepositBatch(ctx, deposits)
 	var refused *money.DepositItemError
 	if errors.As(err, &refused) && errors.Is(refused.Err, money.ErrIdempotencyKeyReused) {
-		return nil, apperr.New(http.StatusConflict, billing.CodeIdempotencyKeyReused, refused.Err.Error()).WithParam(apperr.ItemParam(refused.Index, "source_id"))
+		return nil, apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, refused.Err.Error()).WithParam(apperr.ItemParam(refused.Index, "source_id"))
 	}
 	if err != nil {
 		return nil, err

@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -154,6 +155,9 @@ type CheckoutAttemptService struct {
 
 	// pspDisarmed reports a PSP whose credentials failed posture verification.
 	pspDisarmed func(uuid.UUID) bool
+
+	// orders settles the orders checkout attempts pay (#1168).
+	orders *orders.Service
 }
 
 // SetPSPPosture wires the verdict checkout consults before offering a PSP.

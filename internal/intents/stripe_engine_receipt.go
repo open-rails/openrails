@@ -62,7 +62,8 @@ func StripeEngineParams(in gen.BillingProviderIntent) (subscriptions.StripeEngin
 		params.Instrument = p.Instrument
 		params.AmountMinor = minor
 		params.Currency = p.Currency
-		params.OneTime = true
+		// An order with a recurring line stores the card for its renewals.
+		params.OneTime, params.Initial = !p.Recurring, p.Recurring
 	case subscriptions.TypeSubscriptionCollection:
 		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
 		if err != nil {

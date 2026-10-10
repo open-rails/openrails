@@ -199,6 +199,9 @@ func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.U
 		p.DisplayName = catalog.Value(row.DisplayName)
 		p.Description = catalog.Value(row.Description)
 		p.TierRank = catalog.Value(int(row.TierRank))
+		if row.Ownership != nil {
+			p.Ownership = catalog.Value(catalog.Ownership(*row.Ownership))
+		}
 		p.Archived = catalog.Value(row.Archived)
 		p.TierGroup = catalog.Null[string]()
 		if row.TierGroup != nil {

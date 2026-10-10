@@ -28,6 +28,8 @@ type Product struct {
 	// TierRank determines direction: higher rank = more premium (upgrade), lower rank = downgrade
 	TierGroup *string `json:"tier_group,omitempty"`
 	TierRank  int     `json:"tier_rank"`
+	// Ownership is the declared rule, "" when derived.
+	Ownership catalog.Ownership `json:"ownership,omitempty"`
 
 	// Archived: retired. Not purchasable, hidden from the public catalog, but
 	// existing subscriptions are grandfathered and bill indefinitely.
@@ -315,12 +317,16 @@ func (p *Product) View() billing.Product {
 	if names == nil {
 		names = []string{}
 	}
-	return billing.Product{Revision: p.Revision,
+	v := billing.Product{Revision: p.Revision,
 		ID: billing.ProductID(p.ID), Key: p.Key,
 		DisplayName: p.DisplayName, Description: p.Description, Entitlements: names, CreditGrant: p.CreditGrant,
 		TierGroup: p.TierGroup, TierRank: p.TierRank, Archived: p.Archived,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
+	if p.Ownership != "" {
+		v.Ownership = &p.Ownership
+	}
+	return v
 }
 
 // PublicView is the price as a buyer sees it: which PSPs sell it, without

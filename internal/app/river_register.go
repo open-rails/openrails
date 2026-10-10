@@ -142,6 +142,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
+		return fmt.Errorf("add order expiry worker: %w", err)
+	}
 	// or#833: the ledger integrity checks existed but nothing ran them.
 	if err := addTrackedWorker(r, workers, &riverjobs.LedgerIntegrityWorker{
 		DB:    r.DB,
@@ -689,6 +692,18 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.CreditExpiryArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 5 minutes: expire orders past their expiry (#1168).
+	jobs = append(jobs, r.healthPeriodic(
+		5*time.Minute,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.OrderExpiryArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

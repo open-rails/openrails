@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 )
@@ -58,6 +59,8 @@ type CheckoutNMISaleService struct {
 	// Intents executes the durable write-ahead sale intent (#674). Every card
 	// charge in this flow goes through it — there is no direct provider call here.
 	Intents intentExecutor
+	// Orders settles an order sale in its completion transaction.
+	Orders *orders.Service
 }
 
 func NewCheckoutNMISaleService(

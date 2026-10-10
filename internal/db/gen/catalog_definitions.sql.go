@@ -270,7 +270,7 @@ func (q *Queries) ListLiveCatalogPricesWithPSPLinks(ctx context.Context, merchan
 const listLiveCatalogProducts = `-- name: ListLiveCatalogProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description,
        COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = products.merchant_id AND pe.product_id = products.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements, credit_grant,
-       tier_group, tier_rank, archived
+       tier_group, tier_rank, ownership, archived
 FROM billing.products
 WHERE merchant_id = $1::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key
@@ -285,6 +285,7 @@ type ListLiveCatalogProductsRow struct {
 	CreditGrant  []byte
 	TierGroup    *string
 	TierRank     int32
+	Ownership    *string
 	Archived     bool
 }
 
@@ -306,6 +307,7 @@ func (q *Queries) ListLiveCatalogProducts(ctx context.Context, merchantID uuid.U
 			&i.CreditGrant,
 			&i.TierGroup,
 			&i.TierRank,
+			&i.Ownership,
 			&i.Archived,
 		); err != nil {
 			return nil, err

@@ -48,9 +48,11 @@ type Payment struct {
 	Currency       string          `json:"currency"`
 	CustomerID     CustomerID      `json:"customer_id"`
 	SubscriptionID *SubscriptionID `json:"subscription_id"`
-	PriceID        PriceID         `json:"price_id"`
-	// Price and Product are what the charge bought; a refund names its
-	// charge's.
+	// OrderID is the order the charge paid; its lines say what it bought.
+	OrderID *OrderID `json:"order_id"`
+	// PriceID, Price and Product are what a one-price charge bought; a
+	// refund names its charge's. Null on an order's charge.
+	PriceID           *PriceID        `json:"price_id"`
 	Price             *Price          `json:"price"`
 	Product           *ProductSummary `json:"product"`
 	Channel           PaymentChannel  `json:"channel"`
@@ -80,12 +82,6 @@ type PaymentListParams struct {
 	Kind           PaymentKind
 	TransactionID  string
 	PageRequest
-}
-
-// PaymentSettlementStatus reports whether a customer has ever paid for a
-// price through a rail. Refunding or archiving the payment does not undo it.
-type PaymentSettlementStatus struct {
-	Settled bool `json:"settled"`
 }
 
 // CreateOffChannelPaymentParams records a purchase paid outside any rail

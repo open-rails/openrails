@@ -45,7 +45,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   (marked in [routes.md](routes.md)): checkout, refunds, tier changes, invoice
   collection. Each such operation keeps its own durable receipt: the same key
   with the same terms answers the original result, and with other terms
-  `409 idempotency_key_reused`. There is no generic response cache; every
+  `422 idempotency_key_reused`. There is no generic response cache; every
   request authenticates and authorizes again. One key names one purchase:
   generate it when the buyer decides to buy, store it with the order, and send
   the same key on every retry of that request (timeouts, network errors,
@@ -232,7 +232,7 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
 - **Credit grants** (`POST /v1/admin/credit-grants`, up to 100 across
   customers, all or none) are idempotent on each customer's `source_id`: an
   identical retry answers the same grant with `replayed: true`; other terms
-  refuse the batch with `409 idempotency_key_reused`. Revoking takes the
+  refuse the batch with `422 idempotency_key_reused`. Revoking takes the
   unspent remainder (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
@@ -308,10 +308,6 @@ first, filtered by `type`. Acknowledge them, up to 100 at a time
 processing commits, then fetch again. Acknowledgment is idempotent and
 independent of notification read state. Acknowledged events are kept 30 days;
 pending ones are never deleted.
-
-`GET /v1/admin/customers/{customer_id}/payment-settlement-status?price_id=`
-answers whether the customer ever paid for that price on a rail, from the
-durable payment records.
 
 ## Provider webhooks
 

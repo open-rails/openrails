@@ -3,13 +3,14 @@
 -- name: CreateProduct :execrows
 INSERT INTO billing.products (
     id, merchant_id, key, display_name, description, credit_grant,
-    tier_group, tier_rank, archived, created_at, updated_at
+    tier_group, tier_rank, ownership, archived, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2, $3, sqlc.narg(description), sqlc.narg(credit_grant),
     NULLIF(sqlc.narg(tier_group)::text, ''),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),
+    sqlc.narg(ownership)::text,
     sqlc.arg(archived)::boolean,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -58,6 +59,7 @@ UPDATE billing.products SET
     credit_grant = CASE WHEN sqlc.arg(set_credit_grant)::boolean THEN sqlc.narg(credit_grant)::jsonb ELSE credit_grant END,
     tier_group = CASE WHEN sqlc.arg(set_tier_group)::boolean THEN NULLIF(sqlc.narg(tier_group)::text, '') ELSE tier_group END,
     tier_rank = COALESCE(sqlc.narg(tier_rank)::int, tier_rank),
+    ownership = CASE WHEN sqlc.arg(set_ownership)::boolean THEN sqlc.narg(ownership)::text ELSE ownership END,
     archived = COALESCE(sqlc.narg(archived)::boolean, archived),
     revision = CASE WHEN sqlc.arg(keys_changed)::boolean THEN revision + 1 ELSE revision END,
     updated_at = now()

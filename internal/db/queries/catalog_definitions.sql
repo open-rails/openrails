@@ -69,7 +69,7 @@ SELECT catalog_revision FROM billing.merchants WHERE id = sqlc.arg(merchant_id):
 -- name: ListLiveCatalogProducts :many
 SELECT id, key, display_name, COALESCE(description, '')::text AS description,
        COALESCE((SELECT jsonb_agg(pe.entitlement ORDER BY pe.entitlement) FROM billing.product_entitlements pe WHERE pe.merchant_id = products.merchant_id AND pe.product_id = products.id AND pe.removed_at IS NULL), '[]'::jsonb)::jsonb AS entitlements, credit_grant,
-       tier_group, tier_rank, archived
+       tier_group, tier_rank, ownership, archived
 FROM billing.products
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND NOT archived
 ORDER BY COALESCE(tier_group, ''), tier_rank, key;

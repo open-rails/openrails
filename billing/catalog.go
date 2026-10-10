@@ -24,7 +24,9 @@ type Product struct {
 	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 	TierGroup    *string                  `json:"tier_group"`
 	TierRank     int                      `json:"tier_rank"`
-	Archived     bool                     `json:"archived"`
+	// Ownership is the declared rule; null derives it (catalog.DeriveOwnership).
+	Ownership *catalog.Ownership `json:"ownership"`
+	Archived  bool               `json:"archived"`
 	// Prices are the product's current prices; archived ones are listed with
 	// ListPrices.
 	Prices    []Price   `json:"prices"`
@@ -42,7 +44,9 @@ type CreateProductParams struct {
 	CreditGrant  *catalog.CreditGrantSpec `json:"credit_grant,omitempty"`
 	TierGroup    *string                  `json:"tier_group,omitempty"`
 	TierRank     int                      `json:"tier_rank,omitempty"`
-	Archived     bool                     `json:"archived,omitempty"`
+	// Ownership declares the rule; empty derives it.
+	Ownership catalog.Ownership `json:"ownership,omitempty"`
+	Archived  bool              `json:"archived,omitempty"`
 }
 
 // UpdateProductParams changes a product's fields: an omitted field is left
@@ -57,7 +61,9 @@ type UpdateProductParams struct {
 	CreditGrant  catalog.Field[catalog.CreditGrantSpec] `json:"credit_grant,omitzero"`
 	TierGroup    catalog.Field[string]                  `json:"tier_group,omitzero"`
 	TierRank     catalog.Field[int]                     `json:"tier_rank,omitzero"`
-	Archived     catalog.Field[bool]                    `json:"archived,omitzero"`
+	// Ownership declares the rule; null derives it again.
+	Ownership catalog.Field[catalog.Ownership] `json:"ownership,omitzero"`
+	Archived  catalog.Field[bool]              `json:"archived,omitzero"`
 }
 
 // ProductListParams filters ListProducts. A nil Archived lists both live and

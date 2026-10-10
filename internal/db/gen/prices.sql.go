@@ -295,7 +295,7 @@ func (q *Queries) GetPriceByTerms(ctx context.Context, arg GetPriceByTermsParams
 }
 
 const getPriceWithProductByCCBillPriceID = `-- name: GetPriceWithProductByCCBillPriceID :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
 JOIN billing.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
@@ -359,6 +359,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, arg Ge
 			&i.BillingProduct.MerchantID,
 			&i.BillingProduct.Revision,
 			&i.BillingProduct.CreditGrant,
+			&i.BillingProduct.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -371,7 +372,7 @@ func (q *Queries) GetPriceWithProductByCCBillPriceID(ctx context.Context, arg Ge
 }
 
 const getPriceWithProductByStripePriceID = `-- name: GetPriceWithProductByStripePriceID :one
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
 JOIN billing.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
@@ -422,6 +423,7 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, arg Ge
 		&i.BillingProduct.MerchantID,
 		&i.BillingProduct.Revision,
 		&i.BillingProduct.CreditGrant,
+		&i.BillingProduct.Ownership,
 	)
 	return i, err
 }
@@ -474,7 +476,7 @@ func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, arg List
 }
 
 const listAllActivePricesWithProduct = `-- name: ListAllActivePricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND NOT price.archived
@@ -523,6 +525,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID
 			&i.BillingProduct.MerchantID,
 			&i.BillingProduct.Revision,
 			&i.BillingProduct.CreditGrant,
+			&i.BillingProduct.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -535,7 +538,7 @@ func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID
 }
 
 const listAllPricesWithProduct = `-- name: ListAllPricesWithProduct :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 
@@ -585,6 +588,7 @@ func (q *Queries) ListAllPricesWithProduct(ctx context.Context, merchantID uuid.
 			&i.BillingProduct.MerchantID,
 			&i.BillingProduct.Revision,
 			&i.BillingProduct.CreditGrant,
+			&i.BillingProduct.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -789,7 +793,7 @@ func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProdu
 }
 
 const listPricesFiltered = `-- name: ListPricesFiltered :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.merchant_id = price.merchant_id AND prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid
@@ -865,6 +869,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 			&i.BillingProduct.MerchantID,
 			&i.BillingProduct.Revision,
 			&i.BillingProduct.CreditGrant,
+			&i.BillingProduct.Ownership,
 		); err != nil {
 			return nil, err
 		}
@@ -877,7 +882,7 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 }
 
 const listPricesWithProductByIDs = `-- name: ListPricesWithProductByIDs :many
-SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant
+SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.trial_unit_amount, price.trial_duration_hours, price.key, price.revision, price.customer_amount, price.billing_interval_hours, prod.id, prod.key, prod.display_name, prod.description, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id, prod.revision, prod.credit_grant, prod.ownership
 FROM billing.prices price
 JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND price.id = ANY($2::uuid[])
@@ -931,6 +936,7 @@ func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPrices
 			&i.BillingProduct.MerchantID,
 			&i.BillingProduct.Revision,
 			&i.BillingProduct.CreditGrant,
+			&i.BillingProduct.Ownership,
 		); err != nil {
 			return nil, err
 		}

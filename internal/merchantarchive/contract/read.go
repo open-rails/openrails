@@ -204,6 +204,9 @@ func flushProducts(rows [][]*string, current bool, emit func(Profile, []*string)
 	products := namedProfile("products")
 	if current {
 		for _, values := range rows {
+			if len(values) == len(products.Columns)-1 {
+				values = append(values, nil) // Before ownership: derived.
+			}
 			if err := emit(products, values); err != nil {
 				return err
 			}
@@ -240,6 +243,7 @@ func flushProducts(rows [][]*string, current bool, emit func(Profile, []*string)
 				current = append(current, values[i])
 			}
 		}
+		current = append(current, nil) // Before ownership: derived.
 		if err := emit(products, current); err != nil {
 			return err
 		}

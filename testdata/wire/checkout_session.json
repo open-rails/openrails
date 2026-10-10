@@ -77,7 +77,9 @@
   "next_action": {
     "type": "solana_pay",
     "url": "solana:https://pay.example/billing/v1/checkout-attempts/chk_ffffffff-ffff-4fff-8fff-ffffffffffff/solana-pay",
-    "transactions": null
+    "transactions": null,
+    "psp_id": null,
+    "payload": null
   },
   "operation": {
     "id": "pop_88888888-8888-4888-8888-888888888888",

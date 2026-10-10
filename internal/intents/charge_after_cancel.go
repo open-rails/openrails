@@ -85,6 +85,14 @@ func RefundChargeAfterCancel(ctx context.Context, d *db.DB, payment *models.Paym
 // queueChargeAfterCancelRefund reserves and enqueues the refund; it answers the
 // intent key, or "" when the rail cannot refund automatically.
 func queueChargeAfterCancelRefund(ctx context.Context, d *db.DB, merchantID uuid.UUID, payment *models.Payment, key string, clock clockwork.Clock) (string, error) {
+	return queueFullRefund(ctx, d, merchantID, payment, key, chargeAfterCancelRefundKey, "charged after cancellation",
+		map[string]any{"charge_after_cancel": true, "refund_reason": "charged after cancellation"}, clock)
+}
+
+// queueFullRefund reserves and enqueues the refund of what remains of
+// payment; it answers the intent key, or "" when the rail cannot refund
+// automatically or nothing remains.
+func queueFullRefund(ctx context.Context, d *db.DB, merchantID uuid.UUID, payment *models.Payment, key, kind, reason string, metadata map[string]any, clock clockwork.Clock) (string, error) {
 	if payment.Rail == models.RailCCBill || payment.PspID == nil {
 		return "", nil
 	}
@@ -99,7 +107,7 @@ func queueChargeAfterCancelRefund(ctx context.Context, d *db.DB, merchantID uuid
 	}
 	cents, err := moneyutil.NativeToRailMinorExact(payment.Currency, amount)
 	if err != nil {
-		return "", fmt.Errorf("charge-after-cancel refund amount: %w", err)
+		return "", fmt.Errorf("%s refund amount: %w", kind, err)
 	}
 	target := payment.TransactionID
 	if payment.Rail == models.RailStripe {
@@ -107,12 +115,11 @@ func queueChargeAfterCancelRefund(ctx context.Context, d *db.DB, merchantID uuid
 			return "", err
 		}
 	}
-	reservation, err := svc.ReserveRefund(ctx, payment.ID, "charge_after_cancel_refund:"+payment.ID.String(), amount,
-		map[string]any{"charge_after_cancel": true, "refund_reason": "charged after cancellation"})
+	reservation, err := svc.ReserveRefund(ctx, payment.ID, kind+"_refund:"+payment.ID.String(), amount, metadata)
 	if err != nil {
-		return "", fmt.Errorf("reserve charge-after-cancel refund: %w", err)
+		return "", fmt.Errorf("reserve %s refund: %w", kind, err)
 	}
-	intentType, provider, _, err := RefundIntentFor(payment, chargeAfterCancelRefundKey)
+	intentType, provider, _, err := RefundIntentFor(payment, kind)
 	if err != nil {
 		return "", err
 	}
@@ -120,11 +127,11 @@ func queueChargeAfterCancelRefund(ctx context.Context, d *db.DB, merchantID uuid
 		MerchantID: merchantID, Provider: provider, IntentType: intentType,
 		SubscriptionID: payment.SubscriptionID, PaymentID: &payment.ID, PspID: *payment.PspID,
 		Payload: RefundPayload{OriginalPaymentID: payment.ID, ReservationID: reservation.ID, AmountCents: cents,
-			Currency: payment.Currency, Reason: "charged after cancellation", ProviderTarget: target},
-		IdempotencyKey: key, NextAttemptAt: clock.Now().UTC(), Origin: OriginSystem, OriginReason: "charge after cancellation",
+			Currency: payment.Currency, Reason: reason, ProviderTarget: target},
+		IdempotencyKey: key, NextAttemptAt: clock.Now().UTC(), Origin: OriginSystem, OriginReason: reason,
 	})
 	if err != nil {
-		return "", fmt.Errorf("enqueue charge-after-cancel refund: %w", err)
+		return "", fmt.Errorf("enqueue %s refund: %w", kind, err)
 	}
 	return key, nil
 }

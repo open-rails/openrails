@@ -2,7 +2,7 @@
 -- A settled payment carries its payer, price and subscription from the
 -- authoritative payment row so a host never re-reads the payment to route it.
 SELECT h.*, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
-  p.subscription_id AS payment_subscription_id
+  p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -15,7 +15,7 @@ LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListHostEventsByIDs :many
 SELECT h.*, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
-  p.subscription_id AS payment_subscription_id
+  p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id
 FROM billing.host_outbox h
 LEFT JOIN billing.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
 WHERE h.merchant_id = sqlc.arg(merchant_id)::uuid AND h.id = ANY(sqlc.arg(ids)::uuid[])

@@ -72,6 +72,7 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 		Entitlements: req.Entitlements, CreditGrant: req.CreditGrant,
 		TierGroup: req.TierGroup,
 		TierRank:  req.TierRank,
+		Ownership: req.Ownership,
 		Archived:  req.Archived,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -102,6 +103,8 @@ type UpdateProductRequest struct {
 	TierGroup                  *string
 	SetTierGroup               bool
 	TierRank                   *int
+	Ownership                  catalogwire.Ownership
+	SetOwnership               bool
 	Archived                   *bool
 	SkipRailSync               bool
 }
@@ -139,6 +142,9 @@ func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	}
 	if p.TierRank.Set {
 		req.TierRank = &p.TierRank.Value
+	}
+	if p.Ownership.Set {
+		req.SetOwnership, req.Ownership = true, p.Ownership.Value
 	}
 	if p.Archived.Set {
 		req.Archived = &p.Archived.Value
@@ -209,6 +215,8 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 		TierGroup:    req.TierGroup,
 		SetTierGroup: req.SetTierGroup,
 		TierRank:     req.TierRank,
+		Ownership:    req.Ownership,
+		SetOwnership: req.SetOwnership,
 		Archived:     req.Archived,
 		KeyEdit:      s.keyEdit(ctx),
 	})

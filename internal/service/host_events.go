@@ -25,7 +25,8 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 		return billing.ListPage[billing.HostEvent]{Items: events}, err
 	}
 	switch req.Type {
-	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged:
+	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged,
+		billing.HostEventOrderPaid, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
 	}
@@ -92,11 +93,19 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			OccurredAt: row.OccurredAt, AcknowledgedAt: row.DeliveredAt}
 		switch event.Type {
 		case billing.HostEventPaymentSettled:
-			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentPriceID == nil {
+			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || (row.PaymentPriceID == nil) == (row.PaymentOrderID == nil) && row.PaymentSubscriptionID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
 			event.Payment = &billing.PaymentSettledEvent{PaymentID: billing.PaymentID(*row.PaymentID), CustomerID: billing.CustomerID(*row.PaymentCustomerID),
-				PriceID: billing.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: derefString(row.Currency)}
+				Amount: *row.Amount, Currency: derefString(row.Currency)}
+			if row.PaymentPriceID != nil {
+				price := billing.PriceID(*row.PaymentPriceID)
+				event.Payment.PriceID = &price
+			}
+			if row.PaymentOrderID != nil {
+				order := billing.OrderID(*row.PaymentOrderID)
+				event.Payment.OrderID = &order
+			}
 			if row.PaymentSubscriptionID != nil {
 				subscriptionID := billing.SubscriptionID(*row.PaymentSubscriptionID)
 				event.Payment.SubscriptionID = &subscriptionID
@@ -125,6 +134,30 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			}
 			payload.ProductID = billing.ProductID(row.SubjectID)
 			event.ProductEntitlements = &payload
+		case billing.HostEventOrderPaid, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
+			var payload struct {
+				CustomerID uuid.UUID `json:"customer_id"`
+				Status     string    `json:"status"`
+				Number     *string   `json:"number"`
+				PaymentID  *string   `json:"payment_id"`
+			}
+			if err := json.Unmarshal(row.Data, &payload); err != nil {
+				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
+			}
+			order := &billing.OrderHostEvent{OrderID: billing.OrderID(row.SubjectID), CustomerID: billing.CustomerID(payload.CustomerID),
+				Status: billing.OrderStatus(payload.Status), Currency: derefString(row.Currency), Number: payload.Number}
+			if row.Amount != nil {
+				order.Total = *row.Amount
+			}
+			if payload.PaymentID != nil {
+				id, err := uuid.Parse(*payload.PaymentID)
+				if err != nil {
+					return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
+				}
+				payment := billing.PaymentID(id)
+				order.PaymentID = &payment
+			}
+			event.Order = order
 		default:
 			return nil, fmt.Errorf("unknown stored host event type %q", row.EventType)
 		}

@@ -110,11 +110,13 @@ type ApplyMeter struct {
 // ApplyProduct declares the product its map key names, with its prices and
 // rate cards; omitted fields keep their values.
 type ApplyProduct struct {
-	DisplayName  Field[string]          `json:"display_name,omitzero"`
-	Description  Field[string]          `json:"description,omitzero"`
-	TierGroup    Field[string]          `json:"tier_group,omitzero"`
-	TierRank     Field[int]             `json:"tier_rank,omitzero"`
-	Archived     Field[bool]            `json:"archived,omitzero"`
+	DisplayName Field[string] `json:"display_name,omitzero"`
+	Description Field[string] `json:"description,omitzero"`
+	TierGroup   Field[string] `json:"tier_group,omitzero"`
+	TierRank    Field[int]    `json:"tier_rank,omitzero"`
+	Archived    Field[bool]   `json:"archived,omitzero"`
+	// Ownership declares the product's rule; null derives it.
+	Ownership    Field[Ownership]       `json:"ownership,omitzero"`
 	Entitlements Field[[]string]        `json:"entitlements,omitzero"`
 	CreditGrant  Field[CreditGrantSpec] `json:"credit_grant,omitzero"`
 	Prices       map[string]ApplyPrice  `json:"prices,omitempty"`
@@ -156,6 +158,9 @@ func (a Application) Validate() error {
 		}
 		if p.DisplayName.Null || p.Description.Null || p.TierRank.Null || p.Archived.Null {
 			return fmt.Errorf("product %q: nonnullable field is null", key)
+		}
+		if err := p.Ownership.Value.Validate(); err != nil {
+			return fmt.Errorf("product %q: %w", key, err)
 		}
 		if p.Entitlements.Set && (p.Entitlements.Null || p.Entitlements.Value == nil) {
 			return fmt.Errorf("product %q: entitlements must be a string list, not null; use [] for none", key)

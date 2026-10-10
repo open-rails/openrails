@@ -42,8 +42,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -247,6 +249,10 @@ type Runtime struct {
 	CheckoutAttemptService *checkout.CheckoutAttemptService
 	// CheckoutSessions stores checkout sessions (#1124).
 	CheckoutSessions *checkoutsession.Store
+	// Orders are purchases (#1168).
+	Orders *orders.Service
+	// Idempotency claims request keys (#1099).
+	Idempotency *idempotency.Store
 
 	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil

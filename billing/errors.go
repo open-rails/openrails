@@ -30,7 +30,7 @@ var (
 	// "insufficient_credits"). Message kept identical to go-client's sentinel.
 	ErrInsufficientCredits = errors.New("insufficient_credits")
 
-	// ErrIdempotencyKeyReused is the money-write refusal (HTTP 409 /
+	// ErrIdempotencyKeyReused is the money-write refusal (HTTP 422 /
 	// "idempotency_key_reused"): the key already committed and THIS retry
 	// carries different charging terms (or#891). A caller bug, not an engine
 	// fault — retrying it unchanged will refuse again. The engine-side twin is

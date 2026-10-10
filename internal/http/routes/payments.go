@@ -14,8 +14,6 @@ var cursorPage = params(text("cursor"), integer("limit"))
 // every authorization a PSP answered, rebill cycles, and the purchases a
 // product archive left for review.
 var paymentsRoutes = []Route{
-	{Method: GET, Path: "/v1/admin/customers/{customer_id}/payment-settlement-status", Group: Admin, Auth: AuthMerchant, Name: "GetPaymentSettlementStatus", Level: LevelRead,
-		Query: params(text("price_id")), Responses: []Reply{{200, billing.PaymentSettlementStatus{}}}, Errors: codes("invalid_param"), Handler: h(handlers.GetPaymentSettlementStatus)},
 	{Method: POST, Path: "/v1/admin/customers/{customer_id}/payments/off-channel", Group: Admin, Auth: AuthMerchant, Name: "CreateOffChannelPayment", Level: LevelWrite, Sensitive: true, Limit: middleware.AdminOperationOffChannel,
 		Request: billing.CreateOffChannelPaymentParams{}, Responses: []Reply{{200, billing.Payment{}}, {201, billing.Payment{}}}, Errors: codes("idempotency_key_reused", "invalid_param", "price_not_found"), Handler: h(handlers.CreateOffChannelPayment)},
 	{Method: GET, Path: "/v1/admin/payments", Group: Admin, Auth: AuthMerchant, Name: "ListPayments", Level: LevelRead,

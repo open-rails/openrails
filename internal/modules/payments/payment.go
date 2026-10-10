@@ -206,6 +206,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		CustomerID:     orig.CustomerID,
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
+		OrderID:        orig.OrderID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -280,6 +281,7 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 		CustomerID:     orig.CustomerID,
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
+		OrderID:        orig.OrderID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id

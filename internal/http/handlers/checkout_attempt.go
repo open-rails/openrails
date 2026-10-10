@@ -35,7 +35,7 @@ func writeCheckoutAttemptError(r *httprequest.Request, err error) {
 		return
 	}
 	if errors.Is(err, billing.ErrIdempotencyKeyReused) {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "idempotency_key_reused", "idempotency key reused with different checkout attempt parameters"))
+		r.APIError(api.Coded(billing.CodeIdempotencyKeyReused, "idempotency key reused with different checkout attempt parameters"))
 		return
 	}
 	var pmErr *paymentmethods.PaymentMethodError

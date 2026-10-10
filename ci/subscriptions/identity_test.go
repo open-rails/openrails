@@ -246,6 +246,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.NotEmpty(t, notes)
 	notification := notes[0].(map[string]any)["id"].(string)
 	session := w.handOver(a, from.ID)
+	pass := w.lifetime("idor:order", 3_000_000)
+	aOrder := a.must(http.MethodPost, "/orders", "order-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": pass.ID.String()}}})["id"].(string)
 
 	b := w.newCustomer()
 	bCard := b.saveCard("nmi", mastercard)
@@ -274,6 +276,10 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
 		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},
 		"POST /v1/me/checkout-sessions/{id}/pay":                     {"/checkout-sessions/" + session.id + "/pay", map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard}},
+		"GET /v1/me/orders/{id}":                                     {"/orders/" + aOrder, nil},
+		"POST /v1/me/orders/{id}/pay":                                {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
+		"POST /v1/me/orders/{id}/confirm":                            {"/orders/" + aOrder + "/confirm", nil},
+		"POST /v1/me/orders/{id}/cancel":                             {"/orders/" + aOrder + "/cancel", nil},
 	}
 	probed := 0
 	for _, route := range routes.Catalog() {
@@ -340,6 +346,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	marked := a.must(http.MethodPost, "/notifications/read", "", map[string]any{"notification_ids": []string{notification}})["notifications"].(map[string]any)
 	require.Equal(t, true, marked[notification].(map[string]any)["seen"], "A marks it read")
 	require.NotEmpty(t, unwrap(a.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))["client_secret"], "A's upgrade still waits for A")
+	require.Equal(t, "open", a.must(http.MethodGet, "/orders/"+aOrder, "", nil)["status"], "A's order is still A's to pay")
 }
 
 // The harness's own Auth passes the conformance kit a host runs in its CI.

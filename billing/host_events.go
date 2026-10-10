@@ -37,7 +37,25 @@ const (
 	// HostEventProductEntitlementsChanged is a product gaining or losing keys:
 	// every holder's access changed with it.
 	HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
+	// Order transitions (#1168): fulfil on order.paid.
+	HostEventOrderPaid           HostEventType = "order.paid"
+	HostEventOrderRequiresAction HostEventType = "order.requires_action"
+	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
+	HostEventOrderCanceled       HostEventType = "order.canceled"
+	HostEventOrderExpired        HostEventType = "order.expired"
 )
+
+// OrderHostEvent is one order transition. Number and PaymentID are set on
+// order.paid.
+type OrderHostEvent struct {
+	OrderID    OrderID     `json:"order_id"`
+	CustomerID CustomerID  `json:"customer_id"`
+	Status     OrderStatus `json:"status"`
+	Total      int64       `json:"total,string"`
+	Currency   string      `json:"currency"`
+	Number     *string     `json:"number"`
+	PaymentID  *PaymentID  `json:"payment_id"`
+}
 
 // ProductEntitlementsChangedEvent is one key edit of a product. Holders is how
 // many customers held the product when it changed.
@@ -49,13 +67,15 @@ type ProductEntitlementsChangedEvent struct {
 	Holders    int64     `json:"holders"`
 }
 
-// PaymentSettledEvent is one successful rail payment. CustomerID and PriceID
-// come from the authoritative payment row so a host can route the settlement
-// without a second read; SubscriptionID is set for renewal payments.
+// PaymentSettledEvent is one successful rail payment. CustomerID and what it
+// paid (an order, a subscription's period, or a one-price sale's price) come
+// from the authoritative payment row so a host can route the settlement
+// without a second read.
 type PaymentSettledEvent struct {
 	PaymentID      PaymentID       `json:"payment_id"`
 	CustomerID     CustomerID      `json:"customer_id"`
-	PriceID        PriceID         `json:"price_id"`
+	OrderID        *OrderID        `json:"order_id,omitempty"`
+	PriceID        *PriceID        `json:"price_id,omitempty"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	Amount         int64           `json:"amount,string"`
 	Currency       string          `json:"currency"`
@@ -85,6 +105,8 @@ type HostEvent struct {
 	Delinquency    *DelinquencyHostEvent `json:"delinquency"`
 	// ProductEntitlements is set for product.entitlements_changed.
 	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
+	// Order is set for the order.* events.
+	Order *OrderHostEvent `json:"order"`
 }
 
 // AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to

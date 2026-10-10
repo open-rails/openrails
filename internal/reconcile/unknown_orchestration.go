@@ -364,7 +364,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		params := gen.CreatePaymentIfNotExistsParams{
 			ID:             uuid.New(),
 			MerchantID:     sub.MerchantID,
-			PriceID:        sub.PriceID,
+			PriceID:        &sub.PriceID,
 			Channel:        string(models.ChannelRail),
 			Rail:           new(string(sub.Rail)),
 			TransactionID:  t.TransactionID,

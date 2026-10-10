@@ -308,7 +308,7 @@ func Lookup(method, path string) (Route, bool) {
 var allRoutes, index = func() ([]Route, map[string]Route) {
 	var all []Route
 	for _, resource := range [][]Route{
-		metaRoutes, configRoutes, checkoutRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
+		metaRoutes, configRoutes, checkoutRoutes, ordersRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
 		merchantRoutes, opsRoutes, platformRoutes, provisioningRoutes,
 	} {
