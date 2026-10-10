@@ -807,7 +807,7 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 	}
 	amountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sess.AmountTotal)))
-	if amountMicros != price.Amount {
+	if !chargeable(price, amountMicros) {
 		return fmt.Errorf("stripe checkout amount mismatch: got %s, want %s", moneyutil.FormatRailMinor(moneyutil.Cents(sess.AmountTotal), sess.Currency), moneyutil.FormatAmount(price.Amount, price.Currency))
 	}
 	if !strings.EqualFold(strings.TrimSpace(sess.Currency), strings.TrimSpace(price.Currency)) {
@@ -855,6 +855,16 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 
 	return nil
+}
+
+// chargeable reports an amount price can be paid with: its own, or for a
+// customer-chosen deposit one within its bounds, which the checkout's
+// accepted terms then fix exactly.
+func chargeable(price *models.Price, amount int64) bool {
+	if c := price.CustomerAmount; c != nil {
+		return amount >= c.MinAmount && amount <= c.MaxAmount
+	}
+	return amount == price.Amount
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx context.Context, obj json.RawMessage) error {
