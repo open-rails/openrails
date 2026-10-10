@@ -9,7 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/models"
 )
 
 // #789: access-ended mail goes to often long-lapsed users, so its copy stays
@@ -52,7 +54,7 @@ func TestEmailHTMLEscapesUserText(t *testing.T) {
 		"update required": RenderPaymentMethodUpdateRequiredEmail(evil, evilURL, data).HTML,
 		"non recoverable": RenderSubscriptionNonRecoverableEmail(evil, evilURL, data).HTML,
 		"expiring":        renderEmailHTML("entitlement_expiring", emailFields{"Username": evil, "Entitlement": evil, "Remaining": "3 days", "ExpiresOn": "Jul 4", "Store": evil}),
-		"receipt":         renderEmailHTML("purchase_receipt", emailFields{"Solana": true, "Intro": evil, "Product": evil, "Amount": "$1", "Date": "Jul 4", "Store": evil}),
+		"receipt":         RenderPurchaseReceiptEmail(evil, evil, billing.NotificationData{ProductName: evil, Amount: new(int64(1_000_000)), Currency: "USD", OrderNumber: evil}, start).HTML,
 	}
 	for name, html := range bodies {
 		require.NotContains(t, html, "<img", name)
@@ -87,7 +89,9 @@ func TestEmailAmountsUseTheCurrencyScale(t *testing.T) {
 	} {
 		data := SubscriptionEmailData{Username: "alice", Amount: tc.amount, Currency: tc.currency, PeriodStart: start, PeriodEnd: start.Add(720 * time.Hour)}
 		mail := &sentMail{}
-		require.NoError(t, NewEmailService(mail, nil).SendOneOffPurchaseReceipt(context.Background(), OneOffPurchaseEmailData{UserEmail: "alice@example.com", AmountMicros: tc.amount, Currency: tc.currency}))
+		receipt := &models.NotificationQueue{EventType: models.NotificationOneOffPurchaseCompleted, CreatedAt: start,
+			Data: billing.NotificationData{UserEmail: "alice@example.com", ProductName: "Credits", Amount: &tc.amount, Currency: tc.currency}}
+		require.NoError(t, NewEmailService(mail, nil).SendPurchaseReceipt(context.Background(), receipt))
 		require.Len(t, mail.sent, 1)
 		for name, c := range map[string]EmailContent{
 			"confirmation":   RenderSubscriptionConfirmationEmail("Store", data),

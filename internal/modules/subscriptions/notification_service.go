@@ -164,27 +164,7 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	case models.NotificationPaymentMethodFailed:
 		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
 	case models.NotificationOneOffPurchaseCompleted:
-		email := notification.Data.UserEmail
-		if email == "" {
-			if _, mail, err := s.emailService.getUserEmail(ctx, notification.CustomerID.String()); err == nil {
-				email = mail
-			}
-		}
-		if email == "" {
-			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification: no recipient email")
-			return nil
-		}
-		if notification.Data.Amount == nil {
-			return fmt.Errorf("one-off purchase notification %s has no amount", notification.ID)
-		}
-		return s.emailService.SendOneOffPurchaseReceipt(ctx, OneOffPurchaseEmailData{
-			UserEmail:     email,
-			AmountMicros:  *notification.Data.Amount,
-			Currency:      notification.Data.Currency,
-			ProductName:   notification.Data.ProductName,
-			PaymentMethod: notification.Data.PaymentMethod,
-			IsPremium:     true,
-		})
+		return s.emailService.SendPurchaseReceipt(ctx, notification)
 	case models.NotificationSubscriptionChanged:
 		return s.emailService.SendSubscriptionChanged(ctx, notification.CustomerID.String(), notification.Data)
 	case models.NotificationPaymentMethodAutoUpdated:

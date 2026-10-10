@@ -1339,6 +1339,9 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
+  payment_id?: string
+  order_id?: string
+  order_number?: string
 }
 
 export type OpenProviderOperationParams = {

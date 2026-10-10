@@ -86,10 +86,15 @@ type NotificationData struct {
 	// from EffectiveAt; Amount is what the change charged now.
 	Quantity *int `json:"quantity,omitempty"`
 
-	// One-off purchase receipt (one_off_purchase_completed). UserEmail is the
-	// address the purchase was made with, for buyers without a profile email.
-	Amount        *int64 `json:"amount,omitempty,string"`
-	ProductName   string `json:"product_name,omitempty"`
-	PaymentMethod string `json:"payment_method,omitempty"`
-	UserEmail     string `json:"user_email,omitempty"`
+	// One-off purchase receipt (one_off_purchase_completed): what was bought,
+	// the amount paid, the payment and, for an order, the order and its
+	// number. UserEmail is the address the purchase was made with, for buyers
+	// without a profile email.
+	Amount        *int64    `json:"amount,omitempty,string"`
+	ProductName   string    `json:"product_name,omitempty"`
+	PaymentMethod string    `json:"payment_method,omitempty"`
+	UserEmail     string    `json:"user_email,omitempty"`
+	PaymentID     PaymentID `json:"payment_id,omitzero"`
+	OrderID       OrderID   `json:"order_id,omitzero"`
+	OrderNumber   string    `json:"order_number,omitempty"`
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/cadence"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -41,19 +40,6 @@ type EmailService struct {
 	productService      *catalog.ProductService
 	priceService        *catalog.PriceService
 	users               identity.UserDirectory
-}
-
-// OneOffPurchaseEmailData contains data for one-off purchase receipts
-type OneOffPurchaseEmailData struct {
-	UserEmail string
-	// AmountMicros is the purchase amount in native units at Currency's
-	// registered scale (micros for USD/EUR, 10^4 for JPY), as FormatAmount
-	// renders it (#818: the field was once documented cents).
-	AmountMicros  int64
-	Currency      string
-	ProductName   string
-	PaymentMethod string
-	IsPremium     bool
 }
 
 // NewEmailService renders billing email for sender; a nil sender sends none.
@@ -203,70 +189,28 @@ func (s *EmailService) SendEntitlementExpiration(ctx context.Context, userEmail,
 	return s.SendEmail(ctx, userEmail, subject, htmlContent, plainContent)
 }
 
-// SendOneOffPurchaseReceipt sends a receipt for a one-off purchase (e.g., Solana payment).
-func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOffPurchaseEmailData) error {
+// SendPurchaseReceipt emails a one-off purchase's receipt to the address the
+// purchase was made with, else the customer's.
+func (s *EmailService) SendPurchaseReceipt(ctx context.Context, n *models.NotificationQueue) error {
 	if !s.IsEnabled() {
-		log.WithContext(ctx).Debug("email service disabled - skipping one-off receipt send")
 		return nil
 	}
-
-	productName := data.ProductName
-	if productName == "" {
-		productName = "Premium content"
+	if n.Data.Amount == nil {
+		return fmt.Errorf("receipt %s has no amount", n.ID)
 	}
-
-	amountLine := moneyutil.FormatAmount(data.AmountMicros, data.Currency)
-
-	issuedAt := s.now().Format("Jan 2, 2006 15:04 MST")
-
-	paymentMethod := strings.ToLower(data.PaymentMethod)
-	isSolana := paymentMethod == "solana"
-
-	storeName := s.storeName(ctx)
-
-	subject := fmt.Sprintf("Thanks for supporting %s!", storeName)
-	if isSolana {
-		subject = "Your Solana purchase is confirmed"
+	username, email, err := s.getUserEmail(ctx, n.CustomerID.String())
+	if n.Data.UserEmail != "" {
+		email, err = n.Data.UserEmail, nil
 	}
-
-	messageIntro := "Thanks for completing your purchase!"
-	if data.IsPremium {
-		messageIntro = fmt.Sprintf("Thanks for unlocking %s Premium!", storeName)
+	if errors.Is(err, errUserEmailUnavailable) {
+		log.WithContext(ctx).WithField("notification_id", n.ID).Warn("receipt: customer has no email")
+		return nil
 	}
-
-	if isSolana {
-		htmlContent := renderEmailHTML("purchase_receipt", emailFields{"Solana": true, "Intro": messageIntro, "Product": productName, "Amount": amountLine, "Date": issuedAt, "Store": storeName})
-
-		plainContent := fmt.Sprintf(`
-		Solana Payment Received
-
-		%s This one-time Solana transaction instantly extended your premium access.
-		Product: %s
-		Amount: %s
-		Date: %s
-
-		Enjoy your premium benefits; there won't be an automatic rebill.
-		The %s Team
-		`, messageIntro, productName, amountLine, issuedAt, storeName)
-
-		return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
+	if err != nil {
+		return err
 	}
-
-	htmlContent := renderEmailHTML("purchase_receipt", emailFields{"Solana": false, "Intro": messageIntro, "Product": productName, "Amount": amountLine, "Date": issuedAt, "Store": storeName})
-
-	plainContent := fmt.Sprintf(`
-		Payment Received
-
-		%s
-		Product: %s
-		Amount: %s
-		Date: %s
-
-		Your access has been updated instantly. Enjoy!
-		The %s Team
-	`, messageIntro, productName, amountLine, issuedAt, storeName)
-
-	return s.SendEmail(ctx, data.UserEmail, subject, htmlContent, plainContent)
+	content := RenderPurchaseReceiptEmail(s.storeName(ctx), username, n.Data, n.CreatedAt)
+	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
 }
 
 // ============================================================================

@@ -189,6 +189,12 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add notification email sweep worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.NotificationEmailWorker{
+		DB:            r.DB,
+		Notifications: r.NotificationService,
+	}); err != nil {
+		return fmt.Errorf("add notification email worker: %w", err)
+	}
 	// Price-migration re-driver: retries failed provider pushes on time. A
 	// nil service (worker-only runtimes) skips inside the worker.
 	if err := addTrackedWorker(r, workers, &riverjobs.PriceMigrationRedriveWorker{

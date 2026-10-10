@@ -15,6 +15,13 @@ Without either, OpenRails sends customers no email; in-app notices and host
 events still arrive. `Deps.UserInfo` and `Routes.Provisioning` are exclusive:
 mounting both fails.
 
+Customers get, through `Config.SMTP` or `Deps.Email`: a receipt for every
+one-off purchase (an order, a checkout session, a credit deposit) once its
+payment settles, naming what was bought and the amount ("12.99 USD"), once
+per payment however often the provider reports it; membership confirmations
+and renewals; and payment, invoice and dunning notices. Each is also in
+`GET /v1/me/notifications`.
+
 ## In process
 
 ```go

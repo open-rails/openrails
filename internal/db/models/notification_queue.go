@@ -23,7 +23,7 @@ const (
 	NotificationPaymentMethodUpdateRequired NotificationEventType = "payment_method_update_required" // (6) Payment method update required
 
 	// One-off payment notifications
-	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // (8) Solana or other one-off purchase completed
+	NotificationOneOffPurchaseCompleted NotificationEventType = "one_off_purchase_completed" // a one-off purchase's receipt
 
 	// Invoice / arrears collection (or#828). The subscription analogue is
 	// premium_ended, which is wrong for an invoice: nothing was canceled and

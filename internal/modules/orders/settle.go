@@ -173,6 +173,12 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if err := s.attemptDone(ctx, q, order, "succeeded", charge, now); err != nil {
 		return "", err
 	}
+	if charge != nil && order.HasOneOff() {
+		if err := subscriptions.QueuePurchaseReceipt(ctx, d, subscriptions.PurchaseReceipt{PaymentID: charge.PaymentID, CustomerID: order.CustomerID, Items: order.Items(),
+			Amount: charge.Amount, Currency: order.Currency, Rail: charge.Rail, OrderID: order.ID, OrderNumber: FormatNumber(number), PaidAt: now}); err != nil {
+			return "", err
+		}
+	}
 	extra := map[string]any{"number": FormatNumber(number)}
 	if paymentID != nil {
 		extra["payment_id"] = paymentID.String()

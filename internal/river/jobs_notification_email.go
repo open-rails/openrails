@@ -116,3 +116,33 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 	}
 	return sweepErr
 }
+
+// NotificationEmailWorker emails one notification as soon as the transaction
+// that queued it commits. A delivered row is a no-op; an undelivered one the
+// job cannot send stays for the sweep.
+type NotificationEmailWorker struct {
+	river.WorkerDefaults[subscriptions.NotificationEmailArgs]
+	DB            *db.DB
+	Notifications *subscriptions.NotificationService
+}
+
+func (w NotificationEmailWorker) Work(ctx context.Context, job *river.Job[subscriptions.NotificationEmailArgs]) error {
+	if w.Notifications == nil || !w.Notifications.EmailEnabled() {
+		return nil
+	}
+	mctx := merchant.WithID(ctx, billing.MerchantID(job.Args.MerchantID))
+	return w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		row, err := w.DB.Gen(ctx).GetNotificationByID(ctx, job.Args.NotificationID)
+		if db.IsNotFound(err) || err == nil && row.EmailedAt != nil {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		n, err := models.NotificationFromGen(row)
+		if err != nil {
+			return err
+		}
+		return w.Notifications.DeliverEmail(ctx, n)
+	})
+}

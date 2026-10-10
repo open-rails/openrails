@@ -16888,6 +16888,15 @@
           },
           "user_email": {
             "type": "string"
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "order_id": {
+            "type": "string"
+          },
+          "order_number": {
+            "type": "string"
           }
         }
       },

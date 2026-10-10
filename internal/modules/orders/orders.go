@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,6 +119,30 @@ func (o *Order) HasRecurring() bool {
 		}
 	}
 	return false
+}
+
+// HasOneOff reports a line bought once: the order's payment is a one-off
+// purchase with its own receipt, beside any subscription it starts.
+func (o *Order) HasOneOff() bool {
+	for _, l := range o.Lines {
+		if l.BillingIntervalHours == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Items names what the order bought, as its receipt does.
+func (o *Order) Items() string {
+	names := make([]string, 0, len(o.Lines))
+	for _, l := range o.Lines {
+		if l.Quantity != nil && *l.Quantity > 1 {
+			names = append(names, fmt.Sprintf("%s × %d", l.Description, *l.Quantity))
+			continue
+		}
+		names = append(names, l.Description)
+	}
+	return strings.Join(names, ", ")
 }
 
 // View is the order as its customer reads it. nextAction and options are

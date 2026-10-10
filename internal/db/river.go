@@ -94,3 +94,12 @@ func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs
 	_, err := inserter.InsertTx(ctx, tx, args, opts)
 	return err
 }
+
+// InsertRiverJob enqueues args in d's own transaction, so the job commits or
+// rolls back with the work that queued it.
+func (d *DB) InsertRiverJob(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {
+	if d == nil || d.pgtx == nil {
+		return fmt.Errorf("a job queued with its work requires that work's transaction")
+	}
+	return d.InsertRiverJobTx(ctx, d.pgtx, args, opts)
+}

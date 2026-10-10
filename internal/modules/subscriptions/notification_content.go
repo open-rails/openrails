@@ -157,15 +157,15 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 {{end}}
 
 {{define "purchase_receipt"}}
-<h2>{{if .Solana}}Solana Payment Received{{else}}Payment Received{{end}}</h2>
-<p>Hi there,</p>
-<p>{{.Intro}}{{if .Solana}} This one-time Solana transaction instantly extended your premium access.{{end}}</p>
+<h2>Payment received</h2>
+<p>Hi {{.Username}},</p>
+<p>Thank you for your purchase.</p>
 <ul>
-	<li><strong>Product:</strong> {{.Product}}</li>
-	<li><strong>Amount:</strong> {{.Amount}}</li>
+	<li><strong>Purchased:</strong> {{.Items}}</li>
+	<li><strong>Amount paid:</strong> {{.Amount}}</li>
+	{{if .Order}}<li><strong>Order:</strong> {{.Order}}</li>{{end}}
 	<li><strong>Date:</strong> {{.Date}}</li>
 </ul>
-<p>{{if .Solana}}Enjoy your premium benefits; no rebill will occur automatically.{{else}}Your access has been updated instantly. Enjoy!{{end}}</p>
 <p>The {{.Store}} Team</p>
 {{end}}
 `))
@@ -182,6 +182,28 @@ func renderEmailHTML(name string, fields emailFields) string {
 		panic(fmt.Sprintf("email template %s: %v", name, err))
 	}
 	return b.String()
+}
+
+// RenderPurchaseReceiptEmail is a one-off purchase's receipt: what was
+// bought, the amount paid, the order number and the day it was paid.
+func RenderPurchaseReceiptEmail(storeName, username string, data billing.NotificationData, paidAt time.Time) EmailContent {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	amount := moneyutil.FormatAmount(*data.Amount, data.Currency)
+	date := paidAt.UTC().Format("January 2, 2006")
+	plain := fmt.Sprintf("Payment received\n\nHi %s,\n\nThank you for your purchase.\n\n- Purchased: %s\n- Amount paid: %s\n", name, data.ProductName, amount)
+	if data.OrderNumber != "" {
+		plain += "- Order: " + data.OrderNumber + "\n"
+	}
+	plain += fmt.Sprintf("- Date: %s\n\nThe %s Team\n", date, storeName)
+	return EmailContent{
+		Subject: "Your receipt from " + storeName,
+		HTML: renderEmailHTML("purchase_receipt", emailFields{"Username": name, "Items": data.ProductName, "Amount": amount,
+			"Order": data.OrderNumber, "Date": date, "Store": storeName}),
+		Plain: plain,
+	}
 }
 
 // RenderSubscriptionChangedEmail is the receipt of a change staff made at the

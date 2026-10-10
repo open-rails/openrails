@@ -2178,9 +2178,12 @@ pkg openrails/billing, type NotificationData struct, NewAmount *int64 `json:"new
 pkg openrails/billing, type NotificationData struct, NewProduct string `json:"new_product,omitempty"`
 pkg openrails/billing, type NotificationData struct, NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, OldAmount *int64 `json:"old_amount,omitempty,string"`
+pkg openrails/billing, type NotificationData struct, OrderID OrderID `json:"order_id,omitzero"`
+pkg openrails/billing, type NotificationData struct, OrderNumber string `json:"order_number,omitempty"`
 pkg openrails/billing, type NotificationData struct, OverdueAmount *int64 `json:"overdue_amount,omitempty,string"`
 pkg openrails/billing, type NotificationData struct, OverdueInvoices int `json:"overdue_invoices,omitempty"`
 pkg openrails/billing, type NotificationData struct, OverdueStartedAt *time.Time `json:"overdue_started_at,omitempty"`
+pkg openrails/billing, type NotificationData struct, PaymentID PaymentID `json:"payment_id,omitzero"`
 pkg openrails/billing, type NotificationData struct, PaymentMethod string `json:"payment_method,omitempty"`
 pkg openrails/billing, type NotificationData struct, PeriodEndsAt *time.Time `json:"period_ends_at,omitempty"`
 pkg openrails/billing, type NotificationData struct, PeriodStartsAt *time.Time `json:"period_starts_at,omitempty"`

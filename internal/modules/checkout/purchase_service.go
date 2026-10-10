@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
@@ -609,6 +610,11 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 	if err := s.grantPurchasedCredits(ctx, payment, product.ID); err != nil {
 		return nil, err
 	}
+	if req.SubscriptionID == nil {
+		if err := s.queueReceipt(ctx, payment, product); err != nil {
+			return nil, err
+		}
+	}
 	var delayedStart *time.Time
 	if coverage.HasCoverage && coverage.EndDate != nil {
 		delayedStart = coverage.EndDate
@@ -690,4 +696,25 @@ func (s *CheckoutPurchaseService) grantPurchasedCredits(ctx context.Context, pay
 		StartsAt: credit.StartsAt, ExpiresAt: credit.ExpiresAt,
 	})
 	return err
+}
+
+// queueReceipt queues the receipt of the one-off payment applyPurchase
+// created, in its transaction.
+func (s *CheckoutPurchaseService) queueReceipt(ctx context.Context, payment *models.Payment, product *models.Product) error {
+	if s.transactionDB == nil {
+		return errors.New("a purchase receipt requires the payment transaction")
+	}
+	if strings.TrimSpace(product.DisplayName) == "" && product.Key == "" {
+		stored, err := s.ProductService.GetByID(ctx, product.ID)
+		if err != nil {
+			return err
+		}
+		product = stored
+	}
+	name := strings.TrimSpace(product.DisplayName)
+	if name == "" {
+		name = product.Key
+	}
+	return subscriptions.QueuePurchaseReceipt(ctx, s.transactionDB, subscriptions.PurchaseReceipt{PaymentID: payment.ID, CustomerID: payment.CustomerID,
+		Items: name, Amount: payment.Amount, Currency: payment.Currency, Rail: string(payment.Rail), PaidAt: payment.PurchasedAt})
 }
