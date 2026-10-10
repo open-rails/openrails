@@ -24,11 +24,10 @@ import (
 type hostKey struct{}
 
 // hostContext carries everything a host request might: private values, a
-// session user, a host principal of another merchant, and a merchant pin.
+// host principal of another merchant, and a merchant pin.
 func hostContext(t *testing.T, pin billing.MerchantID) context.Context {
 	ctx := context.WithValue(t.Context(), hostKey{}, "host-private")
 	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: billing.MerchantID(uuid.New())})
-	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: uuid.NewString()})
 	if !pin.IsZero() {
 		ctx = merchant.WithID(ctx, pin)
 	}
@@ -56,9 +55,7 @@ func TestEngineContextKeepsOnlyCancellation(t *testing.T) {
 	defer cancel()
 	ctx := engineContext(host)
 	require.Nil(t, ctx.Value(hostKey{}))
-	_, ok := billingauth.FromContext(ctx)
-	require.False(t, ok)
-	_, ok = merchant.FromContext(ctx)
+	_, ok := merchant.FromContext(ctx)
 	require.False(t, ok)
 	_, ok = requestauth.HostPrincipalFromContext(ctx)
 	require.False(t, ok)
@@ -82,8 +79,6 @@ func TestTransportAuthority(t *testing.T) {
 	var got observed
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Nil(t, r.Context().Value(hostKey{}))
-		_, user := billingauth.FromContext(r.Context())
-		require.False(t, user, "the host's session user never reaches the engine")
 		got = observed{auth: r.Header.Get("Authorization")}
 		got.host, _ = requestauth.HostPrincipalFromContext(r.Context())
 		got.merchant, _ = merchant.FromContext(r.Context())

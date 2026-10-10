@@ -17,7 +17,6 @@
 unbounded-many ListPSPsForMerchant              # psps: operator-declared, units per merchant
 unbounded-many ListCustodiansForMerchant        # custodians: operator-declared, units per merchant
 unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same small set
-unbounded-many ListFederatedGrants              # federated_grants: staff the merchant's owners invited
 unbounded-many ListProvisioningTokens           # provisioning_tokens: tokens the merchant's staff minted, one per directory
 unbounded-many ListCatalogMeters                # catalog_meters: operator-declared, units per merchant
 unbounded-many ListDefaultCatalogRateCards      # catalog_rate_cards: declared default cards only; payer overrides excluded by the query

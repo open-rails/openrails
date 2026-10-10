@@ -18,9 +18,6 @@ type GateError struct {
 	Message  string
 	Code     string
 	Metadata map[string]any
-	// Headers are set on the refusal (a DPoP challenge's WWW-Authenticate
-	// and DPoP-Nonce).
-	Headers map[string]string
 	// Err is the helpers/auth class the refusal answers as, so a refusal of
 	// OpenRails' own Authenticators classifies like a host's (auth.Refuse).
 	Err error
@@ -56,8 +53,6 @@ func classOf(code string, status int) error {
 		return errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)
 	case billing.CodeCredentialRevoked:
 		return errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
-	case billing.CodeSenderProofRequired, billing.CodeDPoPNonceRequired:
-		return errors.Join(auth.ErrUnauthenticated, auth.ErrSenderProofRequired)
 	case billing.CodeStepUpRequired:
 		return auth.ErrStepUpRequired
 	}

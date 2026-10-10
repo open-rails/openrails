@@ -54,7 +54,6 @@ type Transport interface {
 	Redirect(code int, location string)
 	PostForm(key string) string
 	FormFile(key string) (multipart.File, *multipart.FileHeader, error)
-	UserContext() (billingauth.UserContext, bool)
 }
 
 type Request struct {
@@ -63,12 +62,6 @@ type Request struct {
 	Clock   clockwork.Clock
 
 	t Transport
-
-	// uc is the user the auth middleware pinned (SetUserContext). It survives
-	// middleware reassigning r.Request, which the net/http Transport's cached
-	// *http.Request would not see.
-	uc    billingauth.UserContext
-	ucSet bool
 
 	requestID string
 }
@@ -186,12 +179,6 @@ func (r *Request) AbortGate(err error) {
 	if !errors.As(err, &refusal) {
 		r.AbortAPIError(api.Coded(billing.CodeInternalError, "authorization unavailable"))
 		return
-	}
-	if refusal.Code == billing.CodeSenderProofRequired {
-		r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
-	}
-	for name, value := range refusal.Headers {
-		r.SetHeader(name, value)
 	}
 	r.AbortAPIError(billingauth.RefusalError(refusal))
 }
@@ -371,25 +358,6 @@ func (r *Request) Header(key string) string {
 // SetHeader sets a response header.
 func (r *Request) SetHeader(key, value string) {
 	r.t.SetHeader(key, value)
-}
-
-// UserContext returns the signed-in user the auth middleware pinned.
-func (r *Request) UserContext() (billingauth.UserContext, bool) {
-	if r.ucSet {
-		return r.uc, true
-	}
-	return r.t.UserContext()
-}
-
-// SetUserContext pins the signed-in user on this request and its context
-// (billingauth.SetUserContext); the auth middleware calls it after
-// Authenticate succeeds.
-func (r *Request) SetUserContext(uc billingauth.UserContext) {
-	r.uc = uc
-	r.ucSet = true
-	if r.Request != nil {
-		r.Request = r.Request.WithContext(billingauth.SetUserContext(r.Request.Context(), uc))
-	}
 }
 
 func (r *Request) Next() {
@@ -709,12 +677,6 @@ func (h *httpTransport) Redirect(code int, location string) {
 func (h *httpTransport) PostForm(key string) string { return h.r.PostFormValue(key) }
 func (h *httpTransport) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
 	return h.r.FormFile(key)
-}
-func (h *httpTransport) UserContext() (billingauth.UserContext, bool) {
-	if h.r == nil {
-		return billingauth.UserContext{}, false
-	}
-	return billingauth.FromContext(h.r.Context())
 }
 
 // bindingValidator reads the `binding:"..."` struct tag with the

@@ -109,10 +109,10 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// bound merchant before any merchant-owned DB access.
 	ctx = merchant.WithID(ctx, mid)
 	if stream {
-		return streamInprocessResponse(t.handler, requestauth.Begin(req.Clone(ctx)))
+		return streamInprocessResponse(t.handler, req.Clone(ctx))
 	}
 	w := &bufferedResponse{header: make(http.Header)}
-	t.handler.ServeHTTP(w, requestauth.Begin(req.Clone(ctx)))
+	t.handler.ServeHTTP(w, req.Clone(ctx))
 	return w.response(req), nil
 }
 

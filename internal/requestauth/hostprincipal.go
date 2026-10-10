@@ -1,3 +1,5 @@
+// Package requestauth carries the in-process host principal: a context value
+// the Go client attaches, never a header.
 package requestauth
 
 import (

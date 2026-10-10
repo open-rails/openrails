@@ -22,7 +22,7 @@ import (
 // wrapCustomerRoutes applies the browser-tier base chain to the customer
 // routes: permissive CORS, body limits, credential admission, merchant
 // resolution and the rate limiter. Each route's own gate runs inside it.
-func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver) *router.Table {
+func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, credentials billingauth.Authenticator) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -51,7 +51,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 			middleware.SecurityHeadersHTTP(),
 			// #765: this handler's entire surface is browser tier — always the
 			// static permissive `*` grant, no per-request source.
-			middleware.PermissiveCORSHTTP(middleware.AllRequests),
+			middleware.PermissiveCORSHTTP(middleware.AllRequests, credentials),
 			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 			// Resolve current authority on each request, including privileged

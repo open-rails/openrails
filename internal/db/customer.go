@@ -2,10 +2,12 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -86,4 +88,39 @@ func EnsureCustomerRowQ(ctx context.Context, q *gen.Queries, tenantID uuid.UUID,
 		ID:         tsid,
 		MerchantID: tenantID,
 	})
+}
+
+// ErrCustomerIssuerMismatch: the customer is another issuer's subject.
+var ErrCustomerIssuerMismatch = errors.New("db: the customer belongs to another issuer")
+
+// AdmitCustomer admits issuer's subject id as merchantID's customer: an
+// existing customer only when its issuer is issuer, else a new one made
+// with it. "" is the host's own users (the native issuer); a trusted
+// issuer's subject never reaches a customer of another issuer, the host's
+// own included (OIDC Core §5.7).
+func AdmitCustomer(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, issuer string) error {
+	want := strings.TrimSpace(issuer)
+	for attempt := 0; ; attempt++ {
+		row, err := q.GetCustomer(ctx, gen.GetCustomerParams{MerchantID: merchantID, ID: id})
+		switch {
+		case err == nil:
+			have := ""
+			if row.Issuer != nil {
+				have = *row.Issuer
+			}
+			if have != want {
+				return ErrCustomerIssuerMismatch
+			}
+			return nil
+		case !errors.Is(err, pgx.ErrNoRows) || attempt > 0:
+			return err
+		}
+		var stored *string
+		if want != "" {
+			stored = &want
+		}
+		if err := q.CreateCustomer(ctx, gen.CreateCustomerParams{ID: id, MerchantID: merchantID, Issuer: stored}); err != nil {
+			return err
+		}
+	}
 }

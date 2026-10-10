@@ -171,7 +171,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			// registered into browserTier above — `*` from any origin, no
 			// credentials, nothing on merchant-admin/catalog/psps/
 			// merchant-API/webhooks.
-			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }),
+			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }, s.Auth),
 			middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 			middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),

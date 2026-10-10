@@ -53,6 +53,12 @@ type hostVerified struct {
 
 func (v hostVerified) Identity() billingauth.Identity { return v.id }
 
+// BoundScope is the host's own merchant (helpers/auth Bound).
+func (v hostVerified) BoundScope() billingauth.Scope {
+	target, _ := billingauth.NamedMerchant(v)
+	return billingauth.HostScope(target.MerchantID)
+}
+
 // Can grants the host every permission at its own merchant.
 func (v hostVerified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
 	target, ok := billingauth.NamedMerchant(v)

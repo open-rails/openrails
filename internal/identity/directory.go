@@ -39,47 +39,124 @@ type Directory interface {
 	Search(ctx context.Context, merchantID billing.MerchantID, query string, limit int) ([]Contact, error)
 }
 
-// Live asks the host's directory on every read. It serves every merchant of
-// the engine: an embedded host's directory is its merchant's.
-type Live struct{ Lookup userinfo.Lookup }
+// Live asks the host's directory on every read. A customer is its issuer's
+// subject (OIDC Core §5.7), so each is asked of its issuer's directory: the
+// host's own users of Lookup, and a trusted issuer's of the lookup an
+// IssuerLookup gives for it. A customer no directory answers for is absent.
+type Live struct {
+	Lookup userinfo.Lookup
+	// DB holds each customer's issuer.
+	DB *db.DB
+}
+
+// IssuerLookup is a directory with a lookup per merchant and issuer: a
+// server's merchants each trust their own issuers.
+type IssuerLookup interface {
+	// ForIssuer is merchant mid's users of issuer; "" is the host's own.
+	ForIssuer(mid billing.MerchantID, issuer string) userinfo.Lookup
+	// Issuers are the issuers merchant mid trusts besides the host.
+	Issuers(ctx context.Context, mid billing.MerchantID) ([]string, error)
+}
+
+// directory is mid's lookup for issuer, nil for none.
+func (l Live) directory(mid billing.MerchantID, issuer string) userinfo.Lookup {
+	if m, ok := l.Lookup.(IssuerLookup); ok {
+		return m.ForIssuer(mid, issuer)
+	}
+	if issuer == "" {
+		return l.Lookup
+	}
+	return nil
+}
+
+// issuers is the issuer of each of mid's customers in ids: "" for the host's
+// own users and for ids that are no customer yet.
+func (l Live) issuers(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := l.DB.Gen(ctx).ListCustomersByIDs(ctx, gen.ListCustomersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]string, len(rows))
+	for _, row := range rows {
+		if row.Issuer != nil {
+			out[row.ID] = *row.Issuer
+		}
+	}
+	return out, nil
+}
 
 // liveBatch bounds one lookup the host answers.
 const liveBatch = 500
 
-func (l Live) Contacts(ctx context.Context, _ billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]Contact, error) {
+func (l Live) Contacts(ctx context.Context, mid billing.MerchantID, ids []uuid.UUID) (map[uuid.UUID]Contact, error) {
 	out := make(map[uuid.UUID]Contact, len(ids))
 	for start := 0; start < len(ids); start += liveBatch {
 		chunk := ids[start:min(start+liveBatch, len(ids))]
-		asked := make([]string, len(chunk))
-		for i, id := range chunk {
-			asked[i] = id.String()
-		}
-		found, err := l.Lookup.Get(ctx, asked)
+		issuers, err := l.issuers(ctx, mid, chunk)
 		if err != nil {
 			return nil, err
 		}
-		for _, u := range found {
-			if contact, ok := liveContact(u); ok {
-				out[contact.CustomerID] = contact
+		asked := map[string][]string{}
+		for _, id := range chunk {
+			asked[issuers[id]] = append(asked[issuers[id]], id.String())
+		}
+		for issuer, subjects := range asked {
+			directory := l.directory(mid, issuer)
+			if directory == nil {
+				continue
+			}
+			found, err := directory.Get(ctx, subjects)
+			if err != nil {
+				return nil, err
+			}
+			for _, u := range found {
+				if contact, ok := liveContact(u); ok && issuers[contact.CustomerID] == issuer {
+					out[contact.CustomerID] = contact
+				}
 			}
 		}
 	}
 	return out, nil
 }
 
-func (l Live) Search(ctx context.Context, _ billing.MerchantID, query string, limit int) ([]Contact, error) {
+func (l Live) Search(ctx context.Context, mid billing.MerchantID, query string, limit int) ([]Contact, error) {
 	query = strings.TrimSpace(query)
 	if query == "" || limit < 1 {
 		return nil, nil
 	}
-	found, err := l.Lookup.Search(ctx, query, limit)
-	if err != nil {
-		return nil, err
+	searched := []string{""}
+	if m, ok := l.Lookup.(IssuerLookup); ok {
+		more, err := m.Issuers(ctx, mid)
+		if err != nil {
+			return nil, err
+		}
+		searched = append(searched, more...)
 	}
-	out := make([]Contact, 0, len(found))
-	for _, u := range found {
-		if contact, ok := liveContact(u); ok {
-			out = append(out, contact)
+	out := make([]Contact, 0, limit)
+	for _, issuer := range searched {
+		directory := l.directory(mid, issuer)
+		if directory == nil || len(out) >= limit {
+			continue
+		}
+		found, err := directory.Search(ctx, query, limit-len(out))
+		if err != nil {
+			return nil, err
+		}
+		var contacts []Contact
+		var ids []uuid.UUID
+		for _, u := range found {
+			if contact, ok := liveContact(u); ok {
+				contacts, ids = append(contacts, contact), append(ids, contact.CustomerID)
+			}
+		}
+		issuers, err := l.issuers(ctx, mid, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, contact := range contacts {
+			if issuers[contact.CustomerID] == issuer {
+				out = append(out, contact)
+			}
 		}
 	}
 	return out, nil

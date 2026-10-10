@@ -89,7 +89,6 @@ var Tables = map[string]Table{
 	"book_identity":                     {Class: State},
 	"worker_state":                      {Class: State},
 	"dashboard_configs":                 {Class: State},
-	"federated_grants":                  {Class: State},
 	"customer_contacts":                 {Class: State},
 	"provisioning_tokens":               {Class: State},
 	"customers":                         {Class: State},

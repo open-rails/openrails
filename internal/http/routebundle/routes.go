@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 type Route struct {
@@ -24,7 +23,7 @@ type Route struct {
 func FromTable(table *router.Table) []Route {
 	routes := make([]Route, 0, len(table.Entries))
 	for _, entry := range table.Entries {
-		routes = append(routes, Route{Method: entry.Method, Path: entry.Path, Handler: withVerificationMemo(BindPathValues(entry.Path, entry.Handler))})
+		routes = append(routes, Route{Method: entry.Method, Path: entry.Path, Handler: BindPathValues(entry.Path, entry.Handler)})
 	}
 	sort.SliceStable(routes, func(i, j int) bool { return moreSpecific(routes[i].Path, routes[j].Path) })
 	return routes
@@ -79,8 +78,4 @@ func BindPathValues(pattern string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func withVerificationMemo(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, requestauth.Begin(r)) })
 }

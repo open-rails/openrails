@@ -1,3 +1,6 @@
+// Package billingauth is OpenRails' auth contract: the host's Auth
+// (helpers/auth), the identities the route gate binds, its refusals, and the
+// cookie admission every mount shares. It imports no auth provider.
 package billingauth
 
 import (

@@ -28,7 +28,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator, host mercha
 	table := &router.Table{}
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: auth, Providers: providers, SelectedMerchant: a.Standalone})
-	return wrapCustomerRoutes(a.Runtime, table, host), nil
+	return wrapCustomerRoutes(a.Runtime, table, host, auth), nil
 }
 
 // CustomerPrefix is the customer surface's path beneath the mount.

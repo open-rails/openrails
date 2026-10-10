@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -88,20 +87,13 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 
 func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 	limits := config.RateLimitsConfig{"metrics-ask": {RequestsPerMinute: 2}}
-	auth := billingauth.SessionAuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
-		return billingauth.UserContext{UserID: r.Header.Get("X-Test-User")}, nil
-	})
-	h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, nil))
-	userA, userB, userC := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	h := ChainHTTP(okHandler(), RateLimitHTTP(&limits, nil, nil, nil, nil))
 	merchantA, merchantB := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	for _, c := range []call{
-		{ip: "203.0.113.10", user: userA, merchant: merchantA, want: http.StatusOK},
-		{ip: "203.0.113.11", user: userA, merchant: merchantB, want: http.StatusOK},
-		{ip: "203.0.113.12", user: userA, merchant: merchantA, want: http.StatusTooManyRequests},
-		// The blocked request used one count for this address; another user
-		// gets its remaining count, but a third user cannot evade the IP cap.
-		{ip: "203.0.113.12", user: userB, merchant: merchantA, want: http.StatusOK},
-		{ip: "203.0.113.12", user: userC, merchant: merchantB, want: http.StatusTooManyRequests},
+		{ip: "203.0.113.10", merchant: merchantA, want: http.StatusOK},
+		{ip: "203.0.113.10", merchant: merchantB, want: http.StatusOK},
+		{ip: "203.0.113.10", merchant: merchantA, want: http.StatusTooManyRequests},
+		{ip: "203.0.113.11", merchant: merchantA, want: http.StatusOK},
 	} {
 		c.path = "/v1/admin/metrics/ask"
 		c.do(t, h)

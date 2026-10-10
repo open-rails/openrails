@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -85,9 +84,6 @@ func (c call) do(t *testing.T, h http.Handler) *httptest.ResponseRecorder {
 // deps so tests can supply a captcha verifier and inspect the stores.
 func engine(deps RateLimitDeps, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if u := r.Header.Get("X-Test-User"); u != "" {
-			r = r.WithContext(billingauth.SetUserContext(r.Context(), billingauth.UserContext{UserID: u}))
-		}
 		applyRateLimitDecisionHTTP(w, r, next, EvaluateRateLimit(w, r, rateLimitSubjectsHTTP(r, nil), deps), deps.Captcha)
 	})
 }
@@ -120,8 +116,9 @@ func TestClassifyBucket(t *testing.T) {
 	}
 }
 
-// Limits are per bucket and per subject (IP and user); either tripping blocks.
-// The IP subject is the proxy-resolved client, never a spoofable header.
+// Limits are per bucket and per client IP, before any route authenticates
+// its caller. The IP subject is the proxy-resolved client, never a spoofable
+// header.
 func TestRateLimitSubjects(t *testing.T) {
 	const a, b, lb = "203.0.113.10", "203.0.113.11", "10.0.0.5"
 	const user = "11111111-1111-1111-1111-111111111111"
@@ -133,7 +130,7 @@ func TestRateLimitSubjects(t *testing.T) {
 		{"per ip", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}, {path: "/v1/me/checkout-sessions", ip: b, want: 200}}},
 		{"buckets are independent", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}, {method: "GET", path: "/v1/products", ip: a, want: 200}}},
 		{"embedded prefix", nil, []call{{path: "/billing/v1/me/checkout-sessions", ip: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: a, want: 429}}},
-		{"per user across ips", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, user: user, want: 200}, {path: "/v1/me/checkout-sessions", ip: b, user: user, want: 429}}},
+		{"a user header is no subject", nil, []call{{path: "/v1/me/checkout-sessions", ip: a, user: user, want: 200}, {path: "/v1/me/checkout-sessions", ip: b, user: user, want: 200}}},
 		{"trusted proxy keys the client", iputil.ParseTrustedProxies([]string{"10.0.0.0/8"}), []call{
 			{path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 200}, {path: "/v1/me/checkout-sessions", ip: lb, xff: a, want: 429}, {path: "/v1/me/checkout-sessions", ip: lb, xff: b, want: 200},
 		}},
@@ -141,13 +138,7 @@ func TestRateLimitSubjects(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-			auth := billingauth.SessionAuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
-				if u := r.Header.Get("X-Test-User"); u != "" {
-					return billingauth.UserContext{UserID: u}, nil
-				}
-				return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-			})
-			h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, tc.resolver))
+			h := ChainHTTP(okHandler(), RateLimitHTTP(&limits, nil, nil, nil, tc.resolver))
 			for _, c := range tc.calls {
 				c.do(t, h)
 			}
@@ -235,12 +226,12 @@ func TestCaptchaChallenges(t *testing.T) {
 
 	t.Run("solve clears every subject and resets its counters", func(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
-		for _, key := range []string{"ip:" + ip, "user:" + user} {
+		for _, key := range []string{"ip:" + ip} {
 			deps.ChallengeStore.MarkChallenged(ctx, key, time.Minute)
 			deps.State.Count(ctx, rateLimitKey("checkout", key), 9, time.Minute)
 		}
 		call{path: "/v1/me/checkout-sessions", ip: ip, user: user, token: "good", want: 200}.do(t, engine(deps, okHandler()))
-		for _, key := range []string{"ip:" + ip, "user:" + user} {
+		for _, key := range []string{"ip:" + ip} {
 			require.False(t, deps.ChallengeStore.IsChallenged(ctx, key), key)
 			count, _ := deps.State.Count(ctx, rateLimitKey("checkout", key), 0, time.Minute)
 			require.EqualValues(t, 1, count)

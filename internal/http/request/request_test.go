@@ -276,14 +276,12 @@ func TestRefusalLogLevel(t *testing.T) {
 }
 
 // The customer a handler sees is the route gate's scope, with the who's
-// verified email only; nothing else (a pinned user, a "user" value) is a
-// customer.
+// verified email only; nothing else (a "user" value) is a customer.
 func TestGetUserIsTheCustomerScope(t *testing.T) {
 	req, _ := newReq(http.MethodGet, "/x", "")
 	require.Nil(t, req.GetUser())
-	req.SetUserContext(billingauth.UserContext{UserID: "11111111-1111-4111-8111-111111111111"})
 	req.Set("user", &checkout.UserIdentity{ID: "u-3"})
-	require.Nil(t, req.GetUser(), "a control-plane user or a stray value is no customer")
+	require.Nil(t, req.GetUser(), "a stray value is no customer")
 
 	customer := billing.CustomerID(uuid.MustParse("22222222-2222-4222-8222-222222222222"))
 	ctx := customerscope.Bind(context.Background(), billing.MerchantID(uuid.New()), customer, customer.String(), true)

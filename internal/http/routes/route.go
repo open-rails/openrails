@@ -390,17 +390,13 @@ var selectorErrors = []string{
 func TierErrors(tier Tier) []string {
 	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
 	// authenticated are the codes of asking who a request is: the host's
-	// answer, or one of OpenRails' own Authenticators'.
+	// answer, or the in-process host's.
 	authenticated := []string{
-		billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
-		billing.CodePermissionRequired, billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid,
-		billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired,
-		billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch,
+		billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
+		billing.CodePermissionRequired, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
+		billing.CodeMerchantUnresolved,
 	}
-	staff := []string{
-		billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved, billing.CodeServiceCredentialResourceScopeDenied,
-		billing.CodeHostPrincipalInvalid, billing.CodeMerchantContextMismatch, billing.CodeAuthorizationUnavailable,
-	}
+	staff := []string{billing.CodeHostPrincipalInvalid}
 	var own []string
 	switch tier {
 	case AuthPublic, AuthSessionID:

@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -8,10 +10,12 @@ import (
 	"strings"
 	"time"
 
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/db"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -84,6 +88,8 @@ type Env struct {
 	Viewers billingauth.Authenticator
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
+	// admit pins a customer to the issuer of its subject (db.AdmitCustomer).
+	admit func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
 }
@@ -107,7 +113,7 @@ func (e *Env) scimServer() *scim.Server {
 }
 
 func newEnv(rt *app.Runtime, opts Options) *Env {
-	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes()}
+	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes(), admit: admitCustomer(rt)}
 	if opts.ProviderRoutes != nil {
 		env.providers = *opts.ProviderRoutes
 	}
@@ -387,15 +393,19 @@ const SelfRoutePrefix = "/me"
 // selects; with ResolveMerchant, the merchant the credential names;
 // otherwise the configured one.
 type CustomerMount struct {
-	Auth             billingauth.Authenticator
-	ResolveMerchant  MerchantResolver
+	Auth            billingauth.Authenticator
+	ResolveMerchant MerchantResolver
+	// Scope is where a merchant's credentials are bound: with
+	// ResolveMerchant, a customer's credential must be bound to the
+	// merchant's.
+	Scope            ScopeFunc
 	Merchant         billingauth.Target
 	SelectedMerchant bool
 	Providers        routesurface.ProviderRoutes
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant})
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, Scope: m.Scope})
 	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
 	return env
 }
@@ -405,4 +415,14 @@ func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 // customer.
 func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
 	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
+}
+
+// admitCustomer is the runtime's customers, each its subject's issuer's.
+func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
+	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error {
+		if rt == nil || rt.DB == nil {
+			return errors.Join(auth.ErrUnavailable, errors.New("no database admits customers"))
+		}
+		return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
+	}
 }

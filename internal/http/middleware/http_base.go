@@ -5,10 +5,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	auth "github.com/open-rails/helpers/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -150,13 +152,17 @@ func AllRequests(*http.Request) bool { return true }
 // authorize these requests (cookie admission checks Origin itself), so an
 // origin allow-list protects nothing: a stolen token replays from curl. A
 // browser-tier request gets `Access-Control-Allow-Origin: *` and never
-// Allow-Credentials; every other request gets no CORS headers.
-func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
-	const (
-		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
-		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-		exposeHeaders = "WWW-Authenticate,DPoP-Nonce,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
-	)
+// Allow-Credentials; every other request gets no CORS headers. The header
+// lists add the ones credentials travels in when it advertises them
+// (helpers/auth Headers): the mount's Authenticator.
+func PermissiveCORSHTTP(match func(*http.Request) bool, credentials any) HTTPMiddleware {
+	allow := []string{"Origin", "Content-Length", "Content-Type", "Authorization", "OpenRails-Merchant", "X-Request-ID", "X-Forwarded-For", "X-Real-IP", "Idempotency-Key", "X-E2E-Run-ID", "X-Captcha-Token", "Accept-Language"}
+	expose := []string{"WWW-Authenticate", "X-Request-ID", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-Captcha-Required"}
+	if h, ok := credentials.(auth.Headers); ok {
+		allow, expose = mergeHeaders(allow, h.AllowedHeaders()), mergeHeaders(expose, h.ExposedHeaders())
+	}
+	allowHeaders, exposeHeaders := strings.Join(allow, ","), strings.Join(expose, ",")
+	const allowMethods = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
 	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 
 	return func(next http.Handler) http.Handler {
@@ -178,36 +184,16 @@ func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	}
 }
 
-// IssuerOriginCORSHTTP admits the admin API (match) from the browser origins
-// trusted issuers declared: a host's admin UI calls it with its users' access
-// tokens. Those are Authorization and DPoP headers, never cookies, so
-// credentials mode stays off; every other origin gets no CORS headers.
-func IssuerOriginCORSHTTP(match func(*http.Request) bool, allowed func(string) bool) HTTPMiddleware {
-	const (
-		allowHeaders  = "Authorization,DPoP,Content-Type,OpenRails-Merchant,Idempotency-Key,X-Request-ID"
-		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-		exposeHeaders = "WWW-Authenticate,DPoP-Nonce,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset"
-	)
-	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-			if origin != "" && match != nil && allowed != nil && match(r) && allowed(origin) {
-				h := w.Header()
-				h.Set("Access-Control-Allow-Origin", origin)
-				h.Add("Vary", "Origin")
-				h.Set("Access-Control-Allow-Headers", allowHeaders)
-				h.Set("Access-Control-Allow-Methods", allowMethods)
-				h.Set("Access-Control-Expose-Headers", exposeHeaders)
-				h.Set("Access-Control-Max-Age", maxAge)
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-			}
-			next.ServeHTTP(w, r)
-		})
+// mergeHeaders is base with each of more it lacks, ignoring case.
+func mergeHeaders(base, more []string) []string {
+	out := append([]string(nil), base...)
+	for _, name := range more {
+		name = strings.TrimSpace(name)
+		if name != "" && !slices.ContainsFunc(out, func(have string) bool { return strings.EqualFold(have, name) }) {
+			out = append(out, name)
+		}
 	}
+	return out
 }
 
 // RecoverHTTP converts a handler panic into a 500 envelope; http.ErrAbortHandler

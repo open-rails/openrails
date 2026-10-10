@@ -12,12 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
-const ensureCustomer = `-- name: EnsureCustomer :one
-
+const createCustomer = `-- name: CreateCustomer :exec
 INSERT INTO billing.customers (id, merchant_id, issuer)
 VALUES ($1, $2, $3)
+ON CONFLICT (merchant_id, id) DO NOTHING
+`
+
+type CreateCustomerParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Issuer     *string
+}
+
+// A customer's first authenticated request makes its row with the issuer of
+// its subject (NULL: the host's own users). An existing row is unchanged.
+func (q *Queries) CreateCustomer(ctx context.Context, arg CreateCustomerParams) error {
+	_, err := q.db.Exec(ctx, createCustomer, arg.ID, arg.MerchantID, arg.Issuer)
+	return err
+}
+
+const ensureCustomer = `-- name: EnsureCustomer :one
+
+INSERT INTO billing.customers (id, merchant_id)
+VALUES ($1, $2)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
-  issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
 RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy
 `
@@ -25,15 +43,15 @@ RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version, bil
 type EnsureCustomerParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Issuer     *string
 }
 
-// A payable identity is (merchant_id, id). The host supplies the stable UUID;
-// the same person can have independent billing relationships with merchants.
-// Refresh only the selected merchant's row. Issuer is audit metadata and does
-// not participate in identity; callers without an issuer preserve its value.
+// A payable identity is (merchant_id, issuer, id) (OIDC Core §5.7): id is the
+// issuer's stable UUID subject, issuer NULL for the host's own users. The same
+// person can have independent billing relationships with merchants.
+// Refresh only the selected merchant's row. A new row is the host's own
+// user's (NULL issuer); an existing row keeps its issuer, which is identity.
 func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (BillingCustomer, error) {
-	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Issuer)
+	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID)
 	var i BillingCustomer
 	err := row.Scan(
 		&i.ID,
@@ -184,7 +202,7 @@ SELECT m.id, m.slug
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
-  AND m.id IN (SELECT c.merchant_id FROM billing.customers c WHERE c.id = $1::uuid)
+  AND m.id IN (SELECT c.merchant_id FROM billing.customers c WHERE c.id = $1::uuid AND c.issuer IS NULL)
 ORDER BY m.slug
 `
 
@@ -194,7 +212,8 @@ type ListMerchantsForCustomerSubjectRow struct {
 }
 
 // The hosted portal's "which merchants am I a customer of" directory, read
-// before any merchant is chosen.
+// before any merchant is chosen: the host's own user's customers, never a
+// trusted issuer's with the same subject.
 func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject uuid.UUID) ([]ListMerchantsForCustomerSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
 	if err != nil {

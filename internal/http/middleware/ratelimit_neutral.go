@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -257,11 +256,12 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 // RateLimitHTTP is the net/http rate-limit and captcha middleware; it lets the
 // embedded surface enforce limits without a fronting gateway.
 //
-// The user subject comes from billingauth.FromContext, so mount
-// billingauth.Optional before it. resolver picks the client IP behind trusted
-// proxies, so each real client is limited rather than the load balancer; nil
-// or empty uses the socket peer. state is the process's abuse state; nil
-// counts in memory of this middleware's own.
+// It runs before any route authenticates its caller, so it limits each
+// client IP; the admin operation limiter keys the admitted caller after the
+// gate. resolver picks the client IP behind trusted proxies, so each real
+// client is limited rather than the load balancer; nil or empty uses the
+// socket peer. state is the process's abuse state; nil counts in memory of
+// this middleware's own.
 func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, state *abusestate.Store, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
 	if limits == nil {
 		return func(next http.Handler) http.Handler { return next }
@@ -340,8 +340,8 @@ func captchaSiteKey(cfg *config.CaptchaConfig) string {
 	return cfg.SiteKey
 }
 
-// rateLimitSubjectsHTTP derives the ip: and user: subjects from the context's
-// identity and the resolver's client IP (nil resolver: the socket peer).
+// rateLimitSubjectsHTTP derives the ip: subject from the resolver's client IP
+// (nil resolver: the socket peer).
 func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []RateLimitSubject {
 	if r == nil {
 		return nil
@@ -350,11 +350,6 @@ func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []R
 	resolved := resolver.ClientIP(r)
 	if clientIP := strings.TrimSpace(resolved); clientIP != "" {
 		subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeIP, Value: clientIP, Key: RateLimitScopeIP + ":" + clientIP})
-	}
-	if uc, ok := billingauth.FromContext(r.Context()); ok {
-		if userID := strings.TrimSpace(uc.UserID); userID != "" {
-			subjects = append(subjects, RateLimitSubject{Scope: RateLimitScopeUser, Value: userID, Key: RateLimitScopeUser + ":" + userID})
-		}
 	}
 	return subjects
 }

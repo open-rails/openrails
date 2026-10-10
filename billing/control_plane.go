@@ -236,8 +236,8 @@ type MerchantRetirement struct {
 }
 
 // A hosted product's user model, served on the server's Go API: the
-// signed-in user's merchants, the merchant's name, API keys, team and
-// federated grants. The JSON names are the ones its own routes answer with.
+// signed-in user's merchants and the merchant's name. The JSON names are the
+// ones its own routes answer with.
 
 // CreateMerchantParams creates a merchant the signed-in user owns.
 type CreateMerchantParams struct {
@@ -259,95 +259,6 @@ type RenameMerchantParams struct {
 	// answers to the creation policy's reserved names and pattern and to the
 	// rename interval. Empty is the operator's rename.
 	ActorUserID string `json:"-"`
-}
-
-// APIKey is one of the merchant's API keys, without its secret.
-type APIKey struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	Role       string     `json:"role"`
-	Prefix     string     `json:"prefix"`
-	CreatedAt  time.Time  `json:"created_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
-}
-
-// CreateAPIKeyParams mints a key holding one of the merchant roles (viewer,
-// support, owner).
-type CreateAPIKeyParams struct {
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-// CreatedAPIKey is a new key with its secret, shown this once.
-type CreatedAPIKey struct {
-	APIKey
-	Secret string `json:"secret"`
-}
-
-// TeamMember is a user holding a merchant role.
-type TeamMember struct {
-	UserID   string  `json:"user_id"`
-	Email    *string `json:"email"`
-	Username *string `json:"username"`
-	Role     string  `json:"role"`
-}
-
-// TeamInvite is a single-use link that registers its holder and adds them to
-// the team. Its URL is answered only when it is made.
-type TeamInvite struct {
-	ID         string     `json:"id"`
-	Role       string     `json:"role"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	RedeemedAt *time.Time `json:"redeemed_at"`
-	RevokedAt  *time.Time `json:"revoked_at"`
-}
-
-// InviteTeamMemberParams invites an email address with a role.
-type InviteTeamMemberParams struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
-}
-
-// TeamInviteResult is an invitation's outcome: Member when an account that
-// verified the address was added at once, else Invite and its URL to share.
-type TeamInviteResult struct {
-	Member *TeamMember `json:"member"`
-	Invite *TeamInvite `json:"invite"`
-	URL    *string     `json:"url"`
-}
-
-// FederatedGrant is a merchant role granted to a trusted issuer's user by
-// invitation: pending until a user of an issuer trusted for the merchant
-// accepts it with the invited, verified email, then bound to that user.
-type FederatedGrant struct {
-	ID         FederatedGrantID `json:"id"`
-	Email      string           `json:"email"`
-	Role       string           `json:"role"`
-	Issuer     *string          `json:"issuer"`
-	Subject    *string          `json:"subject"`
-	AcceptedAt *time.Time       `json:"accepted_at"`
-	CreatedAt  time.Time        `json:"created_at"`
-}
-
-// CreateFederatedGrantParams invites an email address with a merchant role.
-type CreateFederatedGrantParams struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
-}
-
-// FederatedInvite is a pending grant the signed-in user may accept.
-type FederatedInvite struct {
-	ID       FederatedGrantID `json:"id"`
-	Merchant MerchantRef      `json:"merchant"`
-	Role     string           `json:"role"`
-}
-
-// SetTeamRoleParams changes a member's role.
-type SetTeamRoleParams struct {
-	Role string `json:"role"`
 }
 
 // CaptchaStatus says whether this caller must solve a captcha before its next

@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/customerscope"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
@@ -387,6 +388,7 @@ func TestCustomerGate(t *testing.T) {
 		mux := router.NewMux(table, "/v1/me", rt)
 		env := newEnv(rt, Options{})
 		env.Customers = &recordingAuth{who: who}
+		env.admit = admitAll
 		route, _ := Lookup(GET, "/v1/me")
 		mux.Handle(GET, "", func(r *httprequest.Request) {
 			seen, _ = r.CustomerScope()
@@ -498,6 +500,11 @@ func TestStaffGate(t *testing.T) {
 
 	stepUp := &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute, Metadata: map[string]any{"step_up_methods": []any{"password"}}}
 	revoked := errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
+	// A provider's sender-proof refusal is a 401 like any other; its
+	// challenge passes through unread.
+	senderProof := errors.Join(auth.ErrUnauthenticated, auth.ErrSenderProofRequired)
+	presented := httptest.NewRequest(http.MethodGet, "/", nil)
+	presented.Header.Set("Authorization", "Bearer x")
 	for name, tc := range map[string]struct {
 		auth      billingauth.Authenticator
 		header    map[string]string
@@ -509,8 +516,8 @@ func TestStaffGate(t *testing.T) {
 		"a refused credential":                {authtest.Deny{}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
 		"an expired credential":               {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)}, nil, 401, "credential_expired", `Bearer error="invalid_token"`},
 		"a revoked credential":                {&recordingAuth{authErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
-		"a missing sender proof":              {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrSenderProofRequired)}, nil, 401, "sender_proof_required", `DPoP error="invalid_dpop_proof"`},
-		"a provider's own challenge":          {&recordingAuth{authErr: &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`DPoP error="use_dpop_nonce"`}}}}, nil, 401, "sender_proof_required", `DPoP error="use_dpop_nonce"`},
+		"a missing sender proof":              {&recordingAuth{authErr: senderProof}, nil, 401, "authentication_required", auth.Refuse(presented, senderProof).Header.Get("WWW-Authenticate")},
+		"a provider's own challenge":          {&recordingAuth{authErr: &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`Proof error="use_nonce"`}, "Proof-Nonce": {"n1"}}}}, nil, 401, "authentication_required", `Proof error="use_nonce"`},
 		"a credential refused here":           {&recordingAuth{authErr: auth.ErrForbidden}, nil, 403, "permission_required", ""},
 		"auth unavailable":                    {&recordingAuth{authErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
 		"an unclassified error":               {&recordingAuth{authErr: errors.New("boom")}, nil, 503, "authentication_unavailable", ""},
@@ -652,6 +659,7 @@ func TestCheckoutViewer(t *testing.T) {
 	route, _ := Lookup(GET, "/v1/checkout-sessions/{id}")
 	run := func(a billingauth.Authenticator, authorization string) (bool, customerscope.Scope) {
 		env := newEnv(gatedRuntime(t), Options{Auth: a})
+		env.admit = admitAll
 		var scope customerscope.Scope
 		var bound, reached bool
 		h := env.checkoutViewer(route)(func(r *httprequest.Request) {
@@ -775,4 +783,82 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 	require.Equal(t, billing.AdminAccess{Admin: billing.AccessNone, Catalog: true, MerchantConfig: true}, read(p, p.Catalog, p.MerchantConfig))
 	require.Equal(t, none, read(Permissions{MerchantConfig: p.MerchantConfig}, p.AdminRead, p.Metrics), "a group that is off is no one's")
 	require.Equal(t, none, read(Permissions{AdminRead: p.AdminRead}, p.AdminUpdate), "an update without the read is nothing")
+}
+
+const (
+	userA = "11111111-1111-4111-8111-111111111111"
+	userB = "22222222-2222-4222-8222-222222222222"
+)
+
+var (
+	merchantA = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+	merchantB = billing.MerchantID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+)
+
+// admitAll admits every customer, as a database would a new one.
+func admitAll(context.Context, billing.MerchantID, billing.CustomerID, string) error { return nil }
+
+// boundAuth admits who, bound to scope (helpers/auth Bound).
+type boundAuth struct {
+	who   billingauth.Identity
+	scope billingauth.Scope
+}
+
+func (a boundAuth) Authenticate(*http.Request) (billingauth.Verified, error) { return a, nil }
+func (a boundAuth) Identity() billingauth.Identity                           { return a.who }
+func (a boundAuth) BoundScope() billingauth.Scope                            { return a.scope }
+func (a boundAuth) Can(_ context.Context, scope billingauth.Scope, _ string) (bool, error) {
+	return scope == a.scope, nil
+}
+
+// A bound credential acts only at the merchant whose scope it is bound to.
+// On a mount serving many merchants a customer must be bound, and is its
+// issuer's subject: one issuer's credential never reaches another's
+// customer (OIDC Core §5.7).
+func TestBoundCredentials(t *testing.T) {
+	rt := gatedRuntime(t)
+	scopeOf := func(_ context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
+		return billingauth.Scope{Authority: "https://auth.example", ID: mid.String()}, nil
+	}
+	here, elsewhere := billingauth.Scope{Authority: "https://auth.example", ID: merchantA.String()}, billingauth.Scope{Authority: "https://auth.example", ID: merchantB.String()}
+	fromIssuer := authtest.User(userA)
+	fromIssuer.Issuer, fromIssuer.Invoker.Issuer = "https://issuer.example", "https://issuer.example"
+
+	staff := func(a billingauth.Authenticator) int {
+		return runRoute(t, rt, a, "GET /v1/admin/findings", nil).status
+	}
+	require.Equal(t, http.StatusNoContent, staff(boundAuth{who: authtest.Application("app"), scope: authtest.Scope}), "bound to the mount's scope")
+	require.Equal(t, http.StatusConflict, staff(boundAuth{who: authtest.Application("app"), scope: elsewhere}), "bound to another scope")
+
+	customer := func(a billingauth.Authenticator, many bool, admit func(context.Context, billing.MerchantID, billing.CustomerID, string) error) int {
+		table := &router.Table{}
+		mux := router.NewMux(table, "/v1/me", rt)
+		opts := Options{}
+		if many {
+			opts.Scope = scopeOf
+			opts.ResolveMerchant = func(*http.Request, billingauth.Verified) (billingauth.Target, error) {
+				return billingauth.Target{MerchantID: merchantA}, nil
+			}
+		}
+		env := newEnv(rt, opts)
+		env.Customers, env.admit = a, admit
+		route, _ := Lookup(GET, "/v1/me")
+		mux.Handle(GET, "", func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
+		return serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/me", nil))
+	}
+	var issuer string
+	recordIssuer := func(_ context.Context, _ billing.MerchantID, _ billing.CustomerID, iss string) error {
+		issuer = iss
+		return nil
+	}
+	require.Equal(t, http.StatusNoContent, customer(&recordingAuth{who: authtest.User(userA)}, false, recordIssuer))
+	require.Empty(t, issuer, "a person bound to no scope is the host's own user")
+	require.Equal(t, http.StatusConflict, customer(&recordingAuth{who: authtest.User(userA)}, true, recordIssuer), "a server's customer is bound")
+	require.Equal(t, http.StatusNoContent, customer(boundAuth{who: fromIssuer, scope: here}, true, recordIssuer))
+	require.Equal(t, "https://issuer.example", issuer, "a trusted issuer's user is its issuer's subject")
+	require.Equal(t, http.StatusConflict, customer(boundAuth{who: fromIssuer, scope: elsewhere}, true, recordIssuer), "bound to another merchant")
+	mismatch := func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
+		return db.ErrCustomerIssuerMismatch
+	}
+	require.Equal(t, http.StatusConflict, customer(boundAuth{who: fromIssuer, scope: here}, true, mismatch), "another issuer's customer")
 }

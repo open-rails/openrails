@@ -240,7 +240,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	var directory identity.Directory = identity.Kept{DB: database}
 	hostUserInfo := overrides != nil && overrides.UserInfo != nil
 	if hostUserInfo {
-		directory = identity.Live{Lookup: overrides.UserInfo}
+		directory = identity.Live{Lookup: overrides.UserInfo, DB: database}
 	}
 	customers := identity.Customers{Directory: directory}
 	// #1099: idempotency leases renew on their own connections, so a pool

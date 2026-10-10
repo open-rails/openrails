@@ -109,8 +109,15 @@ func TestArchiveBodyLimit(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"code":"request_body_too_large"`)
 }
 
+// headerAuth advertises the headers its credentials travel in.
+type headerAuth struct{ allowed, exposed []string }
+
+func (h headerAuth) AllowedHeaders() []string { return h.allowed }
+func (h headerAuth) ExposedHeaders() []string { return h.exposed }
+
 // The browser tier gets a static wildcard without credentials; everything
-// else gets no CORS.
+// else gets no CORS. The lists add the headers the mount's Authenticator
+// advertises, and name no provider's own.
 func TestPermissiveCORSHTTP(t *testing.T) {
 	tier := NewBrowserTierRoutes()
 	tier.Add("GET /v1/products")
@@ -135,7 +142,8 @@ func TestPermissiveCORSHTTP(t *testing.T) {
 		{AllRequests, http.MethodPost, "/anything", true, 200},
 	} {
 		reached := false
-		h := PermissiveCORSHTTP(tc.match)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true }))
+		credentials := headerAuth{allowed: []string{"authorization", "X-Proof"}, exposed: []string{"X-Proof-Nonce"}}
+		h := PermissiveCORSHTTP(tc.match, credentials)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true }))
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.Header.Set("Origin", "https://storefront.example")
 		w := httptest.NewRecorder()
@@ -147,7 +155,9 @@ func TestPermissiveCORSHTTP(t *testing.T) {
 			require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 			require.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "Authorization")
 			require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "X-Captcha-Required")
-			require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "DPoP-Nonce", "a browser retries use_dpop_nonce with it")
+			require.Equal(t, 1, strings.Count(strings.ToLower(w.Header().Get("Access-Control-Allow-Headers")), "authorization"), "merged without repeats")
+			require.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "X-Proof")
+			require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "X-Proof-Nonce")
 		} else {
 			require.Empty(t, w.Header().Get("Access-Control-Allow-Origin"), "%s %s", tc.method, tc.path)
 		}
@@ -242,4 +252,12 @@ func TestResolveMerchant(t *testing.T) {
 			}
 		})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://shop.example/v1/products", nil))
 	}
+}
+
+// Without an Authenticator advertising headers, the lists are OpenRails' own.
+func TestPermissiveCORSHTTPWithoutHeaders(t *testing.T) {
+	w := httptest.NewRecorder()
+	PermissiveCORSHTTP(AllRequests, nil)(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/products", nil))
+	require.Equal(t, "Origin,Content-Length,Content-Type,Authorization,OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language", w.Header().Get("Access-Control-Allow-Headers"))
+	require.Equal(t, "WWW-Authenticate,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required", w.Header().Get("Access-Control-Expose-Headers"))
 }

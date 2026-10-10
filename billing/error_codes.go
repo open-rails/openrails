@@ -106,23 +106,10 @@ const (
 const (
 	CodeCredentialExpired                    = "credential_expired"
 	CodeCredentialRevoked                    = "credential_revoked"
-	CodeCredentialIdentityMismatch           = "credential_identity_mismatch"
-	CodeSenderProofRequired                  = "sender_proof_required"
-	CodeServiceCredentialInvalid             = "service_credential_invalid"
-	CodeServiceCredentialMerchantUnresolved  = "service_credential_merchant_unresolved"
-	CodeServiceCredentialResourceScopeDenied = "service_credential_resource_scope_denied"
 	CodeServiceCredentialCustomerScopeDenied = "service_credential_customer_scope_denied"
-	CodeDelegatedPrincipalInvalid            = "delegated_principal_invalid"
-	CodeAccessTokenInvalid                   = "access_token_invalid"
-	CodeAccessTokenIssuerUnknown             = "access_token_issuer_unknown"
-	CodeAccessTokenMerchantNotBound          = "access_token_merchant_not_bound"
-	CodeDPoPNonceRequired                    = "use_dpop_nonce"
-	CodeInsufficientScope                    = "insufficient_scope"
 	CodeHostPrincipalInvalid                 = "host_principal_invalid"
 	CodePermissionRequired                   = "permission_required"
 	CodeMerchantUnresolved                   = "merchant_unresolved"
-	CodeHostMerchantMismatch                 = "host_merchant_mismatch"
-	CodeMerchantContextMismatch              = "merchant_context_mismatch"
 	CodeInvokerScopedPrincipal               = "invoker_scoped_principal"
 	CodeApplicationRequired                  = "application_required"
 	CodeStepUpRequired                       = "step_up_required"
@@ -185,27 +172,14 @@ var errorCodes = []ErrorCode{
 	// Authentication.
 	{CodeCredentialExpired, 401, authn, "The credential has expired."},
 	{CodeCredentialRevoked, 401, authn, "The credential or its session was revoked."},
-	{CodeCredentialIdentityMismatch, 401, authn, "The credential changed identity during the request."},
-	{CodeSenderProofRequired, 401, authn, "A sender-constrained token arrived without its DPoP proof."},
-	{CodeServiceCredentialInvalid, 401, authn, "The API key or service token is invalid."},
-	{CodeDelegatedPrincipalInvalid, 401, authn, "The host's delegated principal names no usable merchant or subject."},
 	{CodeHostPrincipalInvalid, 401, authn, "The in-process host principal is bound to no merchant."},
 	{CodeAuthenticationUnavailable, 503, fault, "The credential could not be verified right now; retry."},
-	{CodeAccessTokenInvalid, 401, authn, "The access token is invalid, expired or not issued for this deployment."},
-	{CodeAccessTokenIssuerUnknown, 401, authn, "The access token's issuer is not trusted by this deployment."},
-	{CodeDPoPNonceRequired, 401, authn, "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."},
 	{CodeStepUpRequired, 401, authn, "The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge."},
 
 	// Authorization.
 	{CodePermissionRequired, 403, authz, "The credential lacks the permission the route requires."},
 	{CodeMerchantUnresolved, 403, authz, "The credential names no merchant, or more than one; select one."},
-	{CodeHostMerchantMismatch, 403, authz, "The credential's merchant is not the one this host serves."},
-	{CodeMerchantContextMismatch, 403, authz, "The authorized merchant is not the one the request resolved."},
-	{CodeServiceCredentialMerchantUnresolved, 403, authz, "The service credential's issuer owns no merchant."},
-	{CodeServiceCredentialResourceScopeDenied, 403, authz, "The service credential is scoped to other resources."},
 	{CodeServiceCredentialCustomerScopeDenied, 403, authz, "The service credential may not act for this customer."},
-	{CodeAccessTokenMerchantNotBound, 403, authz, "The access token's issuer is not trusted for this merchant."},
-	{CodeInsufficientScope, 403, authz, "The access token was not granted the scope this surface requires."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},

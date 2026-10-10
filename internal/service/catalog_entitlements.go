@@ -31,10 +31,13 @@ func (s *Service) keyEdit(ctx context.Context) catalog.KeyEdit {
 	return catalog.KeyEdit{At: s.now().UTC(), Actor: actor}
 }
 
-// editActor is who made an edit: the signed-in user, or the API.
+// editActor is who made an edit: the person the route gate admitted, or who
+// acted for an application; an application acting for itself is the API.
 func editActor(ctx context.Context) string {
-	if uc, ok := billingauth.FromContext(ctx); ok && strings.TrimSpace(uc.UserID) != "" && len(uc.UserID) <= 255 {
-		return uc.UserID
+	staff, ok := billingauth.StaffFromContext(ctx)
+	person := ok && (staff.SubjectKind == billingauth.SubjectUser || !staff.SelfInvoked())
+	if id := strings.TrimSpace(staff.Invoker.ID); person && id != "" && len(id) <= 255 {
+		return id
 	}
 	return "api"
 }

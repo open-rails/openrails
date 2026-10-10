@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // InprocessBaseURL is the synthetic base of the embedded client. `.invalid`
@@ -49,11 +48,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	})
 	// The same body cap the HTTP mounts apply: an oversized request gets the
 	// same 413 envelope in every deployment.
-	return withVerificationMemo(middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler()))
-}
-
-func withVerificationMemo(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, requestauth.Begin(r)) })
+	return middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler())
 }
 
 func merchantMismatchMsg(bound, pinned billing.MerchantID) string {

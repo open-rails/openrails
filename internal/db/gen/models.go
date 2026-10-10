@@ -318,11 +318,11 @@ type BillingCustodyMigration struct {
 	CreatedAt time.Time
 }
 
-// OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.
+// OpenRails payable identity: (merchant_id, issuer, id), id being the issuer's stable UUID subject. A credential of another issuer never acts on the row.
 type BillingCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
+	// The trusted issuer whose subject id is, fixed when the row is created; NULL is the host's own users (its native issuer).
 	Issuer     *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
@@ -459,19 +459,6 @@ type BillingFailedUsageWindow struct {
 	WindowStart time.Time
 	WindowEnd   time.Time
 	Amount      int64
-}
-
-// Merchant roles granted by invitation to users of trusted issuers (#1140): pending (email only) until a user of an issuer trusted for the merchant accepts with that verified email, then bound to (issuer, subject). Grants, not accounts; revoking deletes the row.
-type BillingFederatedGrant struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	Email      string
-	Role       string
-	Issuer     *string
-	Subject    *string
-	AcceptedAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
 }
 
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.

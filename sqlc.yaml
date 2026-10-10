@@ -47,6 +47,7 @@ sql:
       - "internal/migrate/postgres/0048_drop_rate_windows.up.sql"
       - "internal/migrate/postgres/0049_merchant_config_out_of_postgres.up.sql"
       - "internal/migrate/postgres/0050_drop_card_attempt_failures.up.sql"
+      - "internal/migrate/postgres/0051_authkit_identity.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

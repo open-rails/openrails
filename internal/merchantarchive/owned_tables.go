@@ -32,7 +32,6 @@ var ownedTables = []string{
 	"destructive_run_before_images",
 	"document_sequences",
 	"failed_usage_windows",
-	"federated_grants",
 	"grants",
 	"host_outbox",
 	"idempotency_keys",

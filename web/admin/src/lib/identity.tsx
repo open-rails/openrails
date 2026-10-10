@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // Who the console's operator is, whichever way they signed in: the
 // deployment's own accounts (auth-ui's AuthKit session) or a trusted issuer
-// (auth-ui's issuer client, an OAuth 2.0 code flow with DPoP).
+// (auth-ui's issuer client, an OAuth 2.0 code flow).
 import * as React from "react"
 import { useAuth as useSession } from "@openrails/auth-ui/react"
 import { useIssuerAuth } from "@openrails/auth-ui/react"

@@ -9,7 +9,7 @@ import (
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
 // OpenRails-minted resources travel as prefixed text (prod_, price_, sub_,
-// pay_, pm_, mdt_, chk_, att_, cyc_, psp_, fgr_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
+// pay_, pm_, mdt_, chk_, att_, cyc_, psp_, ord_, oli_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
 // id marshals to "" and "" decodes to the zero id; use IsZero (and the json
@@ -34,9 +34,6 @@ type (
 	RenewalID uuid.UUID
 	// PSPID names one merchant account on a rail.
 	PSPID uuid.UUID
-	// FederatedGrantID names one merchant role granted to a trusted issuer's
-	// user.
-	FederatedGrantID uuid.UUID
 	// OrderID names one purchase; OrderLineID one of its lines.
 	OrderID     uuid.UUID
 	OrderLineID uuid.UUID
@@ -53,7 +50,6 @@ const (
 	PaymentAttemptIDPrefix  = "att_"
 	RenewalIDPrefix         = "cyc_"
 	PSPIDPrefix             = "psp_"
-	FederatedGrantIDPrefix  = "fgr_"
 	OrderIDPrefix           = "ord_"
 	OrderLineIDPrefix       = "oli_"
 )
@@ -127,10 +123,6 @@ func ParsePSPID(s string) (PSPID, error) {
 	u, err := parsePrefixedID("PSP", PSPIDPrefix, s)
 	return PSPID(u), err
 }
-func ParseFederatedGrantID(s string) (FederatedGrantID, error) {
-	u, err := parsePrefixedID("federated grant", FederatedGrantIDPrefix, s)
-	return FederatedGrantID(u), err
-}
 
 // ParseCustomerID reads the plain UUID spelling of a customer id.
 func ParseCustomerID(s string) (CustomerID, error) {
@@ -151,7 +143,6 @@ func (id OrderLineID) UUID() uuid.UUID       { return uuid.UUID(id) }
 func (id PaymentAttemptID) UUID() uuid.UUID  { return uuid.UUID(id) }
 func (id RenewalID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PSPID) UUID() uuid.UUID             { return uuid.UUID(id) }
-func (id FederatedGrantID) UUID() uuid.UUID  { return uuid.UUID(id) }
 
 func (id CustomerID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
 func (id ProductID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
@@ -166,7 +157,6 @@ func (id OrderLineID) IsZero() bool       { return uuid.UUID(id) == uuid.Nil }
 func (id PaymentAttemptID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
 func (id RenewalID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PSPID) IsZero() bool             { return uuid.UUID(id) == uuid.Nil }
-func (id FederatedGrantID) IsZero() bool  { return uuid.UUID(id) == uuid.Nil }
 
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
@@ -190,9 +180,6 @@ func (id PaymentAttemptID) String() string {
 }
 func (id RenewalID) String() string { return formatPrefixedID(RenewalIDPrefix, uuid.UUID(id)) }
 func (id PSPID) String() string     { return formatPrefixedID(PSPIDPrefix, uuid.UUID(id)) }
-func (id FederatedGrantID) String() string {
-	return formatPrefixedID(FederatedGrantIDPrefix, uuid.UUID(id))
-}
 
 func (id CustomerID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
 func (id ProductID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
@@ -207,7 +194,6 @@ func (id OrderLineID) MarshalText() ([]byte, error)       { return []byte(id.Str
 func (id PaymentAttemptID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
 func (id RenewalID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id PSPID) MarshalText() ([]byte, error)             { return []byte(id.String()), nil }
-func (id FederatedGrantID) MarshalText() ([]byte, error)  { return []byte(id.String()), nil }
 
 func (id *CustomerID) UnmarshalText(text []byte) error {
 	parsed, err := ParseCustomerID(string(text))
@@ -271,11 +257,6 @@ func (id *RenewalID) UnmarshalText(text []byte) error {
 }
 func (id *PSPID) UnmarshalText(text []byte) error {
 	parsed, err := ParsePSPID(string(text))
-	*id = parsed
-	return err
-}
-func (id *FederatedGrantID) UnmarshalText(text []byte) error {
-	parsed, err := ParseFederatedGrantID(string(text))
 	*id = parsed
 	return err
 }
