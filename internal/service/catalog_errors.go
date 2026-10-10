@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Catalog refusals (#983). Status and code are the contract; messages are not.
+// Catalog refusals. Status and code are the contract; messages are not.
 var (
 	ErrProductNotFound  = apperr.New(http.StatusNotFound, "product_not_found", "product not found")
 	ErrPriceNotFound    = apperr.New(http.StatusNotFound, "price_not_found", "price not found")

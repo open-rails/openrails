@@ -102,8 +102,8 @@ func recurringTerms(micros int64) autoCreateContext {
 	return autoCreateContext{PriceID: priceDeterministicID(uuid.MustParse("11111111-1111-4111-8111-111111111111"), "monthly", micros, "USD", intPtr(720), intPtr(720), nil, nil), ProductKey: "premium", Currency: "usd", UnitAmount: micros, BillingIntervalHours: intPtr(30 * 24), BillingCycleDays: intPtr(30)}
 }
 
-// #817: catalog micros become token BASE UNITS using the mint's on-chain
-// decimals; shipping micros verbatim undercharged 1000x on a 9-decimal mint.
+// Catalog micros become token BASE UNITS at the mint's on-chain decimals;
+// micros verbatim undercharge 1000x on a 9-decimal mint.
 func TestSolanaPlanPublishUsesOnChainMintDecimals(t *testing.T) {
 	for _, tc := range []struct {
 		decimals uint8
@@ -111,7 +111,7 @@ func TestSolanaPlanPublishUsesOnChainMintDecimals(t *testing.T) {
 		want     uint64
 	}{
 		{6, 10_000_000, 10_000_000}, {9, 10_000_000, 10_000_000_000}, {8, 10_000_000, 1_000_000_000},
-		{6, 4_030_000, 4_030_000}, {9, 8_050_000, 8_050_000_000}, {8, 8_130_000, 813_000_000}, // #818 float off-by-ones
+		{6, 4_030_000, 4_030_000}, {9, 8_050_000, 8_050_000_000}, {8, 8_130_000, 813_000_000}, // float off-by-ones
 		{9, 19_990_000, 19_990_000_000},
 	} {
 		chain := newFakeChain(map[string]uint8{usdcMint: tc.decimals})

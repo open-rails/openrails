@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// nmiCatalogCtx carries the merchant every NMI client is bound to (#1055).
+// nmiCatalogCtx carries the merchant every NMI client is bound to.
 func nmiCatalogCtx() context.Context {
 	return merchant.WithID(context.Background(), billing.MerchantID(uuid.MustParse("11111111-1111-1111-1111-111111111111")))
 }
@@ -36,7 +36,7 @@ func newMobiusAdapterWithServer(serverURL string) *nmiAdapter {
 
 type nmiPlanCreate struct {
 	ID           string      `json:"id"`
-	PlanAmount   json.Number `json:"plan_amount"` // exact wire text, never a float (#818)
+	PlanAmount   json.Number `json:"plan_amount"` // exact wire text, never a float
 	DayFrequency int         `json:"day_frequency"`
 	auth         string
 }
@@ -106,8 +106,8 @@ func TestNMIAdapterAutoCreatePreservesPriceIdentity(t *testing.T) {
 	require.ErrorIs(t, err, errPendingManualLink)
 }
 
-// #641/#845: a secondary sync reaches THAT account with its own credential,
-// and link metadata names the merchant's own PSP key.
+// A secondary sync reaches THAT account with its own credential, and link
+// metadata names the merchant's own PSP key.
 func TestNMIAdapterTargetsResolvedAccount(t *testing.T) {
 	srv, creates := fakeNMIPlans(t, nil)
 	a := &nmiAdapter{svc: nmiService(railresolve.FixedSet{
@@ -226,8 +226,8 @@ func newStripeAdapterWithServer(serverURL string) *stripeAdapter {
 	}}, testBaseURL: serverURL}
 }
 
-// #671: micros become the EXACT Stripe unit_amount in cents on the wire, and
-// an amount that is not whole cents never rounds or reaches the provider.
+// Micros become the EXACT Stripe unit_amount in cents on the wire; an amount
+// that is not whole cents never rounds or reaches the provider.
 func TestStripeAdapterAutoCreateWireAmount(t *testing.T) {
 	for _, tc := range []struct {
 		micros int64
@@ -274,7 +274,7 @@ func TestCCBillAdapterAttach(t *testing.T) {
 	a := &ccbillAdapter{}
 	for _, link := range []map[string]string{
 		{models.RailKeyCCBillFormName: "premium", models.RailKeyCCBillFlexID: "abc-123"},
-		{models.RailKeyCCBillRecurringBillingOption: "0000000931"}, // #601 legacy RBO-only
+		{models.RailKeyCCBillRecurringBillingOption: "0000000931"}, // RBO-only
 		{models.RailKeyCCBillFormName: "basic-monthly", models.RailKeyCCBillFlexID: "abc-123", models.RailKeyCCBillRecurringBillingOption: "0000007498"},
 	} {
 		ids, err := a.Attach(context.Background(), link, autoCreateContext{})
@@ -328,8 +328,8 @@ func TestResolveProviders(t *testing.T) {
 		require.Empty(t, pending)
 	})
 
-	// #346: limited/readonly mode never calls a provider write; native catalog
-	// slots defer to a manual link and the price still applies locally.
+	// Limited/readonly mode never calls a provider write; native catalog slots
+	// defer to a manual link and the price still applies locally.
 	t.Run("remote writes disabled defers", func(t *testing.T) {
 		svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}}}
 		req := recurring("stripe", "nmi", "solana")
@@ -344,8 +344,8 @@ func TestResolveProviders(t *testing.T) {
 		require.Len(t, pending, 1)
 	})
 
-	// or#896: a trial on a rail with no first phase is refused, never
-	// silently dropped (which charged full price immediately).
+	// A trial on a rail with no first phase is refused, never silently dropped
+	// (that would charge full price at once).
 	t.Run("trial only on rails with a first phase", func(t *testing.T) {
 		withTrial := func(psp string) billing.CreatePriceParams {
 			req := recurring(psp)

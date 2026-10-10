@@ -9,10 +9,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// ResolveReference resolves a caller-supplied price reference that is EITHER
-// a typed price id ("price_<uuid>") OR a #774 price_key: the id spelling never
-// collides with a key, so an id parse is tried first and a key lookup follows
-// only when the reference is not an id.
+// ResolveReference resolves a typed price id ("price_<uuid>") when productKey
+// is empty, otherwise a price key within that product.
 func ResolveReference(ctx context.Context, prices *PriceService, productKey, ref string) (*models.Price, error) {
 	if id, err := billing.ParsePriceID(ref); productKey == "" && err == nil && !id.IsZero() {
 		return prices.GetByID(ctx, id.UUID())

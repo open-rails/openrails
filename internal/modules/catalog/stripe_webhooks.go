@@ -1,35 +1,16 @@
 package catalog
 
-// Stripe webhook-endpoint management (#590). OpenRails registers + reconciles its
-// OWN Stripe webhook endpoint so the operator only has to supply the API key — no
-// manual dashboard steps to create the endpoint, pick events, set the version, or
-// copy the signing secret. The endpoint's api_version is pinned to
-// stripeapi.APIVersion (closing #587 for the inbound side too).
+// Stripe webhook-endpoint management. OpenRails registers and reconciles its own
+// endpoint, pinned to stripeapi.APIVersion, so the operator supplies only the
+// API key. Find-or-create keys on metadata[openrails_managed], never the URL
+// (it drifts on redeploys); url, events and disabled are patched in place.
 //
-// Identity for find-or-create is metadata[openrails_managed]=true, NOT the URL —
-// the URL is the field that drifts (redeploys), so it can't be the key. Cost
-// asymmetry baked into ReconcileWebhookEndpoint: url / enabled_events / disabled
-// are patched IN PLACE (signing secret survives).
-//
-// #856 — ROLLOVER, NEVER DELETE-THEN-CREATE. Two Stripe facts are load-bearing
-// and both are verified against the API reference:
-//
-//   - api_version is a CREATE-only parameter. POST /v1/webhook_endpoints/:id
-//     accepts url, enabled_events, description, disabled and metadata — not
-//     api_version. An endpoint is pinned for life.
-//     https://docs.stripe.com/api/webhook_endpoints/update
-//   - The signing secret is "only returned at creation" — retrieve and list
-//     never return it. https://docs.stripe.com/api/webhook_endpoints/object
-//
-// So a version bump DOES need a new endpoint and a new secret. What it does NOT
-// need is a gap: Stripe permits several endpoints on the same URL and documents
-// exactly this dual-endpoint migration — stand the new version up, run both,
-// then retire the old one (https://docs.stripe.com/webhooks/versioning). This
-// file implements that: the successor is CREATED FIRST, predecessors are stamped
-// metadata[openrails_superseded_at] and left ENABLED, and deletes happen only in
-// RetireSupersededWebhookEndpoints — after the overlap window, behind the
-// operator kill switch. Nothing here ever deletes an endpoint it has not already
-// replaced.
+// Rollover, never delete-then-create: api_version is create-only and the
+// signing secret is returned only at creation, so a version bump needs a new
+// endpoint. The successor is created first; predecessors are stamped
+// metadata[openrails_superseded_at] and stay enabled. Only
+// RetireSupersededWebhookEndpoints deletes, after the overlap window and behind
+// the operator kill switch (https://docs.stripe.com/webhooks/versioning).
 
 import (
 	"context"
@@ -47,10 +28,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
-// StripeMetadataSupersededAt marks a managed endpoint that a newer managed
-// endpoint has replaced. It is an RFC3339 instant and it is the ONLY clock for
-// retirement — it lives on the Stripe object, so it survives our restarts and
-// needs no local table.
+// StripeMetadataSupersededAt (RFC 3339) marks a managed endpoint a newer one
+// replaced. It is the only retirement clock and lives on the Stripe object.
 const StripeMetadataSupersededAt = "openrails_superseded_at"
 
 // WebhookRolloverOverlap is how long a superseded endpoint keeps delivering
@@ -58,10 +37,9 @@ const StripeMetadataSupersededAt = "openrails_superseded_at"
 // a week leaves room for the retry tail plus an operator's working week.
 const WebhookRolloverOverlap = 7 * 24 * time.Hour
 
-// maxManagedWebhookEndpoints caps the managed endpoints we will hold on one
-// Stripe account. Stripe's own ceiling is 16 per account; stopping well short of
-// it means a rollover that somehow loops cannot consume the operator's ability
-// to register endpoints by hand. Hitting the cap raises a finding instead.
+// maxManagedWebhookEndpoints caps managed endpoints per Stripe account, well
+// short of Stripe's 16, so a looping rollover cannot exhaust it. Hitting the cap
+// asks the operator to retire superseded endpoints.
 const maxManagedWebhookEndpoints = 4
 
 // ErrWebhookEndpointBudgetExhausted means maxManagedWebhookEndpoints managed
@@ -212,8 +190,7 @@ func (s *StripeCatalogService) ListWebhookEndpoints(ctx context.Context) ([]Stri
 }
 
 // UpdateWebhookEndpointParams are the in-place-updatable fields. api_version is
-// NOT among them (verified against docs.stripe.com/api/webhook_endpoints/update)
-// — a version change needs a NEW endpoint, which is why rollover exists.
+// not one: a version change needs a new endpoint (rollover).
 type UpdateWebhookEndpointParams struct {
 	URL           *string
 	EnabledEvents []string // nil = leave unchanged
@@ -309,14 +286,12 @@ type DesiredWebhookEndpoint struct {
 
 	URL           string
 	EnabledEvents []string
-	// HaveSecret reports whether the caller holds the stored signing secret for
-	// the CURRENT-version managed endpoint. False means "we cannot verify what
-	// that endpoint sends" — it does NOT mean the endpoint is wrong, so it is
-	// never a reason to remove it. Reconcile stands a successor up alongside it.
+	// HaveSecret reports whether the caller holds the signing secret of the
+	// current-version managed endpoint. False is never a reason to remove that
+	// endpoint; reconcile stands a successor up alongside it.
 	HaveSecret bool
-	// ForbidCreate refuses any create with ErrWebhookCreateForbidden BEFORE
-	// mutating Stripe. MODE 1 (#723): a minted signing secret would seed only
-	// process memory and be lost on reboot.
+	// ForbidCreate refuses any create with ErrWebhookCreateForbidden before
+	// mutating Stripe, for a caller that cannot persist a minted signing secret.
 	ForbidCreate bool
 	// Now overrides the rollover clock (tests). Zero = time.Now().
 	Now time.Time
@@ -347,19 +322,15 @@ type WebhookReconcileResult struct {
 }
 
 // ReconcileWebhookEndpoint brings the OpenRails-managed webhook endpoints to the
-// desired state, idempotently and ADDITIVELY:
+// desired state, idempotently and additively:
 //
-//   - none found                 -> create (returns secret)
-//   - api_version drifted        -> create the successor, stamp the old one
-//     superseded, leave it ENABLED (returns new secret)
-//   - caller holds no secret     -> same rollover; the endpoint we cannot verify
-//     is never removed, only replaced alongside
-//   - url/events/disabled drift  -> patch in place (secret preserved)
-//   - already correct            -> no-op
+//   - none found, api_version drift, or no held secret -> create a successor
+//     (returns its secret); predecessors are stamped superseded, stay enabled
+//   - url/events/disabled drift -> patch in place (secret preserved)
+//   - already correct -> no-op
 //
-// No branch deletes. Retirement is RetireSupersededWebhookEndpoints, after the
-// overlap window and behind the operator kill switch. Endpoints without the
-// openrails_managed marker are ignored (never touched).
+// No branch deletes. Endpoints without the openrails_managed marker are never
+// touched.
 func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, desired DesiredWebhookEndpoint) (WebhookReconcileResult, error) {
 	if strings.TrimSpace(desired.URL) == "" {
 		return WebhookReconcileResult{}, fmt.Errorf("desired webhook url required")
@@ -572,8 +543,7 @@ func (s *StripeCatalogService) RetireSupersededWebhookEndpoints(ctx context.Cont
 	}
 	managed, current := partitionManagedEndpoints(all)
 	if current == nil {
-		// No successor is live. Retiring here would be the delete-then-nothing
-		// the whole redesign exists to prevent.
+		// No successor is live: retiring now would leave no endpoint.
 		return RetireSupersededResult{Pending: supersededEndpoints(managed, "", overlap)},
 			fmt.Errorf("refusing to retire superseded stripe webhook endpoints: no live endpoint at api_version %s", stripeapi.APIVersion)
 	}

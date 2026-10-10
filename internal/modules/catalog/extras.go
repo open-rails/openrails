@@ -7,15 +7,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// Extra-ness of remote Stripe objects vs the local catalog (#357/#358 phase D).
-//
-// A remote Stripe object is an EXTRA when the local catalog neither links it by
-// ID nor identifies its exact local price (or product key) from metadata.
-// This definition is shared by the internal/service extras report
-// (DetectCatalogExtras) and the intent ledger's archive relevance checks
-// (stripe_archive_product / stripe_archive_price): an archive intent stays
-// applicable exactly while its object is STILL an extra — if the object has
-// since been added/linked locally, archiving the remote copy would be wrong.
+// A remote Stripe object is an extra when the local catalog neither links it by
+// ID nor identifies its local price (or product key) from metadata. The extras
+// report (DetectCatalogExtras) and the archive intents share this test: an
+// archive intent applies only while its object is still an extra.
 
 // ExtrasIndex is the local-catalog view the extra-ness predicates consult.
 type ExtrasIndex struct {
@@ -72,8 +67,8 @@ func (ix ExtrasIndex) StripeProductExtra(sp StripeProduct) (isExtra bool, produc
 }
 
 // StripePriceExtra reports whether the remote price is an extra, plus its
-// OpenRails ownership marker (local price ID or older metadata/lookup key;
-// "" = foreign).
+// OpenRails ownership marker (local price ID or metadata/lookup key; "" =
+// foreign).
 func (ix ExtrasIndex) StripePriceExtra(sp StripePrice) (isExtra bool, contentKey string) {
 	contentKey = RemoteStripePriceKey(sp)
 	if _, linked := ix.StripePriceIDs[sp.ID]; linked {
@@ -87,9 +82,9 @@ func (ix ExtrasIndex) StripePriceExtra(sp StripePrice) (isExtra bool, contentKey
 	return true, contentKey
 }
 
-// RemoteStripePriceKey reads the retained local price ID when available,
-// otherwise the OpenRails metadata/lookup ownership marker. Older financial
-// markers still identify owned extras, but cannot select a same-money local row.
+// RemoteStripePriceKey reads the retained local price ID, else the OpenRails
+// metadata/lookup marker. A financial-terms marker identifies an owned extra
+// but never selects a same-money local row.
 func RemoteStripePriceKey(sp StripePrice) string {
 	if id, err := uuid.Parse(strings.TrimSpace(sp.Metadata[StripeMetadataOpenRailsPriceID])); err == nil && id != uuid.Nil {
 		return id.String()

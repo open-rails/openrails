@@ -18,30 +18,21 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// nmiAdapter implements providerAdapter for the NMI rail's recurring plans. The
-// PSP name a plan lives under (e.g. "mobius") is recorded in the
-// link's provider field; the rail key in provider_links is always "nmi".
+// nmiAdapter implements providerAdapter for NMI recurring plans (Direct Post +
+// Query APIs). The link's provider field records the PSP key the plan lives
+// under.
 //
-// As of issue #207, NMI is a first-class create-capable provider: OpenRails
-// programmatically creates, attaches to, updates, and reconciles NMI Recurring
-// Plans via the Direct Post + Query APIs.
+//   - Attach: find-or-create at the operator-supplied plan_id: an existing plan
+//     must match the price's amount and frequency; a missing one is created
+//     from the price's terms.
+//   - AutoCreate: the same at `or-<32-hex-UUID>`; needs a day cadence. With no
+//     NMI rail armed it returns errPendingManualLink.
+//   - Update: no-op; amount/frequency are immutable and is_active is not
+//     representable.
+//   - Verify: live read, diffs unit_amount.
 //
-//   - Attach: find-or-create at the operator-supplied plan_id. NMI plan_ids are
-//     operator-chosen AND client-creatable, so a link to a plan that exists is
-//     verified (amount + frequency must match the price) while a link to one that
-//     does not yet exist is CREATED from the price's terms (+ optional provider override).
-//   - AutoCreate: local-price-addressed plan_id `or-<32-hex-UUID>`; find-or-attach
-//     against NMI, falling back to creating the plan. Requires
-//     a recurring provider day cadence (NMI requires a frequency). When no NMI rail is
-//     configured, falls back to errPendingManualLink so the operator can link
-//     a control-center plan manually.
-//   - Update: no-op. Amount/frequency are immutable post-create and is_active is
-//     not representable, so no mutable field is left to propagate.
-//   - Verify: live GetRecurringPlanByID + diff plan_name.
-//
-// Divergence from Stripe: on price deactivation OpenRails does NOT delete the
-// NMI plan. NMI delete_recurring_plan does not stop subscriptions already
-// billing on the plan, so the plan must outlive the OpenRails price.
+// Archiving a price never deletes its NMI plan: a deleted plan does not stop
+// subscriptions billing on it, so the plan must outlive the price.
 type nmiAdapter struct {
 	svc *Service
 	// testEndpointURL points built NMI clients at a fake gateway (test seam).
@@ -77,22 +68,18 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 	if planID == "" {
 		return nil, fmt.Errorf("nmi link requires psp_links.nmi.plan_id")
 	}
-	// provider is the merchant's PSP key the plan lives under (recorded
-	// metadata; client resolution is by rail). Link override wins; otherwise
-	// the resolved armed account's key.
+	// provider is the PSP key the plan lives under (metadata only): the link's
+	// override, else the armed account's key.
 	provider := strings.ToLower(strings.TrimSpace(link[models.RailKeyProvider]))
 	client, pspKey, ok := a.nmiClient(ctx)
 	if provider == "" {
 		provider = pspKey
 	}
 
-	// NMI plan_ids are operator-chosen AND client-creatable (the id is an input to
-	// AddRecurringPlan), so an explicit link is a find-or-CREATE at that id:
-	//   - exists: verify it matches the catalog price's immutable money terms
-	//     (amount + day-based cycle); a mismatch is a loud error.
-	//   - missing: create the plan at the supplied id from the price's terms.
-	// When no NMI rail is configured there is no API to verify/create
-	// against, so the link is stored as-is (operator-owned).
+	// NMI plan_ids are operator-chosen and client-creatable, so an explicit link
+	// is a find-or-create at that id: an existing plan must match the price's
+	// money terms (a mismatch is a loud error); a missing one is created. With
+	// no NMI rail armed the link is stored as-is (operator-owned).
 	if ok && client != nil {
 		detail, err := client.GetRecurringPlanDetailByID(ctx, planID, in.Currency)
 		if err != nil {
@@ -128,10 +115,9 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 	return out, nil
 }
 
-// createPlan adds an NMI Recurring Plan at the given plan_id from the price's
-// money terms. Shared by AutoCreate (local price ID) and Attach (operator
-// id). NMI plans are inherently recurring, so a fixed billing frequency and a
-// positive amount are required.
+// createPlan adds an NMI Recurring Plan at planID from the price's money terms
+// (AutoCreate and Attach). NMI plans need a fixed frequency and a positive
+// amount.
 func (a *nmiAdapter) createPlan(ctx context.Context, client *nmi.NMIClient, planID string, in autoCreateContext) error {
 	if in.RemoteWritesDisabled {
 		return errRemoteWritesDisabled
@@ -169,11 +155,10 @@ func (a *nmiAdapter) nmiClient(ctx context.Context) (*nmi.NMIClient, string, boo
 	return a.nmiClientFor(ctx, "")
 }
 
-// nmiClientFor arms the NMI client from the ctx merchant's armed rail state
-// (#641/#788): empty → the active account; an account_id → THAT declared
-// account's credentials. pspKey is the resolved account's merchant PSP key
-// (recorded in link metadata, #845). ok=false = not armed (callers defer to
-// manual link or signal sync_disabled — never a cross-plane fallback).
+// nmiClientFor arms the NMI client from the ctx merchant's armed rail state:
+// empty targetAccountID is the active account, else that declared account.
+// pspKey is the resolved account's PSP key. ok=false = not armed; callers defer
+// to a manual link or sync_disabled, never another account.
 func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (client *nmi.NMIClient, pspKey string, ok bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.RailConfigs == nil {
 		return nil, "", false
@@ -253,7 +238,7 @@ func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[
 	return out, nil
 }
 
-// Verify performs a live retrieve of the NMI plan and computes plan_name drift.
+// Verify performs a live retrieve of the NMI plan and computes unit_amount drift.
 func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]billing.DriftField, bool, error) {
 	if local != nil && local.Currency != "" {
 		if err := moneyutil.RequireFiatCurrency(local.Currency); err != nil {
@@ -296,10 +281,8 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	return drift, false, nil
 }
 
-// Update is a no-op for NMI plans. is_active is not representable on NMI plans,
-// and amount/frequency are immutable post-create (parallel to Stripe Price
-// financials). With the price display_name removed there are no mutable fields
-// left to propagate.
+// Update is a no-op: NMI plans cannot represent is_active, and amount/frequency
+// are immutable after create.
 func (a *nmiAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
 	return nil
 }

@@ -23,17 +23,15 @@ import (
 type stripeAdapter struct {
 	svc *Service
 	// testBaseURL points StripeCatalogServices built by stripeServiceFor at an
-	// httptest server (wire-pinning tests, #671). Empty in production.
+	// httptest server. Empty in production.
 	testBaseURL string
 }
 
 func (a *stripeAdapter) Name() string { return "stripe" }
 
 func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction {
-	// Stripe always supports AutoCreate; this should never fire under normal
-	// configuration. The dispatcher only invokes PendingActionTemplate when
-	// AutoCreate returns errPendingManualLink — for stripe that's an edge case
-	// (no config). We still surface a helpful hint.
+	// Reached only when AutoCreate returns errPendingManualLink, i.e. Stripe is
+	// not configured.
 	return billing.PendingAction{
 		PSP:    "stripe",
 		Action: "configure_stripe",
@@ -41,13 +39,10 @@ func (a *stripeAdapter) PendingActionTemplate(_ uuid.UUID) billing.PendingAction
 	}
 }
 
-// Attach validates supplied Stripe link ids. When Stripe is configured the
-// linked Price is round-tripped against the API and its substance verified
-// against the OpenRails price: the Price must exist and match unit_amount,
-// currency, the recurring interval/duration, and — when the operator supplied a
-// product_id — the expected Product association. A missing or mismatched Price
-// is a loud error. When Stripe is not configured there is no read API to verify
-// against, so the ids are stored as operator-owned.
+// Attach validates supplied Stripe link ids. With Stripe configured, the linked
+// Price must exist and match unit_amount, currency, recurrence and (when
+// product_id is supplied) the Product; a mismatch is a loud error. Without
+// Stripe the ids are stored as operator-owned.
 func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	if err := moneyutil.RequireFiatCurrency(in.Currency); err != nil {
 		return nil, err
@@ -58,11 +53,9 @@ func (a *stripeAdapter) Attach(ctx context.Context, link map[string]string, in a
 	link = normalizeLinkMap(link)
 	priceID := strings.TrimSpace(link[models.RailKeyStripePriceID])
 	if priceID == "" {
-		// A Stripe price_id (price_xxx) is STRIPE-GENERATED: it cannot be created
-		// at an operator-chosen id, so a price_id link must already exist. The
-		// Stripe analog of NMI's "create at my chosen id" is the client-chosen
-		// lookup_key — a link supplying only a lookup_key is find-or-created at
-		// that key (AutoCreate's flow, but at the operator's key).
+		// A Stripe price_id is Stripe-generated, so a price_id link must already
+		// exist. A link with only a lookup_key is find-or-created at that key,
+		// the Stripe analog of NMI's operator-chosen plan id.
 		if lookupKey := strings.TrimSpace(link[providerLookupKey]); lookupKey != "" {
 			if in.RemoteWritesDisabled {
 				// find-or-create at the key is a potential write; defer it rather
@@ -138,10 +131,9 @@ func (a *stripeAdapter) stripeConfigured(ctx context.Context) bool {
 	return a.svc.railArmed(ctx, string(models.RailStripe))
 }
 
-// stripeServiceFor builds the StripeCatalogService for a target account (#641):
-// empty → the merchant's active account; an account_id → a service keyed to
-// THAT declared account's secret. ok=false when no usable Stripe credentials
-// arm for the target.
+// stripeServiceFor builds the StripeCatalogService for a target account: empty
+// is the merchant's active account, else that declared account's secret.
+// ok=false when no usable Stripe credentials arm for the target.
 func (a *stripeAdapter) stripeServiceFor(ctx context.Context, targetAccountID string) (*catalog.StripeCatalogService, bool) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil || a.svc.rt.RailConfigs == nil {
 		return nil, false
@@ -178,8 +170,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	}
 	stripeSvc, ok := a.stripeServiceFor(ctx, in.TargetAccountID)
 	if !ok {
-		// Same error string used by stripe_catalog.go so callers can detect
-		// the "not configured" case via substring (Verify, etc).
+		// Stripe is not armed for the target account: defer to a manual link.
 		return nil, errPendingManualLink
 	}
 
@@ -235,11 +226,8 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 		stripeProductID = id
 	}
 
-	// #586: mirror this product's entitlements onto the Stripe Product as
-	// Features, so the Stripe catalog carries the SAME entitlements as OpenRails.
-	// One-way (OpenRails -> Stripe); OpenRails stays the source of truth.
-	// Best-effort: a feature-sync failure must not fail the price link — catalog
-	// drift surfaces on the next reconcile, like the other Stripe propagations.
+	// Mirror the product's entitlements onto the Stripe Product as Features,
+	// one way. Best-effort: a sync failure must not fail the price link.
 	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.Entitlements) > 0 {
 		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, in.Product.Entitlements); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
@@ -381,11 +369,9 @@ func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local
 	return drift, false, nil
 }
 
-// verifyStripeProduct is a product-side helper retained for internal use only.
-// It is NOT exposed through the public catalog API (per issue #208: products
-// have no user-facing provider linkage). It exists so that internal lookups
-// (UpdateProduct's best-effort Stripe propagation) can decide whether to push
-// changes. Returns drift, missing, configured, error.
+// verifyStripeProduct diffs a Stripe Product's name, description and active
+// flag against the local product, for ReconcileProduct. Products have no
+// public provider link. Returns drift, missing, configured, error.
 func (a *stripeAdapter) verifyStripeProduct(ctx context.Context, stripeProductID string, local *models.Product) ([]billing.DriftField, bool, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
 		return nil, false, false, nil

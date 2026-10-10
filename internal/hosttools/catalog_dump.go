@@ -251,8 +251,7 @@ func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUI
 }
 
 func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*dumpedProduct) error {
-	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
-	// are translated at push time, so no price-attached metered shape exists.
+	// Metered pricing dumps as rate cards; prices carry no metered shape.
 	rows, err := database.Gen(ctx).ListLiveCatalogPricesWithPSPLinks(ctx, merchantID)
 	if err != nil {
 		return fmt.Errorf("list catalog prices: %w", err)
@@ -350,18 +349,15 @@ func providerLinks(raw []byte) (map[string]map[string]string, error) {
 	if len(links) == 0 {
 		return nil, nil
 	}
-	// The stored blob is account-keyed with the rail stamped inside each
-	// entry; the manifest derives the rail from the account key, so the stamp
-	// is storage detail, not manifest content.
+	// The stored blob stamps the rail in each entry; the manifest derives it
+	// from the account key.
 	for _, cfg := range links {
 		rail := cfg[models.RailKeyRail]
 		delete(cfg, models.RailKeyRail)
 		if strings.EqualFold(strings.TrimSpace(rail), string(models.RailSolana)) {
-			// mint_symbol is the resolved on-chain snapshot. The push manifest
-			// declares token only when selecting a new non-default plan, so
-			// never emit snapshot metadata as input. A stored plan_pda is
-			// authoritative for an attached plan and resolves its token from
-			// chain, so emitting token beside it would duplicate that fact.
+			// mint_symbol is a resolved on-chain snapshot, not input. token is
+			// redundant beside a stored plan_pda (resolved from chain) or as USDC,
+			// the default.
 			delete(cfg, "mint_symbol")
 			if strings.TrimSpace(cfg["plan_pda"]) != "" ||
 				strings.EqualFold(strings.TrimSpace(cfg["token"]), "USDC") {

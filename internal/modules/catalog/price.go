@@ -51,9 +51,7 @@ func (s *PriceService) createRow(ctx context.Context, price *models.Price) error
 		return fmt.Errorf("price merchant does not match the authorized merchant")
 	}
 	price.MerchantID = mid.UUID()
-	// CUR-6: the single price-INSERT chokepoint, so every price row is
-	// canonical whatever minted it (service API, catalog manifest apply,
-	// importer).
+	// The single price INSERT: every price row gets a canonical currency.
 	price.Currency = moneyutil.NormalizeCurrency(price.Currency)
 	customAmount, err := models.PointerToJSONB(price.CustomerAmount)
 	if err != nil {
@@ -151,9 +149,7 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 		return nil, queryScopeErr
 	}
 
-	// Archived included. The catalog converge relies on this to reconcile
-	// already-archived historical prices instead of re-creating them;
-	// GetActiveByProductID is the non-archived variant.
+	// Archived included; GetActiveByProductID is the non-archived variant.
 	rows, err := s.db.Gen(ctx).ListPricesByProduct(ctx, gen.ListPricesByProductParams{MerchantID: queryMerchant.UUID(), ProductID: productID})
 	if err != nil {
 		return nil, err
@@ -385,24 +381,20 @@ func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID str
 	return price, nil
 }
 
-// Update is not supported - prices are immutable to preserve historical payment accuracy.
-// To change pricing, create a new price and deactivate the old one.
-// Use UpdatePSPLinks() for non-financial fields.
+// Update is not supported: prices are immutable. A reprice is a new price;
+// UpdatePSPLinks changes provider bindings.
 func (s *PriceService) Update(ctx context.Context, price *models.Price) error {
 	return errors.New("prices are immutable; use UpdatePSPLinks() or Deactivate() for allowed changes")
 }
 
-// Delete is not supported - prices are immutable to preserve historical payment accuracy.
-// To retire a price, archive it via Deactivate() (sets archived).
+// Delete is not supported: prices are immutable; Deactivate archives one.
 func (s *PriceService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("prices cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
-// #662: there is no full-row price update. A price's money/identity columns are
-// immutable (a reprice creates a new row and archives the old); the only allowed
-// mutations are archived (SetArchived) and rails (UpdateRails), each writing
-// exactly its own column via a narrow query, so the immutable columns cannot be
-// SET at the DB layer.
+// Prices have no full-row update: money and identity columns are immutable.
+// Only archived (SetArchived) and PSP bindings (UpdatePSPLinks) change, each
+// through its own narrow query.
 
 // Deactivate archives a price so it won't appear in product listings and
 // cannot be purchased by new customers. Existing subscriptions and payments
@@ -436,10 +428,9 @@ func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived b
 	return nil
 }
 
-// #774: price keys — a durable, per-merchant-unique handle that is a MOVABLE
-// POINTER to the current row of a substance-version chain. Row identity stays
-// the #662 substance UUID; these methods manage the key label + the
-// pointer-movement history log, never the immutable financial columns.
+// A price key is a product-local handle pointing at the current row of a
+// version chain. These methods move the key and log its movements; they never
+// touch the immutable financial columns.
 
 // GetCurrentByKey returns the CURRENT (non-archived) row for a key, or
 // pgx.ErrNoRows if the key names no live price. At most one such row can
@@ -479,9 +470,7 @@ func (s *PriceService) ListChainByKey(ctx context.Context, merchantID, productID
 	return s.pricesFromGen(ctx, rows)
 }
 
-// ListPriorVersionsByKey returns the archived members of a key's chain —
-// #773's "all prior versions of key K", the reprice_all_prior_versions bulk
-// target set.
+// ListPriorVersionsByKey returns the archived members of a key's chain.
 func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID, productID uuid.UUID, key string) ([]*models.Price, error) {
 	rows, err := s.db.Gen(ctx).ListPriorVersionsByKey(ctx, gen.ListPriorVersionsByKeyParams{
 		MerchantID: merchantID,

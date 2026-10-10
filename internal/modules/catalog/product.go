@@ -254,14 +254,13 @@ func (s *ProductService) List(ctx context.Context, filter ProductFilter, page bi
 	return pagination.Cut(products, limit, func(p *models.Product) any { return pagination.TimeID{At: p.CreatedAt, ID: p.ID} }), nil
 }
 
-// Update is not supported for arbitrary changes - products should be treated as mostly immutable.
-// Use UpdateDisplayName(), UpdateDescription(), or Deactivate() for allowed changes.
+// Update is not supported: products change only through the narrow update
+// methods.
 func (s *ProductService) Update(ctx context.Context, product *models.Product) error {
 	return errors.New("products are mostly immutable; use UpdateDisplayName(), UpdateDescription(), or Deactivate() for allowed changes")
 }
 
-// Delete is not supported - products cannot be deleted to preserve historical data integrity.
-// Use Deactivate() instead to hide a product from listings.
+// Delete is not supported: Deactivate archives a product, keeping its history.
 func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("products cannot be deleted; use Deactivate() instead to preserve historical data")
 }

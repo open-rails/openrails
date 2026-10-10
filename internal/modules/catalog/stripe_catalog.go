@@ -23,11 +23,10 @@ import (
 type StripeCatalogService struct {
 	StripeClients *stripeapi.Factory
 	Config        *config.Config
-	// Rails resolves the ctx merchant's armed Stripe account (Layer C, #788).
+	// Rails resolves the ctx merchant's armed Stripe account.
 	Rails railresolve.Source
-	// BaseURL overrides the Stripe API root (https://api.stripe.com). Empty in
-	// production; tests point it at an httptest server. Every method routes
-	// through baseURL().
+	// BaseURL overrides the Stripe API root; tests point it at an httptest
+	// server.
 	BaseURL string
 }
 
@@ -39,10 +38,9 @@ func (s *StripeCatalogService) baseURL() string {
 	return "https://api.stripe.com"
 }
 
-// stripeRail resolves the ctx merchant's armed Stripe credentials. nil means
-// "not armed" — every caller fails closed on it ("stripe is not configured").
-// Resolution errors are logged and also yield nil (the caller still refuses
-// to act; it never defaults to another account).
+// stripeRail resolves the ctx merchant's armed Stripe credentials. nil (not
+// armed, or a logged resolution error) makes every caller refuse; it never
+// falls back to another account.
 func (s *StripeCatalogService) stripeRail(ctx context.Context) *config.StripeRailConfig {
 	if s == nil || s.Rails == nil {
 		return nil
@@ -57,10 +55,8 @@ func (s *StripeCatalogService) stripeRail(ctx context.Context) *config.StripeRai
 	return proc.Stripe
 }
 
-// httpClient returns the choke-point Stripe client (internal/integrations/
-// stripeapi): when mode=readonly every mutating request is rejected at the
-// transport with stripeapi.ErrProviderReadOnly before reaching the network.
-// ALL Stripe HTTP in this package must flow through it.
+// httpClient returns the stripeapi choke-point client: readonly mode rejects
+// mutating requests at the transport. All Stripe HTTP here goes through it.
 func (s *StripeCatalogService) httpClient() *http.Client {
 	var cfg *config.Config
 	if s != nil {
@@ -77,15 +73,12 @@ type stripeObject struct {
 	ID string `json:"id"`
 }
 
-// Stripe metadata keys used by OpenRails to mark catalog items it owns.
-// These are read on both reconciliation and orphan-discovery paths.
-//
-// Products match their declared keys; prices match their retained local IDs.
-// Stored provider bindings always take precedence over metadata discovery.
+// Stripe metadata keys marking catalog objects OpenRails owns. Products match
+// their declared keys, prices their retained local IDs; stored bindings take
+// precedence over metadata discovery.
 const (
-	// StripeMetadataOpenRailsProductKey is the content key stamped on a Stripe
-	// Product: the OpenRails product key. This is the field SEARCHED on to
-	// find-or-create the Stripe Product, so it must be stable across DB wipes.
+	// StripeMetadataOpenRailsProductKey holds the OpenRails product key.
+	// AutoCreate searches on it, so it must survive DB wipes.
 	StripeMetadataOpenRailsProductKey = "openrails_product_key"
 	// StripeMetadataOpenRailsPriceKey holds the immutable local price UUID.
 	// Older objects may retain their historical financial-content marker.
@@ -96,10 +89,8 @@ const (
 	StripeMetadataOpenRailsProductID = "openrails_product_id"
 	StripeMetadataOpenRailsPriceID   = "openrails_price_id"
 
-	// Recovery envelope keys (#596). Product/price keys are stable catalog
-	// identity; BenefitFingerprint snapshots the OpenRails-only benefits that
-	// providers do not own, so pull-provider can tell what local grant semantics
-	// to materialize after a DB rebuild/import.
+	// Recovery envelope: a format version and a hash of the product's
+	// entitlements, which providers do not own.
 	StripeMetadataOpenRailsRecoveryVersion    = "openrails_recovery_version"
 	StripeMetadataOpenRailsBenefitFingerprint = "openrails_benefit_fingerprint"
 )
@@ -109,8 +100,8 @@ type CreateProductParams struct {
 	Name           string
 	Description    string
 	IdempotencyKey string
-	// Metadata is written to the Stripe Product. OpenRails always includes
-	// StripeMetadataOpenRailsProductID so the object can be discovered later.
+	// Metadata is written to the Stripe Product; discovery searches
+	// StripeMetadataOpenRailsProductKey.
 	Metadata map[string]string
 }
 
@@ -222,8 +213,7 @@ type UpdateProductParams struct {
 	// Metadata replaces the keys provided; to clear a key set its value to "".
 	Metadata map[string]string
 	// IdempotencyKey, when set, is sent as the Stripe Idempotency-Key header so
-	// a replayed mutation (e.g. an archive intent's lease reclaim, #358) is
-	// deduplicated by Stripe itself.
+	// Stripe deduplicates a replayed mutation (e.g. a reclaimed archive intent).
 	IdempotencyKey string
 }
 
@@ -316,9 +306,8 @@ type StripeProduct struct {
 	Metadata    map[string]string `json:"metadata"`
 }
 
-// RetrieveProduct fetches a Stripe Product by ID. Returns os.ErrNotExist
-// (wrapped as fmt error containing "not found") when the ID 404s, so callers
-// can distinguish drift from missing.
+// RetrieveProduct fetches a Stripe Product by ID; a 404 is a "not found"
+// error. FindProduct reports absence without an error.
 func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProductID string) (*StripeProduct, error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -345,9 +334,8 @@ func (s *StripeCatalogService) RetrieveProduct(ctx context.Context, stripeProduc
 	return &out, nil
 }
 
-// FindProduct fetches a Stripe Product by ID, with absence as a first-class
-// answer: a 404 returns (nil, false, nil) so verify-then-execute callers (#358
-// archive intents) can distinguish "gone" from "read failed".
+// FindProduct fetches a Stripe Product by ID. A 404 returns (nil, false, nil),
+// so verify-then-execute callers tell "gone" from "read failed".
 func (s *StripeCatalogService) FindProduct(ctx context.Context, stripeProductID string) (*StripeProduct, bool, error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -418,14 +406,8 @@ type StripePrice struct {
 	} `json:"recurring,omitempty"`
 }
 
-// SearchProductsByMetadata returns Stripe Products whose metadata key/value
-// matches the given pair. Uses Stripe's Search API, which is eventually
-// consistent (~30-60s lag). Returns at most 10 matches; the typical OpenRails
-// expectation is 0 or 1.
-//
-// Use this when the OpenRails DB has lost track of a Stripe Product (or to
-// detect operator-pre-created products). For normal create flows, the Stripe
-// ID stored on the OpenRails row is the primary lookup.
+// SearchProductsByMetadata returns up to 10 Stripe Products whose metadata key
+// equals value. Stripe Search is eventually consistent (~30-60s lag).
 func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key, value string) ([]StripeProduct, error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -455,11 +437,8 @@ func (s *StripeCatalogService) SearchProductsByMetadata(ctx context.Context, key
 	return resp.Data, nil
 }
 
-// ListPricesByLookupKey returns Stripe Prices with the given lookup_key.
-// Uses Stripe's List API (strongly consistent), unlike SearchProductsByMetadata.
-// Lookup keys are unique across active prices in an account, so 0 or 1 result
-// is typical; multiple results indicate prior duplicate creation that should
-// be cleaned up.
+// ListPricesByLookupKey returns the Stripe Prices with lookupKey through the
+// strongly consistent List API. More than one means duplicate creation.
 func (s *StripeCatalogService) ListPricesByLookupKey(ctx context.Context, lookupKey string) ([]StripePrice, error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -491,16 +470,11 @@ func escapeStripeQueryValue(s string) string {
 	return strings.ReplaceAll(s, "'", "\\'")
 }
 
-// stripeListPageLimit is the page size for the catalog reconciliation List calls.
-// Stripe caps List endpoints at 100 per page; the reconciliation loop paginates
-// with starting_after until has_more is false.
+// stripeListPageLimit is Stripe's List page maximum.
 const stripeListPageLimit = 100
 
-// ListProducts returns one page of Stripe Products using the List API. Pass
-// startingAfter="" for the first page; on subsequent calls pass the nextCursor
-// returned by the prior call. nextCursor is "" when there are no more pages
-// (Stripe's has_more=false). Used by the catalog reconciliation loop to
-// enumerate the full catalog and detect orphans / drift.
+// ListProducts returns one page of Stripe Products. Pass "" for the first page,
+// then the returned nextCursor; it is "" when no pages remain.
 func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter string) (products []StripeProduct, nextCursor string, err error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -530,9 +504,7 @@ func (s *StripeCatalogService) ListProducts(ctx context.Context, startingAfter s
 	return resp.Data, nextCursor, nil
 }
 
-// ListPrices returns one page of Stripe Prices using the List API. Pagination
-// semantics match ListProducts: pass startingAfter="" for the first page and
-// the returned nextCursor for subsequent pages; nextCursor is "" when exhausted.
+// ListPrices returns one page of Stripe Prices, paged like ListProducts.
 func (s *StripeCatalogService) ListPrices(ctx context.Context, startingAfter string) (prices []StripePrice, nextCursor string, err error) {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {

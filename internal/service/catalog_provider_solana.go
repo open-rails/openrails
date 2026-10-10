@@ -23,23 +23,19 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// solanaAdapter implements providerAdapter for the official Solana Subscriptions
-// program (solana-program/subscriptions, De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44).
-// A recurring Solana price is a merchant-published on-chain Plan: AutoCreate signs
-// create_plan with the merchant's key (via the runtime's SolanaPlanService) and
-// stores the plan handle in rails["solana"]. Verify reads the Plan account
-// back and diffs its immutable terms (amount / period / mint) for drift.
+// solanaAdapter implements providerAdapter for the Solana Subscriptions program
+// (solana-program/subscriptions, De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44).
+// A recurring price is an on-chain Plan published with the merchant's key.
 //
 //   - AutoCreate: one-off prices need no plan; recurring prices publish (or
-//     idempotently attach to) a USDC plan in live mode and the DUSD devnet
-//     test plan in test mode.
+//     attach to) a USDC plan in live mode, DUSD in test mode.
 //   - Attach: token selects a non-default token for a published plan; plan_pda
 //     attaches an existing plan and resolves its token on-chain.
-//   - Verify: GetAccountData(plan_pda) -> DecodePlanAccount -> diff vs the stored
-//     snapshot. RPC unavailable -> sync_disabled.
-//   - Update: no-op. Plan core terms are immutable on-chain; an amount/period change
-//     is modeled as a new price (new plan), and archiving a Solana price stops new
-//     subscriptions while existing on-chain subscriptions continue (grandfathered).
+//   - Verify: reads the Plan account and diffs its immutable terms against the
+//     stored snapshot. No RPC -> sync_disabled.
+//   - Update: no-op. Plan terms are immutable on-chain, so a term change is a
+//     new price (new plan); archiving stops new subscriptions, existing ones
+//     continue.
 type solanaAdapter struct{ svc *Service }
 
 // Solana rail-config keys (mirror recurring.PlanHandle.ToRailConfig).
@@ -86,9 +82,8 @@ func solanaPlanID(priceID uuid.UUID, mint string) uint64 {
 }
 
 func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[string]string, error) {
-	// A one-off Solana price (no recurring cadence, #622) needs no on-chain Plan
-	// PDA — it settles as a direct transfer validated at payment time. Mark the
-	// rail present so checkout offers Solana; publish nothing on-chain.
+	// A one-off price needs no Plan: it settles as a direct transfer validated
+	// at payment time. Mark the rail present so checkout offers Solana.
 	if in.BillingCycleDays == nil {
 		return map[string]string{"provider": "solana"}, nil
 	}
@@ -105,10 +100,9 @@ func (a *solanaAdapter) defaultRecurringToken() string {
 	return solanaDefaultRecurringToken
 }
 
-// requireUSDBillingForSolanaPublish gates publishing a NEW recurring plan on
-// the #745 model: the price bills in USD and the settlement token is declared
-// separately when it differs from the USDC default. Pre-#745 rows attached by
-// plan_pda are exempt (see Attach).
+// requireUSDBillingForSolanaPublish requires a new recurring plan's price to
+// bill in USD; a non-USDC settlement token is declared separately. Plans
+// attached by plan_pda are exempt (see Attach).
 func requireUSDBillingForSolanaPublish(currency string) error {
 	if !strings.EqualFold(strings.TrimSpace(currency), "usd") {
 		return fmt.Errorf("solana recurring currently requires USD billing currency, got %q", currency)
@@ -142,13 +136,13 @@ func (a *solanaAdapter) createRecurringPlan(ctx context.Context, in autoCreateCo
 	if err != nil {
 		return nil, err
 	}
-	// #817: decimals come from the SPL mint ON-CHAIN, never from config.
+	// Decimals come from the SPL mint on-chain, never from config.
 	decimals, err := plan.MintDecimals(ctx, symbol)
 	if err != nil {
 		return nil, err
 	}
-	// #817: the price is MICROS; the plan amount is token BASE UNITS at the
-	// mint's ON-CHAIN decimals — shipping micros verbatim only worked at 6.
+	// The price is micros; the plan amount is token base units at the mint's
+	// on-chain decimals.
 	amountBaseUnits, err := solanamodule.FiatMicrosToBaseUnitsAtPeg(moneyutil.Micros(in.UnitAmount), symbol, decimals)
 	if err != nil {
 		return nil, err
@@ -223,14 +217,10 @@ func (a *solanaAdapter) findExistingPlan(ctx context.Context, plan *recurring.Pl
 }
 
 // Attach publishes a plan from a declarative token or stores an
-// operator-supplied existing plan handle. When the Solana RPC is available the
-// plan account is read back and its IMMUTABLE terms are verified against the
-// OpenRails price: the account must exist and match
-// amount (base units), period (billing cycle * 24h), mint (resolved from token
-// or inferred from the plan), and — when a merchant is in context — the merchant/owner. A
-// missing or mismatched plan is a loud error. On a successful read the verified
-// on-chain terms are stamped onto the stored ids so Verify has a snapshot. When
-// RPC is unavailable, plan_pda attachment fails closed.
+// operator-supplied plan handle, read back on-chain: it must exist and match
+// the price's amount (base units), period, mint and, with a merchant in
+// context, owner. The verified terms are stamped onto the ids for Verify.
+// Without RPC, plan_pda attachment fails closed.
 func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in autoCreateContext) (map[string]string, error) {
 	_, mintSymbolSupplied := link[solanaKeyMintSymbol]
 	link = normalizeLinkMap(link)
@@ -246,20 +236,17 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 		return nil, fmt.Errorf("psp_links.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain")
 	}
 	if pda == "" {
-		// The guard lives here — not on the plan_pda path — so eligible
-		// pre-#745 USDC rows can derive the token from their currency and stay
-		// operable for link verification and rotation.
+		// The guard lives here, not on the plan_pda path, so USDC-currency rows
+		// can derive their token from the currency and stay operable.
 		if in.BillingCycleDays != nil {
 			if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
 				return nil, err
 			}
 		}
 		if in.BillingCycleDays == nil {
-			// A one-off price consumes no link keys (it settles as a direct
-			// transfer quoted at checkout). Callers only reach Attach with a
-			// non-empty link, so silently returning the bare rail marker would
-			// drop the operator's declared values and leave catalog plans
-			// re-flagging the same drift forever — reject loudly instead.
+			// A one-off price takes no link keys (it settles as a direct transfer
+			// quoted at checkout). Refuse rather than drop the operator's values
+			// and re-flag the same drift forever.
 			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana")
 		}
 		if symbol == "" {
@@ -309,10 +296,8 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			return nil, fmt.Errorf("solana plan %q period (%s) does not match catalog price (%s)", pda, solanaPeriod(acct.PeriodHours), cadence.FormatHours(*in.BillingIntervalHours))
 		}
 	}
-	// Amount + mint + merchant validation requires the plan service (mint
-	// allowlist, on-chain decimals, merchant resolution); skip gracefully when it
-	// is unconfigured — the price is in MICROS and only the MINT's on-chain
-	// decimals turn that into the plan's base units (#817).
+	// Amount, mint and merchant checks need the plan service (mint allowlist,
+	// on-chain decimals, merchant resolution); skipped when it is unconfigured.
 	if plan, ok := a.planService(); ok {
 		if symbol == "" {
 			symbol, err = resolveSolanaTokenFromMint(plan, acct.Mint.String())
@@ -329,7 +314,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 				return nil, fmt.Errorf("solana plan %q mint (%s) does not match settlement token %s mint (%s)", pda, acct.Mint, symbol, mint)
 			}
 			if in.UnitAmount > 0 {
-				// #817: decimals come from the SPL mint ON-CHAIN, never from config.
+				// Decimals come from the SPL mint on-chain, never from config.
 				decimals, err := plan.MintDecimals(ctx, symbol)
 				if err != nil {
 					return nil, err
@@ -363,11 +348,9 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	return out, nil
 }
 
-// existingSolanaSettlementToken keeps safely translatable pre-#745 USDC
-// prices operable while preserving strict validation for the #745 model.
-// Before #745, currency=usdc identified both the billing denomination and the
-// settlement token. New prices bill in USD; an empty token is resolved from the
-// supplied plan_pda.
+// existingSolanaSettlementToken keeps USDC-currency prices, whose currency
+// names both the billing denomination and the settlement token, operable. USD
+// prices resolve the token from the supplied plan_pda.
 func existingSolanaSettlementToken(currency string) (string, error) {
 	currency = strings.ToLower(strings.TrimSpace(currency))
 	switch currency {
@@ -400,11 +383,10 @@ func isSolanaRecurringToken(symbol string) bool {
 		symbol == solanaDUSDRecurringToken
 }
 
-// Verify reads the on-chain Plan account and diffs its immutable terms against the
-// stored snapshot. The terms (amount/period/mint) cannot change on-chain, so any
-// divergence means tampering or a deleted+recreated plan (created_at fingerprint
-// shift); both are real drift the operator must resolve. RPC unavailable ->
-// sync_disabled (nil,false,nil). Account gone -> missing=true.
+// Verify reads the on-chain Plan account and diffs its immutable terms (amount,
+// period, mint) against the stored snapshot: any divergence is tampering or a
+// deleted and recreated plan (created_at shift). No RPC -> sync_disabled;
+// account gone -> missing.
 func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]billing.DriftField, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
 		return nil, false, fmt.Errorf("solana is not configured: %w", errProviderNotArmed)
@@ -444,11 +426,8 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 	return drift, false, nil
 }
 
-// Update is a no-op: Solana plan core terms are immutable on-chain. Archiving
-// (updatePlan status=sunset, subscriptions.BuildUpdatePlan) is wired through
-// the provider intent ledger instead — the `push-merchant-catalog --prune`
-// sweep enqueues solana_sunset_plan intents for plans whose local price is no
-// longer purchasable (#357/#358 phase D).
+// Update is a no-op: Solana plan terms are immutable on-chain. Sunsetting a
+// plan is a solana_sunset_plan intent (ArchiveCatalogExtras).
 func (a *solanaAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
 	return nil
 }

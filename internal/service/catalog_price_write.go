@@ -28,18 +28,11 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		}
 		now := time.Now().UTC()
 
-		// #774: resolve the price key (explicit or auto-default) and repoint it.
-		// A key names AT MOST one non-archived row per product
-		// (prices_key_key) — so whatever OTHER row currently holds
-		// this key must be archived FIRST (never after), or the create/reactivate
-		// below would transiently double-hold the key and violate that index.
-		// Declaring the SAME key with a NEW substance is exactly the version-bump
-		// semantics: archive the displaced row, create-or-REACTIVATE the substance
-		// row (re-declaring a previously-seen substance finds its archived row via
-		// the #662 deterministic id and reactivates it — flip-flopping between two
-		// amounts forever yields exactly two rows, never a third), re-point the
-		// key. Skipped entirely when the caller creates the price pre-archived
-		// (never claims the "current" pointer for its key).
+		// A key names at most one non-archived row per product (prices_key_key),
+		// so the row holding it is archived first, never after. Same key with new
+		// terms archives the displaced row, then creates or reactivates the terms'
+		// deterministic row: flip-flopping between two amounts keeps two rows. A
+		// price created archived never claims the key.
 		key, defaulted := resolvePriceKey(product, req)
 		if err := lockCatalogKey(ctx, tx, tid, "product", product.Key); err != nil {
 			return err
@@ -72,9 +65,8 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 			return existErr
 		}
 		reactivating := existErr == nil
-		// A true no-op: re-declaring the SAME substance under the SAME key with no
-		// archived-state change and no key displaced — nothing moved, so no
-		// movement-log entry (idempotent, as today).
+		// Same terms, same key, no archive change, nothing displaced: no movement
+		// to log.
 		trueNoOp := reactivating && existing.Archived == req.Archived && existing.Key == key && displacedID == uuid.Nil
 
 		if reactivating {
@@ -111,7 +103,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 		}
 
 		if !req.Archived && !trueNoOp {
-			// #774 pointer-movement log: key's current pointer moved to priceID.
+			// Log the key's move to priceID.
 			if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, key); err != nil {
 				return fmt.Errorf("record key movement for %q -> %s: %w", key, priceID, err)
 			}

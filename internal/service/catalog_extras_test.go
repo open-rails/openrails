@@ -92,9 +92,8 @@ func (f *fakeIntentExecutor) EnqueueAndExecute(_ context.Context, p intents.Enqu
 	return row, nil
 }
 
-// --prune archives only OWNED ACTIVE Stripe objects and Solana plans through
-// admin-origin intents; foreign objects are never touched and NMI stays
-// manual (its plan delete is unsafe).
+// Archiving touches only OWNED ACTIVE Stripe objects and Solana plans, through
+// admin-origin intents; foreign objects are never touched and NMI stays manual.
 func TestArchiveCatalogExtrasOnlyOwnedThroughIntents(t *testing.T) {
 	const pda = "5tzFkiKscXHK5ZXCGbXZxdw7gTfCvqSGpHGxVJD6oxBd"
 	merchantID := uuid.New()
@@ -138,8 +137,8 @@ func TestArchiveCatalogExtrasOnlyOwnedThroughIntents(t *testing.T) {
 	}
 }
 
-// #358-D: a parked intent (mode gate, provider down) is durable, not an
-// error; terminal failures continue the pass and aggregate into an error.
+// A parked intent (mode gate, provider down) is durable, not an error;
+// terminal failures continue the pass and aggregate into an error.
 func TestArchiveCatalogExtrasParkedVersusFailed(t *testing.T) {
 	extras := []CatalogExtra{
 		{Provider: "stripe", ObjectType: "price", ExternalID: "price_a", Owned: true, Active: true},

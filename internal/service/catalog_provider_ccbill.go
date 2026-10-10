@@ -38,13 +38,10 @@ func (a *ccbillAdapter) PendingActionTemplate(priceID uuid.UUID) billing.Pending
 	}
 }
 
-// Attach stores the operator-supplied CCBill link. Two independent identifiers
-// (#601): the FlexForm (form_name + flex_id) is the hosted purchase-flow page;
-// the Recurring Billing Option (recurring_billing_option_id) is the price/plan
-// identity. A link may carry the RBO alone (legacy/archived tiers have no
-// FlexForm), a FlexForm alone, or both — but a FlexForm needs BOTH halves.
-// CCBill exposes no public read API, so the ids are accepted as operator-owned
-// (the one provider in the shared model without remote link validation).
+// Attach stores the operator-supplied CCBill link: a FlexForm (form_name +
+// flex_id, both required; the hosted purchase page) and/or a Recurring Billing
+// Option (recurring_billing_option_id; the price identity). Archived tiers may
+// carry the RBO alone. CCBill has no read API, so the ids are not validated.
 func (a *ccbillAdapter) Attach(_ context.Context, link map[string]string, _ autoCreateContext) (map[string]string, error) {
 	link = normalizeLinkMap(link)
 	formName := strings.TrimSpace(link[models.RailKeyCCBillFormName])

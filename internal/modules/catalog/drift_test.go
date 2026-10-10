@@ -148,7 +148,7 @@ func TestComputeNMIDrift(t *testing.T) {
 	amount := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", Amount: "19.99"}}, snap, now)
 	require.Len(t, amount, 1)
 	require.Equal(t, []string{"plan_amount", "9990000", "19990000"}, []string{amount[0].Field, amount[0].OpenRailsValue, amount[0].ExternalValue})
-	// FAB-6: an unparseable linked amount is drift reported verbatim, never a zero price.
+	// An unparseable linked amount is drift reported verbatim, never a zero price.
 	bad := ComputeNMIDrift([]NMIPlan{{PlanID: "premium-usd-999-30", Amount: "nope"}}, snap, now)
 	require.Len(t, bad, 1)
 	require.Equal(t, []string{"plan_amount", "9990000", "nope"}, []string{bad[0].Field, bad[0].OpenRailsValue, bad[0].ExternalValue})
@@ -163,8 +163,8 @@ func TestComputeNMIDrift(t *testing.T) {
 	require.Equal(t, []string{"plan_amount", "5000000", "500.50"}, []string{fractional[0].Field, fractional[0].OpenRailsValue, fractional[0].ExternalValue})
 }
 
-// #993: links bound to another account are neither evidence nor expectations
-// for the account being read; the zero account is the all-accounts view.
+// Links bound to another account are neither evidence nor expectations for
+// the account being read; the zero account is the all-accounts view.
 func TestDriftSnapshotIsScopedToTheReadAccount(t *testing.T) {
 	now := time.Now().UTC()
 	a, b := uuid.New(), uuid.New()
@@ -275,7 +275,7 @@ func TestStripeDriftKeepsSameMoneyPriceIdentities(t *testing.T) {
 		extra, _ := ix.StripePriceExtra(price)
 		require.False(t, extra, price.ID)
 	}
-	// Old financial markers cannot select whichever sibling overwrote a map slot.
+	// A financial-terms marker cannot pick one of several same-money siblings.
 	ambiguous := StripePrice{ID: "price_unbound", UnitAmount: 1000, Currency: "usd", LookupKey: "openrails.premium.usd.10000000.onetime"}
 	events := ComputeStripeDrift(nil, []StripePrice{ambiguous}, snap, time.Now())
 	require.Len(t, events, 1)

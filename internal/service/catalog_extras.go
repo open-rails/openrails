@@ -19,67 +19,36 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
-// Issue #357 — provider-side catalog extras: detection + (--prune) archive.
-// Issue #358 phase D — every archive WRITE flows through the provider intent
-// ledger instead of being a direct provider call.
+// Catalog extras are provider-side catalog objects the local catalog lacks.
 //
-// DEFAULT (`push-merchant-catalog`): DetectCatalogExtras enumerates every
-// provider-side catalog object (Stripe products + prices, NMI recurring plans)
-// and reports those NOT present in the local catalog. For Solana — whose plans
-// are PDAs with no enumeration API, so FOREIGN plans are unobservable — the
-// scan instead derives "sunset-needed" plans from the LOCAL handles: an
-// on-chain plan referenced only by non-purchasable (archived/draft) local
-// prices that still has status=active should not accept new subscribers.
-// Detection is READ-ONLY — it works in every operating mode — and extras are
-// ignorable: the default path never touches them.
+// DetectCatalogExtras is read-only (every mode): it reports Stripe products
+// and prices and NMI plans missing locally. Solana plans cannot be enumerated,
+// so it instead reports active on-chain plans that only archived local prices
+// reference (sunset-needed).
 //
-// --prune (`push-merchant-catalog --prune`): the local catalog is treated
-// as complete — ArchiveCatalogExtras archives (NEVER
-// deletes) extras that bear OpenRails ownership markers, by enqueuing
-// admin-origin intents on the provider intent ledger (#358) and executing them
-// synchronously. Per-provider archive semantics:
+// ArchiveCatalogExtras archives, never deletes, owned extras through
+// admin-origin provider intents:
 //
-//   - Stripe: products/prices -> active=false (Stripe's documented archive:
-//     existing subscriptions continue, the object can no longer be purchased).
-//     Intent types stripe_archive_product / stripe_archive_price.
-//   - NMI: LOG-ONLY + pending manual action — NO intent, NO write path. NMI
-//     has no plan-archive primitive, and plan deletion is both irreversible
-//     and documented-unsafe while customers use the plan ("Once a plan is
-//     deleted, this action cannot be undone. Please ensure no customers are
-//     using the plan before proceeding") — and plan changes propagate live to
-//     subscribers, so OpenRails cannot guarantee existing subscriptions keep
-//     billing after a delete. The operator confirms zero subscribers in the
-//     NMI control center, then deletes the plan manually. (Source:
-//     support.nmi.com "Recurring via the Virtual Terminal: Plans and
-//     Subscriptions".)
-//   - CCBill: no catalog API at all (FlexForms are write-only) -> note only;
-//     archive is a pending manual action in the CCBill admin portal.
-//   - Solana: updatePlan status=sunset — the program's exact archive
-//     semantics: new subscribe calls are rejected (program error "Plan is in
-//     sunset status") while existing subscriptions continue. Intent type
-//     solana_sunset_plan.
+//   - Stripe: active=false; existing subscriptions continue (intents
+//     stripe_archive_product / stripe_archive_price).
+//   - Solana: update_plan status=sunset; new subscribes are rejected, existing
+//     ones continue (intent solana_sunset_plan).
+//   - NMI: manual only. NMI has no plan archive, plan delete is irreversible
+//     and unsafe while customers use the plan, and plan changes propagate live
+//     to subscribers. The operator confirms zero subscribers, then deletes.
+//   - CCBill: no catalog API; manual.
 //
-// OWNERSHIP-MARKER GUARD: only objects bearing OUR markers are ever archived —
-// Stripe objects must carry the openrails_product_key / openrails_price_key
-// metadata or an "openrails."-prefixed lookup_key; NMI plans must match the
-// local-price "or-<32-hex-UUID>" or historical financial plan_id shape; Solana
-// sunset candidates come from our own stored plan handles. Foreign (merchant-
-// owned, unrelated) provider objects are LISTED in the report but NEVER
-// touched, even under --prune.
-//
-// MODE INTERPLAY (#358): the intents are admin-origin (the --prune flag
-// is an explicit human request), so they EXECUTE under mode=limited and PARK
-// under mode=readonly — parked is NOT an error, the scheduled executor drains
-// the queue when the mode lifts. A provider being down no longer aborts the
-// sweep either: those items retry durably on the ledger.
+// Only objects bearing OpenRails markers are archived: Stripe openrails_*
+// metadata or an "openrails." lookup_key, an NMI local-price or financial plan
+// id, or a stored Solana plan handle. Foreign objects are reported, never
+// touched. Admin-origin intents execute under limited mode and park under
+// readonly; parked is durable, not an error.
 
-// CatalogExtra is one provider-side catalog object that is not in the local
-// catalog (for Solana: a sunset-needed plan, see the file header). Owned
-// reports whether it bears an OpenRails ownership marker (the archive guard);
-// Active is the provider-side active flag (NMI plans have no such flag and
-// always report true). MarkerKey is the Stripe ownership marker value (a
-// product key / price content key) — the archive intents' relevance re-checks
-// it against the live local catalog.
+// CatalogExtra is one provider-side catalog object missing from the local
+// catalog (for Solana, a sunset-needed plan). Owned means it bears an
+// OpenRails marker (the archive guard). NMI plans have no active flag and
+// report Active true. MarkerKey is the Stripe marker value the archive intents
+// re-check against the live local catalog.
 type CatalogExtra struct {
 	Provider   string `json:"provider"`    // "stripe" | "nmi" | "solana"
 	ObjectType string `json:"object_type"` // "product" | "price" | "plan"
@@ -144,15 +113,11 @@ type CatalogExtraArchiveOutcome struct {
 	IntentID string `json:"intent_id,omitempty"`
 }
 
-// nmiPlanArchiveManualDetail is the manual-action text attached to owned NMI
-// plan extras under --prune. See the file header for the doc citations.
+// nmiPlanArchiveManualDetail is the manual-action text for owned NMI plan
+// extras.
 const nmiPlanArchiveManualDetail = "NMI has no plan-archive primitive and plan deletion is irreversible and unsafe while customers use the plan " +
 	"(NMI: \"Once a plan is deleted, this action cannot be undone. Please ensure no customers are using the plan before proceeding\"); " +
 	"verify the plan has zero subscribers in the NMI control center, then delete it manually"
-
-// ---------------------------------------------------------------------------
-// Detection (read-only; every mode)
-// ---------------------------------------------------------------------------
 
 // solanaPlanReader is the chain-read surface the Solana sunset-needed scan
 // uses (satisfied by *solana.RPCClient; interface for unit tests).
@@ -160,11 +125,9 @@ type solanaPlanReader interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 }
 
-// DetectCatalogExtras enumerates the provider-side catalogs (Stripe via the
-// stripeapi choke client, NMI via the Query API, Solana via per-stored-handle
-// account reads) and returns the objects that are NOT in the local catalog
-// (resp. sunset-needed, for Solana). Read-only; never mutates anything.
-// Providers without a read API (CCBill) contribute notes.
+// DetectCatalogExtras returns the provider catalog objects missing from the
+// local catalog (for Solana, sunset-needed plans). It never mutates; CCBill,
+// with no read API, contributes a note.
 func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -266,12 +229,10 @@ func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister cata
 	return report, nil
 }
 
-// computeStripeExtras is the pure Stripe diff: remote products/prices that the
-// local catalog neither links by id nor matches by content key. The extra-ness
-// predicate is catalog.ExtrasIndex — the SAME definition the archive intents'
-// relevance checks use (#358), so detection and the ledger can never disagree.
-// Owned = the object bears an OpenRails marker (openrails_product_key /
-// openrails_price_key metadata, or an "openrails."-prefixed lookup_key).
+// computeStripeExtras is the pure Stripe diff. Extra-ness is
+// catalog.ExtrasIndex, the same test the archive intents re-check, so
+// detection and the ledger never disagree. Owned = the object bears an
+// OpenRails metadata marker or an "openrails."-prefixed lookup_key.
 func computeStripeExtras(products []catalog.StripeProduct, prices []catalog.StripePrice, snap catalog.DriftSnapshot) []CatalogExtra {
 	ix := extrasIndex(snap)
 	var out []CatalogExtra
@@ -312,8 +273,7 @@ func computeStripeExtras(products []catalog.StripeProduct, prices []catalog.Stri
 	return out
 }
 
-// extrasIndex renders the snapshot as the shared extra-ness index
-// (catalog.ExtrasIndex) detection and the #358 relevance checks consult.
+// extrasIndex renders the snapshot as the shared catalog.ExtrasIndex.
 func extrasIndex(snap catalog.DriftSnapshot) catalog.ExtrasIndex {
 	ix := catalog.ExtrasIndex{
 		StripeProductIDs: make(map[string]struct{}, len(snap.StripeProductIDs)),
@@ -367,12 +327,10 @@ func computeNMIExtras(plans []catalog.NMIPlan, snap catalog.DriftSnapshot) []Cat
 	return out
 }
 
-// computeSolanaSunsetExtras derives the Solana sunset candidates from the
-// LOCAL plan handles (there is no on-chain enumeration): a plan PDA referenced
-// ONLY by non-purchasable (archived/draft) local prices, whose on-chain
-// account still exists with status=active. Reads only. Already-sunset and
-// vanished plans are converged — not reported. Read/decode failures become
-// notes (the apply must not fail because one RPC read did).
+// computeSolanaSunsetExtras derives sunset candidates from local plan handles
+// (no on-chain enumeration): a plan PDA only archived prices reference whose
+// on-chain plan is still active. Sunset or vanished plans have converged; read
+// and decode failures become notes.
 func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, snap catalog.DriftSnapshot) ([]CatalogExtra, int, []CatalogExtrasNote) {
 	// pda -> is it referenced by ANY purchasable price; plus a representative
 	// label (content key of a referencing price).
@@ -448,12 +406,11 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 	return out, scanned, notes
 }
 
-// isContentAddressedNMIPlanID recognizes current prefixed local price IDs and
-// the historical financial shape: "<product-key>-<currency>-<amount>-<cycle>"
-// where currency is a 3-letter code, amount is an integer, and cycle is a day
-// count or "onetime" (see nmiDeterministicPlanID). The product key may itself
-// contain hyphens, so the id is parsed from the right. Operator-chosen plan ids
-// that happen not to match this shape are treated as foreign (never archived).
+// isContentAddressedNMIPlanID recognizes local-price plan ids ("or-<hex>", see
+// nmiDeterministicPlanID) and the historical financial shape
+// "<product-key>-<currency>-<amount>-<cycle>" (cycle: day count or "onetime"),
+// parsed from the right since product keys may contain hyphens. Any other plan
+// id is foreign and never archived.
 func isContentAddressedNMIPlanID(planID string) bool {
 	if raw, ok := strings.CutPrefix(strings.TrimSpace(planID), "or-"); ok {
 		id, err := uuid.Parse(raw)
@@ -506,26 +463,16 @@ func isAllLowerAlpha(s string) bool {
 	return true
 }
 
-// ---------------------------------------------------------------------------
-// Archive (--prune; provider WRITES — through the intent ledger, #358)
-// ---------------------------------------------------------------------------
-
 // intentExecutor is the ledger surface the archive pass drives (interface for
 // unit tests; satisfied by *intents.Runner).
 type intentExecutor interface {
 	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.BillingProviderIntent, error)
 }
 
-// ArchiveCatalogExtras archives (never deletes) the OWNED extras from a
-// detection pass by enqueuing admin-origin provider intents and executing them
-// synchronously through the full gate/classify pipeline (#358). Foreign extras
-// are skipped untouched; NMI extras surface as pending manual actions (see
-// nmiPlanArchiveManualDetail — NMI has NO archive write path, by design).
-//
-// There is no up-front mode refusal: admin-origin intents execute under
-// mode=limited and PARK under readonly — parked outcomes are durable, not
-// errors, and the scheduled executor drains them when the mode lifts. The
-// returned error aggregates only TERMINAL failures.
+// ArchiveCatalogExtras archives (never deletes) the owned extras by enqueuing
+// admin-origin provider intents and executing them synchronously. Foreign
+// extras are skipped; NMI extras become manual actions. Parked intents are
+// durable, not errors; the returned error aggregates only terminal failures.
 func (s *Service) ArchiveCatalogExtras(ctx context.Context, extras []CatalogExtra) ([]CatalogExtraArchiveOutcome, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -579,8 +526,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 	for _, e := range extras {
 		switch {
 		case !e.Owned:
-			// HARD GUARD: no OpenRails ownership marker — never touched, even
-			// under --prune.
+			// No OpenRails ownership marker: never touched.
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{
 				Extra:  e,
 				Action: CatalogExtraSkippedForeign,
@@ -613,8 +559,7 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 				intents.StripeArchiveIdempotencyKey(intentType, e.ExternalID),
 				intents.StripeArchivePayload{ObjectID: e.ExternalID, MarkerKey: e.MarkerKey, Label: e.Label})
 		case e.Provider == string(models.RailNMI):
-			// LOG-ONLY by design: see the file header for the verified NMI
-			// semantics. No NMI write — and no NMI intent type — exists.
+			// Manual by design (see the file header): no NMI archive intent exists.
 			outcomes = append(outcomes, CatalogExtraArchiveOutcome{
 				Extra:  e,
 				Action: CatalogExtraManualActionRequired,
@@ -638,10 +583,9 @@ func archiveCatalogExtrasVia(ctx context.Context, exec intentExecutor, tenantID 
 	return outcomes, nil
 }
 
-// archiveOutcomeFromIntent maps the post-execution intent row onto the CLI
-// outcome vocabulary: succeeded -> archived (with evidence), still-live
-// states -> parked (durable; the executor/verifier drains them), terminal ->
-// failed, superseded -> nothing to do.
+// archiveOutcomeFromIntent maps the executed intent row to an outcome:
+// succeeded -> archived, live states -> parked (the executor finishes them),
+// terminal -> failed, superseded -> nothing to do.
 func archiveOutcomeFromIntent(e CatalogExtra, row gen.BillingProviderIntent) CatalogExtraArchiveOutcome {
 	out := CatalogExtraArchiveOutcome{Extra: e, IntentID: row.ID.String()}
 	reason := ""

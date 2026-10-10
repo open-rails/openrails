@@ -1,13 +1,9 @@
 package catalog
 
-// Stripe Entitlements (Features) — the catalog-level mirror of OpenRails product
-// entitlements (#586). OpenRails entitlements are opaque strings in
-// product.Entitlements. Each maps 1:1 onto a Stripe Feature whose
-// lookup_key IS the string; the feature is then attached to the synced Stripe
-// Product as a Product Feature. Sync is ONE-WAY (OpenRails -> Stripe): OpenRails
-// stays the source of truth, and the per-customer "active entitlements" Stripe
-// derives from these are NEVER read back as authority (they'd be empty for the
-// non-Stripe rails).
+// Stripe Features mirror product entitlements one way (OpenRails -> Stripe):
+// each entitlement string is a Feature whose lookup_key is that string,
+// attached to the synced Product. Stripe's per-customer active entitlements are
+// never read back as authority.
 
 import (
 	"context"
@@ -20,10 +16,8 @@ import (
 	catalogwire "github.com/open-rails/openrails/catalog"
 )
 
-// StripeMetadataOpenRailsManaged marks a Stripe Feature as OpenRails-owned.
-// SyncProductFeatures only ever DETACHES features carrying this marker, so an
-// operator-created or third-party feature attached to the same product is left
-// untouched.
+// StripeMetadataOpenRailsManaged marks a Stripe Feature as OpenRails-owned;
+// SyncProductFeatures detaches only features carrying it.
 const StripeMetadataOpenRailsManaged = "openrails_managed"
 
 // StripeFeature is the subset of Stripe's entitlement Feature resource we read.
@@ -197,15 +191,10 @@ func (s *StripeCatalogService) DetachProductFeature(ctx context.Context, stripeP
 	return nil
 }
 
-// SyncProductFeatures reconciles a Stripe Product's attached features to match
-// the desired OpenRails entitlement strings. It find-or-creates a Feature per
-// desired string (lookup_key = the string), attaches any not yet attached, and
-// detaches OpenRails-managed features no longer desired. Operator/third-party
-// features (without the openrails_managed marker) are never detached. Idempotent:
-// a no-op when already in sync.
-//
-// An empty desired set is valid and means "detach all OpenRails-managed features"
-// (e.g. a product whose last entitlement was removed).
+// SyncProductFeatures makes a Stripe Product's attached features match
+// desiredKeys: it find-or-creates a Feature per key (lookup_key = the key),
+// attaches missing ones and detaches undesired OpenRails-managed ones; other
+// features are never detached. Empty desiredKeys detaches every managed one.
 func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripeProductID string, desiredKeys []string) error {
 	stripeProc := s.stripeRail(ctx)
 	if stripeProc == nil || stripeProc.SecretKey == "" {
@@ -264,8 +253,7 @@ func (s *StripeCatalogService) SyncProductFeatures(ctx context.Context, stripePr
 		feat, ok := featureByKey[key]
 		featureID := feat.ID
 		if !ok {
-			// name = the entitlement string: a valid Stripe Feature name that
-			// matches the user's mental model (entitlements are plain strings).
+			// The Feature name is the entitlement string itself.
 			id, err := s.CreateFeature(ctx, key, key)
 			if err != nil {
 				return fmt.Errorf("create feature %q: %w", key, err)
