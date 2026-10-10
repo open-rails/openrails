@@ -4471,6 +4471,7 @@
       "http": "net/http",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
+      "math": "math",
       "regexp": "regexp",
       "strconv": "strconv",
       "strings": "strings",
