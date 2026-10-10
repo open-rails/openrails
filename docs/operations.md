@@ -964,7 +964,10 @@ version match the ones it was built from. A stale cache is never used.
 ## Background worker schedule
 
 Everything runs by itself under River once `run-server` (or `run-worker`) is
-up. "start" = RunOnStart.
+up. "start" = RunOnStart: the replica that takes River's leadership runs the
+job then. Only the leader schedules, and each cadence fires on the clock's
+boundaries (an hourly job at :00, a 15-minute one at :00, :15, …), so a change
+of leader neither delays nor repeats a period's run.
 
 | Worker | Cadence |
 |---|---|

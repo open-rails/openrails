@@ -21,6 +21,11 @@ func periodicRunOnStart(job *river.PeriodicJob) bool {
 	return opts != nil && opts.RunOnStart
 }
 
+func periodicSchedule(job *river.PeriodicJob) river.PeriodicSchedule {
+	v := reflect.ValueOf(job).Elem().FieldByName("scheduleFunc")
+	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Interface().(river.PeriodicSchedule)
+}
+
 func periodicArgs(job *river.PeriodicJob) (river.JobArgs, *river.InsertOpts) {
 	v := reflect.ValueOf(job).Elem().FieldByName("constructorFunc")
 	return reflect.NewAt(v.Type(), unsafe.Pointer(v.UnsafeAddr())).Elem().Interface().(river.PeriodicJobConstructor)()
@@ -69,6 +74,16 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		require.Equal(t, riverjobs.QueueBilling, opts.Queue, args.Kind())
 		require.NotZero(t, opts.UniqueOpts, "%s must coalesce overlapping ticks", args.Kind())
 		runOnStart[args.Kind()] = runOnStart[args.Kind()] || periodicRunOnStart(job)
+		// Leaders taking over at different instants of a period schedule its
+		// next run at the same boundary, where the next uniqueness bucket starts.
+		period := opts.UniqueOpts.ByPeriod
+		if period == 0 {
+			continue
+		}
+		boundary := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC).Truncate(period).Add(period)
+		for _, takeover := range []time.Time{boundary.Add(-period), boundary.Add(-period / 2), boundary.Add(-time.Nanosecond)} {
+			require.Equal(t, boundary, periodicSchedule(job).Next(takeover), "%s after a takeover at %s", args.Kind(), takeover)
+		}
 	}
 	periods := rt.workerHealthRegistrations().Snapshot()
 	require.Len(t, runOnStart, len(want))

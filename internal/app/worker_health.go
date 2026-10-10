@@ -102,5 +102,16 @@ func (r *Runtime) healthPeriodic(interval time.Duration, ctor river.PeriodicJobC
 	if args, _ := ctor(); args != nil {
 		r.workerHealthRegistrations().NotePeriod(args.Kind(), interval)
 	}
-	return river.NewPeriodicJob(river.PeriodicInterval(interval), ctor, opts)
+	return river.NewPeriodicJob(periodBoundaries(interval), ctor, opts)
+}
+
+// periodBoundaries fires at each multiple of the period on the clock, where
+// a ByPeriod uniqueness bucket starts. Only the River leader schedules, and a
+// new leader starts its schedule afresh: counted from its own start, a sweep
+// would slip by up to a period at every change of leader and never run while
+// leaders change faster than that.
+type periodBoundaries time.Duration
+
+func (p periodBoundaries) Next(t time.Time) time.Time {
+	return t.Truncate(time.Duration(p)).Add(time.Duration(p))
 }
