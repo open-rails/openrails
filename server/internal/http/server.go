@@ -12,10 +12,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/http/router"
 
-	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -32,7 +31,6 @@ import (
 type Dependencies struct {
 	Config  *config.Config
 	Runtime *app.Runtime
-	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
 	// wraps it as the best-effort global middleware (#282/#670).
 	Authenticator billingauth.SessionAuthenticator
@@ -62,7 +60,6 @@ type Server struct {
 	runtime *app.Runtime
 	// draining fails readiness while the process stops (Drain).
 	draining atomic.Bool
-	rdb      *redis.Client
 	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
 	// there is no gin auth provider any more; every surface uses this directly).
 	authenticator billingauth.SessionAuthenticator
@@ -240,14 +237,13 @@ func New(deps Dependencies) (*Server, error) {
 	s := &Server{
 		cfg:                deps.Config,
 		runtime:            deps.Runtime,
-		rdb:                deps.Redis,
 		authenticator:      deps.Authenticator,
 		controlPlane:       deps.ControlPlane,
 		issuer:             deps.Issuer,
 		resourceServer:     deps.ResourceServer,
 		consoleIssuer:      deps.ConsoleIssuer,
 		captchaStore:       deps.Runtime.CaptchaStore,
-		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis, deps.Runtime.RateWindows),
+		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
 		consoleAssets:      deps.ConsoleAssets,
 		adminConsole:       deps.AdminConsole,
 		groups:             deps.RouteGroups,
@@ -318,7 +314,7 @@ func New(deps Dependencies) (*Server, error) {
 		return merchanttarget.Resolve(ctx, r, s.runtime.Merchants, s.runtime.ConfiguredMerchant(), "")
 	})
 
-	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.rateWindows(), s.captchaStore, s.trustedProxies())
+	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	s.publicHandler = s.wrapPublicHandler(mux.Handler())
 	s.nativeRoutes = &router.Table{}
 	for _, entry := range mux.Entries {
@@ -337,13 +333,12 @@ func New(deps Dependencies) (*Server, error) {
 	return s, nil
 }
 
-// rateWindows are the runtime's PostgreSQL rate windows, nil-safe like
-// trustedProxies.
-func (s *Server) rateWindows() *ratelimit.Windows {
+// abuseState is the runtime's abuse state, nil-safe like trustedProxies.
+func (s *Server) abuseState() *abusestate.Store {
 	if s == nil || s.runtime == nil {
 		return nil
 	}
-	return s.runtime.RateWindows
+	return s.runtime.AbuseState
 }
 
 // trustedProxies returns the #746 client-IP resolver, nil-safe against a
@@ -364,7 +359,7 @@ func (s *Server) wrapPublicHandler(mux http.Handler) http.Handler {
 func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool) http.Handler {
 	limiter := s.sharedRateLimit
 	if limiter == nil {
-		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.rateWindows(), s.captchaStore, s.trustedProxies())
+		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
 	}
 	return middleware.ChainHTTP(next,
 		middleware.RecoverHTTP(),

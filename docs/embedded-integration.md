@@ -98,7 +98,7 @@ explicit:
 | Deps field | Meaning |
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
-| `Redis` | Optional shared rate limits and abuse statistics. |
+| `Redis` | Rate limits, admin lockouts and captcha challenges shared by every instance, and abuse statistics. Without it they live in each process's memory: one instance only. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
@@ -117,8 +117,8 @@ live gateway. See [operations.md](operations.md).
 
 **Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
 on checkout, card and subscription writes and webhooks (tight on checkout to
-deter card testing; every replica counts the same limits, in Redis with
-`Deps.Redis`, else in PostgreSQL). Other routes are
+deter card testing; counted in Redis with `Deps.Redis`, else in the process's
+memory, so several instances need Redis). Other routes are
 not limited: a per-address ceiling belongs to your proxy. Override the limits,
 or set `RateLimitsDisabled` if your own gateway fronts billing. See
 [rate-limiting.md](rate-limiting.md).

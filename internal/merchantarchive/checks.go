@@ -29,7 +29,7 @@ var excludedTables = map[string]string{
 	"merchant_write_posture":    "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
 	"card_attempt_failures": "card-testing telemetry",
-	"rate_windows":          "deployment-wide rate-limit windows, lockouts and captcha challenges",
+	"rate_windows":          "deployment-wide spent DPoP proofs",
 	"failed_usage_windows":  "live grace and cutoff windows; the destination counts afresh",
 	"payment_attempts":      "decline analytics, kept 25 months; money is payments and provider_intents",
 	"rebill_cycles":         "rebill analytics: expected rebills, derived from subscriptions",

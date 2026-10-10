@@ -46,8 +46,9 @@ database:
   schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
   # river_schema: billing_river # OpenRails' River jobs; defaults to the schema plus '_river'
 
-# Optional: without redis, rate limits, lockouts and captcha challenges are
-# counted in PostgreSQL, as they are while a declared Redis does not answer.
+# Rate limits, lockouts and captcha challenges, shared by every instance.
+# Without redis they live in this process's memory: run one instance only.
+# While a declared Redis does not answer, each process keeps its own.
 redis:
   addr: localhost:6380 # or url: rediss://user:password@cache.example:6380/0
   password: ""

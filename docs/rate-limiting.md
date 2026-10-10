@@ -2,9 +2,11 @@
 
 OpenRails rate-limits on a fixed 1-minute window, per *bucket* (endpoint category) and per
 *subject* (dimension). Every request is counted against each applicable subject and blocked when
-**any** trips — headers reflect the strictest. Counters live in Redis when configured, else in
-PostgreSQL (`rate_windows`), so every replica counts the same window; a Redis error counts that
-check in PostgreSQL. Admin lockouts and captcha challenges are kept the same way. One net/http middleware
+**any** trips — headers reflect the strictest. Counters, admin lockouts and captcha challenges
+live in Redis when configured, shared by every instance, and otherwise in each process's memory,
+for one instance only: several instances need Redis. While a configured Redis does not answer,
+each process keeps them in its own memory and readiness reports Redis degraded. Never in
+PostgreSQL. One net/http middleware
 (`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
 embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.
 
@@ -122,4 +124,5 @@ with `Retry-After`:
   past-due membership. The window slides: attack mode ends as declines age
   out.
 
-Redis, when configured, remains the captcha accelerator above.
+The captcha escalation above counts declines per subject too, in Redis or memory like every
+other limit.

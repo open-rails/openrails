@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -29,13 +30,16 @@ func (s *Server) UnlockAdminLockout(ctx context.Context, userID, actor string) e
 
 // metricsHandler serves /metrics: one gauge per dependency Ready reports,
 // optional ones included, from the same cached state (no provider calls),
-// and each background job kind's health.
+// the abuse state memory took while Redis did not answer, and each
+// background job kind's health.
 func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	var runtime *app.Runtime
+	var abuse *abusestate.Store
 	if s != nil {
 		runtime = s.runtime
+		abuse = s.abuseState()
 	}
 	deps, _ := runtime.Ready(ctx)
 	var workers []billing.WorkerHealth
@@ -45,10 +49,10 @@ func (s *Server) metricsHandler(w http.ResponseWriter, r *http.Request) {
 			log.WithError(err).Warn("metrics: worker health")
 		}
 	}
-	writeMetrics(w, deps, workers)
+	writeMetrics(w, deps, abuse, workers)
 }
 
-func writeMetrics(w http.ResponseWriter, deps []app.ReadinessDependency, workers []billing.WorkerHealth) {
+func writeMetrics(w http.ResponseWriter, deps []app.ReadinessDependency, abuse *abusestate.Store, workers []billing.WorkerHealth) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "# HELP openrails_dependency_up Whether a dependency is usable (1) or not (0).")
@@ -62,6 +66,11 @@ func writeMetrics(w http.ResponseWriter, deps []app.ReadinessDependency, workers
 			up = 1
 		}
 		_, _ = fmt.Fprintf(w, "openrails_dependency_up{dependency=%q,class=%q} %d\n", d.Name, class, up)
+	}
+	if abuse.UsesRedis() {
+		_, _ = fmt.Fprintln(w, "# HELP openrails_abuse_state_fallbacks_total Rate-limit, lockout and captcha operations kept in this process's memory because Redis did not answer.")
+		_, _ = fmt.Fprintln(w, "# TYPE openrails_abuse_state_fallbacks_total counter")
+		_, _ = fmt.Fprintf(w, "openrails_abuse_state_fallbacks_total %d\n", abuse.Fallbacks())
 	}
 	if len(workers) == 0 {
 		return

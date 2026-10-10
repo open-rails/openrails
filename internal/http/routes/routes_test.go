@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
@@ -199,7 +200,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(abusestate.New(nil)), Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

@@ -26,7 +26,6 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 	return server.New(server.Dependencies{
 		Config:         a.Config,
 		Runtime:        a.Runtime,
-		Redis:          a.RedisClient,
 		Authenticator:  cp.UserAuthenticator(),
 		ControlPlane:   cp,
 		Issuer:         s.Issuer,

@@ -7,23 +7,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	redis "github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
 const (
 	// TokenHeader is the request header clients use to submit a captcha response token.
 	TokenHeader = "X-Captcha-Token"
-
-	maxMemoryEntries = 10_000
 )
 
 // CardAttackModeSubject is the challenge subject set while merchantID is under
@@ -63,15 +59,11 @@ type siteVerifyVerifier struct {
 	verifyURLOverride string
 }
 
-// ChallengeStore tracks challenged subjects where every replica reads them: in
-// Redis, else in PostgreSQL. This process's memory holds only a marker
-// neither could write. One per process. Subjects are rate-limit identities
-// such as "ip:203.0.113.1" or "user:abc".
+// ChallengeStore tracks challenged subjects in the process's abuse state. One
+// per process. Subjects are rate-limit identities such as "ip:203.0.113.1" or
+// "user:abc".
 type ChallengeStore struct {
-	rdb        *redis.Client
-	windows    *ratelimit.Windows
-	mu         sync.Mutex
-	challenged map[string]time.Time
+	state *abusestate.Store
 }
 
 // NewVerifier returns a provider-neutral captcha verifier when captcha is enabled.
@@ -159,149 +151,40 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 	return result, nil
 }
 
-// NewChallengeStore creates a captcha challenge store over Redis or, without
-// it, the PostgreSQL windows.
-func NewChallengeStore(rdb *redis.Client, windows *ratelimit.Windows) *ChallengeStore {
-	return &ChallengeStore{
-		rdb:        rdb,
-		windows:    windows,
-		challenged: make(map[string]time.Time),
-	}
+// NewChallengeStore creates a captcha challenge store over state.
+func NewChallengeStore(state *abusestate.Store) *ChallengeStore {
+	return &ChallengeStore{state: state}
 }
 
 // IsChallenged reports whether subject currently requires captcha solving.
-func (s *ChallengeStore) IsChallenged(ctx context.Context, subject string) (bool, error) {
-	return s.exists(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged)
+func (s *ChallengeStore) IsChallenged(ctx context.Context, subject string) bool {
+	return s != nil && s.state.Held(ctx, challengeKey(subject)) > 0
 }
 
-// MarkChallenged records that subject must solve captcha.
-func (s *ChallengeStore) MarkChallenged(ctx context.Context, subject string, ttl time.Duration) error {
-	return s.set(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged, ttl)
-}
-
-// ClearChallenged removes the captcha challenge marker for subject.
-func (s *ChallengeStore) ClearChallenged(ctx context.Context, subject string) error {
-	return s.del(ctx, s.challengeRedisKey(subject), s.memoryKey(subject), s.challenged)
-}
-
-func (s *ChallengeStore) exists(ctx context.Context, redisKey, memoryKey string, memory map[string]time.Time) (bool, error) {
+// MarkChallenged records that subject must solve captcha for ttl (15 minutes
+// when not positive).
+func (s *ChallengeStore) MarkChallenged(ctx context.Context, subject string, ttl time.Duration) {
 	if s == nil {
-		return false, nil
-	}
-	answered := false
-	if s.rdb != nil {
-		n, err := s.rdb.Exists(ctx, redisKey).Result()
-		if err == nil && n > 0 {
-			return true, nil
-		}
-		answered = err == nil
-		if err != nil {
-			log.WithError(err).Warn("captcha Redis lookup failed; reading PostgreSQL")
-		}
-	}
-	if !answered && s.windows != nil {
-		_, live, err := s.windows.Live(ctx, redisKey)
-		if live {
-			return true, nil
-		}
-		if err != nil {
-			log.WithError(err).Error("captcha PostgreSQL lookup failed; reading this process only")
-		}
-	}
-	// A marker neither store could write is in this process's memory.
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	expiresAt, ok := memory[memoryKey]
-	if !ok {
-		return false, nil
-	}
-	if time.Now().After(expiresAt) {
-		delete(memory, memoryKey)
-		return false, nil
-	}
-	return true, nil
-}
-
-func (s *ChallengeStore) set(ctx context.Context, redisKey, memoryKey string, memory map[string]time.Time, ttl time.Duration) error {
-	if s == nil {
-		return nil
+		return
 	}
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	// Memory is only the fallback for a shared write that failed: a marker
-	// kept in memory as well would outlive a solve on another replica.
-	if s.rdb != nil {
-		err := s.rdb.Set(ctx, redisKey, "1", ttl).Err()
-		if err == nil {
-			return nil
-		}
-		log.WithError(err).Warn("captcha Redis set failed; writing PostgreSQL")
-	}
-	if s.windows != nil {
-		err := s.windows.Mark(ctx, redisKey, time.Now().Add(ttl))
-		if err == nil {
-			return nil
-		}
-		log.WithError(err).Error("captcha PostgreSQL write failed; this process only holds the challenge")
-	}
-	now := time.Now()
-	s.mu.Lock()
-	s.pruneLocked(memory, now)
-	memory[memoryKey] = now.Add(ttl)
-	s.mu.Unlock()
-	return nil
+	s.state.Hold(ctx, challengeKey(subject), ttl)
 }
 
-func (s *ChallengeStore) del(ctx context.Context, redisKey, memoryKey string, memory map[string]time.Time) error {
+// ClearChallenged removes the captcha challenge marker for subject.
+func (s *ChallengeStore) ClearChallenged(ctx context.Context, subject string) {
 	if s == nil {
-		return nil
+		return
 	}
-	if s.rdb != nil {
-		if err := s.rdb.Del(ctx, redisKey).Err(); err != nil {
-			log.WithError(err).Warn("captcha redis delete failed")
-		}
+	if err := s.state.Release(ctx, challengeKey(subject)); err != nil {
+		log.WithError(err).WithField("subject", subject).Warn("captcha: the challenge is cleared in this process only")
 	}
-	if s.windows != nil {
-		if err := s.windows.Clear(ctx, redisKey); err != nil {
-			log.WithError(err).Warn("captcha PostgreSQL delete failed")
-		}
-	}
-	s.mu.Lock()
-	delete(memory, memoryKey)
-	s.mu.Unlock()
-	return nil
 }
 
-func (s *ChallengeStore) challengeRedisKey(subject string) string {
+func challengeKey(subject string) string {
 	return "captcha:challenge:" + subject
-}
-
-func (s *ChallengeStore) memoryKey(subject string) string {
-	return subject
-}
-
-func (s *ChallengeStore) pruneLocked(memory map[string]time.Time, now time.Time) {
-	for key, expiresAt := range memory {
-		if now.After(expiresAt) {
-			delete(memory, key)
-		}
-	}
-	for len(memory) >= maxMemoryEntries {
-		var oldestKey string
-		var oldest time.Time
-		for key, expiresAt := range memory {
-			if oldestKey == "" || expiresAt.Before(oldest) {
-				oldestKey = key
-				oldest = expiresAt
-			}
-		}
-		if oldestKey == "" {
-			return
-		}
-		delete(memory, oldestKey)
-	}
 }
 
 // ShouldApply reports whether captcha escalation is enabled for a rate-limit bucket.

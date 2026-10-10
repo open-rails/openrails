@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -41,9 +42,9 @@ func captchaServer(provider string, store *captcha.ChallengeStore) *Server {
 // Captcha discovery is mounted under each surface prefix, reports a pending
 // challenge for the caller's address or user, and never serves the secret.
 func TestCaptchaDiscoveryRoutes(t *testing.T) {
-	store := captcha.NewChallengeStore(nil, nil)
-	require.NoError(t, store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute))
-	require.NoError(t, store.MarkChallenged(context.Background(), "user:user_1", time.Minute))
+	store := captcha.NewChallengeStore(abusestate.New(nil))
+	store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute)
+	store.MarkChallenged(context.Background(), "user:user_1", time.Minute)
 
 	status := func(s *Server, prefix, remote, user string) string {
 		mux := http.NewServeMux()

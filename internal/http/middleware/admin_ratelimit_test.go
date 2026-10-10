@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/request"
 )
@@ -21,8 +22,9 @@ import (
 const adminUser = "11111111-1111-1111-1111-111111111111"
 
 func testAdminLimiter(now *time.Time) (*AdminOperationLimiter, *[]AdminRateLimitEvent) {
-	l := NewAdminOperationLimiter(nil, nil)
-	l.now = func() time.Time { return *now }
+	state := abusestate.New(nil)
+	state.SetClock(func() time.Time { return *now })
+	l := NewAdminOperationLimiter(state)
 	var events []AdminRateLimitEvent
 	l.sink = func(_ context.Context, e AdminRateLimitEvent) { events = append(events, e) }
 	return l, &events

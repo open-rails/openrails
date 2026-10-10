@@ -21,6 +21,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -301,17 +302,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	})
 
 	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
-	// It needs Redis and a captcha to solve; nil (safe no-op) otherwise, and
-	// the ledger's blocks are the whole policy.
-	rateWindows := ratelimit.NewWindows(database)
-	captchaStore := captcha.NewChallengeStore(redisClient, rateWindows)
+	// It needs a captcha to solve; nil (safe no-op) otherwise, and the
+	// ledger's blocks are the whole policy.
+	abuseState := abusestate.New(redisClient)
+	captchaStore := captcha.NewChallengeStore(abuseState)
 	var cardAbuseGuard *abuse.CardAbuseGuard
-	if redisClient != nil && config.CaptchaEnabled(cfg.Captcha) {
-		cardAbuseGuard = abuse.NewCardAbuseGuard(
-			ratelimit.NewLimiter(redisClient),
-			captchaStore,
-			abuse.DefaultCardAbuseConfig(),
-		)
+	if config.CaptchaEnabled(cfg.Captcha) {
+		cardAbuseGuard = abuse.NewCardAbuseGuard(abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
 	}
 
 	// SEC-30: the durable card-testing ledger works on every replica, Redis or not.
@@ -368,8 +365,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Orders:                 orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
 		Idempotency:            serviceInstances.Idempotency,
 		CardAbuseGuard:         cardAbuseGuard,
+		AbuseState:             abuseState,
 		CaptchaStore:           captchaStore,
-		RateWindows:            rateWindows,
+		RateWindows:            ratelimit.NewWindows(database),
 		CardFailureLedger:      cardFailureLedger,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,

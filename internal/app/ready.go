@@ -2,11 +2,8 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/retry"
 )
@@ -70,14 +67,10 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		add("river_consumer", false, consumerErr)
 	}
 
-	// A declared Redis that does not answer is degraded: requests count in
-	// PostgreSQL meanwhile.
-	if r.RedisClient != nil {
-		redisErr := errors.New("not reached yet")
-		if observed, err := r.redisState.observed(); observed {
-			redisErr = err
-		}
-		add("redis", true, redisErr)
+	// A declared Redis that does not answer is degraded: abuse state is in
+	// this process's memory meanwhile.
+	if r.AbuseState.UsesRedis() {
+		add("redis", true, r.AbuseState.RedisErr())
 	}
 	if r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil {
 		add("vault", true, r.MerchantSecretBackend.State())
@@ -115,28 +108,22 @@ func (r *Runtime) PostureState() error {
 	return r.postureState()
 }
 
-// startRedisMonitor observes optional Redis health without delaying startup.
-// The runtime owns the probe loop and waits for it to stop before closing Redis.
+// startRedisMonitor observes optional Redis health without delaying startup:
+// a request that finds Redis failing leaves it for memory, and this loop
+// hears it answer again. The runtime waits for it to stop before closing
+// Redis.
 func (r *Runtime) startRedisMonitor() {
-	if r.RedisClient == nil {
+	if !r.AbuseState.UsesRedis() {
 		return
 	}
 	r.Go("redis health", func(ctx context.Context) {
 		for attempt := 0; ; {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			err := r.RedisClient.Ping(pingCtx).Err()
+			err := r.AbuseState.Probe(pingCtx)
 			cancel()
 			if ctx.Err() != nil {
 				return
 			}
-			if before, prev := r.redisState.observed(); !before || (prev == nil) != (err == nil) {
-				if err != nil {
-					log.WithError(err).Error("redis: unreachable; counting in PostgreSQL until it answers")
-				} else {
-					log.Info("redis: reachable")
-				}
-			}
-			r.redisState.record(err)
 			wait := 10 * time.Second
 			if err != nil {
 				wait = retry.Backoff(attempt, retry.Base, retry.Max)

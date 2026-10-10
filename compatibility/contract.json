@@ -1637,10 +1637,6 @@
       "type HyperSwitchBinding struct {\n\tAccountID  string `json:\"account_id\"`\n\tProfileID  string `json:\"profile_id\"`\n\tAPIBaseURL string `json:\"api_base_url\"`\n}",
       "type Mandate struct {\n\tID   uuid.UUID `json:\"id\"`\n\tKind Agreement `json:\"kind\"`\n\n\tInitialTransactionID string `json:\"initial_transaction_id\"`\n\tNetworkTransactionID string `json:\"network_transaction_id,omitempty\"`\n\tTransactionLinkID    string `json:\"transaction_link_id,omitempty\"`\n}"
     ],
-    "internal/modules/ratelimit": [
-      "type Decision struct {\n\tAllowed     bool         `json:\"allowed\"`\n\tBlockedUnit string       `json:\"blocked_unit,omitempty\"`\n\tWindows     []WindowInfo `json:\"windows\"`\n}",
-      "type WindowInfo struct {\n\tUnit       string        `json:\"unit\"`\n\tLimit      int64         `json:\"limit\"`\n\tRemaining  int64         `json:\"remaining\"`\n\tResetAfter time.Duration `json:\"reset_after\"`\n}"
-    ],
     "internal/modules/solana/recurring": [
       "type solanaSignerConfig struct {\n\tMode string `json:\"mode\"`\n\tKey  string `json:\"key\"`\n}"
     ],
@@ -3774,12 +3770,6 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "url": "net/url"
-    },
-    "internal/modules/ratelimit/limiter.go": {
-      "context": "context",
-      "fmt": "fmt",
-      "time": "time",
-      "v9": "github.com/redis/go-redis/v9"
     },
     "internal/modules/solana/recurring/wiring.go": {
       "billing": "github.com/open-rails/openrails/billing",

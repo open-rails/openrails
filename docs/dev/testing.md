@@ -28,7 +28,7 @@ modules once (tags
 `OPENRAILS_E2E_JOBS` at a time, longest first. CI splits the suite across
 `OPENRAILS_E2E_WORKERS` runners by the durations in `ci/e2e-durations.tsv`,
 keyed by package directory; a test missing from it counts as the median. Redis is needed by the
-card-attack captcha test only.
+tests of several instances sharing limits and the card-attack captcha tests.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
   catalog and merchant isolation, checkout sessions and attempts, signed

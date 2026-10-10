@@ -332,7 +332,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // a router rooted at /v1.
 func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
-		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient, rt.RateWindows)
+		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.AbuseState)
 	}
 	any := opts.Permissions != (Permissions{})
 	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) || any && r.Group == Access })

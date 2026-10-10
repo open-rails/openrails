@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	redis "github.com/redis/go-redis/v9"
-
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
@@ -17,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -30,14 +28,12 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	// after this outer chain — exactly like the standalone self surface.
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
-	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
 	var store *captcha.ChallengeStore
-	var windows *ratelimit.Windows
+	var state *abusestate.Store
 	if rt != nil {
-		rdb = rt.RedisClient
 		store = rt.CaptchaStore
-		windows = rt.RateWindows
+		state = rt.AbuseState
 		resolver = rt.TrustedProxies
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
@@ -47,7 +43,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	for i := range mux.Entries {
 		mux.Entries[i].Browser = true
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, windows, store, resolver)
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, state, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		return middleware.ChainHTTP(entry.Handler,
 			middleware.WithRoutePath(embeddedMount+entry.Path),

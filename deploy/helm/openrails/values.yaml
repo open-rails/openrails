@@ -3,8 +3,9 @@
 # walkthrough.
 
 # Every pod serves the API and runs the workers. More than one needs Redis
-# (config.redis) for AuthKit's rate limits and DPoP proofs, and its keys from
-# secrets.authKeys.
+# (config.redis), which shares rate limits, admin lockouts, captcha challenges
+# and spent DPoP proofs (without it each pod keeps its own), and AuthKit's keys
+# from secrets.authKeys.
 replicaCount: 1
 
 image:

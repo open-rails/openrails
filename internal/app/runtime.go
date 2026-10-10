@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
 
@@ -68,8 +69,6 @@ type Runtime struct {
 	// background owns goroutines that reconnect optional providers; Close
 	// stops them first.
 	background backgroundTasks
-	// redisState is the latest background Redis health observation.
-	redisState dependencyState
 	// signerIdentity records a Vault Transit key that no longer matches its
 	// stored Solana identity.
 	signerIdentity dependencyState
@@ -252,13 +251,17 @@ type Runtime struct {
 
 	// CardAbuseGuard escalates repeated card-charge failures to a captcha, and
 	// to a captcha for everyone while the ledger reports an attack (#371). Nil
-	// without Redis or a captcha (safe no-op).
+	// without a captcha (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
+	// AbuseState is the process's one store of rate-limit windows, admin
+	// lockouts, captcha challenges and spent DPoP proofs: in Redis, else in
+	// memory.
+	AbuseState *abusestate.Store
 	// CaptchaStore is the process's one captcha challenge store, shared by the
 	// card-abuse guard and every HTTP surface so a solve clears it everywhere.
 	CaptchaStore *captcha.ChallengeStore
-	// RateWindows are the rate-limit windows, admin lockouts and captcha
-	// challenges in PostgreSQL that replicas share without Redis.
+	// RateWindows are the standalone resource server's spent DPoP proofs, in
+	// PostgreSQL.
 	RateWindows *ratelimit.Windows
 	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
 	// enforced on every replica.

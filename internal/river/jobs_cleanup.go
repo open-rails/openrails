@@ -235,8 +235,8 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		}
 	}
 
-	// Expired rate-limit windows, lockouts and captcha challenges: indexed,
-	// bounded deletes like the sessions above.
+	// Expired spent DPoP proofs: indexed, bounded deletes like the sessions
+	// above.
 	windows := ratelimit.NewWindows(w.DB)
 	for range cleanupCheckoutSessionMaxBatches {
 		n, err := windows.Prune(ctx, cleanupDeleteBatch)

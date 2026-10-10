@@ -174,18 +174,20 @@ its URL, with `sslmode=verify-full` across a network.
 
 ## Redis
 
-Redis or [Garnet](https://github.com/microsoft/garnet) is optional and has no
-default. Without it, OpenRails counts its rate limits, admin lockouts and
-captcha challenges in Postgres, shared by every replica. AuthKit's rate limits
-and spent DPoP proofs are kept in Redis, or without it in each pod's memory,
-so more than one replica needs Redis. Nothing in Redis needs a backup.
+Redis or [Garnet](https://github.com/microsoft/garnet) has no default, and one
+replica runs without it. OpenRails' rate limits, admin lockouts and captcha
+challenges and AuthKit's rate limits and spent DPoP proofs are kept in Redis,
+shared by every replica, or without it in each pod's memory, so more than one
+replica needs Redis. None of it is in Postgres. Nothing in Redis needs a backup.
 
 Name it with `redis.addr` (`REDIS_ADDR`) or a `redis://` or `rediss://` URL
 (`REDIS_URL`). `redis.username` (`REDIS_USERNAME`) is an ACL user. TLS comes
 from a `rediss://` URL or `redis.tls` (`REDIS_TLS`), and verifies the server
 against the system roots or `redis.ca_cert` (`REDIS_CA_CERT`, a PEM bundle). A
 declared Redis with invalid settings refuses boot. While it does not answer,
-requests count in Postgres, `/metrics` and the error log report it, and
+each pod keeps its limits in its own memory, `/metrics`
+(`openrails_dependency_up{dependency="redis"}`,
+`openrails_abuse_state_fallbacks_total`) and the error log report it, and
 readiness stays green. Credentials and the CA go in `secrets.files`:
 
 ```bash
@@ -235,7 +237,8 @@ Prometheus Operator.
 
 `replicaCount` is 1. More replicas share the database and need:
 
-- Redis for AuthKit's rate limits and spent DPoP proofs, which each pod
+- Redis (`config.redis`) for OpenRails' rate limits, admin lockouts and captcha
+  challenges and AuthKit's rate limits and spent DPoP proofs, which each pod
   otherwise keeps on its own;
 - AuthKit's keys from `secrets.authKeys`: an ephemeral signing key is per pod,
   so a token one pod signs fails on the others. Everything else in `secrets`

@@ -75,25 +75,28 @@ completion rules and limits. CCBill and Solana retain their existing controls.
 
 Several instances can serve one billing book: replicas of a host app that each
 call `openrails.New` and `Start` (embedded), or several `openrails run-server`
-and `run-worker` processes (standalone). They need nothing from each other but
-the database: there is no instance count to configure, no primary instance and
-no sticky session. `TestInstancesShareOneDatabase`, `TestServersShareOneDatabase`
-and the `TestReplicas` suites run several instances on one database.
+and `run-worker` processes (standalone). They need the database and Redis, and
+nothing from each other: there is no instance count to configure, no primary
+instance and no sticky session. Without Redis, run one instance.
+`TestInstancesShareOneDatabase`, `TestServersShareOneDatabase` and the
+`TestReplicas` suites run several instances on one database.
 
 ### What they share
 
 - **PostgreSQL**, one writable primary (above): every record, River's queue and
   its leader election (in the River schema), request idempotency claims,
   webhook deduplication, provider intents, and the locks that admit a charge.
-- **Redis**, optional at any scale and never assumed: an instance uses one only
-  when `Config.Redis` (an address or a `redis://` or `rediss://` URL, with an
-  ACL user and TLS as needed) or `Deps.Redis` names it. With it, rate-limit
-  windows, admin lockouts and captcha challenges are counted there; without it
-  they are counted in PostgreSQL, once for the whole fleet either way. A
-  declared Redis that stops answering costs speed, not correctness: requests
-  count in PostgreSQL meanwhile and readiness reports it degraded without
-  failing. Only Redis carries the card-abuse captcha accelerator and the
-  admission-denial statistics.
+- **Redis**, named by `Config.Redis` (an address or a `redis://` or `rediss://`
+  URL, with an ACL user and TLS as needed) or `Deps.Redis`. Rate-limit windows,
+  admin lockouts and captcha challenges are counted there, once for the whole
+  fleet. Without Redis they live in each process's memory, which is right for
+  one instance only: several would each allow the full limit, and a lockout or
+  challenge set on one would not hold on another. They are never in
+  PostgreSQL. A declared Redis that stops answering costs sharing, not service:
+  each instance keeps them in its own memory meanwhile, logs an error,
+  counts `openrails_abuse_state_fallbacks_total` and reports Redis degraded in
+  readiness without failing it. Redis also carries the admission-denial
+  statistics.
 - The standalone server's AuthKit counts its rate limits and records spent
   DPoP proofs in Redis, or without it in the process's memory: several
   instances need Redis. While a declared Redis fails, each instance keeps its

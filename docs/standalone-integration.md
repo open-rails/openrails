@@ -44,14 +44,15 @@ there is no separate private/service listener.
   ahead of a rollout. Name it with `db.url` (`DB_URL`), or with `db.host`,
   `db.port`, `db.database` and `db.username` (`db.sslmode` defaults to
   `require`). There is no default: without one the server refuses to start.
-- **A Redis-compatible service** (we recommend Garnet) — optional. Without
-  one, rate limits, admin lockouts and captcha challenges are counted in
-  PostgreSQL, shared by every replica. Name it with `redis.addr` (`REDIS_ADDR`)
+- **A Redis-compatible service** (we recommend Garnet) — optional for one
+  instance, required for several. It holds rate limits, admin lockouts and
+  captcha challenges, shared by every instance; without it they live in the
+  process's memory. Name it with `redis.addr` (`REDIS_ADDR`)
   or a `redis://` / `rediss://` URL (`REDIS_URL`), with `redis.username`
   (`REDIS_USERNAME`, an ACL user), `redis.password`, `redis.tls` and
   `redis.ca_cert` (`REDIS_CA_CERT`, the PEM CA) as it needs. While a declared
-  Redis does not answer, requests count in PostgreSQL and readiness reports it
-  degraded without failing.
+  Redis does not answer, each process keeps them in its own memory and
+  readiness reports Redis degraded without failing.
 - **HashiCorp Vault** — optional. Two independent uses: KV storage for merchant
   secrets (`secret_backend: vault`) and Transit signing for Solana custody. See
   [vault.md](vault.md).

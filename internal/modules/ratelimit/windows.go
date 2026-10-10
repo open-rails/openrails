@@ -8,9 +8,9 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Windows keeps rate-limit windows, lockouts and captcha challenges in
-// PostgreSQL (billing.rate_windows), keyed as in Redis, so replicas without
-// Redis count the same ones. Redis, when configured, stays the fast path.
+// Windows keeps the standalone resource server's spent DPoP proofs in
+// PostgreSQL (billing.rate_windows). Rate limits, lockouts and captcha
+// challenges are abusestate's, never here.
 type Windows struct{ db *db.DB }
 
 // NewWindows is the store over d; nil without a database.
@@ -26,28 +26,6 @@ func NewWindows(d *db.DB) *Windows {
 func (w *Windows) Hit(ctx context.Context, key string, n int64, end time.Time) (int64, time.Time, error) {
 	row, err := w.db.GenDirectory().HitRateWindow(ctx, gen.HitRateWindowParams{Key: key, Hits: n, ExpiresAt: end})
 	return row.Hits, row.ExpiresAt, err
-}
-
-// Mark holds key until until.
-func (w *Windows) Mark(ctx context.Context, key string, until time.Time) error {
-	return w.db.GenDirectory().MarkRateWindow(ctx, gen.MarkRateWindowParams{Key: key, ExpiresAt: until})
-}
-
-// Live reports whether key is held, and until when.
-func (w *Windows) Live(ctx context.Context, key string) (time.Time, bool, error) {
-	until, err := w.db.GenDirectory().LiveRateWindow(ctx, key)
-	if db.IsNotFound(err) {
-		return time.Time{}, false, nil
-	}
-	return until, err == nil, err
-}
-
-// Clear deletes keys.
-func (w *Windows) Clear(ctx context.Context, keys ...string) error {
-	if len(keys) == 0 {
-		return nil
-	}
-	return w.db.GenDirectory().ClearRateWindows(ctx, keys)
 }
 
 // Prune deletes up to limit expired keys and returns how many it deleted.

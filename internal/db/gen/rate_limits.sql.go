@@ -10,15 +10,6 @@ import (
 	"time"
 )
 
-const clearRateWindows = `-- name: ClearRateWindows :exec
-DELETE FROM billing.rate_windows WHERE key = ANY($1::text[])
-`
-
-func (q *Queries) ClearRateWindows(ctx context.Context, keys []string) error {
-	_, err := q.db.Exec(ctx, clearRateWindows, keys)
-	return err
-}
-
 const hitRateWindow = `-- name: HitRateWindow :one
 INSERT INTO billing.rate_windows (key, hits, expires_at)
 VALUES ($1::text, $2::bigint, $3::timestamptz)
@@ -46,36 +37,6 @@ func (q *Queries) HitRateWindow(ctx context.Context, arg HitRateWindowParams) (H
 	var i HitRateWindowRow
 	err := row.Scan(&i.Hits, &i.ExpiresAt)
 	return i, err
-}
-
-const liveRateWindow = `-- name: LiveRateWindow :one
-SELECT expires_at FROM billing.rate_windows
-WHERE key = $1::text AND expires_at > now()
-`
-
-// When a live key ends; no row when it is not held.
-func (q *Queries) LiveRateWindow(ctx context.Context, key string) (time.Time, error) {
-	row := q.db.QueryRow(ctx, liveRateWindow, key)
-	var expires_at time.Time
-	err := row.Scan(&expires_at)
-	return expires_at, err
-}
-
-const markRateWindow = `-- name: MarkRateWindow :exec
-INSERT INTO billing.rate_windows (key, hits, expires_at)
-VALUES ($1::text, 1, $2::timestamptz)
-ON CONFLICT (key) DO UPDATE SET hits = 1, expires_at = EXCLUDED.expires_at
-`
-
-type MarkRateWindowParams struct {
-	Key       string
-	ExpiresAt time.Time
-}
-
-// Holds key until expires_at: a lockout or a captcha challenge.
-func (q *Queries) MarkRateWindow(ctx context.Context, arg MarkRateWindowParams) error {
-	_, err := q.db.Exec(ctx, markRateWindow, arg.Key, arg.ExpiresAt)
-	return err
 }
 
 const pruneRateWindows = `-- name: PruneRateWindows :execrows

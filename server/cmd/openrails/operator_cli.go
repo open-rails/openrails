@@ -243,7 +243,7 @@ func newAdminLockoutsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "admin-lockouts", Short: "Administrators locked out of administrative operations"}
 	cmd.AddCommand(&cobra.Command{
 		Use:   "unlock <user-id>",
-		Short: "End a person's lockout and reset their operation counters, on every replica",
+		Short: "End a person's lockout and reset their operation counters (needs Redis: without it a lockout lives in the serving process)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if _, err := uuid.Parse(strings.TrimSpace(args[0])); err != nil {

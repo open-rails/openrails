@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 )
 
 // CardAbuseConfig tunes the failure-driven captcha/block escalation. Each
@@ -69,49 +69,35 @@ func DefaultCardAbuseConfig() CardAbuseConfig {
 
 // CardAbuseGuard is the captcha accelerator over the durable FailureLedger: it
 // captchas abusive subjects and, while the ledger reports an attack, everyone
-// on that merchant's card routes. It is built only when Redis and a captcha are
+// on that merchant's card routes. It is built only when a captcha is
 // configured; otherwise the ledger's blocks are the whole policy.
 type CardAbuseGuard struct {
-	lim        *ratelimit.Limiter
+	state      *abusestate.Store
 	challenges *captcha.ChallengeStore
 	cfg        CardAbuseConfig
 }
 
-// NewCardAbuseGuard builds the guard; a nil lim or challenges makes it a no-op.
-// cfg is used verbatim, with no zero-value defaulting.
-func NewCardAbuseGuard(lim *ratelimit.Limiter, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
-	return &CardAbuseGuard{lim: lim, challenges: challenges, cfg: cfg}
+// NewCardAbuseGuard builds the guard; a nil state or challenges makes it a
+// no-op. cfg is used verbatim, with no zero-value defaulting.
+func NewCardAbuseGuard(state *abusestate.Store, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
+	return &CardAbuseGuard{state: state, challenges: challenges, cfg: cfg}
 }
 
 func (g *CardAbuseGuard) enabled() bool {
-	return g != nil && g.lim != nil && g.challenges != nil
+	return g != nil && g.state != nil && g.challenges != nil
 }
 
-// countFailure counts one failure in (key, unit)'s window, capped at max, and
-// returns the window's count; unit keeps co-existing windows' keys apart. Each
-// window gets its own Check: the limiter is all-or-nothing across a Policy's
-// windows, so a tripped burst window would stop the daily counter.
-func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, window time.Duration, max int64) (int64, error) {
-	dec, err := g.lim.Check(ctx, "card_fail:"+key,
-		ratelimit.Policy{Windows: []ratelimit.Limit{{Unit: unit, Window: window, Max: max}}},
-		map[string]int64{unit: 1})
-	if err != nil {
-		return 0, err
-	}
-	if len(dec.Windows) == 0 {
-		return 0, nil
-	}
-	count := max - dec.Windows[0].Remaining
-	if count < 0 {
-		count = 0
-	}
-	return count, nil
+// countFailure counts one failure in key's window of unit and returns the
+// window's count; unit keeps co-existing windows' keys apart.
+func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, window time.Duration) int64 {
+	count, _ := g.state.Count(ctx, "card_fail:"+key+":"+unit, 1, window)
+	return count
 }
 
 // RecordChargeFailure counts one failed card attempt for each captcha subject
 // (middleware.SubjectKeysFromContext, the subjects RateLimitHTTP pinned) and
 // escalates it. attack, the ledger's verdict, (re)opens the merchant's attack
-// captcha for AttackTTL. Best-effort: errors are logged, never returned.
+// captcha for AttackTTL.
 func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uuid.UUID, subjectKeys []string, attack bool) {
 	if !g.enabled() {
 		return
@@ -122,47 +108,27 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 		}
 
 		// Daily window first, so it keeps counting after the burst window blocks.
-		dailyCount, err := g.countFailure(ctx, key, "fail_day", g.cfg.DailyWindow, g.cfg.DailyBlockAfter)
-		if err != nil {
-			log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to record daily charge failure")
-		} else if dailyCount >= g.cfg.DailyBlockAfter {
-			if err := g.challenges.MarkChallenged(ctx, key, g.cfg.DailyBlockTTL); err != nil {
-				log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to block subject for the day")
-			} else {
-				log.WithFields(log.Fields{"subject": key, "failures": dailyCount}).Warn("card-abuse: subject blocked for the day after repeated card failures")
-			}
+		if daily := g.countFailure(ctx, key, "fail_day", g.cfg.DailyWindow); daily >= g.cfg.DailyBlockAfter {
+			g.challenges.MarkChallenged(ctx, key, g.cfg.DailyBlockTTL)
+			log.WithFields(log.Fields{"subject": key, "failures": daily}).Warn("card-abuse: subject blocked for the day after repeated card failures")
 		}
 
 		// Burst window (15 min): CaptchaAfter -> captcha, BlockAfter -> block for
 		// the remainder of the window.
-		count, err := g.countFailure(ctx, key, "fail", g.cfg.FailWindow, g.cfg.BlockAfter)
-		if err != nil {
-			log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to record charge failure")
-			continue
-		}
+		count := g.countFailure(ctx, key, "fail", g.cfg.FailWindow)
 		switch {
 		case count >= g.cfg.BlockAfter:
-			if err := g.challenges.MarkChallenged(ctx, key, g.cfg.BlockTTL); err != nil {
-				log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to block subject")
-			} else {
-				log.WithFields(log.Fields{"subject": key, "failures": count}).Warn("card-abuse: subject blocked (aggressive captcha) after repeated card failures")
-			}
+			g.challenges.MarkChallenged(ctx, key, g.cfg.BlockTTL)
+			log.WithFields(log.Fields{"subject": key, "failures": count}).Warn("card-abuse: subject blocked (aggressive captcha) after repeated card failures")
 		case count >= g.cfg.CaptchaAfter:
-			if err := g.challenges.MarkChallenged(ctx, key, g.cfg.ChallengeTTL); err != nil {
-				log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to challenge subject")
-			} else {
-				log.WithFields(log.Fields{"subject": key, "failures": count}).Info("card-abuse: subject captcha-challenged after repeated card failures")
-			}
+			g.challenges.MarkChallenged(ctx, key, g.cfg.ChallengeTTL)
+			log.WithFields(log.Fields{"subject": key, "failures": count}).Info("card-abuse: subject captcha-challenged after repeated card failures")
 		}
 	}
 
 	if !attack || merchantID == uuid.Nil {
 		return
 	}
-	fields := log.Fields{"merchant_id": merchantID}
-	if err := g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL); err != nil {
-		log.WithError(err).WithFields(fields).Warn("card-abuse: failed to enable attack mode")
-	} else {
-		log.WithFields(fields).Warn("card-abuse: attack mode — captcha required on this merchant's card routes")
-	}
+	g.challenges.MarkChallenged(ctx, captcha.CardAttackModeSubject(merchantID), g.cfg.AttackTTL)
+	log.WithField("merchant_id", merchantID).Warn("card-abuse: attack mode — captcha required on this merchant's card routes")
 }

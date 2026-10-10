@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 )
 
@@ -19,11 +21,16 @@ import (
 func TestStandaloneMetrics(t *testing.T) {
 	rec := httptest.NewRecorder()
 	succeeded := time.Unix(1_700_000_000, 0)
+	down := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1})
+	t.Cleanup(func() { _ = down.Close() })
+	abuse := abusestate.New(down)
+	abuse.Hold(t.Context(), "lock", time.Minute)
+	abuse.Hold(t.Context(), "lock", time.Minute)
 	writeMetrics(rec, []app.ReadinessDependency{
 		{Name: "postgres", Available: true},
 		{Name: "redis", Optional: true, Err: errors.New("down")},
 		{Name: "vault", Optional: true, Available: true},
-	}, []billing.WorkerHealth{
+	}, abuse, []billing.WorkerHealth{
 		{WorkerKind: "invoice_sweep", LastSuccessAt: &succeeded},
 		{WorkerKind: "renewals", ConsecutiveFailures: 3},
 	})
@@ -34,6 +41,7 @@ func TestStandaloneMetrics(t *testing.T) {
 	require.Contains(t, body, `openrails_dependency_up{dependency="postgres",class="required"} 1`)
 	require.Contains(t, body, `openrails_dependency_up{dependency="redis",class="optional"} 0`)
 	require.Contains(t, body, `openrails_dependency_up{dependency="vault",class="optional"} 1`)
+	require.Contains(t, body, "openrails_abuse_state_fallbacks_total 2")
 	require.Contains(t, body, `openrails_worker_consecutive_failures{kind="renewals"} 3`)
 	require.Contains(t, body, `openrails_worker_last_success_timestamp_seconds{kind="invoice_sweep"} 1700000000`)
 	require.NotContains(t, body, `openrails_worker_last_success_timestamp_seconds{kind="renewals"}`)

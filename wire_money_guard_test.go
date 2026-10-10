@@ -92,8 +92,6 @@ var pendingNumericMoney = map[string]string{
 	"billing/metrics.go:MetricsQuery.Limit limit":                                                                            notMoneyPageSize,
 	"billing/metrics.go:MetricsLimits.MaxLimit max_limit":                                                                    notMoneyPageSize,
 	"internal/modules/money/invoice_profile.go:CustomerInvoiceProfile.Tax tax":                                               notMoneyTaxFacts,
-	"internal/modules/ratelimit/limiter.go:WindowInfo.Limit limit":                                                           notMoneyCount,
-	"internal/modules/ratelimit/limiter.go:WindowInfo.Remaining remaining":                                                   notMoneyCount,
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.Amount amount":                               notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountRefunded amount_refunded":              notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":              notHTTPProviderWire,

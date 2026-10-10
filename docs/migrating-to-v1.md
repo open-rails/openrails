@@ -501,7 +501,7 @@ Metrics questions, catalog questions/drafting and dashboard widget generation
 use the normal configurable HTTP feature buckets described in
 [rate limiting](rate-limiting.md). The former separate per-merchant AI daily quota
 is removed. Standalone and embedded HTTP use the same counters (Redis, else
-PostgreSQL); trusted in-process Client operations retain their normal boundary.
+the process's memory); trusted in-process Client operations retain their normal boundary.
 
 Merchant billing archives use the single current format, v1, and preserve arbitrary
 application metadata. Regenerate artifacts from discarded draft formats; see
