@@ -20,10 +20,16 @@ func (c *customer) change(sub billing.SubscriptionID, params billing.ChangeSubsc
 	return c.changeAt(c.w.server.URL, sub, params)
 }
 
-// changeAt is change through the server at base.
+// changeAt is change through the server at base. A processing answer whose
+// charge River's executor is still running is replayed once it finishes.
 func (c *customer) changeAt(base string, sub billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error) {
 	var out billing.SubscriptionChange
-	return &out, c.changeCall(base, "/subscriptions/"+sub.String()+"/change", params.IdempotencyKey, params, &out)
+	err := c.changeCall(base, "/subscriptions/"+sub.String()+"/change", params.IdempotencyKey, params, &out)
+	if err == nil && out.Status == "processing" && params.IdempotencyKey != "" && !out.OperationID.IsZero() && c.w.awaitExecutor(`i.id = $1`, out.OperationID.UUID()) {
+		out = billing.SubscriptionChange{}
+		err = c.changeCall(base, "/subscriptions/"+sub.String()+"/change", params.IdempotencyKey, params, &out)
+	}
+	return &out, err
 }
 
 // previewChange is the customer's preview of a change.

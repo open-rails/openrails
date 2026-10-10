@@ -185,6 +185,9 @@ func (s hostedSession) payAs(c *customer, body map[string]any) (int, map[string]
 func (c *customer) payWithSaved(s hostedSession, rail, method string) billing.SubscriptionID {
 	c.w.t.Helper()
 	status, out := s.payAs(c, map[string]any{"option_id": s.option(rail), "payment_method_id": method})
+	if status == http.StatusOK && out["status"] == "processing" && s.awaitPayment() {
+		out = s.read()
+	}
 	require.Equal(c.w.t, http.StatusOK, status, "%v", out)
 	require.Equal(c.w.t, "succeeded", out["status"], "%v", out)
 	c.w.settle()

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -85,9 +86,48 @@ func (s hostedSession) buy(c *customer, o order) (*sessionPaid, error) {
 }
 
 // buyAt is c paying s on the page server serves: any process of the merchant.
+// A processing answer whose payment River's executor is still running is the
+// session's outcome once it finishes, as the page reads it.
 func (s hostedSession) buyAt(server string, c *customer, o order) (*sessionPaid, error) {
 	s.w.t.Helper()
-	return s.payAt(s.w.t.Context(), server, s.optionAt(server, o.rail), c, o)
+	paid, err := s.payAt(s.w.t.Context(), server, s.optionAt(server, o.rail), c, o)
+	if err == nil && paid.Status == "processing" && s.awaitPayment() {
+		status, raw := s.w.pageAt(server, http.MethodGet, "/v1/checkout-sessions/"+s.id, "", "", nil)
+		require.Equal(s.w.t, http.StatusOK, status, "%s", raw)
+		paid = &sessionPaid{session: s}
+		require.NoError(s.w.t, json.Unmarshal(raw, &paid.CheckoutSessionPayResult))
+	}
+	return paid, err
+}
+
+// executorTimeout bounds how long a helper waits for River's executor to
+// finish an operation; one still running then is a hang, and fails the test.
+const executorTimeout = 30 * time.Second
+
+// awaitExecutor waits while River's executor runs a provider operation that
+// cond (a predicate on billing.provider_intents i) names, and reports whether
+// one ran. River can claim an operation before the request that enqueued it
+// executes it inline, so the request answers processing meanwhile. An
+// operation waiting on evidence (unknown_needs_verify) or a hold is not
+// running and answers at once.
+func (w *world) awaitExecutor(cond string, args ...any) bool {
+	w.t.Helper()
+	running := func() bool {
+		var found bool
+		require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM billing.provider_intents i WHERE i.status = 'in_flight' AND `+cond+`)`), args...).Scan(&found))
+		return found
+	}
+	if !running() {
+		return false
+	}
+	require.Eventually(w.t, func() bool { return !running() }, executorTimeout, 20*time.Millisecond, "River's executor finishes the operation")
+	return true
+}
+
+// awaitPayment is awaitExecutor for the payment of s's current attempt.
+func (s hostedSession) awaitPayment() bool {
+	s.w.t.Helper()
+	return s.w.awaitExecutor(`i.payload->>'checkout_attempt_id' = (SELECT s.attempt_id::text FROM billing.checkout_sessions s WHERE s.id_hash = sha256($1::bytea))`, []byte(s.id))
 }
 
 // payAt is c paying option of s on server's page as o says. It touches no

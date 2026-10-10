@@ -73,6 +73,13 @@ func (c *customer) order(method, path, key string, body any) orderCall {
 		require.NoError(c.w.t, json.Unmarshal(raw, &out.body), "%s %s: %s", method, path, raw)
 	}
 	out.replayed = res.Header.Get("Idempotent-Replayed") == "true"
+	// A processing order whose charge River's executor is still running is
+	// read again once it finishes.
+	if id, _ := out.body["id"].(string); method == http.MethodPost && out.body["status"] == "processing" && id != "" {
+		if order, err := billing.ParseOrderID(id); err == nil && c.w.awaitExecutor(`i.payload->>'order_id' = $1`, order.UUID().String()) {
+			out.body = c.order(http.MethodGet, "/orders/"+id, "", nil).body
+		}
+	}
 	return out
 }
 
