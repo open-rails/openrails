@@ -294,6 +294,20 @@ payment answers `402` (`type: card_error`, code `card_declined` or
 `payment.last_payment_error`. Fulfil on the `order.completed` host event or a
 read of the order, never on the browser's word.
 
+A line of a price whose amount the customer chooses (`customer_amount`, such
+as a deposit) takes `amount`, a decimal string within the price's bounds; a
+fixed price refuses one.
+
+A merchant order is one your backend creates for a customer (`CreateOrder`,
+`POST /v1/app/orders` with the `Orders` permission): it is `open` for 30 days
+unless `expires_at` says otherwise, and the customer pays it on your site with
+`POST /v1/me/orders/{id}/pay`. Staff read orders and never pay them.
+
+billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
+card, or a new card in the PSP's fields, then any `next_action` and `confirm`.
+It uses only the order API and `GET /v1/config`, through the provider's client
+or one passed as `client`.
+
 ### Payment methods
 
 `POST /v1/me/payment-methods` saves a card in one call: the PSP's `psp_id`, the `token`

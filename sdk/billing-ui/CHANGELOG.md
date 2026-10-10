@@ -1,5 +1,16 @@
 # Changelog
 
+## OrderCheckout pays an order
+
+- `<OrderCheckout orderId>` shows an order and pays it with a saved card or a
+  new card in the PSP's fields, running any `next_action` and `confirm`. It
+  takes an optional `client` and offers only cards kept for one-click buys
+  (`PaymentMethod.reusable`).
+- The client gains `getOrder`, and `payOrder` and `confirmOrder`, which answer
+  `{ order, error? }`: a declined payment (402) is the order with
+  `payment.last_payment_error`, not a throw. `BillingError` carries `order`.
+- `StripeCardEntry`'s handle gains `tokenize()` and `handleNextAction()`.
+
 ## A card is saved in one call
 
 - `addPaymentMethod` takes `token` (was `payment_token`). A Stripe card is a

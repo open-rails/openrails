@@ -11,6 +11,7 @@
       "func (c *Client) ArchiveProduct(ctx context.Context, params billing.ArchiveProductParams, requestOptions ...RequestOption) (*billing.ProductArchive, error)",
       "func (c *Client) AskCatalog(ctx context.Context, params billing.AskCatalogParams, requestOptions ...RequestOption) (*billing.CatalogAnswer, error)",
       "func (c *Client) AskMetrics(ctx context.Context, req billing.AskMetricsParams, options ...RequestOption) (*billing.MetricsAnswer, error)",
+      "func (c *Client) CancelOrder(ctx context.Context, id billing.OrderID, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigrationID, requestOptions ...RequestOption) (*billing.PriceMigrationCancel, error)",
       "func (c *Client) CancelSubscription(ctx context.Context, id billing.SubscriptionID, params billing.CancelSubscriptionParams, requestOptions ...RequestOption) (*billing.Subscription, error)",
       "func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error)",
@@ -23,6 +24,7 @@
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
       "func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionParams, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams, requestOptions ...RequestOption) ([]billing.CreditGrant, error)",
+      "func (c *Client) CreateOrder(ctx context.Context, params billing.CreateOrderParams, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error)",
       "func (c *Client) CreatePayment(ctx context.Context, params billing.CreatePaymentParams, requestOptions ...RequestOption) (*billing.Payment, error)",
       "func (c *Client) CreatePrice(ctx context.Context, params billing.CreatePriceParams, requestOptions ...RequestOption) (*billing.Price, error)",
@@ -94,6 +96,7 @@
       "func (c *Client) MerchantID() billing.MerchantID",
       "func (c *Client) OpenProviderOperation(ctx context.Context, req billing.OpenProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error)",
       "func (c *Client) OpenProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.OpenProviderOperationParams) (*billing.ProviderOperation, error)",
+      "func (c *Client) PreviewOrder(ctx context.Context, params billing.PreviewOrderParams, requestOptions ...RequestOption) (*billing.OrderPreview, error)",
       "func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error)",
       "func (c *Client) PreviewPriceMigration(ctx context.Context, params billing.CreatePriceMigrationParams, requestOptions ...RequestOption) (*billing.PriceMigrationPreview, error)",
       "func (c *Client) PreviewSubscriptionChange(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChangePreview, error)",
@@ -605,7 +608,8 @@
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
       "type CreateCreditGrantParams struct {\n\tCustomerID  CustomerID `json:\"customer_id\"`\n\tCurrency    string     `json:\"currency\"`\n\tAmount      int64      `json:\"amount,string\"`\n\tSourceID    string     `json:\"source_id\"`\n\tSource      string     `json:\"source\"`\n\tInvoker     string     `json:\"invoker,omitempty\"`\n\tExpiresAt   *time.Time `json:\"expires_at,omitempty\"`\n\tDescription *string    `json:\"description,omitempty\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
-      "type CreateOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n}",
+      "type CreateMyOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n}",
+      "type CreateOrderParams struct {\n\tCustomerID     CustomerID        `json:\"customer_id\"`\n\tLines          []OrderLineParams `json:\"lines\"`\n\tExpiresAt      *time.Time        `json:\"expires_at,omitempty\"`\n\tIdempotencyKey string            `json:\"-\"`\n}",
       "type CreatePSPParams struct {\n\tKey         string            `json:\"key\"`\n\tRail        Rail              `json:\"rail\"`\n\tAccountID   string            `json:\"account_id\"`\n\tSettings    map[string]any    `json:\"settings\"`\n\tCredentials map[string]string `json:\"credentials\"`\n}",
       "type CreatePaymentMethodParams struct {\n\tPSPID          PSPID           `json:\"psp_id\"`\n\tToken          string          `json:\"token,omitempty\"`\n\tCard           *Card           `json:\"card,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n}",
       "type CreatePaymentParams struct {\n\tInvoiceID     *InvoiceID `json:\"invoice_id,omitempty\"`\n\tOrderID       *OrderID   `json:\"order_id,omitempty\"`\n\tAmount        int64      `json:\"amount,string\"`\n\tTransactionID string     `json:\"transaction_id\"`\n\tPaidAt        *time.Time `json:\"paid_at,omitempty\"`\n}",
@@ -749,7 +753,7 @@
       "type OrderID uuid.UUID",
       "type OrderLine struct {\n\tID          OrderLineID `json:\"id\"`\n\tPriceID     PriceID     `json:\"price_id\"`\n\tProductID   ProductID   `json:\"product_id\"`\n\tDescription string      `json:\"description\"`\n\n\tQuantity   *int              `json:\"quantity\"`\n\tUnitAmount int64             `json:\"unit_amount,string\"`\n\tAmount     int64             `json:\"amount,string\"`\n\tOwnership  catalog.Ownership `json:\"ownership\"`\n\n\tBillingIntervalHours *int             `json:\"billing_interval_hours\"`\n\tAccessDurationHours  *int             `json:\"access_duration_hours\"`\n\tSubscriptionID       *SubscriptionID  `json:\"subscription_id\"`\n\tProductAccessID      *ProductAccessID `json:\"product_access_id\"`\n}",
       "type OrderLineID uuid.UUID",
-      "type OrderLineParams struct {\n\tPriceID  PriceID `json:\"price_id\"`\n\tQuantity *int    `json:\"quantity,omitempty\"`\n}",
+      "type OrderLineParams struct {\n\tPriceID  PriceID `json:\"price_id\"`\n\tQuantity *int    `json:\"quantity,omitempty\"`\n\tAmount   *int64  `json:\"amount,omitempty,string\"`\n}",
       "type OrderLineRefusal struct {\n\tCode    string  `json:\"code\"`\n\tMessage string  `json:\"message\"`\n\tOwnedBy *string `json:\"owned_by\"`\n\tHint    *string `json:\"hint\"`\n}",
       "type OrderListParams struct {\n\tIDs        []OrderID\n\tCustomerID CustomerID\n\tPriceID    PriceID\n\tStatus     OrderStatus\n\tPageRequest\n}",
       "type OrderOrigin string",
@@ -798,7 +802,8 @@
       "type PaymentSettledEvent struct {\n\tPaymentID      PaymentID       `json:\"payment_id\"`\n\tCustomerID     CustomerID      `json:\"customer_id\"`\n\tOrderID        *OrderID        `json:\"order_id,omitempty\"`\n\tPriceID        *PriceID        `json:\"price_id,omitempty\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id,omitempty\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tCurrency       string          `json:\"currency\"`\n}",
       "type PaymentStatus string",
       "type PendingAction struct {\n\tPSP           string                                  `json:\"psp\"`\n\tAction        string                                  `json:\"action\"`\n\tHint          string                                  `json:\"hint\"`\n\tPatchRequired map[string]map[string]map[string]string `json:\"patch_required\"`\n}",
-      "type PreviewOrderParams struct {\n\tLines []OrderLineParams `json:\"lines\"`\n}",
+      "type PreviewMyOrderParams struct {\n\tLines []OrderLineParams `json:\"lines\"`\n}",
+      "type PreviewOrderParams struct {\n\tCustomerID CustomerID        `json:\"customer_id\"`\n\tLines      []OrderLineParams `json:\"lines\"`\n}",
       "type PreviewPSPRoutingParams struct {\n\tPriceID PriceID `json:\"price_id\"`\n\n\tCountry string `json:\"country\"`\n\tPSP     string `json:\"psp\"`\n}",
       "type Price struct {\n\tCustomerAmount *catalog.CustomerAmount `json:\"customer_amount,omitempty\"`\n\n\tQuantity *catalog.Quantity `json:\"quantity\"`\n\n\tRevision int64 `json:\"revision\"`\n\n\tVersion              int64                   `json:\"version\"`\n\tID                   PriceID                 `json:\"id\"`\n\tKey                  string                  `json:\"key\"`\n\tProductID            ProductID               `json:\"product_id\"`\n\tArchived             bool                    `json:\"archived\"`\n\tUnitAmount           int64                   `json:\"unit_amount,string\"`\n\tCurrency             string                  `json:\"currency\"`\n\tAccessDurationHours  *int                    `json:\"access_duration_hours\"`\n\tBillingIntervalHours *int                    `json:\"billing_interval_hours\"`\n\tTrialUnitAmount      *int64                  `json:\"trial_unit_amount,string\"`\n\tTrialDurationHours   *int                    `json:\"trial_duration_hours\"`\n\tPSPs                 map[string]PSPLinkState `json:\"psps\"`\n\n\tPendingManualActions []PendingAction `json:\"pending_manual_actions\"`\n\tCreatedAt            time.Time       `json:\"created_at\"`\n\tUpdatedAt            time.Time       `json:\"updated_at\"`\n}",
       "type PriceChangeDraft struct {\n\tProductKey    string `json:\"product_key\"`\n\tPriceKey      string `json:\"price_key\"`\n\tCurrentAmount int64  `json:\"current_amount,string\"`\n\tNewAmount     int64  `json:\"new_amount,string\"`\n\tCurrency      string `json:\"currency\"`\n\n\tAffectedCount int                         `json:\"affected_count\"`\n\tReviewText    string                      `json:\"review_text\"`\n\tCreatePrice   CreatePriceParams           `json:\"create_price\"`\n\tMigration     *CreatePriceMigrationParams `json:\"migration\"`\n}",
@@ -1054,7 +1059,7 @@
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
       "type PSPSignerConfig struct {\n\tMode string `yaml:\"mode,omitempty\"`\n\tKey  string `yaml:\"key,omitempty\"`\n}",
-      "type Permissions struct {\n\tAdminRead fmt.Stringer\n\n\tAdminUpdate fmt.Stringer\n\n\tCatalog fmt.Stringer\n\n\tMerchantConfig fmt.Stringer\n\n\tMetrics fmt.Stringer\n\n\tEntitlements fmt.Stringer\n\n\tOffers fmt.Stringer\n\n\tUsage fmt.Stringer\n\n\tCosts fmt.Stringer\n\n\tEvents fmt.Stringer\n}",
+      "type Permissions struct {\n\tAdminRead fmt.Stringer\n\n\tAdminUpdate fmt.Stringer\n\n\tCatalog fmt.Stringer\n\n\tMerchantConfig fmt.Stringer\n\n\tMetrics fmt.Stringer\n\n\tEntitlements fmt.Stringer\n\n\tOffers fmt.Stringer\n\n\tUsage fmt.Stringer\n\n\tCosts fmt.Stringer\n\n\tEvents fmt.Stringer\n\n\tOrders fmt.Stringer\n}",
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
@@ -1124,7 +1129,7 @@
     ],
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
-      "const (\n\tMerchantBillingRead   = staffperm.BillingRead\n\tMerchantBillingManage = staffperm.BillingManage\n\tMerchantCatalogManage = staffperm.CatalogManage\n\tMerchantConfigManage  = staffperm.ConfigManage\n\tMerchantMetricsRead   = staffperm.MetricsRead\n\n\tMerchantEntitlementsRead = staffperm.EntitlementsRead\n\tMerchantCatalogRead      = staffperm.CatalogRead\n\tMerchantUsageManage      = staffperm.UsageManage\n\tMerchantCostsManage      = staffperm.CostsManage\n\tMerchantEventsRead       = staffperm.EventsRead\n)",
+      "const (\n\tMerchantBillingRead   = staffperm.BillingRead\n\tMerchantBillingManage = staffperm.BillingManage\n\tMerchantCatalogManage = staffperm.CatalogManage\n\tMerchantConfigManage  = staffperm.ConfigManage\n\tMerchantMetricsRead   = staffperm.MetricsRead\n\n\tMerchantEntitlementsRead = staffperm.EntitlementsRead\n\tMerchantCatalogRead      = staffperm.CatalogRead\n\tMerchantUsageManage      = staffperm.UsageManage\n\tMerchantCostsManage      = staffperm.CostsManage\n\tMerchantEventsRead       = staffperm.EventsRead\n\tMerchantOrdersManage     = staffperm.OrdersManage\n)",
       "func (s *Server) AuthKit() *authkit.Client",
       "func (s *Server) ClaimMerchantAPIHost(ctx context.Context, id billing.MerchantID, host string) (*billing.MerchantAPIHost, error)",
       "func (s *Server) Client() *openrails.Client",
@@ -4464,6 +4469,7 @@
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "sha256": "crypto/sha256",
       "strings": "strings",
+      "time": "time",
       "uuid": "github.com/google/uuid"
     },
     "internal/service/service_definition_catalog_admin.go": {
@@ -4562,7 +4568,8 @@
     "orders.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
-      "http": "net/http"
+      "http": "net/http",
+      "strings": "strings"
     },
     "payment_attempts.go": {
       "billing": "github.com/open-rails/openrails/billing",

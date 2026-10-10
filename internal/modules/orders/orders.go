@@ -30,6 +30,10 @@ import (
 const (
 	// CustomerTTL is how long a customer's own order takes payment.
 	CustomerTTL = 24 * time.Hour
+	// MerchantTTL is a merchant order's default lifetime, MaxMerchantTTL its
+	// longest (Stripe's invoice ceiling).
+	MerchantTTL    = 30 * 24 * time.Hour
+	MaxMerchantTTL = 120 * 24 * time.Hour
 	// MaxQuantity bounds one line.
 	MaxQuantity = 10_000
 	// PurgeAfter is how long an unpaid closed order without attempts is kept.
@@ -76,6 +80,10 @@ const (
 	RefusalUnavailable      = "unavailable"
 	RefusalCurrencyMismatch = "currency_mismatch"
 	RefusalQuantityInvalid  = "quantity_invalid"
+	// A chosen amount: on a fixed price, missing, or out of bounds.
+	RefusalAmountNotAllowed = "amount_not_allowed"
+	RefusalAmountRequired   = "amount_required"
+	RefusalAmountInvalid    = "amount_invalid"
 	// RefusalQuantityNotAllowed is also the line's error code.
 	RefusalQuantityNotAllowed = billing.CodeQuantityNotAllowed
 )

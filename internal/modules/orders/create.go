@@ -277,6 +277,18 @@ func (s *Service) withLines(ctx context.Context, q *gen.Queries, merchantID uuid
 	return &Order{BillingOrder: row, Lines: lines}, nil
 }
 
+// CancelMerchantOrder withdraws an open order the merchant created.
+func (s *Service) CancelMerchantOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
+	order, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if order.Origin != string(billing.OrderOriginMerchant) {
+		return nil, ErrNotCancelable
+	}
+	return s.Cancel(ctx, order.CustomerID, id)
+}
+
 // Cancel closes customer's open order or one awaiting their action, and
 // releases its claims. A canceled order that is paid late revives (Paid).
 func (s *Service) Cancel(ctx context.Context, customerID, id uuid.UUID) (*Order, error) {

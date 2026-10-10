@@ -16,6 +16,7 @@ const (
 	UsageManage      = "merchant:usage:manage"      // Usage: admissions and usage events
 	CostsManage      = "merchant:costs:manage"      // Costs: provider operations
 	EventsRead       = "merchant:events:read"       // Events: host events
+	OrdersManage     = "merchant:orders:manage"     // Orders: merchant orders
 
 	// AuthKit's built-ins on the merchant persona: the team, and the
 	// merchant's API keys.
@@ -31,5 +32,5 @@ const (
 // Routes.Permissions field.
 var Declared = []string{
 	BillingRead, BillingManage, CatalogManage, ConfigManage, MetricsRead,
-	EntitlementsRead, CatalogRead, UsageManage, CostsManage, EventsRead,
+	EntitlementsRead, CatalogRead, UsageManage, CostsManage, EventsRead, OrdersManage,
 }

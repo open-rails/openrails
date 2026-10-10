@@ -79,15 +79,16 @@ const (
 	appUsage        perm = "root:usage:manage"
 	appCosts        perm = "root:costs:manage"
 	appEvents       perm = "root:events:read"
+	appOrders       perm = "root:orders:manage"
 )
 
 var permissions = openrails.Permissions{
 	AdminRead: staffReads, AdminUpdate: staffWrites, Catalog: staffCatalog, MerchantConfig: staffConfig, Metrics: staffMetrics,
-	Entitlements: appEntitlements, Offers: appOffers, Usage: appUsage, Costs: appCosts, Events: appEvents,
+	Entitlements: appEntitlements, Offers: appOffers, Usage: appUsage, Costs: appCosts, Events: appEvents, Orders: appOrders,
 }
 
 // everyPermission is what the "staff" and host roles hold.
-var everyPermission = []perm{staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics, appEntitlements, appOffers, appUsage, appCosts, appEvents}
+var everyPermission = []perm{staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics, appEntitlements, appOffers, appUsage, appCosts, appEvents, appOrders}
 
 // routeGroups turns on every route group the harness mounts.
 var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}

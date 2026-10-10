@@ -95,7 +95,7 @@ func writeOrder(r *httprequest.Request, order *billing.Order) {
 
 // PreviewMyOrder handles POST /v1/me/orders/preview.
 func PreviewMyOrder(r *httprequest.Request) {
-	var body billing.PreviewOrderParams
+	var body billing.PreviewMyOrderParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -115,7 +115,7 @@ func PreviewMyOrder(r *httprequest.Request) {
 // CreateMyOrder handles POST /v1/me/orders: the one-call buy when a payment
 // is named, an open order to pay later otherwise.
 func CreateMyOrder(r *httprequest.Request) {
-	var body billing.CreateOrderParams
+	var body billing.CreateMyOrderParams
 	if !r.BindJSON(&body) {
 		return
 	}
@@ -325,3 +325,62 @@ func writeOrderError(r *httprequest.Request, err error) {
 }
 
 func lineParam(i int) string { return "lines[" + strconv.Itoa(i) + "]" }
+
+// PreviewMerchantOrder handles POST /v1/app/orders/preview: lines priced for
+// one customer.
+func PreviewMerchantOrder(r *httprequest.Request) {
+	var body billing.PreviewOrderParams
+	if !r.BindJSON(&body) {
+		return
+	}
+	svc := orderService(r)
+	if svc == nil {
+		return
+	}
+	preview, err := svc.PreviewMerchantOrder(r.Request.Context(), body)
+	if err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	r.SuccessJSON(preview)
+}
+
+// CreateMerchantOrder handles POST /v1/app/orders: an unpaid order for one
+// customer, which they pay on the merchant's site.
+func CreateMerchantOrder(r *httprequest.Request) {
+	var body billing.CreateOrderParams
+	if !r.BindJSON(&body) {
+		return
+	}
+	svc := orderService(r)
+	if svc == nil {
+		return
+	}
+	order, replayed, err := svc.CreateMerchantOrder(r.Request.Context(), body, r.Header("Idempotency-Key"))
+	if err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	}
+	r.SetHeader("Cache-Control", "no-store")
+	r.JSON(status, order)
+}
+
+// CancelMerchantOrder handles POST /v1/app/orders/{id}/cancel: withdraws an
+// open order the merchant created.
+func CancelMerchantOrder(r *httprequest.Request) {
+	id, ok := orderID(r)
+	svc := orderService(r)
+	if !ok || svc == nil {
+		return
+	}
+	order, err := svc.CancelMerchantOrder(r.Request.Context(), id)
+	if err != nil {
+		writeOrderError(r, err)
+		return
+	}
+	writeOrder(r, order)
+}

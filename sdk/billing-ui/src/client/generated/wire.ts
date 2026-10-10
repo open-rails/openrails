@@ -154,7 +154,7 @@ export type CheckoutSessionSavedMethod = {
   card: CardDetails | null
 }
 
-export type CreateOrderParams = {
+export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
   expected_total?: string
   payment?: OrderPaymentParams
@@ -421,6 +421,7 @@ export type OrderLine = {
 export type OrderLineParams = {
   price_id?: string
   quantity?: number
+  amount?: string
 }
 
 export type OrderLineRefusal = {
@@ -601,7 +602,7 @@ export type PendingAction = {
   patch_required: Record<string, Record<string, Record<string, string>>> | null
 }
 
-export type PreviewOrderParams = {
+export type PreviewMyOrderParams = {
   lines?: OrderLineParams[]
 }
 

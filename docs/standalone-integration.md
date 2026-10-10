@@ -347,7 +347,8 @@ merchants:
 - An application's token calls the programmatic routes, `/v1/app/*` with
   `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
-  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`); a
+  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`,
+  `merchant:orders:manage`); a
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad
   signature, audience or lifetime), `401 credential_expired`,

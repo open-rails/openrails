@@ -46,10 +46,13 @@ const MaxOrderLines = 100
 // OrderLineParams is one line to buy: a price and how many. Quantity is
 // seats on a per-seat price (omitted: its minimum), units of a consumable
 // product (omitted: 1) and 1 on another one-time price; any other recurring
-// price takes none (quantity_not_allowed).
+// price takes none (quantity_not_allowed). Amount is what the customer
+// chose on a price whose customer picks it (a deposit, a top-up), within
+// its bounds; a fixed price takes none.
 type OrderLineParams struct {
 	PriceID  PriceID `json:"price_id"`
 	Quantity *int    `json:"quantity,omitempty"`
+	Amount   *int64  `json:"amount,omitempty,string"`
 }
 
 // OrderPaymentParams names how to pay: exactly one of a saved card
@@ -66,24 +69,45 @@ type OrderPaymentParams struct {
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 }
 
-// PreviewOrderParams prices lines without creating an order.
-type PreviewOrderParams struct {
+// PreviewMyOrderParams prices lines for the signed-in customer without
+// creating an order.
+type PreviewMyOrderParams struct {
 	Lines []OrderLineParams `json:"lines"`
 }
 
-// CreateOrderParams creates an order and, with Payment, pays it in the same
-// call. ExpectedTotal is required with Payment: a different total refuses
-// the order with order_total_changed. Reusable keeps a new card for one-click
-// buys where that needs the customer's opt-in (billing or card country in the
-// EEA or the UK); elsewhere every new card is kept.
-type CreateOrderParams struct {
+// CreateMyOrderParams creates the signed-in customer's order and, with
+// Payment, pays it in the same call. ExpectedTotal is required with Payment:
+// a different total refuses the order with order_total_changed. Reusable
+// keeps a new card for one-click buys where that needs the customer's opt-in
+// (billing or card country in the EEA or the UK); elsewhere every new card is
+// kept. Without Payment the order is open for POST /v1/me/orders/{id}/pay.
+type CreateMyOrderParams struct {
 	Lines         []OrderLineParams   `json:"lines"`
 	ExpectedTotal *int64              `json:"expected_total,omitempty,string"`
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`
 }
 
-// PayOrderParams pays an open order; Reusable as in CreateOrderParams.
+// PreviewOrderParams prices lines for one customer, as a merchant order
+// would freeze them.
+type PreviewOrderParams struct {
+	CustomerID CustomerID        `json:"customer_id"`
+	Lines      []OrderLineParams `json:"lines"`
+}
+
+// CreateOrderParams creates a merchant order: an unpaid order for one
+// customer, which they pay on the merchant's own site
+// (POST /v1/me/orders/{id}/pay). It never charges. ExpiresAt defaults to 30
+// days and is at most 120 days away. IdempotencyKey is required: a retry
+// with it answers the same order.
+type CreateOrderParams struct {
+	CustomerID     CustomerID        `json:"customer_id"`
+	Lines          []OrderLineParams `json:"lines"`
+	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	IdempotencyKey string            `json:"-"`
+}
+
+// PayOrderParams pays an open order; Reusable as in CreateMyOrderParams.
 type PayOrderParams struct {
 	Payment       OrderPaymentParams `json:"payment"`
 	ExpectedTotal int64              `json:"expected_total,string"`
@@ -176,7 +200,8 @@ type OrderPreviewLine struct {
 }
 
 // OrderLineRefusal is why a line cannot be bought. Code is already_owned,
-// unavailable, currency_mismatch, quantity_invalid or quantity_not_allowed. An already_owned line
+// unavailable, currency_mismatch, quantity_invalid, quantity_not_allowed,
+// amount_not_allowed, amount_required or amount_invalid. An already_owned line
 // names its owner (a subscription, product access or an unpaid order) and a
 // hint: change (change that subscription instead) or resume (pay that order,
 // or resume that subscription).

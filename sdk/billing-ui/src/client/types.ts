@@ -250,6 +250,8 @@ export const paymentMethodSchema = z.object({
   psp_id: z.string().nullish(),
   card: cardSummarySchema.nullish(),
   billing_details: billingDetailsSchema.nullish(),
+  /** Kept for one-click buys; a card stored only for a subscription is not. */
+  reusable: z.boolean().nullish(),
   health: z
     .object({
       /** `valid | expiring_soon | expired` */
@@ -272,6 +274,95 @@ export const paymentMethodSchema = z.object({
   created_at: time.nullish(),
 })
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>
+
+/** Why the latest payment attempt failed, in the customer's words. */
+export const paymentFailureSchema = z.object({
+  reason: z.string(),
+  message: z.string(),
+  field: z.string().nullish(),
+})
+export type PaymentFailure = z.infer<typeof paymentFailureSchema>
+
+/**
+ * What the customer completes before a payment can finish: `authenticate`
+ * runs the PSP's own script with `payload` (Stripe.js `handleNextAction`
+ * with `client_secret`); `redirect_to_url` leaves for `url`.
+ */
+export const orderNextActionSchema = z.object({
+  type: z.string(),
+  url: z.string().nullish(),
+  psp_id: z.string().nullish(),
+  transactions: z.array(z.string()).nullish(),
+  payload: z.record(z.string(), z.string()).nullish(),
+})
+export type OrderNextAction = z.infer<typeof orderNextActionSchema>
+
+export const orderLineSchema = z.object({
+  id: z.string(),
+  price_id: z.string(),
+  product_id: z.string(),
+  description: z.string(),
+  quantity: z.number().nullish(),
+  unit_amount: amount,
+  amount: amount,
+  billing_interval_hours: z.number().nullish(),
+  access_duration_hours: z.number().nullish(),
+  subscription_id: z.string().nullish(),
+  product_access_id: z.string().nullish(),
+})
+export type OrderLine = z.infer<typeof orderLineSchema>
+
+/**
+ * A purchase: frozen lines and total, read and paid by its own customer.
+ * `status` is the order's (`open | processing | complete | canceled |
+ * expired`); `payment.status` its payment's (`requires_payment_method |
+ * requires_action | processing | succeeded`).
+ */
+export const orderSchema = z.object({
+  id: z.string(),
+  customer_id: z.string(),
+  origin: z.string(),
+  status: z.string(),
+  number: z.string().nullish(),
+  currency: z.string(),
+  total: amount,
+  lines: z.array(orderLineSchema),
+  payment: z.object({
+    status: z.string(),
+    next_action: orderNextActionSchema.nullish(),
+    last_payment_error: paymentFailureSchema.nullish(),
+    payment_method_id: z.string().nullish(),
+    payment_id: z.string().nullish(),
+  }),
+  payment_options: z
+    .array(
+      z.object({
+        psp_id: z.string(),
+        rail: z.string(),
+        accepts: z.array(z.string()),
+      })
+    )
+    .nullish()
+    .transform((v) => v ?? []),
+  expires_at: time,
+  completed_at: time.nullish(),
+  canceled_at: time.nullish(),
+  expired_at: time.nullish(),
+  created_at: time,
+})
+export type Order = z.infer<typeof orderSchema>
+
+/**
+ * How to pay an order: a saved card, or a card just entered (the token of
+ * the PSP's own fields, its `psp_id`).
+ */
+export type OrderPaymentInput =
+  | { payment_method_id: string }
+  | {
+      token: string
+      psp_id?: string
+      billing_details?: NewCard["billing_details"]
+    }
 
 /** A price's state on one PSP; public routes carry the status only. */
 export const productSchema = z.object({

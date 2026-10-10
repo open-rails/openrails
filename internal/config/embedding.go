@@ -107,6 +107,9 @@ type Permissions struct {
 	Costs fmt.Stringer
 	// Events is host events: reading and acknowledging them.
 	Events fmt.Stringer
+	// Orders is merchant orders: unpaid orders for a customer to pay on your
+	// site, previewed, created and withdrawn (POST /v1/app/orders).
+	Orders fmt.Stringer
 }
 
 // ConsoleMount is where a standalone server serves the admin console, and

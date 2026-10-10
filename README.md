@@ -547,10 +547,11 @@ until `RouteGroups` turns it on:
 - `Permissions`: what a caller must hold for each staff group, and for each
   programmatic task: `Entitlements` (`root:entitlements:read`), `Usage`
   (`root:usage:manage`), `Costs` (`root:costs:manage`), `Events`
-  (`root:events:read`). Name them `persona:resource:action`, the persona being
-  where they are held: `root:` in AuthKit's root group. `Mount` fails when a
-  staff group is on without its permission, or a permission is given for a
-  group that is off or your auth does not know.
+  (`root:events:read`), `Orders` (`root:orders:manage`). Name them
+  `persona:resource:action`, the persona being where they are held: `root:`
+  in AuthKit's root group. `Mount` fails when a staff group is on without its
+  permission, or a permission is given for a group that is off or your auth
+  does not know.
 - `AdminConsole`: `true` serves the staff dashboard at `/billing/admin` (below);
   off by default.
 
@@ -818,6 +819,9 @@ get a token from your issuer; that token opens nothing else.
 | `POST /billing/v1/app/provider-operations/{operation_id}/observations` | what the provider billed |
 | `GET /billing/v1/app/host-events` | events for your backend to process, oldest first |
 | `POST /billing/v1/app/host-events/acknowledge` | mark them processed |
+| `POST /billing/v1/app/orders/preview` | an order's total and how it can be paid, for one of your users; changes nothing |
+| `POST /billing/v1/app/orders` | an unpaid order for one of your users, which they pay on your site; it never charges |
+| `POST /billing/v1/app/orders/{id}/cancel` | withdraw an unpaid order you created |
 | `POST /billing/v1/app/scim/v2/Bulk` | your directory's batch of user changes (AuthKit sends one every 5 minutes) |
 | `POST`, `GET /billing/v1/app/scim/v2/Users`; `GET`, `PUT`, `PATCH`, `DELETE /billing/v1/app/scim/v2/Users/{id}` | one user at a time, for directories that don't batch (Okta, Entra ID) |
 | `GET /billing/v1/app/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | what OpenRails accepts, including the batch limits |

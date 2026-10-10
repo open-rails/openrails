@@ -555,11 +555,17 @@ export type CreateCreditGrantParams = {
   description?: string
 }
 
-export type CreateOrderParams = {
+export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
   expected_total?: string
   payment?: OrderPaymentParams
   reusable?: boolean
+}
+
+export type CreateOrderParams = {
+  customer_id?: string
+  lines?: OrderLineParams[]
+  expires_at?: string
 }
 
 export type CreatePSPParams = {
@@ -1420,6 +1426,7 @@ export type OrderLine = {
 export type OrderLineParams = {
   price_id?: string
   quantity?: number
+  amount?: string
 }
 
 export type OrderLineRefusal = {
@@ -1712,7 +1719,12 @@ export type PerUnitPrice = {
   matrix?: Matrix
 }
 
+export type PreviewMyOrderParams = {
+  lines?: OrderLineParams[]
+}
+
 export type PreviewOrderParams = {
+  customer_id?: string
   lines?: OrderLineParams[]
 }
 

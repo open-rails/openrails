@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -75,7 +76,7 @@ type OrderAnswer struct {
 }
 
 // PreviewOrder prices lines for the customer without writing.
-func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params billing.PreviewOrderParams) (*billing.OrderPreview, error) {
+func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params billing.PreviewMyOrderParams) (*billing.OrderPreview, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -129,7 +130,7 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 // CreateOrder freezes lines into an order and, with a payment, pays it in the
 // same call. key is the request's Idempotency-Key: a later request with it
 // answers what the first did.
-func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateOrderParams, key string) (OrderAnswer, error) {
+func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateMyOrderParams, key string) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return OrderAnswer{}, err
@@ -183,7 +184,7 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 
 // createClaimed runs a create under its key's claim: a key the order table
 // already maps (its claim long gone) answers that order.
-func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateOrderParams, pay orderPayment, key string, digest []byte) (uuid.UUID, bool, checkout.OrderCharge, error) {
+func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateMyOrderParams, pay orderPayment, key string, digest []byte) (uuid.UUID, bool, checkout.OrderCharge, error) {
 	customer := actor.Customer.UUID()
 	existing, err := rt.Orders.ByIdempotencyKey(ctx, customer, key)
 	if err != nil {
@@ -631,4 +632,109 @@ func (s *Service) RecordPayment(ctx context.Context, params billing.CreatePaymen
 		return nil, false, err
 	}
 	return rt.Orders.RecordRemittance(ctx, orders.Remittance{OrderID: params.OrderID.UUID(), Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
+}
+
+// Merchant orders: the merchant's backend prices lines for a customer and
+// creates an unpaid order they pay on the merchant's own site. Merchants
+// never pay: no merchant route takes a payment.
+
+var errMerchantOrderExpiry = apperr.Invalidf("expires_at is between an hour and 120 days away").WithParam("expires_at")
+
+// PreviewMerchantOrder prices lines for one customer without writing.
+func (s *Service) PreviewMerchantOrder(ctx context.Context, params billing.PreviewOrderParams) (*billing.OrderPreview, error) {
+	if params.CustomerID.IsZero() {
+		return nil, apperr.Invalidf("customer_id required").WithParam("customer_id")
+	}
+	return s.PreviewOrder(ctx, OrderActor{Customer: params.CustomerID}, billing.PreviewMyOrderParams{Lines: params.Lines})
+}
+
+// CreateMerchantOrder creates an unpaid order for a customer. key is the
+// request's Idempotency-Key, kept on the order: the same key answers the same
+// order (replayed), another body with it is idempotency_key_reused.
+func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.CreateOrderParams, key string) (*billing.Order, bool, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	rt, err := s.orderRuntime()
+	if err != nil {
+		return nil, false, err
+	}
+	if params.CustomerID.IsZero() {
+		return nil, false, apperr.Invalidf("customer_id required").WithParam("customer_id")
+	}
+	if err := orders.CheckLines(params.Lines); err != nil {
+		return nil, false, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, false, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
+	}
+	ttl := orders.MerchantTTL
+	if params.ExpiresAt != nil {
+		ttl = params.ExpiresAt.Sub(s.now())
+		if ttl < time.Hour || ttl > orders.MaxMerchantTTL {
+			return nil, false, errMerchantOrderExpiry
+		}
+	}
+	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
+		return nil, false, err
+	}
+	digest, scoped := orderDigest(params), "app:"+key
+	existing, err := rt.Orders.ByIdempotencyKey(ctx, params.CustomerID.UUID(), scoped)
+	if err != nil {
+		return nil, false, err
+	}
+	replayed := existing != nil
+	if replayed && string(existing.RequestDigest) != string(digest) {
+		return nil, false, errOrderKeyReused
+	}
+	order := existing
+	if !replayed {
+		if order, err = rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
+			IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl}); err != nil {
+			if db.IsUniqueViolation(err) {
+				return nil, false, ErrIdempotencyKeyInUse
+			}
+			return nil, false, err
+		}
+	}
+	view, err := s.merchantOrderView(ctx, order)
+	return view, replayed, err
+}
+
+// CancelMerchantOrder withdraws an open order the merchant created.
+func (s *Service) CancelMerchantOrder(ctx context.Context, id billing.OrderID) (*billing.Order, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	rt, err := s.orderRuntime()
+	if err != nil {
+		return nil, err
+	}
+	order, err := rt.Orders.CancelMerchantOrder(ctx, id.UUID())
+	if err != nil {
+		return nil, err
+	}
+	return s.merchantOrderView(ctx, order)
+}
+
+// merchantOrderView is an order as the merchant reads it: what can pay it,
+// never a next action (only its customer pays).
+func (s *Service) merchantOrderView(ctx context.Context, order *orders.Order) (*billing.Order, error) {
+	var options []billing.OrderPaymentOption
+	if order.Status == string(billing.OrderOpen) {
+		quote, err := s.frozenQuote(ctx, order)
+		if err != nil {
+			return nil, err
+		}
+		if options, err = s.orderOptions(ctx, quote.prices, quote.products); err != nil {
+			return nil, err
+		}
+	}
+	view := order.View(nil, options)
+	return &view, nil
 }

@@ -12,10 +12,7 @@ export {
   type BillingClientOptions,
   type ProductListOptions,
 } from "./client/client"
-export {
-  BillingProvider,
-  type BillingProviderProps,
-} from "./react/provider"
+export { BillingProvider, type BillingProviderProps } from "./react/provider"
 export { BillingUiRoot } from "./scope"
 export type { Navigate } from "./scope-context"
 export {
@@ -38,6 +35,7 @@ export {
   SavePaymentMethod,
   type SavePaymentMethodProps,
 } from "./save-payment-method"
+export { OrderCheckout, type OrderCheckoutProps } from "./order-checkout"
 export { authenticatePayment } from "./authenticate"
 export {
   canAuthenticatePayment,

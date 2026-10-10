@@ -23,6 +23,7 @@ import {
   paymentAuthenticationSchema,
   invoiceSchema,
   listPageSchema,
+  orderSchema,
   pageSchema,
   paymentMethodSchema,
   paymentSchema,
@@ -40,6 +41,8 @@ import {
   type ListPage,
   type NewCard,
   type NextAction,
+  type Order,
+  type OrderPaymentInput,
   type Page,
   type Payment,
   type PaymentMethod,
@@ -210,6 +213,15 @@ function pause(ms: number, signal?: AbortSignal): Promise<number> {
   })
 }
 
+/**
+ * An order request's answer. `error` is set when the payment failed: the
+ * order is open again and its `payment.last_payment_error` says why.
+ */
+export interface OrderResult {
+  order: Order
+  error?: BillingError
+}
+
 export function createBillingClient(options: BillingClientOptions = {}) {
   const base = (options.baseUrl ?? "/billing/v1").replace(/\/+$/, "")
   const doFetch =
@@ -309,6 +321,22 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     cursor: opts.cursor ?? undefined,
   })
   const productPage = pageSchema(productSchema)
+
+  // An order answer: the order, or a failed payment's 402 with it.
+  async function orderResult(
+    path: string,
+    opts: RequestOptions
+  ): Promise<OrderResult> {
+    try {
+      return { order: await json(orderSchema, path, opts) }
+    } catch (cause) {
+      if (isBillingError(cause) && cause.status === 402 && cause.order) {
+        const order = orderSchema.safeParse(cause.order)
+        if (order.success) return { order: order.data, error: cause }
+      }
+      throw cause
+    }
+  }
 
   const client = {
     baseUrl: base,
@@ -455,6 +483,45 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
         body: card,
+      })
+    },
+
+    /** One of the customer's orders: the resumable handle of a purchase. */
+    getOrder(orderId: string, signal?: AbortSignal): Promise<Order> {
+      return json(orderSchema, `/me/orders/${id(orderId)}`, { signal })
+    },
+
+    /**
+     * Pays an open order. A failed payment resolves with the order (open,
+     * `payment.last_payment_error` saying why) and `error`, the 402.
+     * `idempotencyKey` is minted when the pay button renders: a retry with it
+     * answers what the first request answered.
+     */
+    payOrder(
+      orderId: string,
+      input: {
+        payment: OrderPaymentInput
+        expectedTotal: string
+        reusable?: boolean
+        idempotencyKey: string
+      }
+    ): Promise<OrderResult> {
+      return orderResult(`/me/orders/${id(orderId)}/pay`, {
+        method: "POST",
+        body: {
+          payment: input.payment,
+          expected_total: input.expectedTotal,
+          ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
+        },
+        headers: { "Idempotency-Key": input.idempotencyKey },
+      })
+    },
+
+    /** Reads the provider after the customer completed `next_action`. */
+    confirmOrder(orderId: string): Promise<OrderResult> {
+      return orderResult(`/me/orders/${id(orderId)}/confirm`, {
+        method: "POST",
+        body: {},
       })
     },
 
@@ -654,7 +721,10 @@ export function createBillingClient(options: BillingClientOptions = {}) {
             return await json(payResultSchema, `${path}/pay`, {
               ...via,
               method: "POST",
-              body: request satisfies Omit<wire.PayCheckoutSessionParams, "billing_details">,
+              body: request satisfies Omit<
+                wire.PayCheckoutSessionParams,
+                "billing_details"
+              >,
             })
           } catch (err) {
             if (!isBillingError(err)) throw err

@@ -12,7 +12,7 @@ import (
 var merchantPermissions = httproutes.Permissions{
 	AdminRead: staffperm.BillingRead, AdminUpdate: staffperm.BillingManage, Catalog: staffperm.CatalogManage,
 	MerchantConfig: staffperm.ConfigManage, Metrics: staffperm.MetricsRead,
-	Entitlements: staffperm.EntitlementsRead, Offers: staffperm.CatalogRead, Usage: staffperm.UsageManage, Costs: staffperm.CostsManage, Events: staffperm.EventsRead,
+	Entitlements: staffperm.EntitlementsRead, Offers: staffperm.CatalogRead, Usage: staffperm.UsageManage, Costs: staffperm.CostsManage, Events: staffperm.EventsRead, Orders: staffperm.OrdersManage,
 }
 
 // permissionsFor is merchantPermissions for the route groups that are on.

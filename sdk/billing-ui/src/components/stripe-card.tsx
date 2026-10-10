@@ -17,6 +17,13 @@ import type { PspConfig } from "#orck/psp"
 export interface StripeCardHandle {
   /** Saves the entered card and returns its payment method id. */
   save(): Promise<string>
+  /**
+   * The entered card as Stripe's single-use payment method (`pm_`), for an
+   * order to charge and save in one call.
+   */
+  tokenize(): Promise<string>
+  /** Answers the bank's authentication of a payment or a card save. */
+  handleNextAction(clientSecret: string): Promise<void>
 }
 
 export const StripeCardEntry = React.forwardRef<
@@ -95,41 +102,47 @@ export const StripeCardEntry = React.forwardRef<
     }
   }, [publishable, defaultCountry, unavailableMessage])
 
-  React.useImperativeHandle(
-    ref,
-    () => ({
+  React.useImperativeHandle(ref, () => {
+    const tokenize = async () => {
+      const current = mounted.current
+      if (!current) throw new Error(unavailableMessage)
+      setError(undefined)
+      const validation = await current.elements.submit()
+      if (validation.error)
+        throw new Error(validation.error.message ?? unavailableMessage)
+      const created = await current.stripe.createPaymentMethod({
+        elements: current.elements,
+      })
+      if (created.error || !created.paymentMethod)
+        throw new Error(created.error?.message ?? unavailableMessage)
+      return created.paymentMethod.id
+    }
+    const handleNextAction = async (clientSecret: string) => {
+      const current = mounted.current
+      if (!current) throw new Error(unavailableMessage)
+      const answered = await current.stripe.handleNextAction({ clientSecret })
+      if (answered.error)
+        throw new Error(answered.error.message ?? unavailableMessage)
+    }
+    return {
+      tokenize,
+      handleNextAction,
       async save() {
-        const current = mounted.current
-        if (!current) throw new Error(unavailableMessage)
-        setError(undefined)
-        const validation = await current.elements.submit()
-        if (validation.error)
-          throw new Error(validation.error.message ?? unavailableMessage)
-        const created = await current.stripe.createPaymentMethod({
-          elements: current.elements,
-        })
-        if (created.error || !created.paymentMethod)
-          throw new Error(created.error?.message ?? unavailableMessage)
         let method = await client.addPaymentMethod({
           psp_id: psp.psp_id,
-          token: created.paymentMethod.id,
+          token: await tokenize(),
         })
         const secret = method.next_action?.payload?.client_secret
         if (method.status === "requires_action" && secret) {
-          const answered = await current.stripe.handleNextAction({
-            clientSecret: secret,
-          })
-          if (answered.error)
-            throw new Error(answered.error.message ?? unavailableMessage)
+          await handleNextAction(secret)
           method = await client.confirmPaymentMethod(method.id)
         }
         if (method.status === "requires_action")
           throw new Error(verificationPendingMessage)
         return method.id
       },
-    }),
-    [client, psp.psp_id, unavailableMessage, verificationPendingMessage]
-  )
+    }
+  }, [client, psp.psp_id, unavailableMessage, verificationPendingMessage])
 
   return (
     <div className="grid gap-2">

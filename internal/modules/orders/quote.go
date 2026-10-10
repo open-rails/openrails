@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/apperr"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Quote is lines priced as an order freezes them.
@@ -174,13 +175,18 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 		}
 		seenProducts[product.ID] = i
 		line.Price, line.Product = price, product
-		line.UnitAmount = price.Amount
 		line.Ownership = catalog.DeriveOwnership(product.Ownership, product.CreditGrant != nil, sold[product.ID])
+		if chosen, refused := chosenAmount(price, l.Amount); refused != nil {
+			line.Refusal = refused
+		} else {
+			line.Price = chosen
+		}
+		price = line.Price
+		line.UnitAmount = price.Amount
 		switch {
+		case line.Refusal != nil:
 		case !price.IsPurchasable() || !product.IsPurchasable():
 			line.Refusal = refusal(RefusalUnavailable, "The price is not for sale.")
-		case price.CustomerAmount != nil:
-			line.Refusal = refusal(RefusalUnavailable, "A price whose amount the customer chooses is not sold in an order.")
 		case price.TrialUnitAmount != nil || price.TrialDurationHours != nil:
 			line.Refusal = refusal(RefusalUnavailable, "A trial price is not sold in an order.")
 		case price.IsRecurring() && price.Amount <= 0:
@@ -235,6 +241,32 @@ func (s *Service) quote(ctx context.Context, q *gen.Queries, merchantID, custome
 		}
 	}
 	return out, nil
+}
+
+// chosenAmount is the price a line buys at: the price, or, when its customer
+// chooses the amount, a copy at the amount chosen within its bounds.
+func chosenAmount(price *models.Price, amount *int64) (*models.Price, *billing.OrderLineRefusal) {
+	if price.CustomerAmount == nil {
+		if amount != nil {
+			return price, refusal(RefusalAmountNotAllowed, "The price is fixed: send no amount.")
+		}
+		return price, nil
+	}
+	bounds := price.CustomerAmount
+	switch {
+	case amount == nil:
+		return price, refusal(RefusalAmountRequired, "The customer chooses this price's amount: send one.")
+	case price.IsRecurring() || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || bounds.MinAmount <= 0 || bounds.MaxAmount < bounds.MinAmount:
+		return price, refusal(RefusalUnavailable, "The price is not for sale.")
+	case *amount < bounds.MinAmount || *amount > bounds.MaxAmount:
+		return price, refusal(RefusalAmountInvalid, fmt.Sprintf("The amount is %d to %d.", bounds.MinAmount, bounds.MaxAmount))
+	}
+	if _, err := moneyutil.NativeToRailMinorExact(price.Currency, *amount); err != nil {
+		return price, refusal(RefusalAmountInvalid, "The amount is not a whole number of the currency's smallest unit.")
+	}
+	chosen := *price
+	chosen.Amount = *amount
+	return &chosen, nil
 }
 
 // lineQuantity is a line's quantity under its price: seats within a per-seat

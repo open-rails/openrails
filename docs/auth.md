@@ -69,8 +69,9 @@ so they are `merchant:…`, the server's constants below.
 | `Usage` | `root:usage:manage` | `server.MerchantUsageManage` | admissions and usage events |
 | `Costs` | `root:costs:manage` | `server.MerchantCostsManage` | provider operations |
 | `Events` | `root:events:read` | `server.MerchantEventsRead` | host events |
+| `Orders` | `root:orders:manage` | `server.MerchantOrdersManage` | merchant orders: `POST /v1/app/orders` (`CreateOrder`), `/preview`, `/{id}/cancel` |
 
-The last five are the programmatic routes' (`RouteGroups.Programmatic`): each
+The last six are the programmatic routes' (`RouteGroups.Programmatic`): each
 `/v1/app` route mounts only with its permission, so a program gets only what
 its task needs. `Mount` refuses a permission for a group that is off.
 

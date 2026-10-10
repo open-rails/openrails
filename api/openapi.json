@@ -763,7 +763,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PreviewOrderParams"
+                "$ref": "#/components/schemas/PreviewMyOrderParams"
               }
             }
           }
@@ -821,7 +821,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateOrderParams"
+                "$ref": "#/components/schemas/CreateMyOrderParams"
               }
             }
           }
@@ -1166,6 +1166,184 @@
         ],
         "x-openrails-error-sets": [
           "tier:customer"
+        ]
+      }
+    },
+    "/v1/app/orders/preview": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewOrderParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Orders",
+        "x-openrails-errors": [
+          "already_owned",
+          "invalid_param",
+          "order_line_unavailable",
+          "quantity_not_allowed",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/orders": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Orders",
+        "x-openrails-errors": [
+          "already_owned",
+          "idempotency_key_in_use",
+          "idempotency_key_required",
+          "idempotency_key_reused",
+          "invalid_param",
+          "order_line_unavailable",
+          "quantity_not_allowed",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request",
+          "app_write"
+        ]
+      }
+    },
+    "/v1/app/orders/{id}/cancel": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Orders",
+        "x-openrails-errors": [
+          "order_not_cancelable",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "app_write"
         ]
       }
     },
@@ -12875,7 +13053,7 @@
           }
         }
       },
-      "CreateOrderParams": {
+      "CreateMyOrderParams": {
         "type": "object",
         "properties": {
           "lines": {
@@ -12893,6 +13071,24 @@
           },
           "reusable": {
             "type": "boolean"
+          }
+        }
+      },
+      "CreateOrderParams": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderLineParams"
+            }
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -16786,6 +16982,10 @@
           },
           "quantity": {
             "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
           }
         }
       },
@@ -18296,9 +18496,23 @@
           }
         }
       },
+      "PreviewMyOrderParams": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderLineParams"
+            }
+          }
+        }
+      },
       "PreviewOrderParams": {
         "type": "object",
         "properties": {
+          "customer_id": {
+            "type": "string"
+          },
           "lines": {
             "type": "array",
             "items": {

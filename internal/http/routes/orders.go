@@ -8,8 +8,9 @@ import (
 // ordersRoutes are purchases (#1168). The customer previews, buys in one
 // call (create with a payment), pays, confirms after next_action, cancels
 // and reads; paying needs the customer in person and an Idempotency-Key, and
-// a failed payment answers 402 card_error with the order. Staff read them
-// and never pay.
+// a failed payment answers 402 card_error with the order. The merchant's
+// backend creates unpaid orders for a customer to pay (/v1/app/orders);
+// staff read them. Neither ever pays.
 var (
 	orderReadErrors   = codes("resource_not_found", "service_unavailable")
 	orderLineErrors   = codes("already_owned", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable")
@@ -19,9 +20,9 @@ var (
 
 var ordersRoutes = []Route{
 	{Method: POST, Path: "/v1/me/orders/preview", Group: Customer, Auth: AuthCustomer,
-		Request: billing.PreviewOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMyOrder)},
+		Request: billing.PreviewMyOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMyOrder)},
 	{Method: POST, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer, IdempotencyKey: true,
-		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}}, Errors: orderCreateErrors, Handler: h(handlers.CreateMyOrder)},
+		Request: billing.CreateMyOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}}, Errors: orderCreateErrors, Handler: h(handlers.CreateMyOrder)},
 	{Method: GET, Path: "/v1/me/orders", Group: Customer, Auth: AuthCustomer,
 		Query: cursorPage, Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListMyOrders)},
 	{Method: GET, Path: "/v1/me/orders/{id}", Group: Customer, Auth: AuthCustomer,
@@ -32,6 +33,13 @@ var ordersRoutes = []Route{
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/cancel", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMyOrder)},
+	{Method: POST, Path: "/v1/app/orders/preview", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "PreviewOrder", Level: LevelRead,
+		Request: billing.PreviewOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMerchantOrder)},
+	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CreateOrder", IdempotencyKey: true,
+		Request: billing.CreateOrderParams{}, Responses: []Reply{{200, billing.Order{}}, {201, billing.Order{}}},
+		Errors: codes("already_owned", "idempotency_key_in_use", "idempotency_key_required", "idempotency_key_reused", "invalid_param", "order_line_unavailable", "quantity_not_allowed", "resource_not_found", "service_unavailable"), Handler: h(handlers.CreateMerchantOrder)},
+	{Method: POST, Path: "/v1/app/orders/{id}/cancel", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CancelOrder", IdempotencyKey: true,
+		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMerchantOrder)},
 	{Method: GET, Path: "/v1/admin/orders", Group: Admin, Auth: AuthMerchant, Name: "ListOrders", Level: LevelRead,
 		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("status")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,

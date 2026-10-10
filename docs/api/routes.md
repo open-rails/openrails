@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (170), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (173), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -44,8 +44,8 @@ A customer acting on its own account.
 | POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
 | GET | `/v1/me/checkout-sessions/{id}` | customer | — | — | 200 `CheckoutSession` |  |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | customer | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
-| POST | `/v1/me/orders/preview` | customer | — | `PreviewOrderParams` | 200 `OrderPreview` |  |
-| POST | `/v1/me/orders` | customer | — | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
+| POST | `/v1/me/orders/preview` | customer | — | `PreviewMyOrderParams` | 200 `OrderPreview` |  |
+| POST | `/v1/me/orders` | customer | — | `CreateMyOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/me/orders/{id}` | customer | — | — | 200 `Order` |  |
 | POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
@@ -216,6 +216,9 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| POST | `/v1/app/orders/preview` | application | `Orders` | `PreviewOrderParams` | 200 `OrderPreview` |  |
+| POST | `/v1/app/orders` | application | `Orders` | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
+| POST | `/v1/app/orders/{id}/cancel` | application | `Orders` | — | 200 `Order` | `Idempotency-Key` |
 | GET | `/v1/app/catalog/products` | application | `Offers` | — | 200 `ListPage<Product>` |  |
 | POST | `/v1/app/entitlements/check` | application | `Entitlements` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | POST | `/v1/app/admissions` | application | `Usage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
