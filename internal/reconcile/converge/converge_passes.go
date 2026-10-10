@@ -681,8 +681,46 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		for i := range refused {
 			out = append(out, refusedProviderOperationFinding(&refused[i], now))
 		}
+
+		// A hold never expires, so one its host stopped driving reserves the
+		// customer's money until someone notices.
+		silent, err := q.ListSilentOperationAuthorizations(ctx, gen.ListSilentOperationAuthorizationsParams{
+			MerchantID: scopeMerchantID.UUID(), Cutoff: now.Add(-silentProviderOperationAge), RowLimit: convergeScanCap,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("life: scan silent provider operations: %w", err)
+		}
+		markTruncated(ctx, len(silent), findingProviderOperationSilent)
+		for i := range silent {
+			out = append(out, silentProviderOperationFinding(&silent[i], now))
+		}
 	}
 	return out, nil
+}
+
+// silentProviderOperationAge is how long an open hold goes untouched before
+// it is silent: its host records an observation at least once per quiescence
+// (a day by default) until the hold qualifies.
+const silentProviderOperationAge = 7 * 24 * time.Hour
+
+// silentProviderOperationFinding asks the host to act on a hold it stopped
+// driving: observe, release, or refuse it so an operator can close it.
+func silentProviderOperationFinding(row *gen.ListSilentOperationAuthorizationsRow, now time.Time) ConvergeFinding {
+	return ConvergeFinding{
+		Type: findingProviderOperationSilent, Shape: ShapeMismatch, Class: ClassOperator, Severity: SeverityHigh,
+		SubjectKey: "provider_operation:" + row.OperationID, Provider: "self",
+		Evidence: map[string]any{
+			"operation_id":      row.OperationID,
+			"customer_id":       billing.CustomerID(row.CustomerID).String(),
+			"currency":          row.Currency,
+			"authorized_amount": strconv.FormatInt(row.AuthorizedAmount, 10),
+			"held_since":        row.CreatedAt.UTC().Format(time.RFC3339),
+			"last_activity_at":  row.LastActivityAt.UTC().Format(time.RFC3339),
+			"silent_for":        now.Sub(row.LastActivityAt).Truncate(time.Minute).String(),
+		},
+		RecommendedAction: fmt.Sprintf("Provider operation %s holds %s %s and nothing has touched it since %s. Its host should record an observation or release it; a host that cannot qualify it records a refusal, then an operator closes it.",
+			row.OperationID, strconv.FormatInt(row.AuthorizedAmount, 10), row.Currency, row.LastActivityAt.UTC().Format(time.RFC3339)),
+	}
 }
 
 // refusedProviderOperationFinding asks an operator to close a provider
@@ -1166,6 +1204,7 @@ const (
 	findingDuplicateCharge      = "consistency.duplicate.provider_charge"
 
 	findingProviderOperationRefused = "life.provider_operation.refused"
+	findingProviderOperationSilent  = "life.provider_operation.silent"
 )
 
 func (*derivePass) Standing() []string {
@@ -1180,7 +1219,7 @@ func (*lifePass) Standing() []string {
 		"life.subscription.pending_stale", "life.subscription.dunning_without_decline", "life.subscription.dunning_overdue",
 		"life.provider_intent.abandoned", findingUnverifiedBacklog, findingUnverifiedUnresolved, findingDunningFunnel, findingRenewalHeld,
 		findingNewCardDeclineSpike, findingRebillFailureSpike, findingSystemErrors, findingDeclineUnmapped, findingWebhookSilence,
-		findingProviderOperationRefused}
+		findingProviderOperationRefused, findingProviderOperationSilent}
 }
 
 func (*notifyPass) Standing() []string { return []string{"notify.access_ended.missing"} }

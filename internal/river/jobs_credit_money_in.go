@@ -155,36 +155,3 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 	}
 	return nil
 }
-
-// --- Ledger reconciliation ---
-
-const KindCreditReconcile = "openrails.credit_reconcile"
-
-type CreditReconcileArgs struct{}
-
-func (CreditReconcileArgs) Kind() string { return KindCreditReconcile }
-
-type CreditReconcileWorker struct {
-	river.WorkerDefaults[CreditReconcileArgs]
-	Money *money.MoneyService
-	Clock clockwork.Clock
-}
-
-func (CreditReconcileWorker) Kind() string { return KindCreditReconcile }
-
-func (w CreditReconcileWorker) Work(ctx context.Context, _ *river.Job[CreditReconcileArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", KindCreditReconcile)
-	if w.Money == nil {
-		logger.Debug("money service not configured; skipping reconcile")
-		return nil
-	}
-	rep, err := w.Money.Reconcile(ctx)
-	if err != nil {
-		return err
-	}
-	if len(rep.OrphanedHolds) > 0 {
-		logger.WithField("orphaned_holds", len(rep.OrphanedHolds)).
-			Warn("credit ledger reconciliation found orphaned expired holds (alert-only)")
-	}
-	return nil
-}

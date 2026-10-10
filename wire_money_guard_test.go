@@ -38,7 +38,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                      notHTTPToolArgs,
 	"internal/modules/money/enterprise.go:PendingCharge.Amount amount":                                                       notHTTPPendingCharges,
 	"internal/service/enterprise.go:PendingChargeDTO.Amount amount":                                                          notHTTPPendingCharges,
-	"internal/modules/money/reconcile.go:OrphanedHold.Amount authorized_amount":                                              notHTTPReconcileReport,
 	"internal/modules/money/provider_billing.go:normalizedProviderBillingRecord.Amount amount":                               notHTTPProviderEvidence,
 	"internal/modules/money/provider_billing.go:providerBillingSettlementManifest.QualifiedCostAmount qualified_cost_amount": notHTTPProviderEvidence,
 	"internal/modules/money/service_usage.go:ResourceRevenueDailyRow.Amount amount":                                          notHTTPInternalRow,
@@ -142,7 +141,6 @@ const (
 	notMoneyPurgeInventory  = "not money: the purge inventory's list of uncaptured secret names"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
 	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
-	notHTTPReconcileReport  = "not HTTP: CLI/job reconcile report"
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
 	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"

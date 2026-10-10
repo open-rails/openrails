@@ -1614,9 +1614,7 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
-      "type OrphanedHold struct {\n\tID         uuid.UUID  `json:\"id\"`\n\tCustomerID uuid.UUID  `json:\"customer_id\"`\n\tAmount     int64      `json:\"authorized_amount\"`\n\tExpiresAt  *time.Time `json:\"expires_at\"`\n}",
       "type PendingCharge struct {\n\tSourceType string    `json:\"source_type\"`\n\tSource     string    `json:\"source\"`\n\tAmount     int64     `json:\"amount\"`\n\tInvoiceAt  time.Time `json:\"invoice_at\"`\n}",
-      "type ReconcileReport struct {\n\tGeneratedAt   time.Time      `json:\"generated_at\"`\n\tOrphanedHolds []OrphanedHold `json:\"orphaned_holds\"`\n}",
       "type ResourceRevenueDailyRow struct {\n\tDate     string `json:\"date\"`\n\tCurrency string `json:\"currency\"`\n\tAmount   int64  `json:\"amount\"`\n}",
       "type ServiceUsageRollupRow struct {\n\tKey         string `json:\"key\"`\n\tCurrency    string `json:\"currency\"`\n\tEventCount  int64  `json:\"event_count\"`\n\tTotalAmount int64  `json:\"total_amount\"`\n}",
       "type UsageRollupRow struct {\n\tEventType   string           `json:\"event_type\"`\n\tCurrency    string           `json:\"currency\"`\n\tTotalAmount int64            `json:\"total_amount\"`\n\tEventCount  int64            `json:\"event_count\"`\n\tDimensions  map[string]int64 `json:\"dimensions\"`\n}",
@@ -3690,12 +3688,6 @@
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "time": "time",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/modules/money/reconcile.go": {
-      "context": "context",
-      "fmt": "fmt",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
     },
     "internal/modules/money/service_usage.go": {
       "context": "context",

@@ -613,6 +613,10 @@ disappears. Two safety doctrines matter operationally:
   customer's capacity until an operator closes it
   (`POST /v1/admin/provider-operations/{operation_id}/close`); the finding
   clears with the close.
+- **Silent provider operations** (`life.provider_operation.silent`): an open,
+  unrefused hold with no increment or observation for 7 days. A hold never
+  expires, so its host must observe, release or refuse it; the finding clears
+  when it does.
 - **Operational problems** outside the sweep are findings too:
   `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
   merchant repairs the ledger and resolves the finding) and

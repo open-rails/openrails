@@ -13,7 +13,8 @@ INSERT INTO billing.operation_authorizations (
     amount,
     claim_reference,
     authorization_body_bytes,
-    authorization_body_digest
+    authorization_body_digest,
+    created_at
 ) VALUES (
     sqlc.arg(operation_id)::text,
     sqlc.arg(merchant_id)::uuid,
@@ -24,7 +25,8 @@ INSERT INTO billing.operation_authorizations (
     sqlc.arg(amount)::bigint,
     sqlc.arg(claim_reference)::text,
     sqlc.arg(authorization_body_bytes)::bytea,
-    sqlc.arg(authorization_body_digest)::bytea
+    sqlc.arg(authorization_body_digest)::bytea,
+    sqlc.arg(created_at)::timestamptz
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING *;
@@ -106,7 +108,7 @@ ORDER BY ordinal;
 
 -- name: InsertOperationAuthorizationExtension :one
 INSERT INTO billing.operation_authorization_extensions (
-    merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount
+    merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
     sqlc.arg(operation_id)::text,
@@ -114,7 +116,8 @@ INSERT INTO billing.operation_authorization_extensions (
     sqlc.arg(requested_amount)::bigint,
     sqlc.arg(minimum_amount)::bigint,
     sqlc.arg(granted_amount)::bigint,
-    sqlc.arg(authorized_amount)::bigint
+    sqlc.arg(authorized_amount)::bigint,
+    sqlc.arg(created_at)::timestamptz
 )
 RETURNING *;
 
@@ -190,4 +193,26 @@ JOIN billing.cost_refusals r
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND a.state = 'open'
 ORDER BY r.refused_at, a.operation_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- Open, unrefused holds nothing has touched since cutoff (no increment, no
+-- observation): their host stopped driving them, and each still reserves the
+-- customer's money. Driven by the open holds.
+-- name: ListSilentOperationAuthorizations :many
+SELECT a.operation_id, a.customer_id, a.currency, a.authorized_amount, a.created_at, activity.last_at::timestamptz AS last_activity_at
+FROM billing.operation_authorizations a
+CROSS JOIN LATERAL (
+    SELECT GREATEST(a.created_at,
+        (SELECT max(e.created_at) FROM billing.operation_authorization_extensions e
+          WHERE e.merchant_id = a.merchant_id AND e.operation_id = a.operation_id),
+        (SELECT max(o.observed_at) FROM billing.cost_observations o
+          WHERE o.merchant_id = a.merchant_id AND o.operation_id = a.operation_id)) AS last_at
+) activity
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.state = 'open'
+  AND a.created_at < sqlc.arg(cutoff)::timestamptz
+  AND activity.last_at < sqlc.arg(cutoff)::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM billing.cost_refusals r
+                  WHERE r.merchant_id = a.merchant_id AND r.operation_id = a.operation_id)
+ORDER BY a.created_at, a.operation_id
 LIMIT sqlc.arg(row_limit)::int;

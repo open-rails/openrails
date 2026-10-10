@@ -108,6 +108,11 @@ A refused hold accepts no observation, increment or release
 convergence sweep raises a `life.provider_operation.refused` finding for it,
 which clears when the hold is closed.
 
+A hold never expires. One with no increment or observation for 7 days raises
+`life.provider_operation.silent`: its host stopped driving it while it still
+reserves the customer's money. The finding clears once the host observes,
+releases or refuses it.
+
 `ListProviderOperations` pages operations newest first.
 `refused=true&state=open` lists exactly the holds waiting for an operator, with
 their reasons; `state` takes a comma-separated list.

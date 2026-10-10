@@ -128,7 +128,7 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 	if _, err := q.InsertOperationAuthorizationExtension(ctx, gen.InsertOperationAuthorizationExtensionParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID, Ordinal: in.Ordinal,
 		RequestedAmount: in.Amount, MinimumAmount: in.MinimumAmount,
-		GrantedAmount: granted, AuthorizedAmount: grown.AuthorizedAmount,
+		GrantedAmount: granted, AuthorizedAmount: grown.AuthorizedAmount, CreatedAt: s.now(),
 	}); err != nil {
 		return nil, err
 	}

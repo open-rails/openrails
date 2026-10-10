@@ -272,12 +272,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add delinquency worker: %w", err)
 	}
-	if err := addTrackedWorker(r, workers, &riverjobs.CreditReconcileWorker{
-		Money: r.MoneyService,
-		Clock: clock,
-	}); err != nil {
-		return fmt.Errorf("add credit reconcile worker: %w", err)
-	}
 	// Solana recurring cranker. Without a Cranker (SetSolanaCranker) it logs
 	// and skips.
 	solanaCrankWorker := &riverjobs.SolanaCrankWorker{
@@ -783,18 +777,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.DelinquencyArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
-
-	// Every 30 minutes: credit ledger reconciliation (alert-only).
-	jobs = append(jobs, r.healthPeriodic(
-		30*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.CreditReconcileArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 30 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

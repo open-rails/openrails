@@ -166,6 +166,7 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		ClaimReference:          in.ClaimReference,
 		AuthorizationBodyBytes:  in.AuthorizationBody,
 		AuthorizationBodyDigest: in.AuthorizationBodySHA256[:],
+		CreatedAt:               s.now(),
 	})
 	if err == nil {
 		return operationAuthorizationFromRow(row, false), nil

@@ -167,7 +167,8 @@ INSERT INTO billing.operation_authorizations (
     amount,
     claim_reference,
     authorization_body_bytes,
-    authorization_body_digest
+    authorization_body_digest,
+    created_at
 ) VALUES (
     $1::text,
     $2::uuid,
@@ -178,7 +179,8 @@ INSERT INTO billing.operation_authorizations (
     $7::bigint,
     $8::text,
     $9::bytea,
-    $10::bytea
+    $10::bytea,
+    $11::timestamptz
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING operation_id, merchant_id, customer_id, record_owner, ledger_account_id, currency, amount, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_cost_amount, settlement_amount, settlement_body_bytes, settlement_body_digest, extended_amount, authorized_amount
@@ -195,6 +197,7 @@ type InsertOperationAuthorizationParams struct {
 	ClaimReference          string
 	AuthorizationBodyBytes  []byte
 	AuthorizationBodyDigest []byte
+	CreatedAt               time.Time
 }
 
 // Durable operation-level financial reservations. The immutable body
@@ -212,6 +215,7 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 		arg.ClaimReference,
 		arg.AuthorizationBodyBytes,
 		arg.AuthorizationBodyDigest,
+		arg.CreatedAt,
 	)
 	var i BillingOperationAuthorization
 	err := row.Scan(
@@ -242,7 +246,7 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 
 const insertOperationAuthorizationExtension = `-- name: InsertOperationAuthorizationExtension :one
 INSERT INTO billing.operation_authorization_extensions (
-    merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount
+    merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
 ) VALUES (
     $1::uuid,
     $2::text,
@@ -250,7 +254,8 @@ INSERT INTO billing.operation_authorization_extensions (
     $4::bigint,
     $5::bigint,
     $6::bigint,
-    $7::bigint
+    $7::bigint,
+    $8::timestamptz
 )
 RETURNING merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
 `
@@ -263,6 +268,7 @@ type InsertOperationAuthorizationExtensionParams struct {
 	MinimumAmount    int64
 	GrantedAmount    int64
 	AuthorizedAmount int64
+	CreatedAt        time.Time
 }
 
 func (q *Queries) InsertOperationAuthorizationExtension(ctx context.Context, arg InsertOperationAuthorizationExtensionParams) (BillingOperationAuthorizationExtension, error) {
@@ -274,6 +280,7 @@ func (q *Queries) InsertOperationAuthorizationExtension(ctx context.Context, arg
 		arg.MinimumAmount,
 		arg.GrantedAmount,
 		arg.AuthorizedAmount,
+		arg.CreatedAt,
 	)
 	var i BillingOperationAuthorizationExtension
 	err := row.Scan(
@@ -579,6 +586,71 @@ func (q *Queries) ListRefusedOperationAuthorizations(ctx context.Context, arg Li
 			&i.BillingOperationAuthorization.SettlementBodyDigest,
 			&i.BillingOperationAuthorization.ExtendedAmount,
 			&i.BillingOperationAuthorization.AuthorizedAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSilentOperationAuthorizations = `-- name: ListSilentOperationAuthorizations :many
+SELECT a.operation_id, a.customer_id, a.currency, a.authorized_amount, a.created_at, activity.last_at::timestamptz AS last_activity_at
+FROM billing.operation_authorizations a
+CROSS JOIN LATERAL (
+    SELECT GREATEST(a.created_at,
+        (SELECT max(e.created_at) FROM billing.operation_authorization_extensions e
+          WHERE e.merchant_id = a.merchant_id AND e.operation_id = a.operation_id),
+        (SELECT max(o.observed_at) FROM billing.cost_observations o
+          WHERE o.merchant_id = a.merchant_id AND o.operation_id = a.operation_id)) AS last_at
+) activity
+WHERE a.merchant_id = $1::uuid
+  AND a.state = 'open'
+  AND a.created_at < $2::timestamptz
+  AND activity.last_at < $2::timestamptz
+  AND NOT EXISTS (SELECT 1 FROM billing.cost_refusals r
+                  WHERE r.merchant_id = a.merchant_id AND r.operation_id = a.operation_id)
+ORDER BY a.created_at, a.operation_id
+LIMIT $3::int
+`
+
+type ListSilentOperationAuthorizationsParams struct {
+	MerchantID uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+type ListSilentOperationAuthorizationsRow struct {
+	OperationID      string
+	CustomerID       uuid.UUID
+	Currency         string
+	AuthorizedAmount int64
+	CreatedAt        time.Time
+	LastActivityAt   time.Time
+}
+
+// Open, unrefused holds nothing has touched since cutoff (no increment, no
+// observation): their host stopped driving them, and each still reserves the
+// customer's money. Driven by the open holds.
+func (q *Queries) ListSilentOperationAuthorizations(ctx context.Context, arg ListSilentOperationAuthorizationsParams) ([]ListSilentOperationAuthorizationsRow, error) {
+	rows, err := q.db.Query(ctx, listSilentOperationAuthorizations, arg.MerchantID, arg.Cutoff, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSilentOperationAuthorizationsRow
+	for rows.Next() {
+		var i ListSilentOperationAuthorizationsRow
+		if err := rows.Scan(
+			&i.OperationID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.AuthorizedAmount,
+			&i.CreatedAt,
+			&i.LastActivityAt,
 		); err != nil {
 			return nil, err
 		}
