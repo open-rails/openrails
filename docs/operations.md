@@ -98,7 +98,7 @@ instance and no sticky session. Without Redis, run one instance.
   readiness without failing it. Redis also carries the admission-denial
   statistics.
 - The standalone server's AuthKit counts its rate limits and records spent
-  DPoP proofs in Redis, or without it in the process's memory: several
+  single-use proofs in Redis, or without it in the process's memory: several
   instances need Redis. While a declared Redis fails, each instance keeps its
   own.
 
@@ -113,12 +113,11 @@ instance and no sticky session. Without Redis, run one instance.
 - **Routes**: every instance mounts the same `openrails.Routes` (prefix,
   permission bundles, admin console). A load balancer sends any request to any
   instance, so a route mounted on some instances is a 404 on the others.
-- **Keys**: the standalone signing key (`auth.active_key_id` and
-  `auth.active_private_key_pem`, or `keys.json` in `auth.keys_path`) and the
+- **Keys**: the standalone signing key (`AUTHKIT_ACTIVE_KEY_ID` and
+  `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM`, or `keys.json` in `auth.keys.path`) and the
   `totp.key` beside it, since a token one instance signs is refused by another
-  (`auth.allow_ephemeral_signing_key` makes a key per process: one instance
-  only); `resource_server.dpop_nonce_key`, since a nonce from one instance is
-  refused by another; the captcha secret.
+  (`auth.keys.allow_ephemeral_dev_keys` makes a key per process: one instance
+  only); the captcha secret.
 - **Version**, except during a rolling upgrade.
 
 ### Background work and leadership
@@ -1165,11 +1164,11 @@ An unset write policy fails closed to `readonly` wherever it is consulted;
 constructor validation requires an explicit policy. Sandbox validates test
 credentials and never relaxes issuer, signing, storage or proxy protections.
 
-Narrow local exceptions are configured explicitly under `auth` (for example
-`allow_loopback_http`, `allow_missing_senders`, `direct_peer_ip`).
-`public_billing_base_url` is only the public callback/link mount base; issuer,
-`auth.request_origin`, remote Client server URL and `dashboard_base_url` are
-independent.
+Narrow local exceptions are configured explicitly in the server's AuthKit (for
+example `auth.registration.allow_missing_senders`, `auth.http.direct_peer_ip`).
+`public_billing_base_url` is only the public callback/link mount base;
+`auth.token.issuer`, `auth.resource.public_url`, remote Client server URL and
+`dashboard_base_url` are independent.
 
 Every subscription has one collector, fixed when it is created or imported
 (`subscriptions.collection_policy`):
@@ -1376,9 +1375,7 @@ provider incident returning a short page — never 850 customers all leaving.
 Every merchant a standalone server serves needs its own canonical API
 hostname, a single merchant's too: the public routes (catalog, checkout)
 resolve their merchant only from the Host, and a Host no merchant answers to
-is `404 merchant_not_found`. A DPoP proof names `auth.request_origin`, so
-customers' browsers calling `/v1/me` must reach the server at that origin; a
-proof for a merchant's API host on another origin is refused. Browser CORS is a **separate, fixed,
+is `404 merchant_not_found`. Browser CORS is a **separate, fixed,
 engine-wide policy**, not a per-merchant setting.
 
 - **Configuring a merchant's host**: the operator binds it (the merchant
@@ -1403,11 +1400,10 @@ engine-wide policy**, not a per-merchant setting.
   configured environment; an explicit runtime merchant binding is enforced.
   Provider signature/source verification and matching payload identity remain
   required. Host headers do not choose callback authority.
-- **Consistency with token issuers**: a JWT minted for merchant A's issuer is
-  rejected when presented against merchant B's Host, even though the token
-  verifies — Host-merchant must equal issuer-merchant on every
-  merchant-scoped route. The check only fires when a Host actually resolved a
-  merchant.
+- **Consistency with credentials**: a credential bound to merchant A (an API
+  key of its group, a token of its trusted issuer) is refused
+  `409 merchant_binding_mismatch` against merchant B's Host or selector, even
+  though it verifies.
 
 ### Browser CORS doctrine
 
@@ -1420,17 +1416,16 @@ CORS doesn't exist. So a per-merchant origin allowlist would protect nothing.
 The engine answers a **static, non-configurable** policy, by
 route tier:
 
-- **Checkout + self-service** (buyer-facing
-  catalog/checkout, `/v1/me/*`, and their embedded
-  equivalents) answer every preflight and response with
-  `Access-Control-Allow-Origin: *`, the methods/headers those routes need,
-  `WWW-Authenticate` and `DPoP-Nonce` exposed, and a 12h `Access-Control-Max-Age` — from ANY origin, zero configuration;
-  `Access-Control-Allow-Credentials` is NEVER set. A merchant frontend calls
-  OpenRails directly with no origin-registration step.
-- **Every other surface** (admin console, platform directory,
-  merchant/service API, inbound webhooks, control-plane auth) emits NO CORS
-  headers at all — the correct, free posture for bearer-JWT curl/service
-  callers.
+- **The standalone server's API routes** (catalog, checkout, `/v1/me/*`, the
+  admin API, `/v1/app/*`) and an embedded host's checkout and self-service
+  routes answer every preflight and response with
+  `Access-Control-Allow-Origin: *`, the methods and headers those routes need
+  plus the headers the mount's Authenticator advertises, `WWW-Authenticate`
+  exposed, and a 12h `Access-Control-Max-Age` — from ANY origin, zero
+  configuration; `Access-Control-Allow-Credentials` is NEVER set.
+- **Every other surface** (the admin console, inbound webhooks, the
+  server's AuthKit routes, an embedded host's staff routes) emits NO CORS
+  headers at all.
 - This is engine code, not a database column or config key, and it does not
   depend on `api_host` or Host resolution: OpenRails' CORS posture is not
   configurable.

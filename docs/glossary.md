@@ -12,9 +12,8 @@ to concrete code (enum, table, or manifest key).
 | Customer | The paying account under a merchant: a UUID the host supplies (`billing.CustomerID`); identity is `(merchant_id, id)`. The same person is a separate customer at each merchant. On a customer route the customer is the admitted identity's subject. |
 | Subject | The native account a request acts as (`Identity.Subject`, a user or an application): its money and authority are used. A customer route's customer; on a merchant route, whose permission is checked. A user is the same subject on every credential they sign in with. |
 | Credential | How a subject proved itself (`Identity.Credential`): a session, a device key, an API key, a signed token or an access token, with its id. Never the subject: rotating a key changes no one. Recorded for audit. |
-| Trusted issuer | An OAuth 2.0 authorization server whose RFC 9068 access tokens OpenRails accepts: declared under `resource_server.trusted_issuers`, or a merchant's remote application. Bound to its merchants by OpenRails, never by a token claim. |
+| Trusted issuer | An OAuth 2.0 authorization server whose RFC 9068 access tokens the standalone server's AuthKit accepts: a remote application in a merchant's AuthKit group. It acts for that merchant only, never by a token claim. |
 | Remote application | AuthKit-registered issuer/JWKS principal nested under a merchant's permission-group: a trusted issuer for that merchant, within its role there. |
-| Federated grant | A merchant role an owner grants by email to a trusted issuer's user, who accepts it with that verified email. |
 | Invoker | The party actually acting (`Identity.Invoker`): the subject itself, or someone acting on its behalf, possibly another issuer's user spending the subject's balance. Spend limits and staff rate limits key on it; usage records it (`invoker`, `invoker_type`). |
 
 ## Money & access

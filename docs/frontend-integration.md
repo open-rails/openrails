@@ -24,25 +24,23 @@ AuthKit request verifier, sent in a header: the mount strips ambient cookies.
 AuthKit's own auth routes keep their refresh/CSRF cookie protocol.
 
 Standalone and SaaS browser clients call OpenRails with an OAuth 2.0 access
-token (RFC 9068 `at+jwt`) from an issuer OpenRails trusts ([auth](auth.md#trusted-issuers)):
+token (RFC 9068 `at+jwt`) from an issuer the merchant trusts ([auth](auth.md#trusted-issuers)):
 
-1. Get a DPoP-bound access token for OpenRails' resource identifier with scope
+1. Get an access token for OpenRails' resource identifier with scope
    `openrails:self` from your issuer: an authorization-code flow, or an RFC 8693
    token exchange of the user's session token. AuthKit's `@openrails/auth-ui`
-   issuer client does both and keeps the DPoP key non-extractable.
-2. Call OpenRails with `Authorization: DPoP <token>` plus a fresh `DPoP` proof
-   for the method and URL (no query or fragment). Answer
-   `401 use_dpop_nonce` by retrying with the response's `DPoP-Nonce` value in
-   the proof.
-3. Clear the token and key on sign-out or account change; refresh before
-   expiry. Do not automatically repeat a financial mutation without its
-   documented durable operation key.
+   issuer client does both. A trusted application without an authorization
+   server redeems its own assertion at the server's token endpoint instead.
+2. Call OpenRails with the token in `Authorization`. A 401 carries the server
+   AuthKit's challenge headers; a sender-constrained token's client answers
+   them as AuthKit documents
+   ([DPoP](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md#dpop)).
+3. Clear the token on sign-out or account change; refresh before expiry. Do
+   not automatically repeat a financial mutation without its documented
+   durable operation key.
 
-OpenRails builds proof targets from its configured `auth.request_origin` plus
-the path, never from Host/Forwarded headers. Self-service CORS allows any
-origin without credentials (`credentials: "omit"`). Native clients may use a
-certificate-bound token over mTLS instead; a DPoP token downgraded to Bearer is
-refused.
+Self-service CORS allows any origin without credentials (`credentials: "omit"`)
+and exposes the headers the server's AuthKit advertises.
 
 ### The self-service surface: `/v1/me/*`
 
@@ -235,9 +233,9 @@ sequenceDiagram
     participant Y as Your identity provider
     participant O as OpenRails
     participant P as Payment rail
-    B->>Y: token exchange (session token + DPoP proof)
+    B->>Y: token exchange (session token)
     Y-->>B: access token, scope openrails:self (TTL ~5 min)
-    B->>O: POST /v1/me/checkout-sessions (DPoP access token + proof)
+    B->>O: POST /v1/me/checkout-sessions (access token)
     O-->>B: {id, url}
     B->>O: GET /v1/checkout-sessions/{id}
     B->>O: POST /v1/checkout-sessions/{id}/pay
@@ -306,8 +304,9 @@ Errors use a Stripe-style envelope:
 Handle in the frontend:
 
 - **401** — access token expired or invalid (`credential_expired`,
-  `access_token_invalid`): get a new one and retry once; `use_dpop_nonce`: retry
-  with the `DPoP-Nonce` value. Embedded: your normal session-expiry flow.
+  `authentication_required`): get a new one and retry once, or answer the
+  challenge headers as your auth client does. Embedded: your normal
+  session-expiry flow.
 - **403** — acting on a resource that isn't yours (foreign checkout session, someone
   else's `payment_method_id`).
 - **409** — `idempotency_key_in_use` or `payment_in_progress` (a retry landed

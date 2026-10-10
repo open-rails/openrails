@@ -75,9 +75,9 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 |---|---|
 | Public: `/v1/config`, `/v1/catalog/products` | none |
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
-| Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
-| Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session, or a trusted issuer's access token with scope `openrails:merchant`; on a hosted product, a merchant API key |
-| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. SCIM names no permission and also takes the merchant's provisioning token |
+| Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
+| Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
+| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
 Every staff and programmatic route is gated by the host's permission for it
@@ -390,7 +390,7 @@ the webhook's identity.
 ## Not routes
 
 No route registers a merchant, lists a user's merchants, or manages a team,
-API keys, federated grants or the merchant directory: those are the `server`
-package's Go methods and the `openrails` CLI, on which a hosted product builds
-its own routes. The operator's `/metrics` is on the standalone server's
-private listener.
+API keys or the merchant directory: those are the `server` package's Go
+methods, the server's AuthKit and the `openrails` CLI, on which a hosted
+product builds its own routes. The operator's `/metrics` is on the standalone
+server's private listener.

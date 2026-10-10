@@ -280,16 +280,16 @@ Without AuthKit, implement `openrails.UserInfo` (`Get` by ids and `Search` by
 text) over your own user table. Leave it out and OpenRails
 sends your customers no email; in-app notices and host events still arrive.
 
-A standalone or hosted OpenRails cannot reach into your process, so it keeps a
-copy, which your directory pushes to it over SCIM 2.0: point AuthKit's
-`Provisioning` (or Okta, or Entra ID) at `/billing/v1/app/scim/v2` with its
-application credential (or, for Okta and Entra ID, the merchant's provisioning
-token). AuthKit sends its changes every 5 minutes and reconciles
-daily, so the copy stays current, and deleting a user erases it. Each customer
-request also brings the user's current email and name in its access token, so
-someone who signs up and buys at once is known before the next push. (Embedded,
-you can keep that pushed copy instead: leave `UserInfo` out and turn on
-`RouteGroups.Programmatic`.)
+A standalone or hosted OpenRails cannot reach into your process: its own
+AuthKit keeps a copy of your users, in the merchant's directory, which your
+directory pushes to over SCIM 2.0. Point AuthKit's `Provisioning` (or Okta, or
+Entra ID) at the server's `/directory/scim/v2` with your application's own
+token. AuthKit sends its changes every 5 minutes and reconciles daily, so the
+copy stays current, and deleting a user erases it. Each customer request also
+brings the user's current email and name in its access token, so someone who
+signs up and buys at once is known before the next push. (Embedded, you can
+keep a pushed copy in OpenRails instead: leave `UserInfo` out, turn on
+`RouteGroups.Programmatic` and push to `/billing/v1/app/scim/v2`.)
 
 #### Using your own auth
 
@@ -510,7 +510,8 @@ until `RouteGroups` turns it on:
 - `Auth`: your auth, which only says who a request is (`Authenticate`). Customer
   routes take a person acting for themself; staff routes ask the answer's
   `Can` for the route's permission in `Scope` and, for a person on a write that
-  moves money or removes access, its `CheckRecentSignIn`. OpenRails answers
+  moves money or removes access, its recent sign-in (helpers/auth
+  `RecentSignInChecker`). OpenRails answers
   every refusal: 401 with a `WWW-Authenticate` challenge (a stale sign-in is
   RFC 9470's `insufficient_user_authentication`, code `step_up_required`), 403,
   or 503 when your auth cannot answer.

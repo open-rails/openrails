@@ -9,7 +9,8 @@ sources:
 | Deployment | Source | Copy |
 |---|---|---|
 | Embedded beside your AuthKit | `Deps.UserInfo`: an `openrails.UserInfo` (AuthKit's `ak.UserInfo()`) asked on every read | none |
-| Standalone, hosted, or embedded without `Deps.UserInfo` | SCIM 2.0 pushes from your directory, plus verified token claims | what was pushed, and when (`contact.synced_at`) |
+| Standalone or hosted | the server's AuthKit: its own users, and each merchant's directory of its trusted issuers' users, asked on every read | in AuthKit |
+| Embedded without `Deps.UserInfo` | SCIM 2.0 pushes from your directory | what was pushed, and when (`contact.synced_at`) |
 
 Without either, OpenRails sends customers no email; in-app notices and host
 events still arrive. With `Deps.UserInfo`, the SCIM routes are not mounted: one
@@ -35,19 +36,24 @@ use AuthKit: `Get(ctx, ids)` returns the users it holds, keyed by id;
 
 ## SCIM provisioning
 
-OpenRails is a SCIM 2.0 service provider (RFC 7643, RFC 7644). Its routes
-live under `{Prefix}/v1/app/scim/v2`, in the programmatic route group: they
-mount with `RouteGroups.Programmatic` (`route_groups.programmatic` on a
-standalone server), unless `Deps.UserInfo` asks your AuthKit directly. Point
-AuthKit's provisioning, Okta or Entra ID at them.
+An embedded engine is a SCIM 2.0 service provider (RFC 7643, RFC 7644). Its
+routes live under `{Prefix}/v1/app/scim/v2`, in the programmatic route group:
+they mount with `RouteGroups.Programmatic`, unless `Deps.UserInfo` asks your
+AuthKit directly. Point AuthKit's provisioning, Okta or Entra ID at them.
+
+The standalone server mounts none: its customers' contacts are its AuthKit's.
+A customer of the server's own users is read from them; a trusted issuer's
+customer from the merchant's directory in the server's AuthKit, which the
+issuer pushes to over SCIM (`{issuer}/directory/scim/v2`, AuthKit's
+[directory](https://github.com/open-rails/authkit/blob/master/docs/scim.md#directory))
+and its tokens' verified contact claims fill as they are used. Each customer
+is read from its own issuer's directory, never another's.
 
 **Authentication** is per merchant, one of:
 
-- An application credential your `Routes.Auth` admits, with no permission:
-  AuthKit's provisioning client, for one. On a standalone
-  server, a client-credentials `at+jwt` from one of the merchant's trusted
-  issuers (`OpenRails-Merchant` names the merchant when the issuer serves
-  several). A person is refused.
+- An application credential your `Routes.Auth` admits, as on every
+  programmatic route: AuthKit's provisioning client, for one. A person is
+  refused.
 - A provisioning token as `Authorization: Bearer`, for directories like Okta
   or Entra ID that cannot get a token from your issuer; it opens nothing else. Mint one with
   `client.CreateProvisioningToken` (`POST /v1/admin/provisioning-tokens`; the
@@ -80,10 +86,9 @@ in process, rooted at the SCIM root, for a directory in the same binary.
 
 ## Newest wins
 
-A standalone server also records the contact claims of each verified customer
-access token (`email` when `email_verified`, `name`, `preferred_username`,
-`updated_at`), so a user who registers and buys at once gets a receipt. A
-report applies only when it is newer than what is held: a SCIM write is dated
-by its resource's `meta.lastModified`, else when it arrives; claims by
-`updated_at`. Claims without `updated_at` fill a contact only when none is held.
-After a `DELETE`, older reports cannot bring the contact back.
+A SCIM write applies only when it is newer than what is held: it is dated by
+its resource's `meta.lastModified`, else when it arrives. After a `DELETE`,
+older reports cannot bring the contact back. On a standalone server the
+server's AuthKit also records each verified customer token's contact claims,
+newest first against pushes, so a user who registers and buys at once gets a
+receipt.

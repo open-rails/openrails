@@ -54,35 +54,33 @@ expires; the merchant itself can take it back. Deleting or retiring a merchant
 releases its name and aliases. Resolution follows live names and unexpired
 aliases; API writes keep their method, body, authorization and idempotency key.
 
-The site naming policy (`auth.naming`, OpenRails' own, which also governs
-AuthKit usernames) governs renames. Defaults allow a rename every **72 hours** and keep each former name
+The naming policy (`naming`, OpenRails' own; usernames follow AuthKit's
+`auth.username`) governs renames. Defaults allow a rename every **72 hours** and keep each former name
 for **90 days**; later policy changes do not alter recorded expiries.
 
 ```yaml
-auth:
-  naming:
-    enabled: true
-    rename_interval: 72h
-    former_names:
-      mode: finite
-      duration: 2160h
+naming:
+  enabled: true
+  rename_interval: 72h
+  former_names:
+    mode: finite
+    duration: 2160h
 ```
 
 Set `enabled: false` to disallow renames, or `rename_interval: 0s` for immediate
 eligibility. Former-name modes are `finite`, `forever`, and `immediate`; omit
 `duration` for the latter two. Environment equivalents are
-`AUTH_NAMING_ENABLED`, `AUTH_NAMING_RENAME_INTERVAL`,
-`AUTH_NAMING_FORMER_NAMES_MODE`, and `AUTH_NAMING_FORMER_NAMES_DURATION`.
-Hosts building on the server package set `server.Config.Auth`'s `Naming`
-(`server.NamingConfig`).
+`NAMING_ENABLED`, `NAMING_RENAME_INTERVAL`, `NAMING_FORMER_NAMES_MODE`, and
+`NAMING_FORMER_NAMES_DURATION`. Hosts building on the server package set
+`server.Config.Naming` (`server.NamingConfig`).
 
 The operator renames a merchant with the server's `RenameMerchant` (or
 `openrails merchants rename`); a hosted product renames one for its owner with
 `RenameMerchantParams.ActorUserID` set, which adds the rename interval and, on
 hosted deployments, the reserved names and creation pattern. `ListMerchants`
-(`openrails merchants list --query`) searches current names, and
-`ListUserMerchants` lists the merchants a user holds a role in, with that role.
-No route renames or lists merchants.
+(`openrails merchants list --query`) searches current names; the merchants a
+user holds a role in are their memberships of merchant groups in AuthKit
+(whose ids are the merchants'). No route renames or lists merchants.
 
 ### Hosted creation recipe (registration is provisioning)
 
@@ -93,9 +91,11 @@ everything through `server.Config.MerchantCreation`:
 engine.SMTP = &openrails.SMTPConfig{Host: "smtp.sendgrid.net", Username: "apikey", Password: key, From: openrails.EmailAddress{Name: "My Brand", Address: "noreply@my-brand.example"}}
 cfg := server.Config{
     Engine:       engine,
-    Auth:         server.AuthConfig{Issuer: "https://api.my-brand.example"},
-    LocalSignIn:  true,
-    Registration: iam.RegistrationModeOpen, // github.com/open-rails/authkit/iam
+    Auth: authkit.Config{ // github.com/open-rails/authkit
+        Token:        authkit.TokenConfig{Issuer: "https://api.my-brand.example"},
+        Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen},
+    },
+    LocalSignIn: true,
     MerchantCreation: &server.MerchantCreationConfig{
         ReservedSlugs: []string{"my-brand"}, // + billing.ReservedMerchantSlugs, always
         FreeAllowance: 2,                    // owned merchants before a card on file is required
@@ -117,8 +117,8 @@ as `OwnerUserID`; the policy then holds: `billing.ErrInvalidMerchantSlug`,
 `billing.ErrMerchantSlugReserved`, `billing.ErrMerchantCreationEmailUnverified`,
 `billing.ErrMerchantCreationPaymentMethodRequired`, or
 `billing.ErrMerchantCreationRefused`. A name already held answers that merchant
-with `Created` false, whoever owns it: the product checks it is the user's
-(`ListUserMerchants`) before treating it as the idempotent repair, and a
+with `Created` false, whoever owns it: the product checks the user owns its
+group in AuthKit before treating it as the idempotent repair, and a
 display name applies only to a merchant the call creates. Rate limits on
 registration are the product's. Ownerless `ProvisionMerchant` and Bootstrap
 are operator acts and stay ungated — that is how a platform merchant claims a
@@ -201,9 +201,10 @@ Per merchant:
   claim one at runtime, bound once a TXT record proves control of the domain
   (the server's `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`).
 - `remote_application` — the host app's issuer (JWKS URI, inline static
-  `jwks`, or raw `public_keys`), registered as merchant **owner**: its RFC 9068
-  access tokens act for this one merchant and no other, within that role
-  ([auth](auth.md#trusted-issuers); needs `resource_server`).
+  `jwks`, or raw `public_keys`), a trusted issuer of the server's AuthKit in the
+  merchant's group, holding its **owner** role: its RFC 9068 access tokens act
+  for this one merchant and no other, within that role
+  ([auth](auth.md#trusted-issuers); needs `auth.resource.id`).
 - `settings` — the merchant's settings (`billing.MerchantSettings`), the same
   document `GET /v1/admin/configuration` reads and a configuration
   application changes, with the same names, units and validation
@@ -224,8 +225,9 @@ Per merchant:
 - `custodians.<key>` — one entry per card custodian a PSP references. Fields:
   `kind` (`basis_theory`), `account_id`, `archived`, `settings`, `secrets`.
 - `secrets.scim_token` — a provisioning token (at least 32 characters) the
-  merchant's directory presents at `/v1/app/scim/v2`
-  ([customer contacts](customer-contacts.md)). OpenRails keeps its SHA-256 as
+  merchant's directory presents to an embedded engine's SCIM routes
+  ([customer contacts](customer-contacts.md)); the standalone server's
+  directory is its AuthKit's. OpenRails keeps its SHA-256 as
   the merchant's declared token, replaced when this changes and removed when it
   is removed; tokens minted over the API stand beside it.
 
@@ -301,20 +303,21 @@ alongside it: see [backup and recovery](backup-and-recovery.md).
 
 ## API keys
 
-OpenRails serves no route that mints credentials. A self-hosted backend
+OpenRails serves no route that mints credentials. A merchant's API keys are
+AuthKit's, in the merchant's group: a hosted product mints one with
+`ak.CreateAPIKey(ctx, who, iam.GroupByID(merchantID), …)` holding a merchant
+role (`server.MerchantRole`), and revokes it with `ak.RevokeAPIKey`. The secret
+is in the result once and never stored; the non-secret `prefix`
+(`openrails_st_<key_id>`) identifies the key afterwards. A self-hosted backend
 authenticates with a client-credentials access token from the merchant's
-trusted issuer ([standalone](standalone-integration.md#deployment)). A hosted
-product mints merchant API keys with the server's `CreateMerchantAPIKey`
-(listed by `ListMerchantAPIKeys`, revoked by `RevokeMerchantAPIKey`): the
-secret is in the result once and never stored; the non-secret `prefix`
-(`openrails_st_<key_id>`) identifies the key afterwards.
+trusted issuer ([standalone](standalone-integration.md#deployment)).
 
-Roles are the fixed merchant catalog: `viewer` (`server.MerchantBillingRead`:
-read-only, the right choice for LLM agents), `support`
-(`server.MerchantBillingRead` and `server.MerchantBillingManage`: acts on
-customers), `owner` (everything, the merchant's configuration and the
-programmatic routes included). A key is minted as an `Actor`, never with
-authority beyond the actor's own.
+Roles are the fixed merchant catalog (`server.MerchantRoles`): `viewer`
+(`server.MerchantBillingRead`: read-only, the right choice for LLM agents),
+`support` (`server.MerchantBillingRead` and `server.MerchantBillingManage`:
+acts on customers), `owner` (everything, the merchant's configuration and the
+programmatic routes included). AuthKit refuses a role beyond the minting
+identity's own.
 
 ## Webhook routing
 

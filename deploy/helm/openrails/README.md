@@ -21,7 +21,7 @@ Chart version `X.Y.Z` runs image `vX.Y.Z`.
 | `secrets.merchantOverlays` | Secret keys holding merchant manifest overlays (PSP credentials outside Vault). |
 | `metrics` | The private `/metrics` listener (`private_port`), its Service port and an optional ServiceMonitor. |
 | `ingress` | Hosts routed whole to the server; TLS. |
-| `replicaCount` | 1. More need Redis (`config.redis`), which shares OpenRails' rate limits, admin lockouts, captcha challenges and card-testing declines and AuthKit's rate limits and DPoP proofs (without it each pod keeps its own), and `secrets.authKeys`. |
+| `replicaCount` | 1. More need Redis (`config.redis`), which shares OpenRails' rate limits, admin lockouts, captcha challenges and card-testing declines and AuthKit's rate limits and spent proofs (without it each pod keeps its own), and `secrets.authKeys`. |
 | `podDisruptionBudget`, `topologySpreadConstraints`, `affinity` | Scheduling. |
 
 The chart owns `host`, `port` and `private_port` (`ports.http`, `metrics.port`).

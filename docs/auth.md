@@ -12,17 +12,17 @@ it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 `Routes.Auth`, who the request is (`Authenticate`, once per request), and
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
 for a staff or programmatic route's permission in `Routes.Scope`, and its
-`CheckRecentSignIn` for a person's recent sign-in. AuthKit provides one as
-`ak.Authenticator()`. The standalone server supplies its trusted issuers, API
-keys and control-plane sessions through the same contract, and the in-process
-Go client its own host authority.
+recent sign-in (helpers/auth `RecentSignInChecker`) for a person. AuthKit
+provides one as `ak.Authenticator()`. The standalone server mounts its routes
+with its own AuthKit's, exactly like an embedded host, and the in-process Go
+client brings its own host authority.
 
 | Route tier | What OpenRails asks | Who it admits |
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | checkout session | the session id; `Authenticate` only when a credential is presented, never to refuse | the session's own customer, a person in person, sees and pays with its saved cards |
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then `CheckRecentSignIn` when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
+| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission in the merchant's scope | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
@@ -32,8 +32,8 @@ resolving `OpenRails-Merchant` itself.
 
 OpenRails answers every refusal itself, the same for every host, with the
 status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
-(`authentication_required`, `credential_expired`, `credential_revoked`,
-`sender_proof_required`, and the provider's own challenge headers), 403
+(`authentication_required`, `credential_expired`, `credential_revoked`, with
+the provider's own challenge headers passed through unread), 403
 (`permission_required`, `application_required`, `invoker_scoped_principal`,
 `step_up_unavailable` for a person whose credential has no sign-in of its own),
 503 when the host's auth cannot answer (`authentication_unavailable`,
@@ -90,46 +90,59 @@ An identity has three parts:
 Provider writes record all three: the subject, the invoker and the
 credential (`kind:id`).
 
-The standalone server (package `server`) runs its own AuthKit with closed
-registration. Its own sign-in (password, passwordless, registration) is opt-in
-(`server.Config.LocalSignIn`, `local_sign_in`); without it people sign in at a
-trusted issuer. OpenRails-SaaS opens hosted registration. A
-merchant signing application maps to exactly one merchant permission group;
-its token cannot select another merchant by adding a claim or changing a URL.
-Identity/contact attributes do not confer authorization.
+The standalone server (package `server`) runs its own AuthKit, configured by
+its `auth:` section in AuthKit's own keys, with closed registration unless it
+says otherwise. Its own sign-in (password, passwordless, registration) is
+opt-in (`server.Config.LocalSignIn`, `local_sign_in`); without it people sign in
+at a trusted issuer. Identity and contact attributes confer no authorization.
+
+## The standalone server
+
+The server's AuthKit decides who every request is. OpenRails maps merchants to
+AuthKit groups and nothing more:
+
+- **A merchant's scope is its AuthKit group**, whose id is the merchant's id
+  (`Server.MerchantScope`). Staff routes ask `Can(scope, permission)` there.
+- **The merchant a request is for** comes from its API host, its
+  `OpenRails-Merchant` selector, the scope its credential is bound to (an API
+  key's group, a trusted issuer's group) and the configured merchant. They must
+  agree, else `409 merchant_binding_mismatch`; with none it is
+  `403 merchant_unresolved`. A person names the merchant: holding a role in
+  one merchant never picks it.
+- **Customer (`/v1/me`) and programmatic (`/v1/app`) credentials must be bound**
+  to the request's merchant: a trusted issuer's token, or an API key of the
+  merchant's group. A credential bound to no merchant is refused there.
+- **A customer is its issuer's subject** (OIDC Core §5.7): the customer id is
+  the token's `sub`, and `billing.customers` records the issuer that made it.
+  Another issuer's credential with the same `sub` is refused
+  (`409 merchant_binding_mismatch`). A customer with no recorded issuer is the
+  host's own user, such as one made through the Go API; no trusted issuer
+  reaches it.
 
 ## Trusted issuers
 
-Standalone OpenRails is an OAuth 2.0 resource server. It accepts RFC 9068
-access tokens (`typ: at+jwt`) whose `aud` is `resource_server.identifier`, from
-two kinds of trusted issuer:
+With `auth.resource.id` set, the server's AuthKit is an OAuth 2.0 resource
+server: it accepts RFC 9068 access tokens (`typ: at+jwt`) minted for that
+resource by its trusted issuers. A trusted issuer is an AuthKit remote
+application in a merchant's group: the merchant manifest's
+`remote_application` (holding the merchant's owner role), or one registered at
+run time through AuthKit. One issuer acts for one merchant. Its tokens'
+permissions count within its application's role and the token's scopes:
+`openrails:merchant` grants the merchant permissions, `openrails:self` none (a
+customer's own billing). A token whose `sub` equals its `client_id` is a client
+acting for itself.
 
-- declared in `resource_server.trusted_issuers`: issuer, keys, the merchants it
-  acts for, a permission ceiling, CORS origins and optional group roles;
-- a merchant's registered signing application (the manifest's
-  `remote_application`): it acts for that merchant only, within its stored
-  authority, read on every request, so disabling it applies to the next one.
+A trusted application without an authorization server mints its customer a
+token at the server's own token endpoint with an RFC 7523 assertion. How
+AuthKit verifies tokens, maps an issuer's roles and handles sender-constrained
+tokens is AuthKit's: see its
+[resource server](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md)
+and [DPoP](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md#dpop)
+documentation. `auth.sign_in.dpop` sets how the server's AuthKit issues tokens
+to its own users; it never changes how tokens are validated.
 
-The token's `scope` selects the surface: `openrails:merchant` for the merchant
-API and a user's own merchant list, `openrails:self` for a customer's own
-billing (`/v1/me`). A token never names its merchant; the request does
-(`OpenRails-Merchant` or the merchant's API host), and it must be one the
-issuer is trusted for. Permissions are the token's `permissions`, the issuer's
-group roles and the user's accepted federated grants, within the ceiling: the
-server's merchant permissions ([Permissions](#permissions)). A
-token whose `sub` equals its `client_id` is a client acting for itself.
-
-A token bound to a key (`cnf.jkt`) is accepted only as `Authorization: DPoP`
-with a fresh single-use proof for the method, the configured
-`auth.request_origin` plus path, and the server nonce: the first proof without
-one is answered `401 use_dpop_nonce` with a `DPoP-Nonce` header. Customer
-tokens must be bound (DPoP, or a certificate-bound token over mTLS). Spent
-proofs are recorded in PostgreSQL, shared by every replica with or without
-Redis; a proof that cannot be recorded fails closed with 503.
-Arbitrary Host/Forwarded headers never define a proof target.
-
-Merchant routes answer CORS for the trusted issuers' declared origins only,
-without credentials mode; browser self-service answers any origin. Origin is
+Every API route answers CORS for any origin, without credentials mode; the
+header lists add the ones the mount's Authenticator advertises. Origin is
 transport metadata, not identity.
 
 OpenRails cannot see an issuer's end-user ban or session revocation: the
@@ -158,21 +171,21 @@ revoke-all, password change, ban, deletion) the check answers 401
 `credential_revoked`, whatever time the token has left. Routes that only
 authenticate, with no permission check, accept the token until it expires.
 
-Every HTTP attempt authenticates and authorizes again. Documented financial
-operations own durable idempotency receipts; there is no generic response
-replay cache. Inside one immutable request, repeated permission checks reuse
-verified identity and sender proof. Permission checks are not memoized.
+Every HTTP attempt authenticates and authorizes again: the route gate asks
+the Authenticator once per request. Documented financial operations own durable
+idempotency receipts; there is no generic response replay cache. Permission
+checks are not memoized.
 
 ## Operational configuration
 
 Configure `trusted_proxies` with actual proxy CIDRs or set
-`auth.direct_peer_ip: true` for direct client connections. Cloudflare-specific
+`auth.http.direct_peer_ip: true` for direct client connections. Cloudflare-specific
 headers are trusted only from declared `cloudflare_proxies`; generic proxy
 trust does not confer that authority. Embedded hosts set the same on
 `Config.TrustedProxies` and `Config.CloudflareProxies`. Direct-peer and proxy
 declarations are mutually exclusive.
 
-Development signing keys persist under `auth.keys_path`; production supplies
+Development signing keys persist under `auth.keys.path`; production supplies
 its managed keys. AuthKit reads a signing application's registration on every
 verification, so registration, key changes and disablement apply to the next
 request, wherever they were made. Unverified token issuers never trigger

@@ -15,7 +15,7 @@ on nmi) — declared under `merchants.<slug>.psps.<key>`, with its `rail:`.
 flowchart LR
     B[Browser] -- session credential --> H[Your identity provider]
     H -. access token, scope openrails:self .-> B
-    B -- DPoP access token, /v1/me/* --> OR[OpenRails :3053]
+    B -- access token, /v1/me/* --> OR[OpenRails :3053]
     H -- access token, /v1/admin/* --> OR
     OR --> PG[(Postgres 18+)]
     OR --> RD[(Garnet/Redis)]
@@ -90,7 +90,8 @@ openrails run-server --config /etc/openrails/config.yaml \
   environment rather than silently disabling the rail. Sandbox is allowed in
   every environment — credential validation, not the env string, keeps it
   honest.
-- An `https` `auth.issuer`.
+- An `https` `auth.token.issuer`: the server's own AuthKit
+  ([runtime configuration](runtime-configuration.md#authentication)).
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or
   `X-Forwarded-For` is ignored and rate limiting keys on the LB's address.
 
@@ -165,9 +166,9 @@ is always explicit.
 registered in step 2 (see [trusted issuers](#trusted-issuers-staff-machines-and-customers)):
 it requests a client-credentials access token for this deployment's resource
 identifier with scope `openrails:merchant`, and its permissions there, within
-the issuer's ceiling, decide what it may do. OpenRails mints no credentials
-and serves no route that does; a hosted product built on the `server` package
-mints API keys with `CreateMerchantAPIKey`.
+its application's role, decide what it may do. OpenRails mints no credentials
+and serves no route that does; a hosted product mints API keys in the server's
+AuthKit (`ak.CreateAPIKey`, [API keys](merchant-provisioning.md#api-keys)).
 
 The remote CLI reads such a token from `--token-file` on every call, so
 whatever refreshes it may rewrite the file in place:
@@ -273,14 +274,14 @@ curl -X POST https://openrails.example/v1/app/admissions/release \
 The `/v1/app/*` surface (admissions, usage, provider operations, host events)
 and the `/v1/admin/*` surface (credits, entitlements, settings, customers,
 payments, subscriptions) are gated per route by their permission — see [api/routes.md](api/routes.md) for every route with its permission and
-[api/endpoints.md](api/endpoints.md) for the conventions. A token acts on its issuer's merchants
+[api/endpoints.md](api/endpoints.md) for the conventions. A token acts on its issuer's merchant
 only, never on another merchant's data.
 
 ### Frontend integration
 
 Your users' browsers call OpenRails' self-service surface (`/v1/me/*`:
 entitlements, subscriptions, payment methods, checkout sessions, invoices) **directly**, using
-a short-lived, DPoP-bound access token with scope `openrails:self` that your
+a short-lived access token with scope `openrails:self` that your
 identity provider mints for OpenRails — your session tokens never leave your
 trust domain. The token contract and checkout flows are in
 [frontend-integration.md](frontend-integration.md); the trust model is in
@@ -289,88 +290,78 @@ trust domain. The token contract and checkout flows are in
 ### Trusted issuers: staff, machines and customers
 
 Your identity provider lets your staff, admin UI, machines and customers call
-OpenRails directly, without OpenRails holding accounts for them. OpenRails is an
-OAuth 2.0 resource server: it accepts RFC 9068 access tokens (`typ: at+jwt`)
-that a trusted issuer minted for this deployment's resource identifier (`aud`).
-A merchant's manifest `remote_application` is a trusted issuer for that
-merchant too, within its owner role; it needs `resource_server` declared.
+OpenRails directly, without OpenRails holding accounts for them. The server's
+AuthKit is an OAuth 2.0 resource server: it accepts RFC 9068 access tokens
+(`typ: at+jwt`) that a merchant's trusted issuer minted for `auth.resource.id`.
+A trusted issuer is an AuthKit remote application in the merchant's group: the
+merchant manifest's `remote_application` (holding the owner role), or one
+registered at run time through AuthKit. One issuer acts for one merchant.
 
 ```yaml
-resource_server:
-  identifier: https://openrails.example.com
-  dpop_nonce_key: ""            # >= 32 bytes, the same on every replica
-  trusted_issuers:
-    - name: example
-      issuer: https://example.com/auth   # keys from <issuer>/.well-known/jwks.json, or pin them with keys:
-      merchants: [example]
-      permissions: ["merchant:*"]        # the ceiling
-      allowed_origins: [https://admin.example.com]
+auth:
+  token:
+    issuer: https://openrails.example.com
+  resource:
+    id: https://openrails.example.com    # the tokens' aud
 ```
 
-- `scope` selects the surface: `openrails:merchant` for the admin API,
-  `openrails:self` for a customer's own billing
-  (`/v1/me/*`, DPoP-bound, `sub` a UUID: the customer's id). Another scope is
-  answered `403 insufficient_scope`.
-- A token's `permissions` claim is what it grants, within the issuer's ceiling
-  (`permissions`), on the issuer's `merchants` only. A token never names its
-  merchant: it acts for the one the request selects (`OpenRails-Merchant`), or
-  the issuer's only merchant. An issuer that cannot mint OpenRails permissions
-  maps the roles in its tokens' `roles` claim to merchant roles with
-  `group_roles` (`owner`, `support`, `viewer`).
+```yaml
+merchants:
+  example:
+    remote_application:
+      issuer: https://example.com/auth   # exact iss
+      jwks_uri: https://example.com/auth/.well-known/jwks.json
+```
+
+- A token's permissions count within its application's role and the token's
+  scopes: `openrails:merchant` grants the merchant permissions,
+  `openrails:self` none (a customer's own billing, `/v1/me/*`, `sub` a UUID:
+  the customer's id).
+- A token acts for its issuer's merchant only. The request may name it
+  (`OpenRails-Merchant`, or the merchant's API host); naming another is
+  `409 merchant_binding_mismatch`.
 - A token with `sub` equal to its `client_id` is a machine acting for itself.
-- Your console signs staff in at the issuer: register a public client with the
-  redirect URI `<console URL>/callback` (authorization code and refresh, DPoP)
-  and set `admin_console.issuer` to the issuer and its `client_id`. OpenRails'
-  own sign-in is off unless you set `local_sign_in: true`.
+- Your console signs staff in at the issuer: register a client with the
+  redirect URI `<console URL>/callback` and set `admin_console.issuer` to the
+  issuer and its `client_id`. OpenRails' own sign-in is off unless you set
+  `local_sign_in: true`.
 - A sensitive operation (one that moves money or grants access) needs a
   person's token's `auth_time` within 15 minutes; otherwise `401
   step_up_required` (`WWW-Authenticate: Bearer
-  error="insufficient_user_authentication", max_age="900"`, metadata
-  `max_age: 0`) asks the client to re-authorize. A client acting for itself
-  has no sign-in to renew.
-- Staff your issuer grants nothing can hold a merchant role by email
-  invitation (a federated grant), which joins the token's own permissions,
-  within the ceiling. Grants are a hosted product's: it builds them on the
-  `server` package (below); a self-hosted deployment grants through its
-  issuer.
-- A token bound to a DPoP key (`cnf.jkt`) is accepted only with
-  `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
-  first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
-  header to retry with. The proof names `auth.request_origin` (else the
-  issuer's origin) plus the path, so browsers call the server at that origin:
-  a proof for any other host, a merchant's API host included, is refused.
+  error="insufficient_user_authentication", max_age="900"`) asks the client to
+  re-authorize. A client acting for itself has no sign-in to renew.
 - With AuthKit as the issuer, the browser gets these tokens by token exchange:
   register a public client with the token-exchange grant and the server as a
   resource, and give billing-ui a `fetch` that calls auth-ui's
   `resourceFetch` with scope `openrails:self`
-  ([`clients.ts`](../examples/standalone/web/src/clients.ts)).
-- Browsers on `allowed_origins` may call the admin API across origins.
-  Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
-  headers, never cookies.
-- A customer token's verified contact claims (`email` with `email_verified:
-  true`, `name`, `preferred_username`, `updated_at`) become the customer's
-  contact, newest first against SCIM pushes, so a user who registers and buys at
-  once gets the receipt ([customer contacts](customer-contacts.md)).
-- A client-credentials token (an application) calls the programmatic routes,
-  `/v1/app/*` with `route_groups.programmatic`, each holding its permission
+  ([`clients.ts`](../examples/standalone/web/src/clients.ts)). An application
+  without an authorization server signs an RFC 7523 assertion for its user,
+  which its frontend redeems at the server's token endpoint
+  ([AuthKit](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md)).
+- A customer is its issuer's subject: another issuer's token with the same
+  `sub` is refused ([auth](auth.md#the-standalone-server)). Its contact comes
+  from the merchant's directory in the server's AuthKit, filled by the issuer's
+  SCIM push (`{issuer}/directory/scim/v2`) or its tokens' verified contact
+  claims, so a user who registers and buys at once gets the receipt
+  ([customer contacts](customer-contacts.md)).
+- An application's token calls the programmatic routes, `/v1/app/*` with
+  `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
-  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`),
-  and provisions the
-  merchant's users at `/v1/app/scim/v2`, as a provisioning token does; a
+  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`); a
   person's token is refused there.
-- Refusals: `access_token_issuer_unknown` (untrusted `iss`),
-  `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
-  `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
-  `permission_required`.
+- Refusals: `401 authentication_required` (an untrusted issuer, a bad
+  signature, audience or lifetime), `401 credential_expired`,
+  `409 merchant_binding_mismatch` (another merchant), `403 permission_required`.
+  AuthKit's challenge headers pass through; how sender-constrained tokens are
+  proven is AuthKit's
+  ([DPoP](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md#dpop)).
 
-These tokens, merchant API keys and the server's own sessions are the server's
-own `openrails.Authenticator`, the contract an embedded host implements,
-through the same route gate: a token's `sub` is the subject (a user), and its
-invoker; a client acting for itself and an API key are an application subject.
-Customer routes take the customer only from the subject. A key or a token names
-its merchant and holds its grant there; a session acts on the merchant the
-request selects or its only one, holding its role there, checked live. Each
-merchant's scope is its permission group.
+Tokens, merchant API keys and the server's own sessions all reach the route
+gate through AuthKit's Authenticator, the contract an embedded host
+implements. A token's `sub` is the subject (a user) and its invoker; a client
+acting for itself and an API key are an application subject. Customer routes
+take the customer only from the subject. Each merchant's scope is its AuthKit
+group, whose id is the merchant's.
 
 ### Webhooks
 
@@ -395,15 +386,15 @@ product lets a merchant claim one it proves with a DNS TXT record
 (`ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`). `GET /v1/admin/api-host`
 reads it. It resolves live on the next request, no restart.
 The public routes then resolve the merchant from the Host header, and every
-merchant-scoped route enforces Host-merchant == issuer-merchant: a token minted
-for merchant A is rejected on merchant B's host even though it verifies.
+merchant-scoped route refuses a credential bound to another merchant: a token
+minted for merchant A is rejected on merchant B's host even though it verifies.
 
-**CORS** is a fixed, engine-wide policy — not configurable, no origin
-registration: browser-facing tiers (checkout, `/v1/me/*`)
-answer `Access-Control-Allow-Origin: *` and expose `WWW-Authenticate` and
-`DPoP-Nonce`, so a browser can answer a nonce challenge (never with credentials — OpenRails
-issues no cookies; every browser call is an explicit bearer token), and every
-other surface (admin API, webhooks, admin) emits no CORS headers at all.
+**CORS** is a fixed policy — not configurable, no origin registration: the
+API routes (checkout, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer
+`Access-Control-Allow-Origin: *`, allow and expose the headers the server's
+AuthKit advertises for its credentials, and never allow credentials (OpenRails
+issues no cookies; every browser call is an explicit bearer token). Webhooks
+and the console emit no CORS headers.
 
 ### Building on the server package
 
@@ -419,8 +410,11 @@ go install github.com/open-rails/openrails/server/cmd/openrails@vX.Y.Z   # the b
 
 ```go
 srv, err := server.New(ctx, server.Config{
-    Engine:      openrails.Config{TestMode: openrails.Live, ProviderWriteMode: openrails.ProviderWritesFull},
-    Auth:        server.AuthConfig{Issuer: "https://billing.example.com", KeysPath: "/vault/auth"},
+    Engine: openrails.Config{TestMode: openrails.Live, ProviderWriteMode: openrails.ProviderWritesFull},
+    Auth: authkit.Config{ // github.com/open-rails/authkit
+        Token: authkit.TokenConfig{Issuer: "https://billing.example.com"},
+        Keys:  authkit.KeysConfig{Path: "/vault/auth"},
+    },
     LocalSignIn: true,
 }, server.Deps{Engine: openrails.Deps{Postgres: pool, Redis: rdb}})
 if err != nil {
@@ -430,39 +424,35 @@ return srv.Run(ctx) // serves Addr (default :3053) and runs the workers until ct
 ```
 
 `server.New` composes three parts as any host of the library does: the engine
-(`openrails.New`); the server's own AuthKit client, its tables created or
-upgraded and its routes mounted at the issuer's path; and the multi-merchant
-control plane (merchants and their names, teams, API keys, federated grants,
-trusted issuers, fleet analytics), which is Go methods only: no OpenRails route
-registers a merchant or manages a team. The engine's routes are
-gated by the server's own `openrails.Authenticator`: it accepts merchant API
-keys, the server's sessions and trusted issuers' access tokens, and resolves
-the merchant each acts for.
+(`openrails.New`); the server's own AuthKit, its tables created or upgraded and
+its routes mounted at the issuer's path; and the multi-merchant control plane
+(merchants and their names, the AuthKit group each is, fleet analytics), which
+is Go methods only: no OpenRails route registers a merchant. The engine's
+routes are mounted with `Routes.Auth` the AuthKit's Authenticator, as an
+embedded host mounts them, and each merchant's group as its scope.
 
 | `server.Config` | Meaning |
 |---|---|
 | `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
-| `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, its tables' `Schema` (default `profiles`), development allowances. |
-| `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
-| `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
+| `Auth` | The server's AuthKit (`authkit.Config`), passed through: its issuer (required), keys, registration, rate limits, the resource it serves (`Resource`) and how it issues tokens (`SignIn`). The server sets the product's own: the merchant roles, the API key prefix and audience, the resource's scopes, AuthKit's River schema and HTTP mount; a closed registration and the engine's trusted proxies when unset. |
+| `LocalSignIn` | Serve sign-in to the server's own accounts. Without it people sign in at a trusted issuer. |
+| `Naming` | The rename policy for merchant names. |
 | `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |
-| `ResourceServer` | The trusted issuers whose access tokens the admin API accepts (above). |
-| `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
+| `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer, for `Auth.Resource.ID`. |
 | `Addr` | Where `Run` listens; default `:3053`. |
 | `PrivateAddr` | Where `Run` also serves `PrivateHandler`, the operator's `/metrics`; empty serves none (`private_port`). |
 
-`server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's
-senders (`SMS`; `AuthEmail` for your own templates, else AuthKit's mail is
-rendered and sent through the engine's sender) and `HasVaultedPaymentMethod`,
-which unlocks merchant creation beyond the free allowance.
+`server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's own
+(`Auth`, an `authkit.Deps`: its senders, key source and the rest; nil Postgres
+is a pool of the engine's database, nil Redis the engine's, nil Email renders
+AuthKit's mail and sends it through the engine's sender) and
+`HasVaultedPaymentMethod`, which unlocks merchant creation beyond the free
+allowance.
 
 `Run` serves `Handler` and runs the workers; `Serve` serves without them. A
 product with its own router mounts `Routes` instead (the surface without
-health routes, plus customer surfaces with their own `Auth`; one without a
-`Merchant` serves the merchant each request selects, which its `Auth` reads
-with `openrails.RequestMerchant`) and composes
-`RiverJobs` into its River fleet before `Start(ctx,
-openrails.WithRiverClient(fleet))`.
+health routes) and composes `RiverJobs` into its River fleet before
+`Start(ctx, openrails.WithRiverClient(fleet))`.
 
 The server's methods are the operator's API and a hosted product's
 foundation; the `openrails` CLI covers the operator's (`merchants`,
@@ -470,17 +460,17 @@ foundation; the `openrails` CLI covers the operator's (`merchants`,
 
 | Area | Methods |
 |---|---|
-| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `SetMerchantAPIHost`, `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
-| Users and authority | `AuthenticateUser`, `ListUserMerchants`, `ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`, `CheckRecentSignIn`, `UserActor`, `CredentialRefusal`, `EnsureCustomerPermissionGroup` |
-| Team and credentials | `ListMerchantTeam`, `ListMerchantTeamInvites`, `InviteMerchantTeamMember`, `RevokeMerchantTeamInvite`, `SetMerchantTeamRole`, `RemoveMerchantTeamMember`, `TeamInvitesEnabled`, `CreateMerchantAPIKey`, `ListMerchantAPIKeys`, `RevokeMerchantAPIKey`, `ListFederatedGrants`, `CreateFederatedGrant`, `RevokeFederatedGrant`, `ListFederatedInvites`, `AcceptFederatedGrant` |
+| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `MerchantByName`, `SetMerchantAPIHost`, `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
+| Authority | `MerchantScope` (a merchant's AuthKit group, as an `auth.Scope`), `ListUserMerchants` (the merchants a user holds a role in), `AuthKit`, `EnsureCustomerPermissionGroup`; `server.MerchantRoles` and `server.MerchantRole` name the merchant roles |
 | Operations | `ListWorkerHealth`, `UnlockAdminLockout`, `PrivateHandler`, `FleetAnalytics`, `FleetTimeseries`, `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`, `CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` |
 
-A change to a team, its keys or its grants names its `Actor`: `UserActor(r)`,
-the user r signs in as, whom AuthKit holds to their own role; a
-`CredentialActor` holding permissions, which grants no role beyond them; or
-`OperatorActor()`. The caller authorizes each call (`ResolveAuthorizedMerchant`)
-and asks `CheckRecentSignIn` before a sensitive one. `AuthKit` is the server's
-AuthKit client and `Client` the engine.
+Who a request is, and what it may do, is AuthKit's: a hosted product
+authenticates a request with `srv.AuthKit().Authenticator()` and asks the
+answer's `Can(ctx, scope, permission)`, with `srv.MerchantScope(ctx, id)` for a
+merchant's permissions (`server.MerchantBillingRead` and the others) or
+`ak.Scope(ctx, iam.RootGroup())` for the operator's. Teams, invitations and API
+keys are AuthKit's (`ak.SetGroupRole`, `ak.CreateAPIKey`, its invitations) in
+the merchant's group. `Client` is the engine.
 
 ### Upgrades and ops
 

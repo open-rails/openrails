@@ -12,8 +12,8 @@ territory. The primary deep manual is [operations.md](operations.md).
 | **Redis-compatible service** (Garnet recommended) | optional for one instance, required for several | Rate limits, admin lockouts, captcha challenges and card-testing declines shared by every instance, and admission-denial counters flushed to Postgres every 5 minutes. The atomic spending-admission gate and failed-usage grace and cutoff windows are in PostgreSQL. | Without Redis, rate limits, admin lockouts, captcha challenges and card-testing declines live in the process's memory: right for one instance, while several would each allow the full limit. They are never in PostgreSQL. Denial statistics are best-effort. No money path needs Redis. A declared Redis that stops answering costs sharing, not service: each instance keeps them in its own memory, logs an error, counts `openrails_abuse_state_fallbacks_total`, readiness reports Redis degraded without failing, and boot never waits for it. |
 | **HashiCorp Vault** | optional | Name a KV mount (`vault.kv_mount`) and Vault holds every merchant's configuration, credentials included; name only a Transit mount and it signs for Solana. See [vault.md](vault.md). | Without a KV mount the merchant manifest is the configuration, read-only. With one, startup needs Vault; afterwards an outage is ridden out from each replica's cache. |
 
-OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
-(file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
+OpenRails' own JWT signing keys come from `keys.json` in `auth.keys.path`
+(`AUTH_KEYS_PATH`; file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
 `AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS` envs, the same names
 the authkit binary reads.
 The same directory holds `totp.key`, the key for authenticator-app secrets.
@@ -144,7 +144,7 @@ HTTP route: the `openrails` CLI over the server's Go methods.
 openrails merchants list [--status active|deleted|all] [--query acme] [--json]
 openrails merchants get acme                    # an id, or a live merchant's name
 openrails merchants create acme --display-name Acme [--owner-user-id <uuid>]
-openrails merchants rename acme acme-shop       # the former name forwards (auth.naming)
+openrails merchants rename acme acme-shop       # the former name forwards (naming)
 openrails merchants delete <merchant-id>        # soft: off the lists, credentials resolve nothing, records kept
 openrails merchants restore <merchant-id>
 openrails admin-lockouts unlock <user-id>       # the lockout in Redis (without it, it lives in the serving process)

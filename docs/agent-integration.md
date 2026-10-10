@@ -80,7 +80,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    authenticated `GET /v1/admin/configuration` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithTokenProvider`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
-4. **Frontend.** Access tokens: your identity provider mints DPoP-bound
+4. **Frontend.** Access tokens: your identity provider mints
    `openrails:self` tokens for OpenRails (code flow or token exchange) per
    [frontend-integration.md](frontend-integration.md) / [auth.md](auth.md).
    Never send the host's own session tokens to OpenRails.

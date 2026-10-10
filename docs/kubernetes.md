@@ -33,9 +33,11 @@ config:                        # config.yaml (config.example.yaml has every key)
   test_mode: live              # sandbox | live
   provider_write_mode: full    # full | limited | readonly
   public_billing_base_url: https://billing.example.com
-  auth:
-    issuer: https://billing.example.com
-    request_origin: https://billing.example.com
+  auth:                        # the server's AuthKit, in AuthKit's keys
+    token:
+      issuer: https://billing.example.com
+    resource:
+      id: https://billing.example.com   # trusted issuers mint its customers' and staff's tokens for it
   redis:
     addr: redis:6379
   email_smtp:
@@ -44,23 +46,19 @@ config:                        # config.yaml (config.example.yaml has every key)
     username: openrails
     from: "Billing <billing@example.com>"
   trusted_proxies: [10.244.0.0/16]   # your pod CIDR: where the ingress controller runs
-  resource_server:
-    identifier: https://billing.example.com
-    trusted_issuers:
-      - name: example
-        issuer: https://id.example.com
-        merchants: [shop]
-        permissions: ["merchant:*"]
 files:
   merchants.yaml:              # applied at every boot; secrets go in an overlay
     version: 1
     merchants:
       shop:
         display_name: Shop
+        remote_application:    # the shop's identity provider: a trusted issuer for this merchant
+          issuer: https://id.example.com
+          jwks_uri: https://id.example.com/.well-known/jwks.json
 secrets:
   env:
     DB_URL: {name: openrails-db-app, key: uri}
-  files: [openrails-secrets]   # EMAIL_SMTP_PASSWORD, RESOURCE_SERVER_DPOP_NONCE_KEY
+  files: [openrails-secrets]   # EMAIL_SMTP_PASSWORD
   authKeys: openrails-auth-keys
 ingress:
   enabled: true
@@ -89,7 +87,7 @@ you already have, in one of four shapes.
 | Value | Shape | Use it for |
 |---|---|---|
 | `secrets.env` | `NAME: {name, key}`: one environment variable from one Secret key | `DB_URL` from CloudNativePG's `uri` |
-| `secrets.files` | Secrets whose keys are environment variable names, mounted at `/vault/secrets` | `REDIS_URL`, `REDIS_PASSWORD`, `REDIS_CA_CERT`, `EMAIL_SMTP_PASSWORD`, `VAULT_TOKEN`, `VAULT_SECRET_ID`, `RESOURCE_SERVER_DPOP_NONCE_KEY`, `LLM_API_KEY` |
+| `secrets.files` | Secrets whose keys are environment variable names, mounted at `/vault/secrets` | `REDIS_URL`, `REDIS_PASSWORD`, `REDIS_CA_CERT`, `EMAIL_SMTP_PASSWORD`, `VAULT_TOKEN`, `VAULT_SECRET_ID`, `LLM_API_KEY` |
 | `secrets.authKeys` | `keys.json` and `totp.key`, mounted at `/vault/auth` | AuthKit's signing key and its TOTP encryption key |
 | `secrets.merchantOverlays` | `{name, key}`: a key holding YAML in the merchant manifest's shape | PSP credentials kept outside Vault |
 
@@ -108,8 +106,7 @@ openssl rand -base64 32 > totp.key        # never rotate: enrolled authenticator
 kubectl -n openrails create secret generic openrails-auth-keys \
   --from-file=keys.json --from-file=totp.key
 kubectl -n openrails create secret generic openrails-secrets \
-  --from-literal=EMAIL_SMTP_PASSWORD="$SMTP_PASSWORD" \
-  --from-literal=RESOURCE_SERVER_DPOP_NONCE_KEY="$(openssl rand -base64 48)"
+  --from-literal=EMAIL_SMTP_PASSWORD="$SMTP_PASSWORD"
 ```
 
 To rotate the signing key, add the new key as active, move the old one to
@@ -132,8 +129,6 @@ spec:
   data:
     - secretKey: EMAIL_SMTP_PASSWORD
       remoteRef: {key: openrails/runtime, property: smtp_password}
-    - secretKey: RESOURCE_SERVER_DPOP_NONCE_KEY
-      remoteRef: {key: openrails/runtime, property: dpop_nonce_key}
 ```
 
 **Vault Agent Injector.** Render one file per variable into `/vault/secrets`
@@ -177,9 +172,10 @@ its URL, with `sslmode=verify-full` across a network.
 
 Redis or [Garnet](https://github.com/microsoft/garnet) has no default, and one
 replica runs without it. OpenRails' rate limits, admin lockouts, captcha
-challenges and card-testing declines and AuthKit's rate limits and spent DPoP proofs are kept in Redis,
-shared by every replica, or without it in each pod's memory, so more than one
-replica needs Redis. None of it is in Postgres. Nothing in Redis needs a backup.
+challenges and card-testing declines and AuthKit's rate limits and spent proofs
+are kept in Redis, shared by every replica, or without it in each pod's memory,
+so more than one replica needs Redis. None of it is in Postgres. Nothing in
+Redis needs a backup.
 
 Name it with `redis.addr` (`REDIS_ADDR`) or a `redis://` or `rediss://` URL
 (`REDIS_URL`). `redis.username` (`REDIS_USERNAME`) is an ACL user. TLS comes
@@ -201,8 +197,8 @@ kubectl -n openrails create secret generic openrails-redis \
 TLS ends at the ingress controller (cert-manager, or the controller's own ACME).
 Every path goes to the server: the API, `/v1/webhooks/{rail}/{account_id}` for
 the PSPs' webhooks, and the admin console when `admin_console.enabled`. Give the
-same public origin to `public_billing_base_url`, `auth.issuer`,
-`auth.request_origin` and `resource_server.identifier`.
+same public origin to `public_billing_base_url`, `auth.token.issuer` and
+`auth.resource.id`.
 
 - **Client IP.** Set `config.trusted_proxies` to the CIDR the controller
   connects from (the pod CIDR, or the node CIDR for a host-network controller).
@@ -239,7 +235,8 @@ Prometheus Operator.
 `replicaCount` is 1. More replicas share the database and need:
 
 - Redis (`config.redis`) for OpenRails' rate limits, admin lockouts, captcha
-  challenges and card-testing declines and AuthKit's rate limits and spent DPoP proofs, which each pod
+  challenges and card-testing declines and AuthKit's rate limits and spent
+  proofs, which each pod
   otherwise keeps on its own;
 - AuthKit's keys from `secrets.authKeys`: an ephemeral signing key is per pod,
   so a token one pod signs fails on the others. Everything else in `secrets`

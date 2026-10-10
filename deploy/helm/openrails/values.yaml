@@ -4,8 +4,8 @@
 
 # Every pod serves the API and runs the workers. More than one needs Redis
 # (config.redis), which shares rate limits, admin lockouts, captcha challenges,
-# card-testing declines and spent DPoP proofs (without it each pod keeps its
-# own), and AuthKit's keys from secrets.authKeys.
+# card-testing declines and AuthKit's spent proofs (without it each pod keeps
+# its own), and AuthKit's keys from secrets.authKeys.
 replicaCount: 1
 
 image:
@@ -27,19 +27,18 @@ config:
   test_mode: sandbox # sandbox | live; required
   provider_write_mode: readonly # full | limited | readonly; required
   # public_billing_base_url: https://billing.example.com
+  # The server's AuthKit, in AuthKit's keys (AUTH_<PATH> env).
   # auth:
-  #   issuer: https://billing.example.com # https, required
-  #   request_origin: https://billing.example.com
-  # Optional, no default; without it OpenRails counts its limits in Postgres.
-  # AuthKit's limits and DPoP proofs need it for more than one replica.
+  #   token:
+  #     issuer: https://billing.example.com # https, required
+  #   resource:
+  #     id: https://billing.example.com # trusted issuers' tokens' aud
+  # Optional, no default; more than one replica needs it.
   # redis:
   #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
   # The ingress controller's pod or node CIDR: without it the client IP is the
   # proxy's.
   # trusted_proxies: [10.244.0.0/16]
-  # resource_server:
-  #   identifier: https://billing.example.com
-  #   trusted_issuers: []
   # Vault holds merchant configuration and secrets when a KV mount is named.
   # vault:
   #   address: https://vault.example.com:8200
@@ -61,13 +60,13 @@ secrets:
   #   DB_URL: {name: openrails-db-app, key: uri}
   env: {}
   # Secrets whose keys are environment variable names (DB_URL, REDIS_URL,
-  # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN,
-  # RESOURCE_SERVER_DPOP_NONCE_KEY, …), mounted as files at /vault/secrets.
+  # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN, …),
+  # mounted as files at /vault/secrets.
   # Environment variables win over files.
   files: []
   # A Secret holding AuthKit's keys.json and totp.key, mounted at /vault/auth
   # and reloaded when it changes. Empty mounts a scratch directory, which
-  # only auth.allow_ephemeral_signing_key can use, and only with one replica.
+  # only auth.keys.allow_ephemeral_dev_keys can use, and only with one replica.
   authKeys: ""
   # Merchant manifest overlays: a Secret key holding YAML in the manifest's
   # shape (PSP credentials kept outside Vault), added to

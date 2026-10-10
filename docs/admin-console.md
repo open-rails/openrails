@@ -79,15 +79,14 @@ drops the fragment.
 
 **Where staff sign in.** Embedded, at the host's AuthKit JSON API, `/api/v1`
 on the console's origin. Standalone, at a trusted issuer when
-`server.Config.ConsoleIssuer` (`admin_console.issuer`) names one of the
-resource server's trusted issuers and the console's public client there;
-otherwise at the server's own AuthKit. A standalone console needs one of the
-two: without `local_sign_in` the server serves no sign-in, and a console with
-neither refuses to boot. Register
+`server.Config.ConsoleIssuer` (`admin_console.issuer`) names it and the
+console's client there, for `auth.resource.id`; otherwise at the server's own
+AuthKit. A standalone console needs one of the two: without `local_sign_in` the
+server serves no sign-in, and a console with neither refuses to boot. Register
 the console at your issuer as a public client with the redirect URI
 `<console URL>/callback`, the authorization-code and refresh grants and
-OpenRails' resource identifier; its tokens' permissions (within the ceiling)
-and accepted invitations decide what each person may do.
+OpenRails' resource identifier; its tokens' permissions, within its
+application's role in the merchant's group, decide what each person may do.
 
 **Where it finds the API.** The console reads `config.json` beneath its path:
 `api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
@@ -275,9 +274,10 @@ and what they may do: standalone, the server's merchant roles
 
 **At a trusted issuer**, the console is that issuer's OAuth 2.0 client
 (auth-ui's issuer client): the login page redirects there, `/callback`
-completes the code flow with PKCE and DPoP, the access token stays in memory
-and the DPoP-bound rotating refresh token in IndexedDB beside its
-non-extractable key. A write OpenRails refuses with `step_up_required` (a
+completes the code flow with PKCE, the access token stays in memory and the
+rotating refresh token in IndexedDB. The server's AuthKit must trust the
+issuer for the merchant, and the console asks for tokens for
+`auth.resource.id`. A write OpenRails refuses with `step_up_required` (a
 sign-in older than 15 minutes) re-authorizes at the issuer with `max_age=0` in
 a popup and runs again. Sign-out revokes the refresh token and ends the
 issuer session.

@@ -7,8 +7,10 @@ config:
   provider_write_mode: full
   public_billing_base_url: https://billing.example.com
   auth:
-    issuer: https://billing.example.com
-    request_origin: https://billing.example.com
+    token:
+      issuer: https://billing.example.com
+    resource:
+      id: https://billing.example.com
   redis:
     addr: redis:6379
   trusted_proxies: [10.244.0.0/16]
