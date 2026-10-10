@@ -10,19 +10,13 @@ import (
 	"time"
 )
 
-// DataLink transaction-type batch exports (#107). Beyond the ACTIVEMEMBERS
-// roster, DataLink's main.cgi exports per-event CSV batches over a date range:
-// successful rebills, cancellations, expirations, refunds, and chargebacks.
-// The transactionTypes values below are the ones the long-standing DataLink
-// integrations (s2member, aMember, magic-members) request; CCBill's public doc
-// site no longer serves the original DataLink spec, so the per-type CSV column
-// meanings encoded in DataLinkExportRow accessors follow those integrations:
-// column 0 = transaction type, column 3 = subscription id for every type;
-// REBILL rows carry transaction id at column 5 and amount at column 6;
-// REFUND/CHARGEBACK rows carry the amount at column 5. All columns are always
-// preserved verbatim in Fields. NOTE: not yet validated against a live
-// DataLink account (no credentials available at build time) — treat the typed
-// accessors as best-effort and the raw Fields as authoritative.
+// DataLink transaction-type batch exports: per-event CSV batches over a date
+// range (rebills, cancellations, expirations, refunds, chargebacks). CCBill's
+// public docs omit the DataLink spec, so transactionTypes and column meanings
+// follow long-standing integrations (s2member, aMember): column 0 = type,
+// 3 = subscription id; REBILL 5 = transaction id, 6 = amount; REFUND/CHARGEBACK
+// 5 = amount. Unvalidated against a live account: the typed accessors are
+// best-effort, the verbatim Fields authoritative.
 type DataLinkTxnType string
 
 const (
@@ -95,11 +89,8 @@ func (r DataLinkExportRow) Amount() string {
 }
 
 // FetchTransactionExport pulls the requested transaction-type batches over
-// [start, end] in one DataLink request (types are comma-joined, matching how
-// existing integrations batch them). start/end are converted to CCBill's MST
-// clock. Returns the parsed rows in response order; rows whose leading type
-// column is not one of the requested types are returned too (type preserved)
-// so nothing in the export is silently dropped.
+// [start, end] (converted to CCBill's MST clock) in one request. Rows of
+// unrequested types are returned too, so nothing in the export is dropped.
 func (c *DataLinkClient) FetchTransactionExport(ctx context.Context, start, end time.Time, types []DataLinkTxnType) ([]DataLinkExportRow, error) {
 	if len(types) == 0 {
 		return nil, fmt.Errorf("at least one transaction type is required")

@@ -143,8 +143,6 @@ func verifyPSS(key *rsa.PublicKey, digest, sig []byte) error {
 	return rsa.VerifyPSS(key, crypto.SHA256, digest, sig, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthAuto, Hash: crypto.SHA256})
 }
 
-// --- event envelope ----------------------------------------------------------
-
 // Event type strings OpenRails consumes (exact, doc-verified).
 const (
 	EventTokenCreated               = "token.created"

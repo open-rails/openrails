@@ -8,11 +8,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 )
 
-// SubscriptionDelegation account on-chain layout, from the OFFICIAL program
-// (solana-program/subscriptions): program/src/state/{subscription_delegation,header}.rs
-// and the Codama IDL account `subscriptionDelegation`. Cross-validated against
-// this repo's devnet-verified artifacts: the plan decoder (same IDL, byte-for-byte),
-// the SubscriptionAuthority initId offset 98, and the instruction discriminators.
+// SubscriptionDelegation account layout of the official program
+// (solana-program/subscriptions: program/src/state/{subscription_delegation,header}.rs,
+// IDL account `subscriptionDelegation`):
 //
 //	header.discriminator  u8      (= 4, accountDiscriminator::subscriptionDelegation)
 //	header.version        u8      (schema version; v1 today, later versions APPEND bytes only)
@@ -31,9 +29,9 @@ import (
 //	                               period. resume_subscription clears it back to 0.)
 const subscriptionAccountDiscriminator byte = 4
 
-// getProgramAccounts filter anchors (#714): enumerate a plan's subscription
-// accounts by memcmp(discriminator @ 0) AND memcmp(plan PDA/delegatee @ 35).
-// The v1 field prefix is frozen, so the offsets hold for later versions too.
+// getProgramAccounts filter anchors: a plan's subscription accounts match
+// memcmp(discriminator @ 0) AND memcmp(plan PDA/delegatee @ 35). The v1 field
+// prefix is frozen, so the offsets hold for later versions.
 const (
 	SubscriptionAccountDiscriminator          = subscriptionAccountDiscriminator
 	SubscriptionAccountDelegateeOffset uint64 = 3 + pubkeyLen // disc + version + bump + delegator

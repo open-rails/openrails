@@ -1,14 +1,7 @@
-// Package basistheory is the single wire-level choke point for every outbound
-// HTTP call OpenRails makes to the Basis Theory API (#795). Mirrors the
-// nmi/stripeapi posture: readonly enforcement lives in the transport, so a
-// mutating request under mode=readonly fails locally with ErrProviderReadOnly
-// before any bytes hit the network; reads pass through.
-//
-// Retry safety: token/network-token writes stamp BT-IDEMPOTENCY-KEY (results
-// cached 24h server-side). The ephemeral PROXY does NOT support idempotency —
-// charge-retry safety rests on the durable intents log (#674), NMI duplicate
-// detection (430), and the orderid verify leg. Never blind-retry an ambiguous
-// proxy outcome.
+// Package basistheory is the choke point for all outbound Basis Theory HTTP.
+// Readonly mode is enforced in the transport: mutating requests fail locally
+// with ErrProviderReadOnly. Token writes stamp BT-IDEMPOTENCY-KEY; the proxy
+// has none, so an ambiguous proxy outcome is verified, never blind-retried.
 package basistheory
 
 import (
@@ -40,9 +33,8 @@ const (
 	idempotencyKeyHeader = "BT-IDEMPOTENCY-KEY"
 )
 
-// ErrProviderReadOnly is returned for every mutating BT request when provider
-// writes are blocked (mode=readonly). http.Client wraps transport errors in
-// *url.Error, which unwraps, so errors.Is works on the returned error.
+// ErrProviderReadOnly is returned for every mutating BT request in readonly
+// mode. It survives *url.Error wrapping, so errors.Is works.
 var ErrProviderReadOnly = errors.New("basistheory: provider writes are blocked (mode=readonly)")
 
 // Config builds a Client. APIKey is the PRIVATE application key (permissions:
@@ -148,8 +140,8 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("basistheory: api error (status %d) %s", e.Status, msg)
 }
 
-// IsNotFound reports whether err is a BT 404 (e.g. an expired token intent —
-// intents live 24h and then genuinely do not exist; #651: surface it loudly).
+// IsNotFound reports whether err is a BT 404 (e.g. an expired token intent:
+// intents live 24h, then genuinely do not exist).
 func IsNotFound(err error) bool {
 	var apiErr *APIError
 	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound

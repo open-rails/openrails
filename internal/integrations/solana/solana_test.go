@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #713: memos are public and immutable; recovery tooling parses these bytes.
+// Memos are public and immutable; recovery tooling parses these bytes.
 func TestPurchaseMemoWireAndParse(t *testing.T) {
 	id := uuid.MustParse("0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42")
 	require.Equal(t, "openrails:1:0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42", PurchaseMemo(id))
@@ -79,7 +79,7 @@ func TestTransferInstructionsPutMemoFirst(t *testing.T) {
 	}
 }
 
-// or#893: a present memo must match; absence fails only when we built the tx.
+// A present memo must match; absence fails only when we built the tx.
 func TestVerifyPurchaseMemoPolicy(t *testing.T) {
 	payer, dest := solanago.NewWallet().PublicKey(), solanago.NewWallet().PublicKey()
 	want, other := uuid.New(), uuid.New()
@@ -312,8 +312,8 @@ func (fixedBlockhash) GetLatestBlockhash(context.Context) (solanago.Hash, error)
 	return solanago.Hash{3}, nil
 }
 
-// #272: the co-signer fills only its own slot; the wallet's slot stays empty
-// until the wallet signs, and a non-signer co-signer is refused.
+// The co-signer fills only its own slot; the wallet's slot stays empty until
+// the wallet signs, and a non-signer co-signer is refused.
 func TestBuildPartiallySignedTx(t *testing.T) {
 	cranker, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)

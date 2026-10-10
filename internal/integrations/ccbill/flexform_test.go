@@ -82,7 +82,7 @@ func TestFlexFormRefusesIncompleteOrUnbillableRequests(t *testing.T) {
 	_, err = CurrencyCode("")
 	require.ErrorContains(t, err, "never defaulted")
 	require.Panics(t, func() { _, _ = NewClient(nil, true) })
-	// A missing salt never yields an unsigned or empty-salt link (#1081).
+	// A missing salt never yields an unsigned or empty-salt link.
 	for _, salt := range []string{"", "  "} {
 		_, err := NewClient(&config.CCBillConfig{ClientAccNum: "999999", ClientSubAcc: "0000", Salt: salt}, true)
 		require.ErrorIs(t, err, ErrMissingSalt)

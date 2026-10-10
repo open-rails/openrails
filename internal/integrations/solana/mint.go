@@ -19,11 +19,9 @@ import (
 // Token-2022 keeps this exact base layout and appends TLV extensions after byte
 // 82, so the decimals byte sits at the same offset under both programs.
 //
-// `decimals` is written once by InitializeMint and there is no instruction that
-// changes it — it is IMMUTABLE for the life of the mint. That is what makes the
-// value cacheable (see modules/solana.MintDecimals) and what makes a plain
-// GetAccountData read safe here: this is never a read-after-our-own-write, so
-// there is no slot to gate on. Any read that DOES follow a confirmed
+// `decimals` is set once by InitializeMint and never changes, so it is
+// cacheable (modules/solana.MintDecimals) and a plain GetAccountData read is
+// safe (never a read-after-our-own-write). A read following a confirmed
 // transaction must still use GetAccountDataAtSlot / ReadUntilConsistent.
 const (
 	MintAccountSize         = 82

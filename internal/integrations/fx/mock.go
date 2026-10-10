@@ -10,8 +10,7 @@ import (
 
 // MockProvider is a test double for FX rate provider.
 type MockProvider struct {
-	// Rates maps currency codes to USD rates.
-	// e.g., {"eur": 1.08, "gbp": 1.27}
+	// Rates maps canonical currency codes to USD rates, e.g. {"EUR": 1.08}.
 	Rates map[string]float64
 
 	// Error, if set, will be returned for all calls.

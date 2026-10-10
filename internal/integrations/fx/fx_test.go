@@ -12,7 +12,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// MONEY-3: exact rational conversion with one final ceiling, across ISO scales.
+// Exact rational conversion with one final ceiling, across ISO scales.
 func TestConvertAmount(t *testing.T) {
 	p := NewMockProvider(map[string]float64{"eur": 1.08, "jpy": 0.01})
 	for _, tc := range []struct {
@@ -81,7 +81,7 @@ func TestCachedProvider(t *testing.T) {
 	}
 }
 
-// CUR-6 wire exception: the endpoint is lower case in path and keys; quotes stay upper.
+// The endpoint is lower case in path and keys; quotes stay upper.
 func TestExchangeAPIWire(t *testing.T) {
 	var path string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +100,7 @@ func TestExchangeAPIWire(t *testing.T) {
 	}
 }
 
-// RedisCachedProvider.Start suppresses shutdown noise via errors.Is(err, context.Canceled).
+// A canceled ctx stays detectable through the error wrap chain.
 func TestExchangeAPICanceledContextIsDetectable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

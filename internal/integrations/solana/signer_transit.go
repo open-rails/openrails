@@ -10,10 +10,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// TransitClient is the minimal Vault Transit surface the remote signer needs. It
-// is declared HERE (no hashicorp/vault/api dependency) so this package builds and
-// is unit-testable without Vault; a managed deployment satisfies it with a real
-// adapter (internal/integrations/vault, issue #251) over the transit engine.
+// TransitClient is the Vault Transit surface the remote signer needs, declared
+// here so this package has no Vault dependency; vault.TransitAdapter
+// implements it.
 type TransitClient interface {
 	// Sign returns the raw 64-byte Ed25519 signature for input over key `name`.
 	Sign(ctx context.Context, name string, input []byte) ([]byte, error)

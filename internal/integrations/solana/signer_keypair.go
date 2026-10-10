@@ -11,18 +11,14 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// DefaultSignerCacheTTL is the in-process cache lifetime for a resolved merchant
-// signing key. 60s (decided) keeps revocation/rotation lag small while removing
-// almost all secret-store round-trips on the hot path; the cache is invalidated
-// early on a rotation (a changed secret value resolves on the next miss).
+// DefaultSignerCacheTTL is the in-process lifetime of a resolved merchant
+// signing key: a rotation takes effect within it, while the hot path skips
+// almost every secret-store round-trip.
 const DefaultSignerCacheTTL = 60 * time.Second
 
-// keypairSigner is the "give me the key" Signer: it loads the PSP
-// private_key from a MerchantSecretGetter, parses it, and signs in-process.
-// Works with any secret backend (DB+envelope self-hosted, or Vault KV managed).
-// The plaintext key briefly lives in memory (cached up to ttl); for stronger
-// custody of the money-signing key, prefer Vault Transit where the key never
-// leaves Vault.
+// keypairSigner loads the PSP private_key from a MerchantSecretGetter and
+// signs in-process, with any secret backend. The plaintext key lives in memory
+// (cached up to ttl); Vault Transit keeps it out of the process entirely.
 type keypairSigner struct {
 	secrets MerchantSecretGetter
 	ttl     time.Duration

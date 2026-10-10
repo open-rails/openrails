@@ -1,12 +1,6 @@
 // Package subscriptions builds instructions for the Solana Subscriptions
-// Delegation Program (De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44) — PDA
-// derivation, instruction account layouts, and fixed-layout arg encoding.
-//
-// Layouts come from the program's generated IDL (idl/subscriptions.json):
-// discriminators are a single leading u8; arg structs are fixed-size
-// little-endian. The on-chain account orderings and the __event_authority
-// derivation are DEVNET-VERIFY items (see issue #252/#254 spike) — they are
-// isolated here behind named constants so a correction is a one-line change.
+// Delegation Program (De1egAFMkMWZSN5rYXRj9CAdheBamobVNubTsi9avR44) from its
+// IDL: u8 discriminators, fixed-size little-endian args, PDA derivation.
 package subscriptions
 
 import (
@@ -25,12 +19,9 @@ var ProgramID = solanago.MustPublicKeyFromBase58("De1egAFMkMWZSN5rYXRj9CAdheBamo
 var AssociatedTokenProgramID = solanago.MustPublicKeyFromBase58("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
 
 // UnknownInitID is the program's `UNKNOWN_INIT_ID` sentinel for
-// SubscribeParams.ExpectedSubscriptionAuthInitID: it opts `subscribe` into the
-// same-slot init check — the authority's stored init_id (its creation slot) must
-// equal the CURRENT slot, which holds exactly when initialize_subscription_authority
-// runs in the same transaction. A real init_id is a slot (never negative), so the
-// sentinel cannot collide. It is what makes a one-transaction first-time signup
-// possible: the client no longer has to land init and read the id back first.
+// SubscribeParams.ExpectedSubscriptionAuthInitID: subscribe then requires the
+// authority's init_id (its creation slot) to be the current slot, so init and
+// subscribe can share one transaction. Real init_ids are never negative.
 const UnknownInitID int64 = math.MinInt64
 
 // Instruction discriminators (leading u8 of instruction data), from the IDL.
@@ -95,7 +86,7 @@ func DeriveSubscriptionPDA(planPDA, subscriber solanago.PublicKey) (solanago.Pub
 }
 
 // DeriveEventAuthority returns the CPI-event authority PDA (seed
-// "__event_authority"). DEVNET-VERIFY before mainnet.
+// "event_authority").
 func DeriveEventAuthority() (solanago.PublicKey, uint8, error) {
 	return solanago.FindProgramAddress([][]byte{[]byte(seedEventAuthority)}, ProgramID)
 }

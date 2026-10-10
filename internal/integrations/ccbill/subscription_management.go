@@ -14,21 +14,14 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// #696: DataLink Subscription Management System — per-subscription read
-// (viewSubscriptionStatus) + merchant-initiated cancel (cancelSubscription)
-// via POST {BaseURL}/utils/subscriptionManagement.cgi.
-//
-// WIRE SHAPE VERIFIED against the live production DataLink account 2026-07-03
-// (#696 Phase 0). Confirmed by real viewSubscriptionStatus/cancelSubscription
-// round-trips: endpoint + form params below; response is
-// <?xml version='1.0'?><results>…</results>. cancelSubscription success is a
-// bare <results>1</results>. A captured -7 response does not establish a general
-// no-execution guarantee: documented causes include internal errors. A status read returns
-// a document of leaf fields — the real ones seen: subscriptionStatus,
-// recurringSubscription, nextBillingDate, expirationDate, cancelDate,
-// signupDate, timesRebilled, refundsIssued/returnsIssued/voidsIssued/
-// chargebacksIssued. Dates are 8-digit YYYYMMDD (nextBillingDate) or 14-digit
-// YYYYMMDDHHMMSS (expirationDate/signupDate/cancelDate).
+// DataLink Subscription Management System: per-subscription read
+// (viewSubscriptionStatus) and merchant-initiated cancel (cancelSubscription)
+// via POST {BaseURL}/utils/subscriptionManagement.cgi. Verified against a live
+// account: responses are <?xml version='1.0'?><results>…</results>; cancel
+// success is a bare <results>1</results>. A status read returns leaf fields
+// (subscriptionStatus, recurringSubscription, nextBillingDate, expirationDate,
+// cancelDate, signupDate, timesRebilled, refundsIssued, …). Dates are YYYYMMDD
+// (nextBillingDate) or YYYYMMDDHHMMSS (the others).
 
 const subscriptionManagementPath = "/utils/subscriptionManagement.cgi"
 
@@ -38,9 +31,8 @@ const (
 	actionCancelSubscription     = "cancelSubscription"
 )
 
-// ErrProviderReadOnly is returned by every CCBill mutation when the provider
-// is read-only (mode=readonly, #346) — blocked before any bytes hit the wire,
-// mirroring nmi.ErrProviderReadOnly.
+// ErrProviderReadOnly is returned by every CCBill mutation in readonly mode,
+// before any bytes hit the wire.
 var ErrProviderReadOnly = errors.New("ccbill: provider writes are blocked (mode=readonly)")
 
 // ErrDataLinkAuth identifies explicit HTTP/authentication rejections. A numeric
@@ -60,16 +52,13 @@ var ErrRefundUnsupported = errors.New("automatic CCBill refunds are unavailable;
 // maxSubscriptionManagementResponseBytes bounds one SMS response (tiny XML).
 const maxSubscriptionManagementResponseBytes = 1 << 20
 
-// subscriptionStatusExpiryFields are the response fields consulted (in order)
-// for the paid-through / expiry date. VERIFIED (#696 Phase 0): an ACTIVE sub
-// carries the forward-looking nextBillingDate (next charge = paid-through); a
-// dead sub carries expirationDate (when access ended). nextBillingDate wins
-// when present.
+// subscriptionStatusExpiryFields are consulted in order for the paid-through
+// date: an active sub carries nextBillingDate (next charge), a dead one
+// expirationDate (when access ended).
 var subscriptionStatusExpiryFields = []string{"nextBillingDate", "expirationDate"}
 
-// subscriptionStatusDateLayouts are the accepted expiry encodings. VERIFIED
-// (#696 Phase 0): 14-digit YYYYMMDDHHMMSS (expirationDate/signupDate/cancelDate)
-// and 8-digit YYYYMMDD (nextBillingDate).
+// subscriptionStatusDateLayouts are the accepted expiry encodings: YYYYMMDDHHMMSS
+// (expirationDate/signupDate/cancelDate) and YYYYMMDD (nextBillingDate).
 var subscriptionStatusDateLayouts = []string{"20060102150405", "20060102"}
 
 // SubscriptionStatusResult is one parsed viewSubscriptionStatus answer.
@@ -81,20 +70,15 @@ type SubscriptionStatusResult struct {
 	Fields    map[string]string
 }
 
-// Rebilling reports whether CCBill will attempt future rebills. Status
-// vocabulary VERIFIED against production (#696 Phase 0) for "2" (active
-// recurring: nextBillingDate future, timesRebilled>0) and "0" (dead:
-// expirationDate past); "1" (active non-recurring / canceled-with-runway)
-// unobserved but held from the DataLink docs.
+// Rebilling reports whether CCBill will attempt future rebills. "2" and "0"
+// are observed in production; "1" comes from the DataLink docs.
 //
 //	"2" = active, recurring        -> will rebill
 //	"1" = active, non-recurring    -> no rebill (canceled-with-runway / one-time)
 //	"0" = inactive / expired       -> no rebill
 //
-// NOTE: rebill prediction keys off subscriptionStatus, NOT the separate
-// `recurringSubscription` field — a dead sub still reports recurringSubscription=1
-// (it WAS a recurring plan) yet will never rebill. Unrecognized values are an
-// ERROR (#651: never silently mapped).
+// It keys off subscriptionStatus, not recurringSubscription: a dead sub still
+// reports recurringSubscription=1. Unrecognized values are an error.
 func (r SubscriptionStatusResult) Rebilling() (bool, error) {
 	switch strings.TrimSpace(r.RawStatus) {
 	case "2":
@@ -145,12 +129,10 @@ type CancelResult struct {
 	Results string // verbatim results token ("1" on success)
 }
 
-// ViewSubscriptionStatus reads ONE subscription's provider state — a READ,
-// allowed under readonly. Every non-answer (transport, auth, error code,
-// missing subscriptionStatus) is an error: the caller's row stays
-// unknown/retried, never resolved off a guess. NOTE (Phase 0): the
-// unknown-subscription response shape is uncaptured; until then it surfaces
-// as an error, NOT as authoritative absence.
+// ViewSubscriptionStatus reads one subscription's provider state (allowed
+// under readonly). Every non-answer is an error, never a guess; the
+// unknown-subscription response shape is uncaptured, so it surfaces as an
+// error, not as authoritative absence.
 func (c *DataLinkClient) ViewSubscriptionStatus(ctx context.Context, subscriptionID string) (SubscriptionStatusResult, error) {
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	if subscriptionID == "" {
@@ -183,11 +165,10 @@ func (c *DataLinkClient) ViewSubscriptionStatus(ctx context.Context, subscriptio
 	return SubscriptionStatusResult{RawStatus: strings.TrimSpace(raw), Fields: fields}, nil
 }
 
-// CancelSubscription stops future rebills for ONE subscription (access runs
-// through the paid period — CCBill semantics). A MUTATION: blocked with
-// ErrProviderReadOnly before any HTTP under mode=readonly. Error classes:
+// CancelSubscription stops future rebills for one subscription (access runs
+// through the paid period). Error classes:
 //
-//	ErrProviderReadOnly — not attempted (transport gate)
+//	ErrProviderReadOnly — not attempted (readonly mode)
 //	ErrDataLinkAuth     — explicit authentication/access rejection
 //	ErrCancelRejected   — provider answered a definite non-success (verify)
 //	anything else       — the request MAY have executed (verify, never assume)

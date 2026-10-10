@@ -33,7 +33,7 @@ type RPCClientConfig struct {
 
 	// Network determines which endpoints to use (mainnet, devnet, testnet).
 	Network string
-	// ReadOnly blocks transaction submission at the wire (mode=readonly, #346).
+	// ReadOnly blocks transaction submission at the wire (mode=readonly).
 	ReadOnly bool
 	// LoopbackFixture marks an explicitly declared loopback fake RPC.
 	LoopbackFixture bool
@@ -72,7 +72,7 @@ func (c *RPCClient) GetBalanceAtSlot(ctx context.Context, address solanago.Publi
 	return c.fallback.GetBalanceAtSlot(ctx, address, minSlot)
 }
 
-// GetTokenBalance returns the SPL token balance for an address and mint
+// GetTokenBalance returns the balance of an SPL token account.
 func (c *RPCClient) GetTokenBalance(ctx context.Context, tokenAccount solanago.PublicKey) (*rpc.UiTokenAmount, error) {
 	resp, err := c.fallback.GetTokenAccountBalance(ctx, tokenAccount)
 	if err != nil {
@@ -154,12 +154,9 @@ func isNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
-// ConfirmTransaction waits for an already-seen signature to reach the
-// requested commitment. It is the verify path's wait (a signature discovered
-// on-chain, e.g. by GetSignaturesForAddress), so the chain terminal is not
-// known here; the wait ends when the commitment is reached, the chain reports
-// an on-chain error, or the caller's context ends (xs-007 row 36 — it used to
-// give up at 60 s and call a landing at 61 s a failure).
+// ConfirmTransaction waits for an already-seen signature (e.g. found by
+// GetSignaturesForAddress) to reach commitment. The chain terminal is unknown
+// here, so the wait ends only on the commitment, an on-chain error, or ctx end.
 func (c *RPCClient) ConfirmTransaction(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) error {
 	outcome, err := c.WatchTransaction(ctx, signature, commitment, ChainTerminal{})
 	if err != nil {
@@ -228,7 +225,7 @@ func (c *RPCClient) GetSignaturesForAddress(ctx context.Context, address string,
 
 // GetSignaturesForAddressPage is GetSignaturesForAddress with a pagination
 // cursor: before != "" continues the newest-first walk strictly below that
-// signature (#714 wallet-scan pagination). limit caps the page (RPC max 1000).
+// signature. limit caps the page (RPC max 1000).
 func (c *RPCClient) GetSignaturesForAddressPage(ctx context.Context, address string, before string, limit int) ([]SignatureInfo, error) {
 	return c.signaturesForAddress(ctx, address, before, "", limit, rpc.CommitmentFinalized)
 }
@@ -337,8 +334,7 @@ type ProgramAccount struct {
 }
 
 // GetProgramAccounts lists the accounts owned by program that match every
-// memcmp filter — a bulk point-in-time listing (no slot gating), used by the
-// #714 per-plan subscription enumeration.
+// memcmp filter: a bulk point-in-time listing (no slot gating).
 func (c *RPCClient) GetProgramAccounts(ctx context.Context, program solanago.PublicKey, filters []ProgramAccountFilter) ([]ProgramAccount, error) {
 	opts := &rpc.GetProgramAccountsOpts{
 		Commitment: rpc.CommitmentFinalized,
@@ -374,13 +370,11 @@ type TokenAccountInfo struct {
 // It derives the Associated Token Account (ATA) address and queries its balance.
 // Returns 0 if the account doesn't exist or has no balance.
 func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error) {
-	// Derive the Associated Token Account address
 	ata, _, err := solanago.FindAssociatedTokenAddress(owner, mint)
 	if err != nil {
 		return 0, fmt.Errorf("failed to derive ATA for mint %s: %w", mint.String(), err)
 	}
 
-	// Get the token account balance
 	resp, err := c.fallback.GetTokenAccountBalance(ctx, ata)
 	if err != nil {
 		// Account might not exist (user has never held this token)
@@ -395,7 +389,6 @@ func (c *RPCClient) GetTokenBalanceForMint(ctx context.Context, owner solanago.P
 		return 0, nil
 	}
 
-	// Parse the amount string to uint64
 	balance, err := strconv.ParseUint(resp.Value.Amount, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse token balance %q: %w", resp.Value.Amount, err)
@@ -430,7 +423,7 @@ func (c *RPCClient) GetTokenBalances(ctx context.Context, owner solanago.PublicK
 }
 
 // PrimaryCredentialFingerprint exposes the armed-credential fingerprint of the
-// primary endpoint (#SEC-17) — the credential itself is never in GetEndpoint().
+// primary endpoint; the credential itself is never in GetEndpoint().
 func (c *RPCClient) PrimaryCredentialFingerprint() string {
 	return c.fallback.PrimaryCredentialFingerprint()
 }

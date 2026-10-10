@@ -11,9 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// GenerateFlexFormURLParams contains parameters for generating CCBill FlexForm
-// URLs for subscription payments. Address1, City, and State are optional and
-// are omitted from the provider URL when empty.
+// GenerateFlexFormURLParams are the inputs of a FlexForm subscription URL.
+// Empty Address1, City and State are omitted from it.
 type GenerateFlexFormURLParams struct {
 	Username      string `json:"username"`
 	Email         string `json:"email"`
@@ -27,8 +26,8 @@ type GenerateFlexFormURLParams struct {
 	FlexID        string `json:"flex_id"`
 	FormName      string `json:"form_name"`
 	ReservationID string `json:"reservation_id"`
-	// Currency is the ISO-4217 alpha-3 currency of the PRICE being sold (e.g.
-	// "eur"). Required — it decides the `currencyCode` CCBill bills in (#819).
+	// Currency is the ISO-4217 alpha-3 currency of the price sold (e.g. "eur").
+	// Required: it decides the `currencyCode` CCBill bills in.
 	Currency string `json:"currency"`
 }
 
@@ -58,9 +57,8 @@ const (
 // ErrMissingSalt refuses a FlexForm client without its signing salt.
 var ErrMissingSalt = errors.New("ccbill salt is required to sign FlexForm links")
 
-// NewClient creates a new CCBill client.
-// testMode: when true, uses sandbox-api.ccbill.com; when false, uses api.ccbill.com.
-// Note: The testMode param should come from config.IsTestMode(cfg).
+// NewClient creates a CCBill client; testMode (config.IsTestMode) selects
+// sandbox-api.ccbill.com over api.ccbill.com.
 func NewClient(cfg *config.CCBillConfig, testMode bool) (*CCBillClient, error) {
 	cfg = requireConfig(cfg)
 	if strings.TrimSpace(cfg.Salt) == "" {
@@ -78,7 +76,7 @@ func NewClient(cfg *config.CCBillConfig, testMode bool) (*CCBillClient, error) {
 	}, nil
 }
 
-// GenerateFlexFormURL creates a CCBill FlexForm URL with subscription parameters for iFrame embedding.
+// GenerateFlexFormURL builds a signed FlexForm subscription checkout URL.
 func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*FlexFormResponse, error) {
 	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
 		return nil, err
@@ -114,12 +112,10 @@ func (c *CCBillClient) computeSignature(query url.Values) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// createSignatureInput is the OUTBOUND FlexForm signature input only. It binds
-// nothing but the username, and the resulting value is handed to the customer's
-// browser in the redirect URL — it is not, and can never be, an inbound
-// callback authenticity check (SEC-19 deleted the VerifyCallbackSignature that
-// pretended otherwise). Inbound CCBill callbacks authenticate by source IP plus
-// the armed clientAccnum/clientSubacc match.
+// createSignatureInput is the outbound FlexForm signature input only: it binds
+// just the username and goes to the browser, so it can never authenticate an
+// inbound callback. Callbacks authenticate by source IP plus the armed
+// clientAccnum/clientSubacc match.
 func (c *CCBillClient) createSignatureInput(params url.Values) string {
 	return params.Get("username") + c.config.Salt
 }
@@ -133,15 +129,15 @@ type GenerateUpgradeFlexFormURLParams struct {
 	// The new pricing tier to upgrade to
 	FlexID   string `json:"flex_id"`
 	FormName string `json:"form_name"`
-	// Currency is the ISO-4217 alpha-3 currency of the TARGET price (#819).
+	// Currency is the ISO-4217 alpha-3 currency of the target price.
 	Currency string `json:"currency"`
 
 	// The existing CCBill subscription ID to upgrade
 	OriginalSubscriptionID string `json:"original_subscription_id"`
 }
 
-// GenerateUpgradeFlexFormURL creates a CCBill FlexForm URL for upgrading an existing subscription
-// This allows users to change their subscription tier (upgrade or downgrade)
+// GenerateUpgradeFlexFormURL builds a FlexForm URL that moves an existing
+// subscription to another tier (up or down).
 func (c *CCBillClient) GenerateUpgradeFlexFormURL(params *GenerateUpgradeFlexFormURLParams) (*FlexFormResponse, error) {
 	if err := validateFlexFormIdentity(params.Username, params.Email, params.FormName, params.FlexID); err != nil {
 		return nil, err

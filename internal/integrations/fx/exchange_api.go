@@ -56,10 +56,8 @@ func (p *ExchangeAPIProvider) Quote(ctx context.Context, fromCurrency, toCurrenc
 		}, nil
 	}
 
-	// Try primary URL first, then fallback
 	rate, asOf, err := p.fetchRate(ctx, p.baseURL, fromCurrency, toCurrency)
 	if err != nil {
-		// Try fallback
 		rate, asOf, err = p.fetchRate(ctx, fallbackBaseURL, fromCurrency, toCurrency)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch FX rate for %s -> %s: %w", fromCurrency, toCurrency, err)
@@ -109,7 +107,6 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, 
 		return 0, time.Time{}, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Parse the date
 	var dateStr string
 	if dateRaw, ok := raw["date"]; ok {
 		if err := json.Unmarshal(dateRaw, &dateStr); err != nil {
@@ -126,7 +123,6 @@ func (p *ExchangeAPIProvider) fetchRate(ctx context.Context, baseURL, currency, 
 		}
 	}
 
-	// Parse the rates for the requested currency
 	ratesRaw, ok := raw[currency]
 	if !ok {
 		return 0, time.Time{}, fmt.Errorf("currency %s not found in response", currency)

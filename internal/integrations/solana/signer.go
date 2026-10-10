@@ -10,12 +10,9 @@ import (
 
 const privateKeySecretName = "private_key"
 
-// MerchantSecretGetter is the minimal per-merchant secret-read surface the signer
-// needs. It is declared HERE (dependency inversion) rather than importing the
-// merchants package, so the signing layer stays decoupled from the in-flight
-// secret-store implementation (issue #227) and from any particular backend
-// (DB+envelope or Vault). A thin adapter over merchants.MerchantSecretStore
-// satisfies it at the composition root.
+// MerchantSecretGetter is the per-merchant secret read the signer needs,
+// declared here so signing is independent of the secret backend. An adapter
+// over merchants.MerchantSecretReader satisfies it at the composition root.
 type MerchantSecretGetter interface {
 	// GetSecret returns the plaintext secret value for (merchant, name), or an
 	// error. Implementations MUST fail closed (never return "" + nil for a
@@ -23,18 +20,11 @@ type MerchantSecretGetter interface {
 	GetSecret(ctx context.Context, merchantID billing.MerchantID, name string) (string, error)
 }
 
-// Signer produces Solana signatures for a merchant key WITHOUT exposing
-// the private key to callers. It is resolved PER MERCHANT (via billing.MerchantID); there
-// is no process-global signer. Two implementations exist:
-//
-//   - keypairSigner: loads the PSP scoped private_key secret and
-//     signs in-process. Works with any secret backend; the key briefly lives in
-//     memory.
-//   - transitSigner: signs through Vault Transit — the key never leaves Vault.
-//
-// The interface is message-level (PublicKey + SignMessage) rather than
-// Sign(tx) precisely so a remote signer can satisfy it: you can hand Vault the
-// serialized message to sign, but you can never hand it the private key.
+// Signer produces Solana signatures for a merchant key without exposing the
+// private key. It is resolved per merchant; there is no process-global signer.
+// keypairSigner loads the PSP private_key secret and signs in-process;
+// transitSigner signs through Vault Transit, so the key never leaves Vault.
+// The interface is message-level so a remote signer can satisfy it.
 type Signer interface {
 	// PublicKey returns the merchant address — the fee payer and sole
 	// required signer on every plan/pull transaction this package builds.
@@ -47,21 +37,20 @@ type Signer interface {
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
 // as an interface so BuildSignSubmit is unit-testable without a live RPC.
 type blockhashProvider interface {
-	// LatestBlockhash returns the blockhash WITH its chain terminal, so the
-	// confirmation watch ends on the chain's word (xs-007 row 36).
+	// LatestBlockhash returns the blockhash with its chain terminal, so the
+	// confirmation watch ends on the chain's word.
 	LatestBlockhash(ctx context.Context) (RecentBlockhash, error)
 	SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error)
 	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error)
 }
 
-// BuildSignSubmit assembles a single-signer transaction (the merchant is
-// fee payer and sole required signer), signs its message via the per-merchant
-// Signer, and submits it. This is the shared path for create_plan, update_plan,
-// delete_plan, and transfer_subscription — only the instructions differ.
+// BuildSignSubmit assembles a single-signer transaction (the merchant is fee
+// payer and sole required signer), signs its message via the per-merchant
+// Signer, and submits it: the shared path for create_plan, update_plan and
+// transfer_subscription.
 //
-// With one required signer, Signatures[0] must correspond to the fee payer; if a
-// future flow needs a co-signer, the signatures must be ordered to match the
-// message's required-signer account list.
+// With one required signer, Signatures[0] is the fee payer's; a co-signer flow
+// must order signatures to match the message's required-signer list.
 func BuildSignSubmit(
 	ctx context.Context,
 	merchantID billing.MerchantID,
@@ -72,10 +61,10 @@ func BuildSignSubmit(
 	return BuildSignSubmitPresubmit(ctx, merchantID, signer, rpc, instructions, nil)
 }
 
-// BuildSignSubmitPresubmit is BuildSignSubmit with a persistence hook invoked
-// AFTER signing and BEFORE submission: the caller durably records the tx
-// signature (#674) so a crash mid-submit resolves via a chain read instead of
-// a blind re-send. A presubmit error aborts the submit (nothing was sent).
+// BuildSignSubmitPresubmit is BuildSignSubmit with a hook run after signing and
+// before submission: the caller durably records the signature so a crash
+// mid-submit resolves by a chain read, not a blind re-send. A presubmit error
+// aborts the submit (nothing was sent).
 func BuildSignSubmitPresubmit(
 	ctx context.Context,
 	merchantID billing.MerchantID,
@@ -142,19 +131,17 @@ func BuildSignSubmitWithPayerPresubmit(
 	}
 	tx.Signatures = []solanago.Signature{sig}
 
-	// Durable write-ahead of the signature (#674): once persisted, a crash at
-	// any later point is resolvable by reading the chain for this signature.
+	// Durable write-ahead of the signature: once persisted, a crash at any
+	// later point resolves by reading the chain for it.
 	if presubmit != nil {
 		if err := presubmit(sig); err != nil {
 			return solanago.Signature{}, fmt.Errorf("solana: presubmit persistence failed (transaction NOT sent): %w", err)
 		}
 	}
 
-	// Submit AND confirm: a billing pull must not be treated as success until the
-	// transaction has actually landed. SubmitAndConfirm surfaces a reverted tx via
-	// the outcome's on-chain error (with the program's Custom code) so the cranker
-	// can classify it (#270) instead of silently "succeeding" on a failed pull.
-	// The watch ends on the blockhash's own last valid height, never a clock.
+	// A pull is not success until it lands. A reverted tx comes back as the
+	// outcome's on-chain error (with the program's Custom code) for the cranker
+	// to classify. The watch ends on the blockhash's last valid height.
 	outcome, err := rpc.SubmitAndConfirm(ctx, tx, blockhash.Terminal())
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: submit/confirm transaction: %w", err)

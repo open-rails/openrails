@@ -82,10 +82,10 @@ func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurre
 	if err != nil {
 		return 0, nil, err
 	}
-	// MONEY-3: the RATE is a float, the AMOUNT never is. amount * rate *
-	// 10^(toScale-fromScale) is evaluated as an exact rational with a single
-	// final ceiling — a float multiply followed by math.Ceil rounds the binary
-	// representation error up into a phantom internal unit.
+	// The rate is a float, the amount never is: amount * rate *
+	// 10^(toScale-fromScale) is an exact rational with one final ceiling. A
+	// float multiply + math.Ceil would round representation error up into a
+	// phantom unit.
 	v := new(big.Rat).SetInt64(amount)
 	v.Mul(v, rate)
 	if shift := toScale - fromScale; shift >= 0 {
@@ -100,10 +100,9 @@ func ConvertAmount(ctx context.Context, provider Provider, fromCurrency, toCurre
 	return n.Int64(), q, nil
 }
 
-// ratFromRate converts an FX RATE (legitimately a float) to the exact rational
-// of its shortest DECIMAL form — 1.08 becomes 108/100, not the binary double
-// 1.0800000000000000710…. Mirrors internal/modules/solana's helper of the same
-// name. Past this point no amount touches a float.
+// ratFromRate converts an FX rate to the exact rational of its shortest decimal
+// form (1.08 -> 108/100, not the binary double). Past this point no amount
+// touches a float.
 func ratFromRate(rate float64) (*big.Rat, error) {
 	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate <= 0 {
 		return nil, fmt.Errorf("invalid fx rate %v", rate)

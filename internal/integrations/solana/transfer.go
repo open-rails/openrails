@@ -30,8 +30,8 @@ type TransferRequest struct {
 	TokenMint   string
 	Amount      uint64
 	Reference   string
-	// Memo, when set, is stamped as an SPL Memo instruction BEFORE the transfer
-	// (#713 self-recognition; Solana Pay ordering). Discovery hint, never money truth.
+	// Memo, when set, is stamped as an SPL Memo instruction before the transfer
+	// (Solana Pay ordering). Discovery hint, never money truth.
 	Memo string
 }
 
@@ -49,7 +49,7 @@ type ObserveTransferRequest struct {
 	Recipient string
 	TokenMint string
 	Reference string
-	// MemoLocalID, when set, is checked against the #713 purchase memo under
+	// MemoLocalID, when set, is checked against the purchase memo under
 	// MemoPolicy: a mismatch always makes the transaction foreign; absence
 	// does only when we built the transaction ourselves.
 	MemoLocalID uuid.UUID
@@ -153,8 +153,8 @@ func AssociatedTokenAddress(owner, mint, program solanago.PublicKey) (solanago.P
 }
 
 // buildTransferInstructions assembles the one-off purchase instruction list:
-// optional #713 SPL Memo FIRST, then the SOL or TransferChecked transfer under
-// the mint's own token program, with the Solana Pay reference appended.
+// optional SPL Memo first, then the SOL or TransferChecked transfer under the
+// mint's own token program, with the Solana Pay reference appended.
 func buildTransferInstructions(req TransferRequest, fromWallet, toWallet solanago.PublicKey, mint *MintInfo) ([]solanago.Instruction, error) {
 	var referencePub *solanago.PublicKey
 	if ref := strings.TrimSpace(req.Reference); ref != "" {

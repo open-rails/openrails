@@ -38,17 +38,14 @@ func (o *TransactionOutcome) OnChainError() error {
 	return fmt.Errorf("transaction %s failed on-chain: %s", o.Signature, string(b))
 }
 
-// xs-007 row 36: a confirmation watch ends on the CHAIN'S terminal, never on
-// a clock. Every transaction carries a recent blockhash that the cluster
-// accepts only while its block height is at most lastValidBlockHeight (~150
-// blocks, ~60–90 s in practice, but the chain's number, not ours); past that
-// height the transaction can never land, and that is the only honest
-// "failed to confirm". A watch that gave up at 90 s reported a landing at
-// 100 s as a failure: the money moved and the caller acted on "it did not".
+// A confirmation watch ends on the chain's terminal, never on a clock. A
+// transaction's blockhash is accepted only while block height <=
+// lastValidBlockHeight (~150 blocks, the chain's number); past it the
+// transaction can never land, the only honest "failed to confirm". A clock
+// timeout can report a late landing as a failure after the money moved.
 //
-// When the watcher does not know the blockhash — a signature the buyer's
-// wallet produced — it polls until the caller's own context ends; the
-// caller's budget is the caller's declaration, not this package's.
+// Without the blockhash (a signature the buyer's wallet produced) the watch
+// polls until the caller's context ends.
 
 // ChainTerminal is the chain's own statement of when a transaction stops
 // being landable: the blockhash's last valid block height. Zero = unknown.
@@ -101,18 +98,13 @@ func wantRank(c rpc.CommitmentType) int {
 	}
 }
 
-// WatchTransaction polls a signature until it reaches `commitment`, returning
-// its resolved on-chain outcome. It works for ANY signature — our own
-// submissions OR a third party's wallet transaction we are waiting to observe
-// (e.g. a subscribe the user signed in their wallet). It does NOT assert
-// success: a transaction that landed but failed returns a non-nil outcome
-// with Err set; inspect Outcome.Succeeded()/OnChainError().
+// WatchTransaction polls any signature (ours or a wallet's) until it reaches
+// commitment and returns its on-chain outcome. It does not assert success: a
+// landed-but-failed transaction returns an outcome with Err set.
 //
-// The watch ends on one of three observations only: the signature reached the
-// commitment; the chain's block height passed terminal.LastValidBlockHeight
-// while the signature was still unseen (ErrTransactionExpired); or the
-// caller's context ended. With an unknown terminal (zero) only the last two
-// apply.
+// The watch ends only when the signature reaches the commitment, the block
+// height passes terminal.LastValidBlockHeight with the signature unseen
+// (ErrTransactionExpired), or ctx ends. A zero terminal skips the second.
 func (c *RPCClient) WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal ChainTerminal) (*TransactionOutcome, error) {
 	ticker := time.NewTicker(watchPollInterval)
 	defer ticker.Stop()
@@ -166,19 +158,15 @@ func (c *RPCClient) watchOnce(ctx context.Context, sig solanago.Signature, commi
 	return nil, nil
 }
 
-// SubmitAndConfirm submits a signed transaction and waits for it to reach the
-// Confirmed commitment, returning the on-chain outcome. The returned error is
-// only for submission / confirmation-watch failures (RPC down, expired
-// blockhash, caller context ended); a transaction that lands but reverts is
-// reported via Outcome.Err (use Outcome.OnChainError() to surface it).
-// terminal is the blockhash validity the transaction was built with
-// (RecentBlockhash.Terminal()); zero watches until the caller's context ends.
+// SubmitAndConfirm submits a signed transaction and watches it to Confirmed.
+// The error covers submission/watch failures only (RPC down, expired
+// blockhash, ctx ended); a landed revert is in Outcome.Err. terminal comes from
+// RecentBlockhash.Terminal(); zero watches until ctx ends.
 func (c *RPCClient) SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error) {
-	// Skip preflight: the node's preflight simulation runs against a bank that
-	// lags just-confirmed writes, so a pull submitted right after subscribe (or any
-	// tx touching very recent accounts) spuriously fails simulation with
-	// InvalidAccountOwner even though it executes fine. We confirm via
-	// WatchTransaction below, which authoritatively reports a real on-chain failure.
+	// Skip preflight: its simulation runs against a bank lagging just-confirmed
+	// writes, so a tx touching very recent accounts (a pull right after
+	// subscribe) spuriously fails with InvalidAccountOwner. WatchTransaction
+	// below reports real on-chain failures.
 	sig, err := c.fallback.SendTransactionSkipPreflight(ctx, tx)
 	if err != nil {
 		return nil, err

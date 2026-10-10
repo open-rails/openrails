@@ -12,20 +12,16 @@ import (
 	"strings"
 )
 
-// Ephemeral detokenizing proxy (POST /proxy + BT-PROXY-URL): the caller
-// composes the FULL destination request — vault-agnostic by design (#297).
-//
-// Outcome discrimination (doc-verified, load-bearing):
-//   - BT-PROXY-DESTINATION-STATUS header present  => the destination ANSWERED;
-//     ProxyForm returns (*ProxyResult, nil) and the caller parses the body.
-//   - header absent + RFC-7807 {"proxy_error": …}  => BT failed PRE-FORWARD
-//     (bad expression, detokenization failure, auth, >20 tokens): a clean
-//     *ProxyError — an engine error, NEVER a decline; safe to retry after fix.
-//   - 408 / 5xx without the header / transport failure after send => AMBIGUOUS:
-//     BT may have forwarded before dying. TransportAmbiguousError — verify by
-//     orderid (#674), never blind-retry, never treat as a decline.
-//
-// The proxy does NOT support BT-IDEMPOTENCY-KEY (doc-verified).
+// Ephemeral detokenizing proxy (POST /proxy + BT-PROXY-URL); the caller
+// composes the full destination request. BT-IDEMPOTENCY-KEY is unsupported.
+// Outcomes:
+//   - BT-PROXY-DESTINATION-STATUS present: the destination answered
+//     (*ProxyResult, even for a decline).
+//   - absent, with {"proxy_error": …}: BT failed before forwarding (bad
+//     expression, detokenization, auth, >20 tokens). *ProxyError: never a
+//     decline; safe to retry after a fix.
+//   - 408/5xx without the header, or transport failure after send: BT may have
+//     forwarded. TransportAmbiguousError: verify by orderid, never blind-retry.
 
 const (
 	proxyURLHeader               = "BT-PROXY-URL"
@@ -120,7 +116,7 @@ func (c *Client) ProxyForm(ctx context.Context, destinationURL string, form url.
 		if errors.Is(err, ErrProviderReadOnly) {
 			return nil, ErrProviderReadOnly
 		}
-		// Sent (or possibly sent) and no answer: ambiguous by doctrine (#674).
+		// Sent (or possibly sent) with no answer: ambiguous.
 		return nil, ambiguous(err)
 	}
 	defer resp.Body.Close()
@@ -131,8 +127,7 @@ func (c *Client) ProxyForm(ctx context.Context, destinationURL string, form url.
 	return classifyProxyResponse(resp.StatusCode, resp.Header.Get(ProxyDestinationStatusHeader), body)
 }
 
-// classifyProxyResponse implements the three-way outcome discrimination.
-// Split out pure for the fixture-matrix unit test.
+// classifyProxyResponse implements the three-way outcome split (pure, for tests).
 func classifyProxyResponse(httpStatus int, destStatusHeader string, body []byte) (*ProxyResult, error) {
 	if ds := strings.TrimSpace(destStatusHeader); ds != "" {
 		n, err := strconv.Atoi(ds)

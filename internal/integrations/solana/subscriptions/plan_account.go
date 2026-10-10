@@ -42,16 +42,15 @@ const (
 const (
 	pubkeyLen      = 32
 	metadataURILen = 128
-	// PlanAccountSize is the exact serialized size of a Plan account. A fetched
-	// account must be at least this long (the program may append nothing today,
-	// but tolerate trailing bytes for forward-compat).
+	// PlanAccountSize is the exact serialized size of a Plan account; trailing
+	// bytes are tolerated for forward-compat.
 	PlanAccountSize = 1 + pubkeyLen + 1 + 1 + 8 + pubkeyLen + 8 + 8 + 8 + 8 + (4 * pubkeyLen) + (4 * pubkeyLen) + metadataURILen
 )
 
-// PlanAccount is the decoded on-chain Plan record. The immutable core terms
-// (Amount, PeriodHours, Mint) are what catalog drift compares against the
-// OpenRails-side Price.Rails["solana"] snapshot; Status / EndTs / Pullers /
-// MetadataURI are mutable via updatePlan.
+// PlanAccount is the decoded on-chain Plan record. Catalog verification
+// compares its immutable core terms (Amount, PeriodHours, Mint) with the
+// price's stored Solana link; Status / EndTs / Pullers / MetadataURI are
+// mutable via updatePlan.
 type PlanAccount struct {
 	Discriminator byte
 	Owner         solanago.PublicKey

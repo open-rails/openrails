@@ -33,7 +33,7 @@ func newTestClient(t *testing.T, cfg Config, h http.HandlerFunc) (*Client, *http
 	return c, srv
 }
 
-// or#795: unknown codes are UNRECOGNIZED (never guessed); UPD_ matches by prefix so a
+// Unknown codes are unrecognized (never guessed); UPD_ matches by prefix so a
 // future variant is still applied.
 func TestClassifyAccountUpdaterResult(t *testing.T) {
 	for code, want := range map[string]AUOutcome{
@@ -63,7 +63,7 @@ func TestParseAccountUpdaterResultsByHeaderName(t *testing.T) {
 	}
 }
 
-// SEC-24: provider-supplied upload/download URLs must not reach internal hosts.
+// Provider-supplied upload/download URLs must not reach internal hosts.
 func TestAccountUpdaterURLsAreOutboundPolicyChecked(t *testing.T) {
 	var hits atomic.Int32
 	var gotMethod, gotType, gotBody string

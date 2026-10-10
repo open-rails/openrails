@@ -6,17 +6,11 @@ import (
 	"strings"
 )
 
-// CCBill's FlexForm `currencyCode` parameter takes an ISO-4217 NUMERIC code,
-// and CCBill bills exactly this set. Kept as STRINGS, not ints: AUD is "036"
-// and the leading zero is part of the wire value.
-//
-// This is the single table for both directions — outbound (checkout picks the
-// code from the price's currency) and inbound (the webhook maps the code CCBill
-// reports back to the price's currency). One table means a currency we can bill
-// is always a currency the webhook can match, so no charge can land and then be
-// rejected as a mismatch (#819).
-// Keys are the CANONICAL internal (upper-case) currency code, so a value read
-// off a webhook lands in the DB already in the form the currency CHECK accepts.
+// flexFormCurrencyCodes is CCBill's billable set: canonical (upper-case, as the
+// DB currency CHECK accepts) currency -> ISO-4217 numeric `currencyCode`.
+// Values are strings: AUD's leading zero ("036") is part of the wire value.
+// Checkout and the webhook share this table, so a billable currency is always
+// one the webhook can match.
 var flexFormCurrencyCodes = map[string]string{
 	"AUD": "036",
 	"CAD": "124",
@@ -27,8 +21,7 @@ var flexFormCurrencyCodes = map[string]string{
 }
 
 // UnsupportedCurrencyError reports a price CCBill cannot bill. It is returned
-// BEFORE any FlexForm URL exists — the customer can only be charged by loading
-// that form, so refusing here refuses before the charge.
+// before any FlexForm URL exists, so before any charge.
 type UnsupportedCurrencyError struct {
 	Currency string
 }

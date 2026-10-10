@@ -51,7 +51,7 @@ func TestDecodePlanAccountByteLayout(t *testing.T) {
 	require.Error(t, err)
 }
 
-// SubscriptionDelegation v1 (frozen V1_LEN=155); #714 memcmp anchors are
+// SubscriptionDelegation v1 (frozen V1_LEN=155); memcmp anchors are
 // discriminator @0 and delegatee (plan PDA) @35.
 func TestDecodeSubscriptionAccountByteLayout(t *testing.T) {
 	require.Equal(t, 155, SubscriptionAccountSize)

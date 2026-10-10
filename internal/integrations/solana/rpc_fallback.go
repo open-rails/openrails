@@ -20,8 +20,8 @@ import (
 // RPCEndpoint represents a single RPC endpoint with metadata.
 type RPCEndpoint struct {
 	Name string // Human-readable name (e.g., "Helius", "Solana Public")
-	// URL is CREDENTIAL-FREE and safe to log (#SEC-17): provider API keys are
-	// stripped into secret and re-attached at the transport.
+	// URL is credential-free and safe to log: provider API keys are stripped
+	// into secret and re-attached at the transport.
 	URL      string
 	Priority int // Lower = higher priority
 
@@ -35,11 +35,9 @@ type RPCFallbackClient struct {
 	network   string
 	mu        sync.RWMutex
 
-	// Track endpoint health for smart failover
 	failures map[int]time.Time // endpoint index -> next retry time
 	// readOnly blocks SendTransaction/SendTransactionSkipPreflight (the only
-	// chain mutations) with ErrProviderReadOnly when mode=readonly (#346).
-	// Reads (account data, balances, signatures) always pass.
+	// chain mutations) with ErrProviderReadOnly; reads always pass.
 	readOnly        bool
 	loopbackFixture bool
 }
@@ -121,9 +119,8 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 
 	var endpoints []RPCEndpoint
 
-	// If custom endpoint is provided, use it exclusively (no fallback). A
-	// merchant-supplied endpoint may itself embed a key — it is split the same
-	// way as the built-in ones (#SEC-17).
+	// A custom endpoint is used exclusively (no fallback). It may embed a key,
+	// which is split out like the built-in ones.
 	if cfg.CustomEndpoint != "" {
 		endpoints = []RPCEndpoint{newSecretEndpoint("Custom", cfg.CustomEndpoint, 0, nil)}
 		log.WithFields(log.Fields{
@@ -131,7 +128,6 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 			"network":  network,
 		}).Info("Using custom RPC endpoint (fallback disabled)")
 	} else {
-		// Build fallback chain based on network
 		switch network {
 		case "devnet":
 			endpoints = DefaultDevnetEndpoints(rpcProviderAPIKey(rpcProvider, rpcAPIKey, "helius"))
@@ -146,7 +142,6 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 			}}
 		}
 
-		// Log the fallback chain
 		names := make([]string, len(endpoints))
 		for i, ep := range endpoints {
 			names[i] = ep.Name
@@ -157,7 +152,6 @@ func NewRPCFallbackClient(cfg RPCFallbackConfig) *RPCFallbackClient {
 		}).Info("Initialized Solana RPC fallback chain")
 	}
 
-	// Create RPC clients for each endpoint
 	clients := make([]*rpc.Client, len(endpoints))
 	for i, ep := range endpoints {
 		clients[i] = newEndpointClient(ep)
@@ -290,9 +284,8 @@ func (c *RPCFallbackClient) withFallback(ctx context.Context, operation string, 
 }
 
 // ErrAllRPCEndpointsFailed marks a transport-level failure of every armed
-// endpoint. Its message carries upstream detail (endpoint text, provider
-// wording) and is for OPERATORS: HTTP handlers must map it to a generic message
-// rather than echo it to a client (#SEC-17).
+// endpoint. Its message carries upstream detail for operators: HTTP handlers
+// map it to a generic message, never echo it to a client.
 var ErrAllRPCEndpointsFailed = errors.New("all RPC endpoints failed")
 
 // allEndpointsFailedError keeps the underlying error in the chain (callers
@@ -605,10 +598,8 @@ func (c *RPCFallbackClient) GetMinimumBalanceForRentExemption(ctx context.Contex
 	return balance, err
 }
 
-// ErrProviderReadOnly is returned by every transaction-submission method when
-// the provider is read-only (mode=readonly, #346). It is a hard failure of the
-// requested operation, never a skip signal — mirrors nmi.ErrProviderReadOnly
-// and stripeapi.ErrProviderReadOnly.
+// ErrProviderReadOnly is returned by every transaction-submission method in
+// readonly mode: a hard failure of the operation, never a skip signal.
 var ErrProviderReadOnly = errors.New("solana: transaction submission is blocked (mode=readonly)")
 
 // SendTransaction submits a transaction with automatic failover.

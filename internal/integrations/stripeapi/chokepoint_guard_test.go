@@ -11,19 +11,11 @@ import (
 	"testing"
 )
 
-// IDEM-8's audit method used to be:
-//
-//	grep -rn "stripe.com" --include=*.go | grep -v stripeapi
-//
-// which can NEVER fail meaningfully. OpenRails has no stripe-go dependency, so
-// every Stripe call site — compliant or not — contains the literal URL, and the
-// filter drops only this package. It returned 20+ "hits" on a fully compliant
-// tree, so nobody could ever read the output as pass/fail.
-//
-// What actually matters is structural: a file that talks to Stripe must obtain
-// its transport from this package, because the readonly guard and the
-// Stripe-Version pin live in that transport and nowhere else. That is what these
-// tests check, and unlike the grep they have an expected value: zero.
+// A grep for "stripe.com" cannot fail meaningfully: with no stripe-go
+// dependency every Stripe call site contains the URL. What matters is
+// structural: a file that talks to Stripe must get its transport from this
+// package, where the readonly guard and the Stripe-Version pin live. These
+// tests check that, expecting zero violations.
 
 const stripeHost = "api.stripe.com"
 
@@ -166,9 +158,8 @@ func TestStripeCallSitesBuildNoOwnTransport(t *testing.T) {
 	}
 }
 
-// or#865 residual: Client(nil, …) used to return a WRITE-capable client — the
-// one input carrying no information about the operating mode produced the most
-// permissive result. It now fails closed.
+// Client(nil, …) fails closed: the input that says nothing about the
+// operating mode yields a read-only client.
 func TestNilConfigYieldsReadOnlyClient(t *testing.T) {
 	c := Client(nil, 0)
 	tr, ok := c.Transport.(*guardTransport)

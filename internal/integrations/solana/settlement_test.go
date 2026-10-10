@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// SEC-33: a quote is honoured only within its late window.
+// A quote is honoured only within its late window.
 func TestSettlementTooLate(t *testing.T) {
 	expires := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := expires.Add(d); return &v }

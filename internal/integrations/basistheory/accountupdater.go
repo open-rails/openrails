@@ -13,12 +13,11 @@ import (
 	"time"
 )
 
-// Batch Account Updater: the FPAN refresh path for merchants that charge the
-// detokenized PAN (us, on NMI). Flow: create job -> upload request CSV to the
-// returned upload_url (expires 1h) -> `account-updater.job.completed` webhook
-// -> download result CSV -> UPD_* rows rotate rail_method_ref to new_token.
-// Cadence is caller-owned and must be watermarked/ahead-of-renewal windows —
-// never an all-instruments sweep.
+// Batch Account Updater: FPAN refresh for merchants charging the detokenized
+// PAN (NMI). Create job -> PUT request CSV to upload_url (expires 1h) ->
+// `account-updater.job.completed` webhook -> download result CSV -> UPD_* rows
+// rotate rail_method_ref to new_token. Callers run it ahead of renewals, never
+// as an all-instruments sweep.
 
 // Account Updater result codes (result CSV v1.2).
 const (
@@ -30,36 +29,31 @@ const (
 	AUContactCardholder = "WRN_CONTACT_CARDHOLDER"
 )
 
-// AUOutcome is the DOCTRINE class of one result row — what OpenRails is
-// entitled to do about it. The wire code is always recorded verbatim (#651);
-// this is only the mapping onto the actions that already exist.
+// AUOutcome is what OpenRails may do about one result row. The wire code is
+// always recorded verbatim; this only maps it onto existing actions.
 type AUOutcome string
 
 const (
 	// AUOutcomeUpdated: the network reissued the credential. Rotate the method
-	// ref / refresh the metadata — and clear any park, because this row is the
-	// newest evidence about the card (or#872).
+	// ref / refresh metadata and clear any park: this row is the newest evidence.
 	AUOutcomeUpdated AUOutcome = "updated"
 	// AUOutcomeClosed: the account is closed. Park (bucket 2) — never delete,
 	// never terminal-cancel.
 	AUOutcomeClosed AUOutcome = "closed"
-	// AUOutcomeContactCardholder: the network will say nothing more without the
-	// cardholder. Same destination as closed: park and surface, since charging
-	// on regardless is how a book quietly turns into declines.
+	// AUOutcomeContactCardholder: the network says nothing more without the
+	// cardholder. Park and surface, like closed.
 	AUOutcomeContactCardholder AUOutcome = "contact_cardholder"
 	// AUOutcomeNoChange: nothing was reported (NO_UPDATE) or the card is not
 	// enrolled/matched (NO_MATCH). No evidence, no action.
 	AUOutcomeNoChange AUOutcome = "no_change"
-	// AUOutcomeUnrecognized: a code this build does not know. Recorded
-	// verbatim, folded by nothing — a guess on a money path is worse than a
-	// gap an operator can see.
+	// AUOutcomeUnrecognized: a code this build does not know. Recorded verbatim,
+	// acted on by nothing: never guess on a money path.
 	AUOutcomeUnrecognized AUOutcome = "unrecognized"
 )
 
 // ClassifyAccountUpdaterResult maps a verbatim result code onto its outcome.
-// The UPD_ family is matched by PREFIX on purpose: the row itself carries the
-// new token/expiry, so a future UPD_* variant must still be applied rather than
-// dropped — refusing the network's own repair is the or#872 failure mode.
+// UPD_ matches by prefix: the row carries the new token/expiry, so a future
+// UPD_* variant must still be applied, not dropped.
 func ClassifyAccountUpdaterResult(code string) AUOutcome {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	switch code {
@@ -140,10 +134,9 @@ func (c *Client) UploadAccountUpdaterCSV(ctx context.Context, uploadURL string, 
 	if uploadURL == "" {
 		return errors.New("basistheory: upload url is required")
 	}
-	// SEC-24 item 5 (same class): this URL comes from the PROVIDER's job
-	// payload. It is a pre-signed object-store URL, so its host cannot be
-	// pinned — but it must at least be publicly routable, or the job payload
-	// becomes a lever to POST a CSV of card tokens at an internal service.
+	// A provider-supplied pre-signed URL: its host can't be pinned, but it must
+	// be publicly routable, or the job payload could aim card tokens at an
+	// internal service.
 	if err := c.outbound.ValidateURL(uploadURL); err != nil {
 		return fmt.Errorf("basistheory: account updater upload url refused: %w", err)
 	}
@@ -206,7 +199,7 @@ func (c *Client) DownloadAccountUpdaterResults(ctx context.Context, downloadURL 
 }
 
 // ParseAccountUpdaterResults parses a v1.2 result CSV by header name (column
-// order is not assumed). Rows are recorded verbatim (#651).
+// order is not assumed). Rows are recorded verbatim.
 func ParseAccountUpdaterResults(r io.Reader) ([]AccountUpdaterResultRow, error) {
 	cr := csv.NewReader(r)
 	cr.FieldsPerRecord = -1

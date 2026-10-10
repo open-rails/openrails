@@ -22,9 +22,8 @@ type DataLinkClient struct {
 	Username     string
 	Password     string
 	DevMode      bool
-	// ReadOnly blocks every SMS mutation (CancelSubscription) at the transport
-	// with ErrProviderReadOnly; reads stay available. Set from
-	// config.IsProviderReadOnly(cfg) in build_runtime (mode=readonly, #346).
+	// ReadOnly makes every SMS mutation (CancelSubscription) fail with
+	// ErrProviderReadOnly before any HTTP; reads stay available.
 	ReadOnly bool
 	// LoopbackFixture marks an explicitly declared loopback fake DataLink.
 	LoopbackFixture bool
@@ -114,14 +113,12 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			"endpoint": apiURL,
 		}).Info("Requesting data from CCBill DataLink API (POST)")
 
-		// Create POST request with form data in body
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, "POST", apiURL, strings.NewReader(formData.Encode()))
 		if err != nil {
 			return "", fmt.Errorf("creating request: %w", err)
 		}
 
-		// Set proper headers
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("User-Agent", "OpenRails/1.0")
 
@@ -145,7 +142,6 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 			break
 		}
 
-		// Handle authentication errors specifically
 		if resp.StatusCode == http.StatusUnauthorized {
 			resp.Body.Close()
 			return "", fmt.Errorf("authentication failed: invalid credentials")
@@ -181,8 +177,7 @@ func (c *DataLinkClient) fetchDataLink(ctx context.Context, extra url.Values) (s
 
 	content := string(body)
 
-	// Check for actual CCBill error responses (more specific error detection)
-	// CCBill errors typically start with specific error messages, not CSV data
+	// CCBill errors arrive as plain text; CSV data starts with a quote.
 	if !strings.HasPrefix(content, `"`) &&
 		(strings.HasPrefix(strings.ToLower(content), "error") ||
 			strings.HasPrefix(strings.ToLower(content), "invalid") ||

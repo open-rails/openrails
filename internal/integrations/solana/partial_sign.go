@@ -14,21 +14,17 @@ type blockhashGetter interface {
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 }
 
-// BuildPartiallySignedTx assembles a transaction that requires TWO (or more)
-// signers, signs ONLY the co-signer's slot with the merchant key, and returns it
-// base64-encoded with the remaining signature slot(s) left empty for a wallet to
-// complete and submit.
+// BuildPartiallySignedTx assembles a transaction needing two or more signers,
+// signs only the co-signer's slot with the merchant key, and returns it base64
+// with the other slots empty for a wallet to complete and submit.
 //
-// This is the on-chain-atomic primitive for the recurring tier change (#272): an
-// upgrade is ONE transaction — [cancel(old) + subscribe(new) + transfer(new,
-// prorated)] — whose transfer_subscription requires the merchant/cranker as the
-// caller-signer while the subscriber is the fee payer + signs cancel/subscribe.
-// OpenRails co-signs the cranker slot here; the user's wallet adds its signature
-// (the fee-payer slot) and sends, so the whole tier change executes atomically.
+// It makes a recurring tier change one atomic transaction: [cancel(old) +
+// subscribe(new) + transfer(new, prorated)], where transfer_subscription needs
+// the cranker as caller-signer while the subscriber pays fees and signs
+// cancel/subscribe.
 //
-// feePayer is account index 0 and the wallet-side signer; cosigner must be one of
-// the transaction's required signers (else this errors rather than producing an
-// un-submittable tx).
+// feePayer is account index 0 and the wallet-side signer; cosigner must be a
+// required signer, else this errors.
 func BuildPartiallySignedTx(ctx context.Context, tenantID billing.MerchantID, cosigner Signer, rpc blockhashGetter, feePayer solanago.PublicKey, instructions []solanago.Instruction) (string, error) {
 	if cosigner == nil {
 		return "", fmt.Errorf("solana: cosigner is required")

@@ -9,31 +9,28 @@ import (
 	"github.com/google/uuid"
 )
 
-// SPL Memo self-recognition stamp (#713), format "openrails:1:<local-id>":
-// version segment + the ONE field the chain cannot derive — local-id is the
-// openrails-side UUID of OUR record for that money movement (checkout attempt
-// for one-offs, pull intent for recurring). Merchant, kind and amount are
-// deliberately omitted: derivable from the chain. STANDING INVARIANTS: the
-// memo is a DISCOVERY HINT, never money truth — money truth is only the
-// transfer itself (mint, base units, destination, signature); no MAC (forged
-// memos cost the attacker real money to matter); the Solana rail keeps exactly
-// ONE hot key (the crank signer) — memo recognition/recovery are read-side
-// only and must never force the receiving wallet hot.
+// SPL Memo self-recognition stamp "openrails:1:<local-id>": local-id is the
+// UUID of our record for the money movement (checkout attempt for one-offs,
+// pull intent for recurring); merchant, kind and amount are derivable from the
+// chain. Invariants: the memo is a discovery hint, never money truth (that is
+// the transfer: mint, base units, destination, signature); no MAC (a forged
+// memo costs the forger real money); recognition is read-side only and never
+// forces the receiving wallet hot (the crank signer is the rail's one hot key).
 //
-// This file is the single source of truth for the format; the #714 recovery
-// lane (chain→local merchant-wallet scan) parses with ParsePurchaseMemo.
+// This file owns the format; the wallet recovery scan reads it through
+// PurchaseMemoLocalIDs.
 
 // purchaseMemoPrefix pins the wire vocabulary. Bump the version segment only
 // with a real format change — memos are public and immutable.
 const purchaseMemoPrefix = "openrails:1:"
 
-// PurchaseMemo renders the #713 stamp for localID.
+// PurchaseMemo renders the stamp for localID.
 func PurchaseMemo(localID uuid.UUID) string {
 	return purchaseMemoPrefix + localID.String()
 }
 
-// ParsePurchaseMemo recognizes a #713 stamp. ok=false for foreign memos,
-// other versions, or anything but a canonical non-nil UUID local-id.
+// ParsePurchaseMemo recognizes a stamp. ok=false for foreign memos, other
+// versions, or anything but a canonical non-nil UUID local-id.
 func ParsePurchaseMemo(s string) (uuid.UUID, bool) {
 	rest, found := strings.CutPrefix(strings.TrimSpace(s), purchaseMemoPrefix)
 	if !found || len(rest) != 36 {
@@ -53,9 +50,9 @@ func NewMemoInstruction(memo string) solanago.Instruction {
 	return memoprog.NewMemoInstruction([]byte(memo)).Build()
 }
 
-// PurchaseMemoLocalIDs extracts every recognizable #713 local-id from a
-// transaction's memo instructions. Foreign/unparseable memos are ignored —
-// a wallet may attach its own.
+// PurchaseMemoLocalIDs extracts every recognizable stamp local-id from a
+// transaction's memo instructions. Foreign/unparseable memos are ignored: a
+// wallet may attach its own.
 func PurchaseMemoLocalIDs(tx *solanago.Transaction) []uuid.UUID {
 	if tx == nil {
 		return nil
@@ -73,18 +70,14 @@ func PurchaseMemoLocalIDs(tx *solanago.Transaction) []uuid.UUID {
 	return ids
 }
 
-// PurchaseMemoPolicy declares how strictly the #713 stamp is verified. It is a
-// property of WHO BUILT THE TRANSACTION, and or#893 makes it explicit rather
-// than leaving "absence passes" as an inherited pre-#713 tolerance:
+// PurchaseMemoPolicy says how strictly the stamp is verified, by who built the
+// transaction:
 //
-//   - MemoPresenceOptional — a WALLET built the transaction from a Solana Pay
-//     URL. The spec asks the wallet to attach the memo, but the wallet is not
-//     ours and a payment that really settled must not be rejected because a
-//     wallet dropped a discovery hint. A present memo must still match.
-//   - MemoRequired — OPENRAILS built and stamped the transaction (the
-//     transaction-request flow, the recurring crank). We know the memo is
-//     there, so its absence means the signature is not the transaction we
-//     built, and that is a verification failure.
+//   - MemoPresenceOptional: a wallet built it from a Solana Pay URL. A wallet
+//     may drop the memo, and a settled payment must not be rejected for a
+//     missing hint. A present memo must still match.
+//   - MemoRequired: OpenRails built and stamped it (transaction request,
+//     recurring crank), so a missing memo means it is not our transaction.
 type PurchaseMemoPolicy int
 
 const (
@@ -92,10 +85,9 @@ const (
 	MemoRequired
 )
 
-// VerifyPurchaseMemo applies the #713 verify rule under policy. A present
-// purchase memo must always name want (mismatch = verification failure);
-// absence fails only under MemoRequired. want == uuid.Nil skips the check
-// entirely (no local record to recognise).
+// VerifyPurchaseMemo applies the stamp rule under policy: a present purchase
+// memo must name want; absence fails only under MemoRequired. want ==
+// uuid.Nil skips the check (no local record to recognise).
 func VerifyPurchaseMemo(tx *solanago.Transaction, want uuid.UUID, policy PurchaseMemoPolicy) error {
 	if want == uuid.Nil {
 		return nil

@@ -10,8 +10,8 @@ import (
 )
 
 // LateSettlementWindow bounds how long past its validity a quote is still
-// honoured (xs-007 row 35, SEC-33). A landing inside it settles at the quoted
-// amount; a later one grants nothing.
+// honoured. A landing inside it settles at the quoted amount; a later one
+// grants nothing.
 const LateSettlementWindow = 30 * time.Minute
 
 // SettlementTooLate reports whether a transaction that landed at landedAt is

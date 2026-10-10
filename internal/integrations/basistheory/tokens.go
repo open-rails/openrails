@@ -84,11 +84,11 @@ func (c *Client) GetTokenIntent(ctx context.Context, id string) (*TokenIntent, e
 
 // ConvertOpts controls intent -> durable-token conversion.
 type ConvertOpts struct {
-	// IdempotencyKey derives from the durable intent row (#674) so an executor
-	// replay converts once.
+	// IdempotencyKey derives from the durable intent row so a replay converts
+	// once.
 	IdempotencyKey string
-	// Deduplicate returns the EXISTING token on fingerprint match instead of
-	// minting a duplicate (deduplicateToken: true).
+	// Deduplicate returns the existing token on fingerprint match instead of
+	// minting a duplicate (deduplicate_token).
 	Deduplicate bool
 	Metadata    map[string]string
 }

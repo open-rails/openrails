@@ -100,8 +100,8 @@ func fastWatch(t *testing.T) {
 	t.Cleanup(func() { watchPollInterval = prev })
 }
 
-// xs-007 row 36: a confirmation watch ends on the chain's terminal (blockhash
-// last valid height) or the caller's context — never on a clock of ours.
+// A confirmation watch ends on the chain's terminal (blockhash last valid
+// height) or the caller's context, never on a clock of ours.
 func TestWatchTransactionEndsOnlyOnChainTerminalOrCaller(t *testing.T) {
 	fastWatch(t)
 	watch := func(t *testing.T, landAt int, terminal ChainTerminal, ctx context.Context) (*rpcStub, *TransactionOutcome, error) {
@@ -152,7 +152,7 @@ func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (st
 	return string(s), nil
 }
 
-// #674: the signature is persisted before any byte is sent, a presubmit failure
+// The signature is persisted before any byte is sent, a presubmit failure
 // sends nothing, and a landed-but-reverted pull surfaces its Custom code.
 func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 	key, err := solanago.NewRandomPrivateKey()
@@ -222,7 +222,7 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 	})
 }
 
-// #346 readonly and provider posture: submission is refused locally unless the
+// Readonly and provider posture: submission is refused locally unless the
 // chain is proven to be a sandbox (or the process is live on mainnet).
 func TestSubmissionGatedByReadOnlyAndChainPosture(t *testing.T) {
 	genesisStub := func(t *testing.T, genesis string) (*rpcStub, string) {
@@ -282,8 +282,8 @@ func TestSubmissionGatedByReadOnlyAndChainPosture(t *testing.T) {
 	})
 }
 
-// #SEC-17: the RPC credential reaches the provider and nothing else — not the
-// held endpoint URL, a log line, or an error string.
+// The RPC credential reaches the provider and nothing else: not the held
+// endpoint URL, a log line, or an error string.
 func TestRPCCredentialReachesOnlyTheProvider(t *testing.T) {
 	const secret = "merchant-rpc-secret-key"
 	var mu sync.Mutex

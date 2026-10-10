@@ -1,14 +1,8 @@
-// Package solanafake is a loopback Solana JSON-RPC node for sandbox tests. It
-// serves the accounts a test declares — SPL and Token-2022 mints, token
-// accounts, published subscription plans and subscription authorities — to an
-// OpenRails whose provider_sandbox.solana_rpc_url points at it. It lands
-// signed transactions (the test's, and the server's own sendTransaction) the
-// way the chain would: every signature must verify, and SPL token moves
-// (transfer, transfer_checked, the subscriptions program's
-// transfer_subscription) and new subscription authorities apply
-// all-or-nothing. Pay lands a synthesized payment with no signer. Like a real
-// node it refuses v0 transactions to a client that does not ask for them, and
-// serves each commitment level only what has reached it.
+// Package solanafake is a loopback Solana JSON-RPC node for sandbox tests
+// (provider_sandbox.solana_rpc_url). It serves declared mints, token accounts,
+// plans and subscription authorities, and lands signed transactions as the
+// chain would: signatures must verify, token moves apply all-or-nothing, v0
+// transactions need opting in, and each commitment sees only what reached it.
 package solanafake
 
 import (

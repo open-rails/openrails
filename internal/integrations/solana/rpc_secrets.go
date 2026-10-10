@@ -16,13 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/redact"
 )
 
-// #SEC-17: a Solana RPC credential is a MERCHANT secret and providers take it
-// in the query string (Helius `?api-key=`). The pinned solana-go client formats
-// the full request URL into every error it returns, and those errors are logged
-// and were echoed to clients — so an endpoint URL we HOLD must never contain the
-// key. RPCEndpoint.URL is credential-free; the stripped parameters are
-// re-attached here, on a CLONE of the outbound request, so the request object
-// solana-go formats into its errors keeps the credential-free URL.
+// A Solana RPC credential is a merchant secret, and providers take it in the
+// query string (Helius `?api-key=`). solana-go formats the full request URL
+// into its errors, which get logged, so a held endpoint URL never contains the
+// key: RPCEndpoint.URL is credential-free and the parameters are re-attached
+// here, on a clone of the outbound request.
 
 // secretQueryTransport re-attaches credential query parameters at dial time.
 type secretQueryTransport struct {
@@ -98,9 +96,8 @@ func newSecretEndpoint(name, rawURL string, priority int, secret url.Values) RPC
 	return RPCEndpoint{Name: name, URL: safeURL, Priority: priority, secret: secret}
 }
 
-// CredentialFingerprint is a short, non-reversible digest of a credential. It
-// lets arming be asserted (tests, diagnostics) without the secret ever
-// appearing in a URL, log line or error (#SEC-17).
+// CredentialFingerprint is a short, non-reversible digest of a credential, so
+// arming can be asserted without the secret in a URL, log line or error.
 func CredentialFingerprint(v string) string {
 	if v == "" {
 		return ""
