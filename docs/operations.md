@@ -251,9 +251,13 @@ openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.
 
 `push-auth-bootstrap` runs first because it creates the initial AuthKit root
 operator; merchant config then creates OpenRails merchant groups, PSP rows,
-and secrets. Normal server restarts never reconcile merchant config or
-catalog files. If `/etc/openrails/bootstrap.yaml` is mounted, startup
-bootstrap is first-run only and limited to AuthKit authority.
+and secrets. A server started with `--merchant-manifest` (or a mounted
+`/etc/openrails/merchants.yaml`) does the merchant step itself at every boot:
+it creates what is missing and preserves later API edits. Restarts never
+apply catalog files. With people signing in at a trusted issuer,
+`push-auth-bootstrap` has nothing to do. If `/etc/openrails/bootstrap.yaml`
+is mounted, startup bootstrap is first-run only and limited to AuthKit
+authority.
 
 ## Durability model
 

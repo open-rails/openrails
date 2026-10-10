@@ -1,7 +1,10 @@
 # Standalone Integration Guide
 
 How to deploy OpenRails as its own self-hosted HTTP service and integrate your
-application against it ([Backend integration](#backend-integration) shows the Go client, `NewRemote`). Money
+application against it ([Backend integration](#backend-integration) shows the Go client, `NewRemote`).
+[`examples/standalone`](../examples/standalone) runs all of it: the server from
+its image, a merchant from a file, an app whose AuthKit is the trusted issuer,
+SCIM contacts, receipts and webhooks. Money
 is an integer in the currency's native units (`GET /v1/config`'s `currencies`;
 micros for USD), a decimal string on the wire ([money-wire.md](money-wire.md)). Vocabulary:
 a **rail** is a gateway kind (`nmi`, `ccbill`,
@@ -129,6 +132,13 @@ contract**: with no flags it is **plan-only** (prints a terraform-style diff,
 mutates nothing); `--insert` creates missing state, `--overwrite` updates
 existing state, `--prune` removes target extras absent from the manifest. The
 flags compose; full reconciliation is `--insert --overwrite --prune`.
+
+The merchant manifest (`version: 1`, then `merchants.<slug>`) can instead be
+read at every boot, `run-server --merchant-manifest merchants.yaml` (or a
+mounted `/etc/openrails/merchants.yaml`): boot creates a merchant and its PSPs
+the first time and leaves later API edits alone, so the server needs no
+separate first-run step for them. `push-auth-bootstrap` is for the server's own
+accounts (`local_sign_in`); with a trusted issuer it has nothing to do.
 
 On an empty install, in order:
 
@@ -330,6 +340,11 @@ resource_server:
   header to retry with. The proof names `auth.request_origin` (else the
   issuer's origin) plus the path, so browsers call the server at that origin:
   a proof for any other host, a merchant's API host included, is refused.
+- With AuthKit as the issuer, the browser gets these tokens by token exchange:
+  register a public client with the token-exchange grant and the server as a
+  resource, and give billing-ui a `fetch` that calls auth-ui's
+  `resourceFetch` with scope `openrails:self`
+  ([`clients.ts`](../examples/standalone/web/src/clients.ts)).
 - Browsers on `allowed_origins` may call the admin API across origins.
   Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
   headers, never cookies.
