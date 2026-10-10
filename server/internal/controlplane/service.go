@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	userauth "github.com/open-rails/openrails/server/internal/auth"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -72,6 +73,7 @@ type options struct {
 	redis                        *redis.Client
 	merchantCreation             *MerchantCreationConfig
 	resourceServer               *hostconfig.ResourceServerConfig
+	proofClaims                  *ratelimit.Windows
 }
 
 // Option configures the control plane.
@@ -351,7 +353,7 @@ func New(client *authkit.Client, cfg *config.Config, auth *hostconfig.AuthConfig
 	cp.client = client
 	cp.users = userauth.NewAuthenticator(client)
 	if options.resourceServer != nil {
-		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
+		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.proofClaims); err != nil {
 			return nil, err
 		}
 	}

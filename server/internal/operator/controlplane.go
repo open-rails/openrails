@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -35,7 +36,9 @@ type Options struct {
 	// closed.
 	Registration iam.RegistrationMode
 	// ResourceServer accepts trusted issuers' RFC 9068 access tokens (#1140).
+	// ProofClaims records the DPoP proofs it accepted, shared by replicas.
 	ResourceServer *hostconfig.ResourceServerConfig
+	ProofClaims    *ratelimit.Windows
 
 	// PasswordlessLogin exposes AuthKit's contact-based passwordless start and
 	// confirm routes; PasswordlessAutoRegistration also lets a verified
@@ -87,7 +90,7 @@ func ControlPlaneOptions(opts Options) ([]controlplane.Option, error) {
 		out = append(out, controlplane.WithRegistration(opts.Registration))
 	}
 	if opts.ResourceServer != nil {
-		out = append(out, controlplane.WithResourceServer(*opts.ResourceServer))
+		out = append(out, controlplane.WithResourceServer(*opts.ResourceServer, opts.ProofClaims))
 	}
 	if opts.PasswordlessLogin {
 		out = append(out, controlplane.WithPasswordless(opts.PasswordlessAutoRegistration))

@@ -81,8 +81,9 @@ A token bound to a key (`cnf.jkt`) is accepted only as `Authorization: DPoP`
 with a fresh single-use proof for the method, the configured
 `auth.request_origin` plus path, and the server nonce: the first proof without
 one is answered `401 use_dpop_nonce` with a `DPoP-Nonce` header. Customer
-tokens must be bound (DPoP, or a certificate-bound token over mTLS). Proof
-claims are shared across replicas through Redis and fail closed with 503.
+tokens must be bound (DPoP, or a certificate-bound token over mTLS). Spent
+proofs are recorded in PostgreSQL, shared by every replica with or without
+Redis; a proof that cannot be recorded fails closed with 503.
 Arbitrary Host/Forwarded headers never define a proof target.
 
 Merchant routes answer CORS for the trusted issuers' declared origins only,

@@ -14,7 +14,6 @@ import (
 
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/authkit/verify"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -23,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -52,22 +52,22 @@ type trustedIssuer struct {
 }
 
 // WithResourceServer accepts the access tokens cfg's trusted issuers mint
-// for this deployment (server.Config.ResourceServer).
-func WithResourceServer(cfg hostconfig.ResourceServerConfig) Option {
-	return func(o *options) { o.resourceServer = &cfg }
+// for this deployment (server.Config.ResourceServer). claims records the
+// DPoP proofs it has accepted, shared by every replica.
+func WithResourceServer(cfg hostconfig.ResourceServerConfig, claims *ratelimit.Windows) Option {
+	return func(o *options) { o.resourceServer, o.proofClaims = &cfg, claims }
 }
 
 // newResourceServer builds the verifier: one audience (the identifier), DPoP
 // with replay protection every replica shares and server nonces.
-func newResourceServer(cfg hostconfig.ResourceServerConfig, auth *hostconfig.AuthConfig, rdb *redis.Client) (*resourceServer, error) {
+func newResourceServer(cfg hostconfig.ResourceServerConfig, auth *hostconfig.AuthConfig, claims *ratelimit.Windows) (*resourceServer, error) {
 	if err := hostconfig.ValidateResourceServer(&cfg, auth.AllowLoopbackHTTP); err != nil {
 		return nil, fmt.Errorf("controlplane: %w", err)
 	}
-	replay, err := proofReplay(rdb, auth.AllowMemory)
-	if err != nil {
-		return nil, err
+	if claims == nil {
+		return nil, errors.New("controlplane: the resource server's DPoP replay protection needs the engine's database")
 	}
-	opts := []verify.VerifierOption{verify.WithDPoP(replay), verify.WithDPoPNonce([]byte(cfg.DPoPNonceKey))}
+	opts := []verify.VerifierOption{verify.WithDPoP(proofReplay(claims)), verify.WithDPoPNonce([]byte(cfg.DPoPNonceKey))}
 	if origin := dpopOrigin(auth); origin != "" {
 		opts = append(opts, verify.WithPublicURL(origin))
 	}
@@ -116,34 +116,15 @@ func dpopOrigin(auth *hostconfig.AuthConfig) string {
 	return strings.TrimRight(issuer, "/")
 }
 
-// proofReplay claims a DPoP proof once across replicas (Redis), or within the
-// one process a memory deployment declared. Its errors fail closed.
-func proofReplay(rdb *redis.Client, allowMemory bool) (func(context.Context, string, time.Duration) (bool, error), error) {
-	if rdb != nil {
-		return func(ctx context.Context, key string, ttl time.Duration) (bool, error) {
-			return rdb.SetNX(ctx, "openrails:dpop:"+key, 1, ttl).Result()
-		}, nil
+// proofReplay claims a DPoP proof once across every replica, in PostgreSQL:
+// the first claim opens the proof's window, any other finds it open. Expired
+// claims are pruned with the rate windows. Redis plays no part, so an outage
+// of it never refuses a proof or admits a replay.
+func proofReplay(claims *ratelimit.Windows) func(context.Context, string, time.Duration) (bool, error) {
+	return func(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+		hits, _, err := claims.Hit(ctx, "dpop:proof:"+key, 1, time.Now().Add(ttl))
+		return err == nil && hits == 1, err
 	}
-	if !allowMemory {
-		return nil, errors.New("controlplane: the resource server's DPoP replay protection needs Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
-	}
-	var mu sync.Mutex
-	seen := map[string]time.Time{}
-	return func(_ context.Context, key string, ttl time.Duration) (bool, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		now := time.Now()
-		for k, until := range seen {
-			if now.After(until) {
-				delete(seen, k)
-			}
-		}
-		if _, used := seen[key]; used {
-			return false, nil
-		}
-		seen[key] = now.Add(ttl)
-		return true, nil
-	}, nil
 }
 
 // AllowedOrigin reports whether origin may call the admin API across

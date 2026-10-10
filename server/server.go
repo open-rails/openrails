@@ -204,7 +204,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		LocalSignIn: cfg.LocalSignIn, EmailSender: deps.AuthEmail, SMSSender: deps.SMS,
 		Frontend:       authkit.FrontendConfig{BaseURL: cfg.FrontendBaseURL},
 		TrustedProxies: cfg.TrustedProxies, CloudflareProxies: cfg.CloudflareProxies,
-		Redis: s.graph.RedisClient,
+		Redis: s.graph.RedisClient, ProofClaims: s.graph.Runtime.RateWindows,
 	}
 	if opts.EmailSender == nil && s.graph.Runtime.EmailSender != nil {
 		opts.EmailSender = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
