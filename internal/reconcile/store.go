@@ -432,6 +432,10 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 }
 
 // Gauge type sets: named counts over open findings, one per error category.
+// FindingAccessUnjustified is live product access whose source is proven
+// absent or reversed: the freeloader the DERIVE sweep reports.
+const FindingAccessUnjustified = "derive.access.unjustified"
+
 // Extend the sets here, not the queries, when a type joins a gauge.
 var (
 	// OrphanedFindingTypes: paying without access (money collected,
@@ -445,7 +449,7 @@ var (
 	// absent or reversed (stale is not freeloading). derive.grant_effect.mismatch
 	// (revoke direction) is auto-repaired in the same sweep, so it is not here.
 	FreeloaderFindingTypes = []string{
-		"derive.entitlement.unjustified",
+		FindingAccessUnjustified,
 		"derive.grant_effect.excess",
 	}
 	// DuplicateCoverageFindingTypes: DOUBLE-BILLED — the same (customer,

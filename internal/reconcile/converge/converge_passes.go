@@ -299,7 +299,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unjustified access windows: %w", err)
 	}
-	markTruncated(ctx, len(unjustified), "derive.access.unjustified")
+	markTruncated(ctx, len(unjustified), reconcile.FindingAccessUnjustified)
 	for i := range unjustified {
 		out = append(out, unjustifiedAccessFinding(&unjustified[i]))
 	}
@@ -345,7 +345,7 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 	}
 
 	return ConvergeFinding{
-		Type:              "derive.access.unjustified",
+		Type:              reconcile.FindingAccessUnjustified,
 		Shape:             ShapeExcess,
 		Class:             ClassAdmin,
 		Severity:          "high",
@@ -1209,7 +1209,7 @@ const (
 
 func (*derivePass) Standing() []string {
 	return []string{"derive.grant_effect.missing", "derive.grant_effect.excess", "derive.grant.missing", "derive.grant.excess",
-		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", "derive.entitlement.unjustified"}
+		"derive.subscription.missing", "derive.wallet.missing", "derive.grant_effect.mismatch", reconcile.FindingAccessUnjustified}
 }
 
 // Standing leaves out life.provider_intent.stuck, which resolves by its own
