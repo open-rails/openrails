@@ -6,20 +6,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// UsageEvent is one append-only, multi-dimensional record of metered usage
-// (issue #289). Host-priced events carry final cost; catalog events carry an
-// unpriced meter input. OpenRails records each and debits only host cost in the
-// SAME transaction.
-// It is the source of truth for usage reporting + #303 invoice line items.
-//
-// Idempotency is enforced by a unique index on
-// (merchant_id, customer_id, event_type, source, source_id): a replayed metered
-// request neither double-records nor double-charges.
+// UsageEvent is one append-only record of metered usage, the source of truth
+// for usage reporting and invoice line items. Host-priced events carry final
+// cost; catalog events carry an unpriced meter input. Host cost is debited in
+// the same transaction. A replay is found by (merchant, customer, currency,
+// event_type, source, source_id) within the ingest window, so it neither
+// double-records nor double-charges.
 type UsageEvent struct {
 	ID uuid.UUID `json:"id"`
-	// MerchantID scopes this row to a merchant / billing namespace (issue #223/#227).
+	// MerchantID scopes this row to a merchant.
 	MerchantID uuid.UUID `json:"merchant_id"`
-	// CustomerID is the merchant subject BILLED for this usage (issue #221, the payer).
+	// CustomerID is the customer billed for this usage.
 	CustomerID uuid.UUID `json:"customer_id"`
 	// Invoker is the caller-supplied principal string that caused usage
 	// (opaque to OpenRails; attribution + grouping only, not the payer).
@@ -51,11 +48,8 @@ type UsageEvent struct {
 	Metadata         map[string]any `json:"metadata,omitempty"`
 	OccurredAt       time.Time      `json:"occurred_at"`
 	CreatedAt        time.Time      `json:"created_at"`
-	// Replayed reports that this event's idempotency coordinate was ALREADY
-	// recorded, so the call that returned it metered nothing new and moved no
-	// money — the row described here landed earlier (or#903, same contract as
-	// BalanceTransaction.Replayed). Not persisted; it is the answer to "did MY
-	// call apply?", which is what lets a caller derive a cache from a durable
-	// decision instead of keeping a claim table beside it.
+	// Replayed reports that this event's idempotency coordinate was already
+	// recorded, so this call metered nothing and moved no money. Not
+	// persisted.
 	Replayed bool `json:"replayed,omitempty"`
 }

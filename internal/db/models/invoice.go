@@ -34,7 +34,7 @@ type Invoice struct {
 	LineItems      []InvoiceLineItem `json:"line_items"`
 	MoneyMovements map[string]int64  `json:"money_movements"`
 
-	// Enterprise document fields (#798), snapshotted from the payer's
+	// Enterprise document fields, snapshotted from the payer's
 	// customer_invoice_profiles row at finalize. Tax is a host-defined shape.
 	PONumber        *string          `json:"po_number,omitempty"`
 	Tax             map[string]any   `json:"tax,omitempty"`
@@ -62,7 +62,7 @@ type Invoice struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
-// InvoiceContact is one billing contact on an invoice / invoice profile (#798).
+// InvoiceContact is one billing contact on an invoice or invoice profile.
 type InvoiceContact struct {
 	Name  string `json:"name,omitempty"`
 	Email string `json:"email"`

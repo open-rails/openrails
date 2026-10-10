@@ -6,26 +6,24 @@ import (
 	"github.com/google/uuid"
 )
 
-// SolanaSubscriptionStatus enumerates the on-chain record lifecycle.
+// SolanaSubscription statuses: the on-chain record lifecycle.
 const (
 	SolanaSubscriptionActive   = "active"
 	SolanaSubscriptionCanceled = "canceled"
 	SolanaSubscriptionExpired  = "expired"
 )
 
-// SolanaSubscription is the per-subscriber on-chain state for a recurring Solana
-// subscription (issue #255). It links 1:1 to a billing.subscriptions row (the
-// canonical lifecycle record) and holds ONLY public on-chain data — never a
-// private key. The hourly pull worker (#256) queries due rows by
+// SolanaSubscription is the on-chain state of a recurring Solana
+// subscription, 1:1 with its subscriptions row. It holds only public on-chain
+// data, never a private key. The pull worker reads due rows by
 // (merchant_id, next_pull_at).
 type SolanaSubscription struct {
 	ID             uuid.UUID `json:"id"`
 	MerchantID     uuid.UUID `json:"merchant_id"`
 	SubscriptionID uuid.UUID `json:"subscription_id"`
 
-	// PspID is the PSP that owns the local subscription this row mirrors.
-	// Carried on the due-window read so the crank's recurring-pull intent names
-	// the account it executes against (or#893). Zero outside that read.
+	// PspID is the PSP owning the mirrored subscription, carried on the
+	// due-window read so the pull intent names its account. Zero elsewhere.
 	PspID uuid.UUID `json:"psp_id,omitempty"`
 
 	SubscriberWallet string `json:"subscriber_wallet"`

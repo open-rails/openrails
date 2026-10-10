@@ -10,12 +10,9 @@ import (
 	"testing"
 )
 
-// TestNoPoolInsideRunInMerchantConn guards the #826 bug class: a
-// RunInMerchantConn callback querying the raw pool (Pool()/DataPool()) instead
-// of Qx(ctx). The raw pool is a different session with no merchant GUC and
-// skips the #471 schema rewrite. Lexical AST check: any zero-arg
-// .Pool()/.DataPool() call inside a function literal passed to
-// RunInMerchantConn fails.
+// TestNoPoolInsideRunInMerchantConn fails any zero-arg .Pool()/.DataPool() call
+// inside a function literal passed to RunInMerchantConn: the raw pool is
+// another session, without the merchant GUC or the schema rewrite.
 func TestNoPoolInsideRunInMerchantConn(t *testing.T) {
 	root := moduleRoot(t)
 	fset := token.NewFileSet()

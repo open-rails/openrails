@@ -1,12 +1,8 @@
-// Package sqlschema relocates OpenRails SQL to the configured Postgres schema.
-//
-// All SQL (queries, migrations, inline statements) is authored in
-// config.DefaultSchema and runs verbatim there. For any other schema one
-// token-aware rewrite moves schema references only: qualifiers ("billing".x
-// included), the name after SCHEMA, SET search_path values and reg* literals
-// ('billing.x'::regclass, to_regclass('billing.x')). Every other literal and
-// comment is data and stays byte-identical, so a lock key such as
-// 'openrails.default_payment_method:' hashes the same in queries and triggers.
+// Package sqlschema relocates OpenRails SQL, authored in config.DefaultSchema,
+// to the configured schema. One token-aware rewrite moves schema references
+// only (qualifiers, SCHEMA names, search_path values, reg* literals); every
+// other literal and comment stays byte-identical, so a lock key hashes the
+// same in queries and triggers.
 package sqlschema
 
 import (

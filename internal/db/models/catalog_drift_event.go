@@ -7,12 +7,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// CatalogDriftProvider names the upstream payment rail a drift event
-// concerns. It disambiguates the shared field_drift kind across providers.
-//
-// CCBill is deliberately absent: CCBill has no catalog-list API (FlexForms are
-// write-only redirect URLs, DataLink exports members not forms), so CCBill
-// catalog reconciliation is structurally impossible. CCBill stays manual-only.
+// CatalogDriftProvider names the rail a drift event concerns. CCBill is
+// absent: it has no catalog-list API, so its catalog stays manual-only.
 type CatalogDriftProvider string
 
 const (
@@ -21,21 +17,14 @@ const (
 	CatalogDriftProviderSolana CatalogDriftProvider = "solana"
 )
 
-// CatalogDriftKind classifies a catalog drift event: a catalog.<kind>
-// reconciliation finding. The orphan/missing kinds are provider-scoped; field_drift is shared and
-// disambiguated by the Provider column.
+// CatalogDriftKind is the <kind> of a catalog.<kind> reconciliation finding.
 //
-//   - CatalogDriftOrphanInStripe / CatalogDriftOrphanInNMI: an upstream
-//     Product/Price/Plan carries (or lacks) the OpenRails ownership marker but
-//     has no matching OpenRails row. Surfaced so operators can decide whether to
-//     import or delete it. Alert-only.
-//   - CatalogDriftMissingInStripe / CatalogDriftMissingInNMI: an OpenRails row
-//     stores an upstream object ID that was not present in the pulled list
-//     (deleted or archived upstream). Resolve via the per-price reconcile action.
-//   - CatalogDriftFieldDrift: an OpenRails row and its upstream mirror disagree
-//     on a mutable field (name/description/amount/currency/active/...). The
-//     Provider column says which rail drifted. Resolve via per-price
-//     reconcile.
+//   - orphan_in_*: an upstream product/price/plan has no matching OpenRails
+//     row. Alert-only; operators decide whether to import or delete it.
+//   - missing_in_*: an OpenRails row stores an upstream id absent from the
+//     pulled list. Resolve via the per-price reconcile action.
+//   - field_drift: a row and its upstream mirror disagree on a mutable field;
+//     Provider says which rail. Resolve via per-price reconcile.
 type CatalogDriftKind string
 
 const (
@@ -43,10 +32,9 @@ const (
 	CatalogDriftMissingInStripe CatalogDriftKind = "missing_in_stripe"
 	CatalogDriftOrphanInNMI     CatalogDriftKind = "orphan_in_nmi"
 	CatalogDriftMissingInNMI    CatalogDriftKind = "missing_in_nmi"
-	// CatalogDriftMissingInSolana: an OpenRails price stores an on-chain plan PDA
-	// whose Plan account is no longer present on chain (deleted / wrong PDA). There
-	// is no orphan_in_solana kind: the Subscriptions program has no "list all plans"
-	// API, so Solana drift is detected per-stored-price, not by enumerating chain.
+	// CatalogDriftMissingInSolana: a price's on-chain plan PDA has no Plan
+	// account. Solana has no orphan kind: the program cannot list plans, so
+	// drift is checked per stored price.
 	CatalogDriftMissingInSolana CatalogDriftKind = "missing_in_solana"
 	CatalogDriftFieldDrift      CatalogDriftKind = "field_drift"
 )
@@ -67,14 +55,9 @@ const (
 	CatalogDriftResourcePrice   CatalogDriftResourceType = "price"
 )
 
-// CatalogDriftEvent is an alert-only record produced by the catalog
-// reconciliation loop (issue #209). The loop never mutates Stripe, NMI, or the
-// catalog rows; it only records divergence here. An event is "open" while
-// ResolvedAt IS NULL. Rows dedupe on (psp, kind, openrails_resource_type,
-// openrails_resource_id, external_resource_id, field) so reruns are idempotent.
-//
-// The external_resource_id column generalizes across providers: it holds the
-// Stripe object id for the Stripe pass and the NMI plan_id for the NMI pass.
+// CatalogDriftEvent is an alert-only catalog reconciliation finding: the loop
+// never mutates providers or catalog rows. It is open while ResolvedAt is nil
+// and dedupes on (PSP, kind, resource type, resource id, external id, field).
 type CatalogDriftEvent struct {
 	ID uuid.UUID `json:"id"`
 	// PSPID is the immutable provider account whose catalog was compared.
@@ -88,9 +71,8 @@ type CatalogDriftEvent struct {
 	// OpenRailsResourceID is the UUID of the OpenRails row (empty for pure
 	// orphans that have no OpenRails counterpart).
 	OpenRailsResourceID string `json:"openrails_resource_id,omitempty"`
-	// ExternalResourceID is the upstream object id: a Stripe product/price id for
-	// the Stripe pass, or an NMI plan_id for the NMI pass. For missing_in_*, it
-	// carries the id we failed to find, so it is set for all kinds in practice.
+	// ExternalResourceID is the upstream id (Stripe product/price id, NMI
+	// plan_id); for missing_in_* it is the id not found.
 	ExternalResourceID string `json:"external_resource_id,omitempty"`
 
 	// Field is the diverged field name for field_drift; empty for orphan/missing.

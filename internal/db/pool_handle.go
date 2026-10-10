@@ -16,12 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Connection discipline (#1105). A request pins one connection (WithMerchantConn)
-// and every pool-backed statement it runs reuses that pin while it is idle,
-// so a request never waits on the pool for a second connection while holding
-// one: at concurrency >= pool size that wait was a deadlock. Every wait for a
-// pooled connection is bounded: a saturated pool answers ErrPoolExhausted
-// (503), never a hang.
+// Connection discipline: a request pins one connection (WithMerchantConn) and
+// its pool-backed statements reuse that pin while it is idle, so a request
+// never waits for a second connection while holding one (a deadlock at
+// concurrency >= pool size). Every pool wait is bounded: a saturated pool
+// answers ErrPoolExhausted (503), never a hang.
 
 // poolAcquireTimeout bounds one wait for a pooled connection.
 const poolAcquireTimeout = 5 * time.Second

@@ -6,10 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// MoneyMovement is the positive marker that replaced the settlement feed's
-// transaction_id denylist (or#827). The zero value is UNDECLARED, which is
-// distinct from MoneyMovementNone: a writer that never thought about it must
-// not pass for one that decided no money moved.
+// MoneyMovement declares whether a payment row moved money. The zero value is
+// undeclared, distinct from MoneyMovementNone: a writer that never decided
+// must not pass for one that decided no money moved.
 type MoneyMovement string
 
 const (
@@ -30,12 +29,10 @@ func (m MoneyMovement) Valid() bool {
 	return m == MoneyMovementRail || m == MoneyMovementNone
 }
 
-// Payment represents a payment event (both one-time and subscription payments)
-// This is an immutable event log of all payments received
+// Payment is an immutable payment event, one-time or subscription.
 type Payment struct {
 	ID uuid.UUID `json:"id"`
-	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
+	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	PriceID    uuid.UUID `json:"price_id"`
 
@@ -62,8 +59,7 @@ type Payment struct {
 	Currency   string `json:"currency"`
 	Status     string `json:"status"`
 
-	// PspID is the PSP (billing.psps.id)
-	// that processed this charge (#641). Nil only for off-rail manual entries.
+	// PspID is the PSP that processed this charge; nil only for manual entries.
 	PspID *uuid.UUID `json:"psp_id,omitempty"`
 
 	// Card snapshot of the payment method used for this charge, captured from
@@ -73,16 +69,16 @@ type Payment struct {
 	CardBrand *string `json:"card_brand,omitempty"`
 	CardLast4 *string `json:"card_last4,omitempty"`
 
-	// AttemptKind: initial|renewal, stamped at write time (#733). Nil = unknown
-	// (imported / pre-instrumentation rows).
+	// AttemptKind: initial|renewal, stamped at write time. Nil = unknown
+	// (imported rows).
 	AttemptKind *string `json:"attempt_kind,omitempty"`
 	// FailureCode is the raw rail decline code, verbatim; FailureReason the
-	// normalized category derived deterministically per rail (#733).
+	// normalized category derived deterministically per rail.
 	FailureCode   *string `json:"failure_code,omitempty"`
 	FailureReason *string `json:"failure_reason,omitempty"`
-	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal (#733).
+	// ReversalKind discriminates mirror rows: refund|chargeback|dispute_reversal.
 	ReversalKind *string `json:"reversal_kind,omitempty"`
-	// TokenType is the credential form presented at charge time (#796):
+	// TokenType is the credential form presented at charge time:
 	// network_token|pan_via_proxy|psp_token. Nil = unknown/legacy.
 	TokenType *string `json:"token_type,omitempty"`
 
@@ -90,10 +86,9 @@ type Payment struct {
 	// that bills no seats.
 	Quantity *int `json:"quantity,omitempty"`
 
-	// MoneyMovement declares whether this row records money that actually
-	// moved at the rail (or#827). It is the ONLY thing the host settlement
-	// feed keys on, so it is a required declaration on any completed
-	// positive charge — see paymentInsertParams.
+	// MoneyMovement declares whether this row records money that moved at the
+	// rail. The host settlement feed keys only on it, so it is required on any
+	// completed positive charge (see paymentInsertParams).
 	MoneyMovement MoneyMovement `json:"money_movement,omitempty"`
 
 	DiscountCode     *string        `json:"discount_code,omitempty"`

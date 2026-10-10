@@ -11,20 +11,19 @@ import (
 type SubscriptionStatus string
 
 const (
-	// The status system is designed around a simple question: "Will we attempt to rebill this subscription?"
-	// - If rebilling will be attempted → past_due (when payment fails but we're still trying)
-	// - If rebilling will NEVER be attempted again → canceled (user canceled, max retries reached, etc.)
+	// Status answers "will we attempt to rebill?": past_due keeps retrying;
+	// canceled never rebills again.
 
 	StatusPending  SubscriptionStatus = "pending"  // Subscription created, waiting for initial payment confirmation
 	StatusActive   SubscriptionStatus = "active"   // Normal good-standing, successful payments, rebill scheduled
 	StatusPastDue  SubscriptionStatus = "past_due" // Payment failed but we're still attempting rebills (will retry)
 	StatusCanceled SubscriptionStatus = "canceled" // Will never rebill again (user canceled, max retries, admin canceled, expired)
 	// StatusAwaitingMethod: a renewal was declined because the card needs the
-	// customer's attention. Charging stops, access is kept, and a replaced
-	// method resumes dunning (#1091).
+	// customer's attention. Charging stops, access is kept, and a replacement
+	// method resumes dunning.
 	StatusAwaitingMethod SubscriptionStatus = "awaiting_method"
 	// StatusUnverified: OpenRails cannot tell whether the period was paid. It
-	// is resolved at once from the provider; access is kept meanwhile (#1091).
+	// is resolved at once from the provider; access is kept meanwhile.
 	StatusUnverified SubscriptionStatus = "unverified"
 )
 
@@ -48,11 +47,10 @@ const (
 type Subscription struct {
 	CollectionPolicy CollectionPolicy `json:"collection_policy"`
 	ID               uuid.UUID        `json:"id"`
-	// MerchantID is the owning merchant (#336): lets workers pin openrails.merchant_id when
-	// writing on this subscription's behalf.
+	// MerchantID is the owning merchant, so workers can pin
+	// openrails.merchant_id when writing on this subscription's behalf.
 	MerchantID uuid.UUID `json:"merchant_id"`
-	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
+	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	ProductID  uuid.UUID `json:"product_id"` // Denormalized for efficient product-based lookups
 	PriceID    uuid.UUID `json:"price_id"`   // Required for all subscriptions
@@ -77,7 +75,7 @@ type Subscription struct {
 	// Payment rail information
 	Rail               Rail   `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
-	// PspID is the PSP that owns this subscription (#641).
+	// PspID is the PSP that owns this subscription.
 	PspID uuid.UUID `json:"psp_id"`
 	// PaymentMethodID is the subscription's own card. nil on a card
 	// subscription follows the customer's default for its currency
@@ -98,21 +96,20 @@ type Subscription struct {
 	CancelType     *CancelType `json:"cancel_type"`     // Who/what caused cancellation
 	CanceledAt     *time.Time  `json:"canceled_at"`
 
-	// DeletionScheduledAt is set for NMI-backed cancellations that defer the
-	// rail-side delete_subscription until shortly before the paid period
-	// ends (issue 216). While non-nil, the cancellation is still reversible (the
-	// rail subscription is alive). The River finalizer clears it to nil
-	// after calling DeleteRecurringSubscription.
+	// DeletionScheduledAt is set when an NMI-backed cancellation defers the
+	// rail-side delete until shortly before the paid period ends. While set,
+	// the cancellation is reversible; the River finalizer clears it after
+	// DeleteRecurringSubscription.
 	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
 
-	// LifecycleRev is the lifecycle revision the row was read at (#1091 part
-	// C). A lifecycle decision advances it by one against this value.
+	// LifecycleRev is the lifecycle revision the row was read at; a lifecycle
+	// decision advances it by one against this value.
 	LifecycleRev int64 `json:"-"`
 	// RowVersion is the row version the image was read at; every update
-	// advances it (#1102), and a write from an older image is refused.
+	// advances it, and a write from an older image is refused.
 	RowVersion int64 `json:"-"`
 	// DunningPolicy is the merchant's policy recorded when the current
-	// dunning case opened (#1102); nil outside a case.
+	// dunning case opened; nil outside a case.
 	DunningPolicy []byte `json:"-"`
 	// loaded is the lifecycle state as read; decision names what changed it.
 	loaded   lifecycleFields
@@ -125,7 +122,7 @@ type Subscription struct {
 	// Product relation for description
 	Product *Product `json:"product,omitempty"`
 
-	Metadata json.RawMessage `json:"gateway_response,omitempty"` // Renamed from GatewayResponse - stores arbitrary subscription metadata
+	Metadata json.RawMessage `json:"gateway_response,omitempty"` // arbitrary subscription metadata
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -170,8 +167,8 @@ func (s *Subscription) ClearRetrySchedule() {
 	s.GraceEndsAt = nil
 }
 
-// Validate checks activation preconditions. amountCents is integer minor units
-// (#818) — no monetary value is ever carried as a float.
+// Validate checks activation preconditions. amountCents is integer minor
+// units; money is never a float.
 func (s *Subscription) Validate(amountCents int64) error {
 	if s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.Before(time.Now()) {
 		if s.Status == StatusActive {

@@ -8,30 +8,18 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// merchantPgxConnKey is the context key under which the request's merchant-scoped
-// lazy connection is stored. Unexported so only this package manages the
-// lifecycle.
+// merchantPgxConnKey is the context key of the request's lazy merchant connection.
 type merchantPgxConnKey struct{}
 
-// WithMerchantConn arranges for the request to run on a single merchant-scoped
-// connection: it puts a LAZY pinned connection in the context carrying the
-// `openrails.merchant_id` session GUC (set on first use — see lazyMerchantPgxConn).
-// Every subsequent Qx(ctx)/Gen(ctx) on the returned context resolves to that
-// connection. The session value supports explicit current_merchant_id()
-// predicates and stored functions; it does not filter arbitrary SQL. Tenant
-// queries must still carry their verified merchant predicates.
+// WithMerchantConn puts a lazy connection pinned to the context's merchant
+// (the openrails.merchant_id session GUC, set on first use) in the context;
+// Qx/Gen on the returned context use it. The GUC filters nothing by itself:
+// tenant queries still carry their merchant predicate.
 //
-// It pins a CONNECTION, not a transaction: no BEGIN, no locks held across
-// slow work (e.g. a Stripe/NMI call between queries) — the connection simply
-// sits idle. The returned release function MUST be called (defer) to reset
-// the GUC and return the connection to the pool; resetting on release means a
-// pooled connection never carries one merchant's GUC into another merchant's
-// request.
-//
-// A tx-scoped DB (NewWithPgxTx) stamps the returned context as transaction-
-// bound and returns a no-op release; the caller's tx carries the merchant GUC.
-// An already compatible pinned connection returns the original ctx and no-op
-// release (nested call).
+// It pins a connection, not a transaction, so slow work between queries holds
+// no locks. The caller MUST call release, which resets the GUC so a pooled
+// connection never carries one merchant into another's request. A tx-scoped DB,
+// or an already compatible pin, returns a no-op release.
 func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), error) {
 	if d == nil || (d.pool == nil && d.pgtx == nil) {
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn on nil DB")
@@ -81,18 +69,14 @@ func (d *DB) WithIndependentMerchantConn(ctx context.Context) (context.Context, 
 // detachedWriteKey marks a context built by DetachedWriteContext.
 type detachedWriteKey struct{}
 
-// DetachedWriteContext is for a write that records what already happened — a
-// provider receipt, an intent outcome — after its caller may be gone. It drops
-// the caller's cancellation, keeps every value (merchant, PSP, the request's
-// pinned connection) and bounds the write by timeout.
+// DetachedWriteContext is for a write that records what already happened (a
+// provider receipt, an intent outcome) after its caller may be gone. It drops
+// the caller's cancellation, keeps every value and bounds the write by timeout.
 //
-// The caller's cancellation can close the pinned connection: pgx closes a
-// connection whose BEGIN or in-flight query is interrupted. A detached write
-// then re-pins: the dead connection goes back to the pool (which destroys it,
-// freeing its slot) before a fresh one is acquired and scoped to the same
-// merchant, so a one-connection pool never waits on itself. A live pin is always
-// reused. Ordinary request queries never re-pin; they keep failing on a dead
-// connection rather than silently continuing on a new session.
+// The caller's cancellation can close the pinned connection. A detached write
+// then re-pins, releasing the dead connection first so a one-connection pool
+// never waits on itself. Ordinary queries never re-pin: they fail on a dead
+// connection rather than continue on a new session.
 func DetachedWriteContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithValue(context.WithoutCancel(ctx), detachedWriteKey{}, true), timeout)
 }
@@ -102,11 +86,8 @@ func isDetachedWrite(ctx context.Context) bool {
 	return ok
 }
 
-// RunInMerchantConn pins a merchant connection for the duration of fn. It is the
-// worker/background analogue of the request middleware: a River job (which has
-// no HTTP request to pin a connection) wraps its merchant-owned work in
-// RunInMerchantConn so its scoped reads and writes retain the selected merchant's
-// session state, exactly like a request.
+// RunInMerchantConn pins a merchant connection for the duration of fn: the
+// background-job analogue of the request middleware.
 func (d *DB) RunInMerchantConn(ctx context.Context, fn func(ctx context.Context) error) error {
 	ctx, release, err := d.WithMerchantConn(ctx)
 	if err != nil {

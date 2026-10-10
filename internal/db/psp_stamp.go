@@ -9,11 +9,9 @@ import (
 
 type pspIDCtxKey struct{}
 
-// ErrNoPSPInContext is returned when a provider-bound write reaches the repo
-// without a resolved PSP. or#893: `psp_id` is NOT NULL on every provider-bound
-// table, so this is a refusal, not a degraded write — an unattributed mirror row
-// is invisible to a PSP-scoped prune and indistinguishable from a sibling
-// account's row.
+// ErrNoPSPInContext refuses a provider-bound write without a resolved PSP:
+// psp_id is NOT NULL on every provider-bound table, and an unattributed row
+// would be indistinguishable from a sibling account's.
 var ErrNoPSPInContext = errors.New("no PSP resolved for this provider operation")
 
 // WithPSPID pins the external account that actually produced a row.
@@ -45,9 +43,9 @@ func RequirePSPID(ctx context.Context) (uuid.UUID, error) {
 
 type custodianIDCtxKey struct{}
 
-// WithCustodianID pins the custodian a write is addressed to. or#893/or#795:
-// the batch account updater uploads one token batch to a custodian that backs
-// MANY PSPs, so its provenance is the custodian, not a gateway account.
+// WithCustodianID pins the custodian a write is addressed to. A batch account
+// updater upload goes to a custodian that backs many PSPs, so its provenance
+// is the custodian, not a gateway account.
 func WithCustodianID(ctx context.Context, id uuid.UUID) context.Context {
 	if id == uuid.Nil {
 		return ctx

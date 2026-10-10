@@ -11,12 +11,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// PaymentMethod represents a stored payment method across multiple rails
-// This replaces rail-specific payment method tables
+// PaymentMethod is a stored payment method on any rail.
 type PaymentMethod struct {
 	ID uuid.UUID `json:"id"`
-	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
+	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	Rail       Rail      `json:"rail"` // Rail: nmi, ccbill, solana
 
@@ -25,28 +23,21 @@ type PaymentMethod struct {
 	// each of its charges.
 	PspID *uuid.UUID `json:"psp_id"`
 
-	// Two-slot rail handle (#588): the customer-scope ref and the instrument-scope
-	// ref, replacing the overloaded vault_id (+ NMI-ism billing_id).
-	//
-	// #682 honesty note: for NMI the "customer-scope" ref is INSTRUMENT-scoped in
-	// our usage — OpenRails deliberately mints ONE vault customer PER CARD, so a
-	// person with N cards is N unrelated NMI vault ids. NMI has no person-level
-	// remote identity in our model; the person is the local customer_id UUID.
-	RailCustomerRef string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see psp_customers)
+	// Rail handles: a customer-scope ref and an instrument-scope ref. For NMI
+	// the customer-scope ref is per card: OpenRails mints one vault customer
+	// per card, so the person exists only as the local customer_id.
+	RailCustomerRef string `json:"-"` // NMI customer_vault_id (per card); "" for Stripe, see psp_customers
 	RailMethodRef   string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only; Stripe pm_, Spreedly/HyperSwitch token)
 
-	// Custodian (or#880) is WHO HOLDS this instrument — the axis orthogonal to
-	// who charges it (Rail + PspID). Always stated, never empty; see the
-	// Custodian* constants. "No stored instrument" (CCBill, Solana) is the
-	// absence of a payment_methods row, not a custodian value.
+	// Custodian is who holds this instrument, orthogonal to who charges it
+	// (Rail + PspID); see the Custodian* constants. CCBill and Solana store no
+	// instrument: no payment_methods row, not a custodian value.
 	Custodian   string     `json:"-"`
 	CustodianID *uuid.UUID `json:"-"`
 
-	// Custodian-held instrument fields (#795, custodian='basis_theory').
-	// Fingerprint is the custodian's stable PAN fingerprint (dedup/lookup);
-	// ChargeVia routes pan_proxy|network_token; ParkReason non-empty =
-	// instrument parked (custody-side problem; cancellation-last-resort,
-	// never a terminal cancel).
+	// Custodian-held instrument fields: Fingerprint is the custodian's stable
+	// PAN fingerprint; ChargeVia routes pan_proxy|network_token; a non-empty
+	// ParkReason parks the instrument (a custody problem, never a cancel).
 	Fingerprint        string     `json:"-"`
 	NetworkTokenID     string     `json:"-"`
 	NetworkTokenStatus string     `json:"-"`
@@ -56,7 +47,7 @@ type PaymentMethod struct {
 	ParkedAt           *time.Time `json:"-"`
 
 	// Status is active, closed, replaced or removed; only active is charged
-	// and the others are final (#1168).
+	// and the others are final.
 	Status       string     `json:"status"`
 	ReplacedByID *uuid.UUID `json:"-"`
 	// ContactCardholderAt is when the issuer last asked for the cardholder.
@@ -247,16 +238,15 @@ func (c Card) Columns() (brand, last4 *string, month, year *int16) {
 	return brand, last4, month, year
 }
 
-// Custodian values (or#880) — payment_methods.custodian. Custody (who holds
-// the card) is orthogonal to the processor (Rail + PspID, who charges it):
-// psp/stripe, psp/nmi and basis_theory/nmi are all real combinations today.
-// The DB CHECK pins the same set; adding a custodian is a migration.
+// Custodian values (payment_methods.custodian). Custody (who holds the card)
+// is orthogonal to the processor (Rail + PspID); the DB CHECK pins the same
+// set, so adding a custodian is a migration.
 const (
 	// CustodianPSP: the instrument lives at the processor itself — a Stripe
 	// pm_ on a Stripe Customer, an NMI customer_vault_id in the gateway.
 	CustodianPSP = "psp"
-	// CustodianBasisTheory: the PAN lives in the Basis Theory neutral vault
-	// (#795) and is proxied to the processor at charge time.
+	// CustodianBasisTheory: the PAN lives in the Basis Theory vault and is
+	// proxied to the processor at charge time.
 	CustodianBasisTheory = "basis_theory"
 	CustodianHyperSwitch = "hyperswitch"
 )
@@ -264,8 +254,8 @@ const (
 // Custodians lists the declared custody values in stable order.
 func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch} }
 
-// PaymentMethodCharge is the DERIVED last-charge health for a payment method
-// (#589) — computed at query time from billing.payments, never a stored column.
+// PaymentMethodCharge is a payment method's last-charge health, derived from
+// payments at query time, never stored.
 type PaymentMethodCharge struct {
 	LastChargedAt time.Time
 	Status        string // completed | failed: the latest charge attempt's outcome

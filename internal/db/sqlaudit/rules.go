@@ -25,14 +25,10 @@ const (
 	// RuleUnplannable: EXPLAIN or the parser could not analyse the query. Never
 	// silently skipped — it fails like any other finding.
 	RuleUnplannable = "unplannable"
-	// RuleUnindexedFilter: the query looks something up by `col = $n`, the scan
-	// is narrowed by nothing but merchant_id, and no index on that table covers
-	// col. This is what a missing index looks like behind the mandatory
-	// merchant_id predicate: the merchant_id index always hands the planner
-	// some index path so the miss never surfaces as a Seq Scan. Catalog truth,
-	// not planner choice: a column indexed by any other index is never flagged.
-	// (openrails-only — host-four has no merchant predicate, so it has no
-	// equivalent.)
+	// RuleUnindexedFilter: a `col = $n` lookup narrowed by nothing but
+	// merchant_id, with no index covering col. The merchant_id index always
+	// gives the planner an index path, so the miss never shows as a Seq Scan.
+	// Judged from the catalog, not planner choice.
 	RuleUnindexedFilter = "unindexed-filter"
 	// RuleUnprunedPartition: a partitioned table is read with no predicate on
 	// its partition key, so every partition is scanned, the ones past retention
@@ -130,7 +126,7 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 			return
 		}
 		if !cat.MerchantScoped[n.RelationName] {
-			return // control-plane table (merchants, worker_state)
+			return // not merchant-scoped (merchants, worker_state)
 		}
 		seen[n.RelationName] = true
 		out = append(out, Finding{

@@ -110,12 +110,9 @@ func (r *Report) unplannable(q Query, detail string, allow *Allowlist) {
 }
 
 // AdvisorConn returns a connection with supabase/index_advisor available, or
-// nil when the caller has not enabled it or the extension is not installed.
-//
-// OPT-IN ON PURPOSE, off in CI. index_advisor cannot gate: without statistics
-// it recommended an index already covered by a unique constraint on a ~1.5%
-// cost delta. It is useful once plan shape has ALREADY proven a problem, to
-// name the column list — advice, never a verdict. See EXEMPTIONS.md.
+// nil when not enabled or not installed. Opt-in and off in CI: without
+// statistics its advice is unreliable, so it only names a column list once
+// plan shape has proven a problem. See EXEMPTIONS.md.
 func AdvisorConn(ctx context.Context, url string, enabled bool) *pgx.Conn {
 	if !enabled {
 		return nil

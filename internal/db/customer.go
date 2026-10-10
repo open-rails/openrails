@@ -11,25 +11,16 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// errNonUUIDSubject builds the rejection for non-UUID payable identities.
-// OpenRails is UUID-only (#364): there is no legacy issuer, no generated row
-// ids, no string subjects. The auth boundary rejects non-UUID subjects before
-// they reach handlers; this error is defense in depth.
+// errNonUUIDSubject rejects a non-UUID payable identity. The auth boundary
+// already refuses them; this is defense in depth.
 func errNonUUIDSubject(userID string) error {
 	return fmt.Errorf("merchant subject %q is not a UUID: payable identities are UUID-only (#364)", userID)
 }
 
-// EnsureCustomerID materializes (or refreshes) the billing.customers
-// row for a UUID subject and returns its id — which IS the subject UUID itself
-// (#317). A non-UUID userID is rejected with an error (#364). An empty userID
-// returns the zero id without touching the database (documented no-op for
-// callers with optional identity).
-//
-// A zero tenantID falls back to the request's merchant context (required — an
-// absent merchant is an error) — the same source the commerce tables use to stamp
-// their own merchant_id column — so the resolved subject lands under the exact
-// merchant the row itself belongs to. Multi-merchant writers that already hold an
-// explicit merchant may pass it directly.
+// EnsureCustomerID upserts the customers row for a UUID subject and returns
+// its id, which is the subject UUID. An empty userID returns the zero id
+// without touching the database; a non-UUID one is an error. A zero tenantID
+// means the context's merchant, which is required.
 func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -56,11 +47,9 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 	return row.ID, nil
 }
 
-// ResolveCustomerID derives the payable merchant subject id for a userID
-// WITHOUT touching the database. Payable identities are UUID-only (#364), so a
-// UUID subject IS its own id — pure derivation, no lookup. An empty userID
-// yields the zero id (matches no rows, which callers translate to an empty
-// result set); a non-UUID userID is an error.
+// ResolveCustomerID derives a customer id without touching the database: a
+// UUID subject is its own id. An empty userID yields the zero id (matches no
+// rows); a non-UUID userID is an error.
 func ResolveCustomerID(userID string) (uuid.UUID, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -73,12 +62,9 @@ func ResolveCustomerID(userID string) (uuid.UUID, error) {
 	return uid, nil
 }
 
-// EnsureCustomerRow makes sure a billing.customers row exists for an
-// already-resolved payable customer id, which the commerce Create methods
-// call just before insert so the FK target exists (#317). customers is UUID-only
-// (#491): the row is materialized as (id, merchant_id); the ON CONFLICT makes a
-// repeat a no-op. A zero id is a no-op (the caller must set model.CustomerID
-// before Create).
+// EnsureCustomerRow makes sure the customers row (id, merchant_id) exists
+// before a commerce insert references it; a repeat is a no-op. A zero id is a
+// no-op, so the caller must set model.CustomerID first.
 func EnsureCustomerRow(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, tsid uuid.UUID) error {
 	return EnsureCustomerRowQ(ctx, gen.New(qx), tenantID, tsid)
 }

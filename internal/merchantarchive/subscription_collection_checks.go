@@ -77,7 +77,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	}
 	if !paid {
 		// A declined or unsent renewal moved no money: it has no payment (a
-		// decline is a payment attempt, #1111).
+		// decline is a payment attempt).
 		return nil
 	}
 	transaction := receipt.TransactionID()

@@ -12,13 +12,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Mapping helpers between sqlc-generated row types (internal/db/gen) and the
-// domain models in this package (which double as JSON API types). Moved here
-// from internal/db/repo (#688): modules call gen directly and convert with
-// these; gen types never leak above the module layer.
+// Mapping helpers between sqlc row types (internal/db/gen) and these domain
+// models; gen types never leak above the module layer.
 
-// FromJSONB unmarshals a jsonb column ([]byte) into dst; empty/NULL is a
-// no-op, leaving dst's zero value (matching bun's nullzero scan behavior).
+// FromJSONB unmarshals a jsonb column into dst; empty/NULL is a no-op.
 func FromJSONB[T any](b []byte, dst *T, col string) error {
 	if len(b) == 0 {
 		return nil
@@ -29,8 +26,7 @@ func FromJSONB[T any](b []byte, dst *T, col string) error {
 	return nil
 }
 
-// ToJSONB marshals v for a jsonb column; nil maps/zero-len values become SQL
-// NULL (nil slice), matching bun's nullzero insert behavior.
+// ToJSONB marshals m for a jsonb column; a nil or empty map becomes SQL NULL.
 func ToJSONB[M ~map[string]V, V any](m M) ([]byte, error) {
 	if m == nil {
 		return nil, nil
@@ -78,10 +74,6 @@ func DerefUUID(u *uuid.UUID) uuid.UUID {
 	return *u
 }
 
-// IntPtrTo32 converts a models *int to a generated *int32, clamping instead
-// of wrapping if a caller ever hands it a value outside int32's range (none
-// of today's callers — retry counts, duration hours — can, but the helper is
-// shared and should never truncate silently).
 // SeatsOf is a seat count a query answers as zero when it has none.
 func SeatsOf(v int32) *int {
 	if v <= 0 {
@@ -91,6 +83,8 @@ func SeatsOf(v int32) *int {
 	return &n
 }
 
+// IntPtrTo32 converts a models *int to a generated *int32, clamping an
+// out-of-range value instead of wrapping.
 func IntPtrTo32(v *int) *int32 {
 	if v == nil {
 		return nil
@@ -367,7 +361,7 @@ func NotificationFromGen(n gen.BillingNotification) (*NotificationQueue, error) 
 	return m, nil
 }
 
-// PriceKeyMovementFromGen maps a generated price_key_movements row (#774).
+// PriceKeyMovementFromGen maps a generated price_key_movements row.
 func PriceKeyMovementFromGen(r gen.BillingPriceKeyMovement) *PriceKeyMovement {
 	return &PriceKeyMovement{
 		Archived:    r.Archived,

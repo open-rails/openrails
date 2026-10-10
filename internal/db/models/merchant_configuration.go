@@ -15,16 +15,13 @@ type MerchantConfiguration struct {
 	InvoiceMonthlyFloor        *int64 `json:"monthly_floor,omitempty"`
 	InvoiceBillingBoundary     string `json:"billing_period_boundary,omitempty"`
 
-	// ArrearsGraceDays (or#878) is how many days past an invoice's due_at a payer
-	// keeps grace before the debt is called DELINQUENT. Business policy, so it is
-	// the merchant's: a cloud vendor may give 7 days where a software subscription gives 30. Nil ⇒
-	// delinquency.DefaultGraceDays (14). Zero is a valid explicit choice.
+	// ArrearsGraceDays is how many days past an invoice's due_at a payer keeps
+	// before its debt is delinquent. Nil ⇒ delinquency.DefaultGraceDays; zero
+	// is a valid choice.
 	ArrearsGraceDays *int `json:"arrears_grace_days,omitempty"`
 
-	// ArrearsDelinquencyFloor (or#878, micros) is the smallest overdue balance
-	// that can escalate a payer to delinquent. Nil ⇒ DERIVED from
-	// InvoiceMonthlyFloor — a debt already declared too small to collect is too
-	// small to cut anyone off for — falling back to
+	// ArrearsDelinquencyFloor (micros) is the smallest overdue balance that can
+	// make a payer delinquent. Nil ⇒ derived from InvoiceMonthlyFloor, else
 	// delinquency.DefaultAmountFloor.
 	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
 
@@ -32,19 +29,18 @@ type MerchantConfiguration struct {
 	// delegated invokers. Missing or empty windows use the service default.
 	DelegatedInvokerWastedSpendWindows []BudgetWindowPolicy `json:"delegated_invoker_wasted_spend_windows,omitempty"`
 
-	// AlertEmail is the merchant-operator address the #736 alerting engine sends
-	// critical alerts to. Unset ⇒ the email channel is inactive (fail-soft skip).
+	// AlertEmail receives the merchant's critical alerts. Unset ⇒ the email
+	// channel is inactive.
 	AlertEmail string `json:"alert_email,omitempty"`
 
-	// RepriceNoticeWindowDays (#781) is the minimum number of days' advance
-	// notice a subscription price INCREASE's effective_at must give existing
-	// subscribers. Decreases are exempt. Nil ⇒ DefaultPriceIncreaseNoticeDays
-	// (30). Zero is a valid explicit merchant choice (no minimum enforced).
+	// RepriceNoticeWindowDays is the minimum advance notice a subscription
+	// price increase must give existing subscribers; decreases are exempt.
+	// Nil ⇒ DefaultPriceIncreaseNoticeDays; zero enforces none.
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 
-	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription
-	// (#1069). Nil ⇒ subscriptions.DefaultRenewalReceiptMinIntervalHours; zero
-	// sends one receipt per renewal.
+	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription.
+	// Nil ⇒ subscriptions.DefaultRenewalReceiptMinIntervalHours; zero sends
+	// one receipt per renewal.
 	RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
 
 	// ProviderRefundAccess decides what a refund made at the provider (not
@@ -52,13 +48,12 @@ type MerchantConfiguration struct {
 	// ("" default), revoke_on_any or keep.
 	ProviderRefundAccess string `json:"provider_refund_access,omitempty"`
 
-	// DunningPolicy (#1093) replaces the built-in dunning schedule. Nil ⇒
+	// DunningPolicy replaces the built-in dunning schedule. Nil ⇒
 	// collection.DefaultPolicy.
 	DunningPolicy *billing.DunningPolicy `json:"dunning_policy,omitempty"`
 
-	// CheckoutRouting (or#288) is the merchant's deterministic processor
-	// preference policy: ordered rules, first match wins. Empty ⇒ the built-in
-	// default order.
+	// CheckoutRouting is the merchant's processor preference: ordered rules,
+	// first match wins. Empty ⇒ the built-in default order.
 	CheckoutRouting []CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 }
 
@@ -72,7 +67,7 @@ type MerchantProfileConfiguration struct {
 	LogoURL     string `json:"logo_url,omitempty"`
 	FromEmail   string `json:"from_email,omitempty"`
 	SupportURL  string `json:"support_url,omitempty"`
-	// SignupURL (#789) is the winback/signup page access-ended and expiry
-	// emails link to. "" ⇒ no CTA rendered.
+	// SignupURL is the signup page access-ended and expiry emails link to.
+	// "" ⇒ no call to action.
 	SignupURL string `json:"signup_url,omitempty"`
 }

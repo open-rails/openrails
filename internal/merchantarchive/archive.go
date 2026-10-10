@@ -320,10 +320,10 @@ UPDATE pg_temp.legacy_entitlements e SET ends_at = b.ends_at
 FROM paid_bounds b WHERE b.id = e.id AND b.ends_at IS NOT NULL`
 
 // convertLegacyAccess converts a version 1 archive's per-key windows to
-// product access, as migration 16 converts a database. The cutover's access
-// changes need an operator's approval, which a restore cannot take: an archive
-// whose conversion changes any customer's access is refused, to be cut over
-// where it was exported.
+// product access, as migration 20 converts a database. A restore cannot take
+// the operator approval that conversion needs, so an archive whose conversion
+// changes any customer's access is refused, to be cut over where it was
+// exported.
 func convertLegacyAccess(ctx context.Context, tx pgx.Tx, id billing.MerchantID, legacyDurations bool, at time.Time) error {
 	if legacyDurations {
 		if _, err := tx.Exec(ctx, legacySubscriptionBounds, id.UUID()); err != nil {

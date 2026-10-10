@@ -9,19 +9,19 @@ import (
 	"testing"
 )
 
-// or#858: a prune sets deleted_at instead of deleting. A read that forgets the
-// predicate silently keeps serving the row (a pruned subscription still grants
-// access, a pruned payment still counts as revenue), so every generated query
-// that reads or mutates a policed table must filter tombstones or be allowed
-// below with a reason. Tables come from the migrations, queries from the
-// generated text the pool executes; both are derived, never listed by hand.
+// A prune sets deleted_at instead of deleting. A read that forgets the
+// predicate keeps serving the row (a pruned subscription still grants access,
+// a pruned payment still counts as revenue), so every generated query that
+// reads or mutates a policed table must filter tombstones or be allowed below
+// with a reason. Tables come from the migrations, queries from the generated
+// text; neither is listed by hand.
 
 const (
 	migrationsDir = "../../migrate/postgres"
 	genDir        = "../gen"
 )
 
-// merchants.deleted_at is directory state (#721), deliberately not policed.
+// merchants.deleted_at is directory state, deliberately not policed.
 var policedTables = []string{"checkout_attempts", "payments", "product_access", "subscriptions"}
 
 var allow = map[string]string{

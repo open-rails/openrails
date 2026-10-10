@@ -10,7 +10,7 @@ import (
 
 // CommitGuard runs inside a transaction just before it commits; an error
 // rolls the transaction back. A claim holder uses it so that no transaction
-// it opens commits after it lost the claim (#1099).
+// it opens commits after it lost the claim.
 type CommitGuard func(ctx context.Context, tx pgx.Tx) error
 
 type commitGuardKey struct{}

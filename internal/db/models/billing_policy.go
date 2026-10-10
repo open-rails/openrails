@@ -6,9 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// BillingPolicyKind names WHICH quantity a policy caps (or#897). The two seed
-// businesses differ on exactly this and on nothing else, so it is the one field
-// the whole registry turns on.
+// BillingPolicyKind names which quantity a policy caps.
 type BillingPolicyKind string
 
 const (
@@ -43,14 +41,13 @@ type BillingPolicy struct {
 	// credit limit" — the per-account lever stays the per-account lever.
 	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
 
-	// SpendWindows are the rolling NEW-spend ceilings (kind=window_spend_cap
-	// only). Shape is verbatim the retired trust-level budget window: at most
-	// Limit of spend per WindowSeconds, metered in Redis.
+	// SpendWindows are the rolling new-spend ceilings (kind=window_spend_cap
+	// only): at most Limit of spend per WindowSeconds, metered in Redis.
 	SpendWindows []BudgetWindowPolicy `json:"spend_windows,omitempty"`
 
-	// BadSpendWindows are the #497 $-valued wasted/failed-spend grace windows for
-	// the direct payer: at most Limit of wasted spend is forgiven per window, and
-	// overage is charged at report time. Orthogonal to Kind, so allowed on any.
+	// BadSpendWindows are wasted/failed-spend grace windows for the direct
+	// payer: at most Limit of wasted spend is forgiven per window, and overage
+	// is charged at report time. Allowed with any Kind.
 	BadSpendWindows []BudgetWindowPolicy `json:"bad_spend_windows,omitempty"`
 
 	// AccrualRateCapPerHour is the ceiling on the payer's measured accrual RATE,
@@ -70,20 +67,16 @@ type BillingPolicy struct {
 	// bound to this policy; unset defers to it. Orthogonal to Kind.
 	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
 
-	// CollectionCycleBoundary is DECLARABLE AND REFUSED. The other half of the
-	// collection trigger — calendar_month | anniversary | fixed_interval —
-	// genuinely cannot be per-policy: a payer's statement periods must TILE its
-	// lifetime with no gap and no overlap, and or#897 makes rebinding a live
-	// runtime lever, so a mid-cycle rebinding would silently move the period
-	// boundary and either bill a stretch twice or never. It stays merchant-wide
-	// (`invoice.billing_period_boundary`), and declaring it here fails with that
-	// reason rather than being quietly ignored.
+	// CollectionCycleBoundary is declarable and refused: a payer's statement
+	// periods must tile its lifetime, and rebinding a policy mid-cycle would
+	// bill a stretch twice or never. It stays merchant-wide
+	// (invoice.billing_period_boundary).
 	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
 
-	// DelinquencyGraceDays / DelinquencyAmountFloor (or#878) are the delinquency
-	// policy for payers bound to this policy, overriding the merchant-wide
-	// invoice.delinquency_* values. Unset defers to them. Orthogonal to Kind: a
-	// cloud tenant's debt still ages even though it never gates admission.
+	// DelinquencyGraceDays / DelinquencyAmountFloor override the merchant's
+	// arrears_grace_days / arrears_delinquency_floor for bound payers; unset
+	// defers to them. Allowed with any Kind: debt ages even where it never
+	// gates admission.
 	DelinquencyGraceDays   *int   `json:"delinquency_grace_days,omitempty"`
 	DelinquencyAmountFloor *int64 `json:"delinquency_amount_floor,omitempty"`
 

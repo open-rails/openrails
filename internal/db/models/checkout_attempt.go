@@ -29,8 +29,7 @@ const (
 
 type CheckoutAttempt struct {
 	ID uuid.UUID `json:"id"`
-	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
+	// CustomerID is the host's subject UUID within MerchantID.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
 	PriceID *uuid.UUID          `json:"price_id"`
@@ -54,18 +53,14 @@ type CheckoutAttempt struct {
 	RailFields map[string]any `json:"rail_fields,omitempty"`
 	RailState  map[string]any `json:"rail_state,omitempty"`
 
-	// RoutingReason (or#288) is the decision trace that picked this session's
-	// PSP: which policy and rule matched, and what was skipped and why. Written
-	// once at creation and never rewritten — support answers "why did this
-	// customer get CCBill" from the row, not from a reconstruction.
+	// RoutingReason is the decision trace that picked this attempt's PSP,
+	// written once at creation and never rewritten.
 	RoutingReason *CheckoutRoutingReason `json:"routing_reason,omitempty"`
 
-	// IdempotencyKey is request-scoped only (Redis owns checkout idempotency,
-	// #702 dropped the column); never persisted or round-tripped from the DB.
+	// IdempotencyKey is request-scoped; the row has no such column.
 	IdempotencyKey *string `json:"idempotency_key,omitempty"`
-	// PspID is the psps row selected for this provider
-	// checkout. It prevents provider sessions from being confused across rotated
-	// Stripe/NMI/CCBill accounts.
+	// PspID is the PSP selected for this checkout, so provider sessions are
+	// never confused across accounts.
 	PspID     uuid.UUID `json:"psp_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -76,8 +71,7 @@ type CheckoutAttempt struct {
 	ExpiryDate *string `json:"expiry_date,omitempty"`
 }
 
-// Checkout routing policy sources (or#288). Recorded on every session so the
-// trace names WHO decided, not just what was decided.
+// Checkout routing policy sources: the trace names who decided.
 const (
 	// CheckoutRoutingPolicyExplicit: the request named the PSP. Honoured
 	// verbatim — an explicitly named processor is NEVER silently switched,
@@ -90,23 +84,21 @@ const (
 	CheckoutRoutingPolicyDefault = "default"
 )
 
-// Checkout routing skip classes (or#288): why a candidate ahead of the winner
-// was passed over. These are PRE-CHARGE availability facts only. A decline is
-// deliberately absent — it is a per-charge outcome, not a routing failure, and
-// never re-routes a session.
+// Checkout routing skip classes: why a candidate ahead of the winner was
+// passed over. Pre-charge availability only: a decline never re-routes.
 const (
 	// CheckoutRoutingSkipUnknownSelector: not a declared PSP key or rail kind.
 	CheckoutRoutingSkipUnknownSelector = "unknown_selector"
 	// CheckoutRoutingSkipAmbiguousSelector: a bare rail kind with more than one
-	// armed PSP — the #848 selector demands the PSP key.
+	// armed PSP; the selector must name the PSP key.
 	CheckoutRoutingSkipAmbiguousSelector = "ambiguous_selector"
 	// CheckoutRoutingSkipNotArmed: no active non-archived psps row.
 	CheckoutRoutingSkipNotArmed = "not_armed"
 	// CheckoutRoutingSkipCredentialsMissing: armed, but the credentials the rail
 	// needs to charge are absent or malformed.
 	CheckoutRoutingSkipCredentialsMissing = "credentials_missing"
-	// CheckoutRoutingSkipLinkMissing: the price carries no usable psp_link for
-	// this PSP (absent, or pointing at a different remote object than execution).
+	// CheckoutRoutingSkipLinkMissing: the price has no usable psp_links entry
+	// for this PSP (absent, or naming a different remote object).
 	CheckoutRoutingSkipLinkMissing = "link_missing"
 	// CheckoutRoutingSkipModeUnsupported: the rail cannot serve this checkout
 	// mode for this price: the rail registry says it cannot make this kind of

@@ -16,29 +16,22 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// MerchantGUC carries the merchant selected by the application for stored
-// functions and queries that explicitly call current_merchant_id(). It does not
-// filter arbitrary SQL. Merchant isolation is enforced by scoped predicates and
-// composite relationships, independently of the PostgreSQL login's privileges.
+// MerchantGUC carries the selected merchant for stored functions and SQL that
+// calls current_merchant_id(). It filters nothing else: tenant isolation is
+// the explicit merchant predicate and composite keys.
 const MerchantGUC = "openrails.merchant_id"
 
-// Qx returns the queryable handle that sqlc-generated queries
-// (and annotated raw-pgx operations) use to preserve transaction and session scope.
-//
-// Resolution order:
-//  1. an open pgx transaction this DB is scoped to (NewWithPgxTx),
-//  2. the request's pinned merchant-scoped connection (WithMerchantConn) — it
-//     carries the openrails.merchant_id GUC for explicit predicates and stored functions,
-//  3. the base pool. Choosing a handle never authorizes a merchant operation;
-//     callers must supply their verified merchant scope to tenant queries.
+// Qx returns the handle sqlc queries use: the open transaction this DB is
+// scoped to (NewWithPgxTx), else the request's pinned merchant connection,
+// else the base pool. Choosing a handle authorizes nothing; tenant queries
+// still carry their verified merchant predicate.
 
 func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
 		return errDBTX{fmt.Errorf("db: Qx on nil DB")}
 	}
-	// d.pgtx is created via pgxBegin / Pool.Begin, which already return a
-	// schema-rewriting tx, so it is returned as-is (no double wrap). The pool and
-	// the lazy merchant connection are raw handles, so wrap them here (#471).
+	// d.pgtx already rewrites schemas (pgxBegin / Pool.Begin); the pool and
+	// the lazy merchant connection are raw, so wrap them here.
 	if d.pgtx != nil {
 		return d.pgtx
 	}
@@ -53,22 +46,15 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	return errDBTX{fmt.Errorf("db: no pgx handle available on this DB")}
 }
 
-// Gen returns the sqlc query catalog bound to Qx(ctx). The standard accessor
-// at converted call sites: d.Gen(ctx).SomeQuery(ctx, ...).
+// Gen returns the sqlc query catalog bound to Qx(ctx).
 func (d *DB) Gen(ctx context.Context) *gen.Queries {
 	return gen.New(d.Qx(ctx))
 }
 
-// GenDirectory returns a sqlc query catalog bound to the BASE pool, deliberately
-// IGNORING any merchant-pinned connection in the context.
-//
-// It grants no additional privilege. This entrypoint is reserved for explicit
-// platform directory, coordination and worker-discovery operations. A missing
-// tenant context must never silently select it as a fallback. Workers enumerate
-// authorized merchant IDs here, then perform tenant work within each merchant's
-// scope using RunInMerchantConn/MerchantTx and scoped SQL parameters.
-//
-// Returns an erroring catalog when this DB has no pool (a tx-scoped wrapper).
+// GenDirectory returns a sqlc query catalog bound to the base pool, ignoring
+// any merchant pin in the context. It is only for platform directory,
+// coordination and worker discovery, never a fallback for a missing merchant.
+// Without a pool (a tx-scoped DB) every call errors.
 func (d *DB) GenDirectory() *gen.Queries {
 	if d == nil || d.pool == nil {
 		return gen.New(errDBTX{fmt.Errorf("db: GenDirectory requires a pool-backed DB")})
@@ -87,9 +73,8 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	if d == nil {
 		return nil, fmt.Errorf("db: transaction on nil DB")
 	}
-	// Every branch wraps the returned tx so hand-written SQL run on it inside the
-	// RunInTx/MerchantTx callback is schema-rewritten (#471). d.pgtx is already a
-	// schema-rewriting tx; its nested Begin re-wraps idempotently.
+	// Every branch wraps the tx so hand-written SQL in the callback is
+	// schema-rewritten; d.pgtx's nested Begin re-wraps idempotently.
 	if d.pgtx != nil {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
@@ -118,11 +103,9 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
 }
 
-// RunInTx runs fn inside a pgx transaction (no merchant GUC — for control-plane
-// and privileged background work that uses explicit merchant_id predicates).
-// Begins on the pinned merchant connection
-// when one is in flight, so request-path transactions retain the
-// connection's session GUC.
+// RunInTx runs fn in a transaction without setting the merchant GUC, for work
+// that uses explicit merchant_id predicates. It begins on the pinned merchant
+// connection when one is in flight.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := d.pgxBegin(ctx)
 	if err != nil {
@@ -135,10 +118,8 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 	return commit(ctx, tx)
 }
 
-// MerchantTx runs fn inside a pgx transaction with the merchant GUC pinned
-// from the context via set_config(..., is_local=true). Request-path
-// merchant-owned writes go through this (or run on a connection pinned by
-// WithMerchantConn).
+// MerchantTx runs fn in a transaction with the context's merchant set as a
+// transaction-local GUC.
 func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	id, err := merchant.Require(ctx)
 	if err != nil {
@@ -206,15 +187,10 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id billing.MerchantI
 	return transactionContext(ctx), d.NewWithPgxTx(tx), nil
 }
 
-// lazyMerchantPgxConn is the request's merchant-scoped connection, acquired
-// LAZILY on the first query instead of eagerly in WithMerchantConn, so requests
-// that never touch the database cost zero pool connections (the eager variant
-// collapsed under burst during the #334 transition — see that issue's status
-// for the post-mortem).
-//
-// It satisfies gen.DBTX directly: the first Exec/Query/QueryRow (or
-// pgxBegin) acquires a pool connection, sets the openrails.merchant_id session GUC
-// on it, and pins it until release().
+// lazyMerchantPgxConn is the request's merchant-scoped connection, acquired on
+// the first query (not in WithMerchantConn) so requests that never touch the
+// database hold no pool connection. Acquiring it sets the
+// openrails.merchant_id session GUC; it stays pinned until release().
 type lazyMerchantPgxConn struct {
 	pool     *pgxpool.Pool
 	tenantID string
@@ -222,7 +198,7 @@ type lazyMerchantPgxConn struct {
 
 	mu   sync.Mutex
 	conn *pgxpool.Conn
-	// poolTx marks a pool transaction open on the pin (#1105).
+	// poolTx marks a pool transaction open on the pin.
 	poolTx bool
 }
 
@@ -269,10 +245,9 @@ func (l *lazyMerchantPgxConn) release() {
 		l.conn = nil
 		return
 	}
-	// Background context so release works even after request cancellation.
-	// get() re-sets the GUC before use, but never return a connection that may carry a
-	// merchant GUC to the pool: on reset failure, warn and close it so the
-	// pool destroys it instead of reusing it (#668).
+	// Background context so release works after request cancellation. Never
+	// pool a connection that may still carry a merchant GUC: on reset failure,
+	// close it so the pool destroys it.
 	if _, err := gen.New(l.conn).SetConfig(context.Background(), gen.SetConfigParams{Setting: MerchantGUC}); err != nil {
 		logrus.WithError(err).Warn("db: failed to reset merchant GUC on pgx connection release; discarding connection")
 		_ = l.conn.Conn().Close(context.Background())
@@ -294,12 +269,11 @@ func (l *lazyMerchantPgxConn) releaseIdle() {
 // ErrPinInTransaction refuses work on the request's connection that would
 // silently join a transaction it did not open: a second BEGIN inside an open
 // transaction (whose inner COMMIT would end the outer one early), or a DB
-// statement inside a pool transaction (#1105). Use that transaction's handle.
+// statement inside a pool transaction. Use that transaction's handle.
 var ErrPinInTransaction = errors.New("db: the request's connection is inside a transaction; use that transaction")
 
-// idle returns the pinned connection for a DB statement. A DB transaction
-// open on it is joined, as DB callers have always done; a pool transaction
-// open on it is refused.
+// idle returns the pinned connection for a DB statement. A DB transaction open
+// on it is joined; a pool transaction open on it is refused.
 func (l *lazyMerchantPgxConn) idle(ctx context.Context) (*pgx.Conn, error) {
 	conn, err := l.get(ctx)
 	if err != nil {
@@ -370,8 +344,7 @@ type errRow struct{ err error }
 
 func (r errRow) Scan(...interface{}) error { return r.err }
 
-// newSQLTracer is the debug-level pgx query tracer, enabled by config
-// db.sql_trace (#712; was the ad-hoc OPENRAILS_SQL_TRACE env read).
+// newSQLTracer is the debug-level pgx query tracer, enabled by db.sql_trace.
 func newSQLTracer() *tracelog.TraceLog {
 	return &tracelog.TraceLog{
 		Logger:   tracelog.LoggerFunc(logPGX),

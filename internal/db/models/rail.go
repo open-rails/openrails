@@ -1,7 +1,5 @@
 package models
 
-// (Removed) GrantSource: use EntitlementSourceType instead (admin, grace, one_off, subscription)
-
 // Rail is a payment GATEWAY integration OpenRails codes against. There is one
 // adapter per rail under internal/integrations/<rail>. A rail hosts 1..N
 // credentialed PSPs (billing.psps); e.g. "mobius"
@@ -15,11 +13,9 @@ const (
 	RailStripe Rail = "stripe" // Stripe gateway (subscriptions + one-time)
 )
 
-// EventSource is WHO sent an inbound provider event. Almost always a rail — but
-// a CUSTODIAN sends its own events too (Basis Theory token/network-token
-// lifecycle), and a custodian is not a gateway (or#879). Rail and Custodian
-// namespaces are disjoint, so one string identifies either without ambiguity;
-// the type exists so the two axes are never silently interchanged.
+// EventSource is who sent an inbound provider event: usually a rail, but a
+// custodian (Basis Theory token lifecycle) sends its own. Rail and custodian
+// names are disjoint; the type keeps the two axes from being interchanged.
 type EventSource string
 
 // EventSource returns the rail as an inbound-event source.

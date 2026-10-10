@@ -1,10 +1,7 @@
-// Package pagination is the one keyset-pagination helper behind the list
-// envelope (billing.ListPage): the request's limit and cursor, the opaque
-// cursor codec, and the cut from a fetched row set to a page.
-//
-// A list handler reads the request with Request.Page, decodes the cursor into
-// its position type with Decode, runs its sqlc query for Fetch(limit) rows
-// ordered by that position, and answers Cut(rows, limit, position).
+// Package pagination is the keyset-pagination helper behind billing.ListPage.
+// A list handler reads Request.Page, decodes the cursor with Decode, fetches
+// Fetch(limit) rows ordered by that position, and answers Cut(rows, limit,
+// position).
 package pagination
 
 import (

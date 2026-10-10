@@ -6,8 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Money domain types. Amount precision is implied by Currency (#494).
-// No credit_type dimension — native money is identical for every merchant (#472).
+// Money domain types. Amount precision is implied by Currency.
 
 type MoneyBalance struct {
 	ID          uuid.UUID `json:"id"`
@@ -41,15 +40,13 @@ type MoneyTransaction struct {
 	Description     *string        `json:"description,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
-	// Replayed reports that this write's idempotency coordinate was ALREADY
-	// committed, so no money moved in the call that returned it — the row
-	// described here is the movement that did land, earlier (or#892). Consumers
-	// needing applied-vs-replayed read this instead of rebuilding a claim table.
+	// Replayed reports that this write's idempotency coordinate was already
+	// committed, so this call moved no money; the row is the earlier movement.
 	Replayed bool `json:"replayed,omitempty"`
 }
 
-// MoneyAccount is the per-(merchant, merchant subject) spend policy and money-in
-// configuration (issue #237).
+// MoneyAccount is a customer's per-currency spend policy and money-in
+// configuration.
 type MoneyAccount struct {
 	MerchantID uuid.UUID `json:"merchant_id"`
 	CustomerID uuid.UUID `json:"customer_id"`
@@ -58,10 +55,10 @@ type MoneyAccount struct {
 	BillingMode          string     `json:"billing_mode"`
 	DefaultPaymentMethod *uuid.UUID `json:"default_payment_method_id,omitempty"`
 
-	// CreditLimitAmount is the admin-set arrears credit line (#489): under
-	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold
-	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
-	// self-serve (set via SetCreditLimit, never UpsertAccountSettings).
+	// CreditLimitAmount is the admin-set arrears credit line: under
+	// billing_mode=arrears the balance may go negative up to it, and a hold
+	// past it is denied insufficient_credit. 0 = off. Not self-serve: only
+	// SetMoneyAccountCreditLimit writes it, never UpsertAccountSettings.
 	CreditLimitAmount int64 `json:"credit_limit_amount"`
 
 	TrustLevel *string `json:"trust_level,omitempty"`

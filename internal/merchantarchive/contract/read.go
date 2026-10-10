@@ -50,7 +50,7 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		return nil
 	}
 	// A version 1 archive's invoice_payments table is gone: its settled rows
-	// are payments since migration 35, so one with rows is refused.
+	// are payments since migration 38, so one with rows is refused.
 	invoicePayments := false
 	info, err := archivewire.Read(src, onHeader, func(r archivewire.Record) error {
 		legacy := version == 1
@@ -203,7 +203,7 @@ func insertRevision(values []*string) []*string {
 
 // flushProducts emits held products rows. Rows of an archive preceding
 // product_entitlements carry their keys, which become product_entitlements
-// rows valid from before key history, as migration 15 converts them.
+// rows valid from before key history, as migration 18 converts them.
 func flushProducts(rows [][]*string, current bool, emit func(Profile, []*string) error) error {
 	products := namedProfile("products")
 	if current {
@@ -283,7 +283,7 @@ func namedProfile(name string) Profile {
 }
 
 // renamePaymentStatus moves a legacy payment's completed to succeeded, as
-// migration 35 moved the database.
+// migration 38 moved the database.
 func renamePaymentStatus(p Profile, values []*string) {
 	for i, c := range p.Columns {
 		if c.Name == "status" && i < len(values) && values[i] != nil && *values[i] == "completed" {

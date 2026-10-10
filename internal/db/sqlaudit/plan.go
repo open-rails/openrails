@@ -65,11 +65,9 @@ func PrepareSession(ctx context.Context, conn *pgx.Conn) error {
 // ANALYZE never executes, so DML is planned but never run.
 func GenericPlan(ctx context.Context, conn *pgx.Conn, sql string) (planNode, error) {
 	// Raw simple-query protocol: the $n placeholders belong to the statement
-	// being EXPLAINed, not to the EXPLAIN itself, so pgx must not bind or
-	// interpolate them (QueryExecModeSimpleProtocol still interpolates and
-	// fails with "insufficient arguments"). Because this is raw text, the
-	// caller must first prove the string is exactly ONE statement — see
-	// singleStatement — so `EXPLAIN a; b` can never smuggle b past EXPLAIN.
+	// being EXPLAINed, so pgx must not bind or interpolate them. Because this
+	// is raw text, the caller must first prove it is exactly one statement
+	// (Query.Parse), so `EXPLAIN a; b` can never smuggle b past EXPLAIN.
 	res := conn.PgConn().Exec(ctx, "EXPLAIN (GENERIC_PLAN, FORMAT JSON, COSTS ON) "+sql)
 	results, err := res.ReadAll()
 	if err != nil {

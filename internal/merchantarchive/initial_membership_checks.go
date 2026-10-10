@@ -85,7 +85,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 			return nil
 		}
 		// A refused or unsent enrollment moved no money (a decline is a payment
-		// attempt, #1111); only a pre-#1111 decline record may carry its id.
+		// attempt); only an older writer's decline record may carry its id.
 		payment, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

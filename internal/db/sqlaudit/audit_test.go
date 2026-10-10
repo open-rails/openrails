@@ -67,7 +67,7 @@ func TestQueryAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The test binary is the env boundary (#712); the package itself reads none.
+	// The test binary is the env boundary; the package itself reads none.
 	advisor := AdvisorConn(ctx, url, os.Getenv("SQLAUDIT_INDEX_ADVISOR") == "1")
 	if advisor != nil {
 		defer advisor.Close(ctx)

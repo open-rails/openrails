@@ -6,11 +6,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// PriceKeyMovement is one entry in the #774 pointer-movement history log: at
-// EffectiveAt, Key's current pointer moved to PriceID. Append-only — a
-// reactivated (flip-flopped) row gets a SECOND entry rather than a new row,
-// so this log (not row back-references) is the source of "what did key K
-// sell on date D" and #773's "all prior versions of key K".
+// PriceKeyMovement is one entry in a price key's pointer history: at
+// EffectiveAt, Key moved to PriceID. Append-only (a reactivated row gets a
+// second entry), so this log answers what key K sold on date D.
 type PriceKeyMovement struct {
 	Archived    bool      `json:"archived"`
 	ID          uuid.UUID `json:"id"`

@@ -33,26 +33,12 @@ func (e *ErrUnscopedMerchantWork) Error() string {
 		e.Op, e.Got, e.Want, MerchantGUC)
 }
 
-// AssertMerchantScope verifies that the handle Qx(ctx) resolves to actually
-// carries the openrails.merchant_id GUC, and that it names the merchant on the
-// context.
-//
-// This exists because the failure it detects is SILENT. A GUC-less read that
-// depends on the merchant GUC returns an empty result and no error, which is
-// indistinguishable from "there was no work to do" — under the since-removed
-// RLS that is why a whole class of background sweeps shipped, passed their
-// tests, and never processed a row (#824, or#860, or#861, or#862, or#868).
-// One cheap round trip at the top of an unattended unit of work converts that
-// silence into a failure.
-//
-// Call it where nothing upstream pinned a connection for you: River workers,
-// embedded/in-process seams, anything reachable off the HTTP request path. On
-// the request path MerchantDBConnMW has already pinned, and the assertion simply
-// passes.
-//
-// It deliberately checks the SESSION, not the Go-side context: the whole bug
-// class comes from code that had a merchant in a context VALUE and believed
-// that scoped the database.
+// AssertMerchantScope verifies that the handle Qx(ctx) resolves to carries the
+// openrails.merchant_id GUC, naming the context's merchant when there is one.
+// A read that depends on the GUC and lacks it returns nothing and no error;
+// one round trip at the top of unattended work (River workers, in-process
+// seams) turns that silence into a failure. It checks the session, not the
+// context value.
 func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 	if d == nil {
 		return fmt.Errorf("db: AssertMerchantScope on nil DB")
@@ -61,10 +47,8 @@ func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 	if err != nil {
 		return fmt.Errorf("db: %s could not read %s: %w", op, MerchantGUC, err)
 	}
-	// A merchant on the context is not required — the SESSION is what scopes the
-	// statement, and some callers (fixtures, pool-level pins) carry only that.
-	// When both are present they must agree, or the work belongs to one merchant
-	// and the rows to another.
+	// The session scopes the statement; some callers carry only that. When the
+	// context names a merchant too, they must agree.
 	want, _ := merchant.FromContext(ctx)
 	if got == "" {
 		return &ErrUnscopedMerchantWork{Op: op, Want: want, Got: got}
@@ -75,11 +59,9 @@ func (d *DB) AssertMerchantScope(ctx context.Context, op string) error {
 	return nil
 }
 
-// RunInMerchantScope is RunInMerchantConn plus the assertion: it pins the
-// connection for merchantID, proves the pin took, then runs fn. It is the one
-// call an unattended per-merchant pass should make — the pin and the proof
-// travel together, so a future refactor cannot drop the pin and leave a sweep
-// silently processing nothing.
+// RunInMerchantScope pins the connection for merchantID, asserts the pin took,
+// then runs fn. Unattended per-merchant passes use it so the pin and its proof
+// cannot be separated.
 func (d *DB) RunInMerchantScope(ctx context.Context, merchantID billing.MerchantID, op string, fn func(ctx context.Context) error) error {
 	if merchantID.IsZero() {
 		return fmt.Errorf("db: %s requires a non-zero merchant id", op)

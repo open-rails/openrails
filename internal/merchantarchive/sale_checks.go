@@ -59,7 +59,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
 	if op.Status == intents.StatusFailedTerminal {
 		// A refused or unexecuted sale moved no money (a decline is a payment
-		// attempt, #1111); only a pre-#1111 decline record may carry its id.
+		// attempt); only an older writer's decline record may carry its id.
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -133,8 +133,8 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 // grant and credit lot, plus per-key grants from before product access.
 const purchaseGrantLimit = 10005
 
-// declineRecord is a decline recorded in payments before declines became
-// payment attempts (#1111): it moved no money.
+// declineRecord is a decline an older writer recorded in payments, not as a
+// payment attempt: it moved no money.
 func declineRecord(p gen.BillingPayment) bool {
 	return p.Status == "failed" && p.MoneyMovement == "none" && p.RefundedPaymentID == nil
 }
