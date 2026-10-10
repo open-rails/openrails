@@ -463,6 +463,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if !k.Exists("test_mode") {
 		return nil, fmt.Errorf("test_mode is required: declare sandbox or live")
 	}
+	if f.RateLimitsDisabled { // defaults() seeded them; off means none
+		f.RateLimits, f.Captcha = nil, nil
+	}
 	cfg, err := f.config()
 	if err != nil {
 		return nil, err

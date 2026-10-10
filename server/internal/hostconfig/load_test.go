@@ -169,6 +169,21 @@ func TestLoadSourcePrecedence(t *testing.T) {
 	require.ErrorContains(t, err, "invalid test_mode")
 }
 
+// rate_limits_disabled turns the defaults off, from the file or the environment.
+func TestRateLimitsDisabled(t *testing.T) {
+	bootEnv(t)
+	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), "db:\n  password: x\n")
+	cfg, err := Load(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.RateLimits, "on by default")
+	t.Setenv("RATE_LIMITS_DISABLED", "true")
+	cfg, err = Load(path)
+	require.NoError(t, err)
+	require.True(t, cfg.RateLimitsDisabled)
+	require.Nil(t, cfg.RateLimits)
+	require.Nil(t, cfg.Captcha)
+}
+
 func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	bootEnv(t)
 	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"),
