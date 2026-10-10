@@ -28,6 +28,9 @@ enablePrePostScripts: false
 dangerouslyAllowAllBuilds: false
 
 minimumReleaseAge: 1440
+# Our own packages, published only by our release CI, skip the waiting period.
+minimumReleaseAgeExclude:
+  - '@openrails/*'
 minimumReleaseAgeStrict: true
 minimumReleaseAgeIgnoreMissingTime: false
 trustPolicy: no-downgrade
