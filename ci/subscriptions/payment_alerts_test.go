@@ -47,8 +47,8 @@ func (w *world) seedAttempts(customerID string, s attemptSeed) {
 			w.membershipEvery("content:members", 9_990_000, monthHours)
 		}
 		_, err := w.pool.Exec(w.t.Context(), w.q(`WITH m AS (SELECT id FROM billing.merchants WHERE slug = $1),
-			s AS (INSERT INTO billing.subscriptions (merchant_id, product_id, rail, customer_id, psp_id, collection_policy, status, started_at, canceled_at, cancel_type, quantity)
-				SELECT m.id, (SELECT p.id FROM billing.products p WHERE p.merchant_id = m.id ORDER BY p.id LIMIT 1), $4, $2::uuid, $3::uuid, CASE $4 WHEN 'nmi' THEN 'nmi_schedule' ELSE 'provider' END, 'canceled', now(), now(), 'user', 1
+			s AS (INSERT INTO billing.subscriptions (merchant_id, product_id, rail, customer_id, psp_id, collection_policy, status, started_at, canceled_at, cancel_type)
+				SELECT m.id, (SELECT p.id FROM billing.products p WHERE p.merchant_id = m.id ORDER BY p.id LIMIT 1), $4, $2::uuid, $3::uuid, CASE $4 WHEN 'nmi' THEN 'nmi_schedule' ELSE 'provider' END, 'canceled', now(), now(), 'user'
 				FROM m RETURNING id),
 			c AS (INSERT INTO billing.rebill_cycles (merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency)
 				SELECT m.id, s.id, $2::uuid, $3::uuid, $4, $5, $6::timestamptz - (g * interval '1 second') - interval '1 minute', 9990000, 'USD'

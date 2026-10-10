@@ -59,8 +59,8 @@ func TestSolanaSubscribeHoldsSlotBeforeFirstPull(t *testing.T) {
 		// Another writer (an import, a restored book) gave the customer this
 		// plan meanwhile.
 		_, err := s.w.pool.Exec(t.Context(), s.w.q(`INSERT INTO billing.subscriptions
-			(price_id, product_id, status, rail, collection_policy, rail_subscription_id, started_at, merchant_id, customer_id, psp_id, current_period_starts_at, current_period_ends_at, quantity)
-			SELECT p.id, p.product_id, 'active', 'stripe', 'provider', 'sub_other_writer', now(), p.merchant_id, $2, psp.id, now(), now() + interval '30 days', 1
+			(price_id, product_id, status, rail, collection_policy, rail_subscription_id, started_at, merchant_id, customer_id, psp_id, current_period_starts_at, current_period_ends_at)
+			SELECT p.id, p.product_id, 'active', 'stripe', 'provider', 'sub_other_writer', now(), p.merchant_id, $2, psp.id, now(), now() + interval '30 days'
 			FROM billing.prices p JOIN billing.psps psp ON psp.merchant_id = p.merchant_id AND psp.rail = 'stripe' WHERE p.id = $1 LIMIT 1`),
 			pid(s.price).UUID(), uuid.MustParse(b.id))
 		require.NoError(t, err)

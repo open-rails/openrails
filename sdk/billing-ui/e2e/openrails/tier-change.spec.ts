@@ -33,7 +33,11 @@ test("change preview answers its owner and refuses the seeded targets", async ({
   })
   await expect(
     client.previewSubscriptionChange(sub.id, { priceId: sub.price!.id })
-  ).rejects.toMatchObject({ status: 409, message: "already on this plan" })
+  ).rejects.toMatchObject({
+    status: 409,
+    code: "resource_conflict",
+    message: "the subscription already has this price and these seats",
+  })
   await expect(
     billing(baseURL, other.access_token).previewSubscriptionChange(sub.id, {
       priceId: target,
